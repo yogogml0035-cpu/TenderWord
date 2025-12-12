@@ -21,7 +21,7 @@ from graph import build_graph
 GRAPH = build_graph()
 
 # 定义上传目录
-UPLOAD_DIR = pathlib.Path("D:/PythonProject/TenderWord/UploadFiles")
+UPLOAD_DIR = pathlib.Path("D:/UploadFiles")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -83,6 +83,11 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+# 初始化 session_state 中的历史记录
+if "history" not in st.session_state:
+    st.session_state.history = []
+
 # 单页表单
 tab, = st.tabs(["生成询价采购文件"])
 
@@ -284,6 +289,12 @@ with tab:
                         # 读取文件内容用于下载
                         with open(prepared_path_obj, "rb") as f:
                             file_data = f.read()
+
+                        # 将生成记录添加到 session_state
+                        st.session_state.history.append({
+                            "path": str(prepared_path_obj),
+                            "time": time.strftime("%H:%M:%S", time.localtime())
+                        })
                         
                         # 显示文件路径和下载按钮
                         st.markdown(f"**输出文件：** `{prepared_path}`")
@@ -298,3 +309,34 @@ with tab:
                         st.write(f"输出文件：`{prepared_path}` (文件不存在)")
 
 
+# 渲染侧边栏历史记录
+with st.sidebar:
+    st.markdown("### 📜 历史生成记录")
+    
+    if not st.session_state.get("history"):
+        st.info("暂无生成记录")
+    else:
+        # 倒序显示，最新的在最上面
+        for i, item in enumerate(reversed(st.session_state.history)):
+            path_str = item["path"]
+            time_str = item["time"]
+            path_obj = pathlib.Path(path_str)
+            
+            if path_obj.exists():
+                try:
+                    with open(path_obj, "rb") as f:
+                        file_bytes = f.read()
+                    
+                    st.caption(f" {time_str} -{path_obj.name}")
+                    st.download_button(
+                        label=f"📥下载生成文件",
+                        data=file_bytes,
+                        file_name=path_obj.name,
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document" if path_obj.suffix == ".docx" else "application/msword",
+                        key=f"hist_dl_{len(st.session_state.history) - i}",
+                        help=f"文件名: {path_obj.name}"
+                    )
+                    st.divider()
+                except Exception as e:
+                    # 如果读取文件出错（例如文件被占用或删除），仅显示错误信息
+                    st.warning(f"无法读取文件: {path_obj.name}")

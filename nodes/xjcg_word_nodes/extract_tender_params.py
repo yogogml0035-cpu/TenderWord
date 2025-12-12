@@ -139,6 +139,205 @@ def find_wps_progids():
     return common_progids
 
 
+# Unicode 上标和下标字符映射表
+SUPERSCRIPT_MAP = {
+    '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+    '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+    '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾',
+    'n': 'ⁿ', 'i': 'ⁱ',
+}
+
+SUBSCRIPT_MAP = {
+    '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
+    '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+    '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎',
+    'a': 'ₐ', 'e': 'ₑ', 'o': 'ₒ', 'x': 'ₓ',
+}
+
+
+def _extract_text_from_xml(xml_content):
+    """
+    从 WordOpenXML 解析文本，识别上标/下标（支持 vertAlign 和 position）
+    """
+    try:
+        import re
+        # 简单的 XML 实体解码
+        def _xml_unescape(text):
+            return text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"').replace("&apos;", "'")
+
+        result = []
+        
+        # 查找所有的 run (<w:r>...</w:r>)
+        # 使用 DOTALL 模式让 . 匹配换行符
+        run_pattern = re.compile(r'<w:r\b.*?>(.*?)</w:r>', re.DOTALL)
+        
+        # 1. 查找标准上标/下标属性 <w:vertAlign w:val="superscript"/>
+        align_pattern = re.compile(r'<w:vertAlign\s+w:val=["\'](superscript|subscript)["\']\s*/>')
+        
+        # 2. 查找位置偏移 <w:position w:val="6"/> (val 单位是半磅)
+        # 阈值设为 3 (1.5磅)，通常上标偏移量会大于这个值
+        position_pattern = re.compile(r'<w:position\s+w:val=["\'](-?\d+)["\']\s*/>')
+        
+        # 查找文本 <w:t>...</w:t>
+        text_pattern = re.compile(r'<w:t\b.*?>(.*?)</w:t>', re.DOTALL)
+        
+        pos = 0
+        while True:
+            match = run_pattern.search(xml_content, pos)
+            if not match:
+                break
+            
+            run_content = match.group(1)
+            pos = match.end()
+            
+            # --- 判别上标/下标 ---
+            is_superscript = False
+            is_subscript = False
+            
+            # 检查 vertAlign
+            align_match = align_pattern.search(run_content)
+            if align_match:
+                val = align_match.group(1)
+                if val == 'superscript':
+                    is_superscript = True
+                elif val == 'subscript':
+                    is_subscript = True
+            
+            # 如果没有 vertAlign，检查 position
+            if not is_superscript and not is_subscript:
+                pos_match = position_pattern.search(run_content)
+                if pos_match:
+                    try:
+                        # 单位是半磅 (1/144 英寸)
+                        val = int(pos_match.group(1))
+                        if val >= 4:  # 偏移 >= 2磅 视为上标
+                            is_superscript = True
+                        elif val <= -4: # 偏移 <= -2磅 视为下标
+                            is_subscript = True
+                    except:
+                        pass
+            
+            # --- 提取文本并转换 ---
+            text_matches = text_pattern.finditer(run_content)
+            for tm in text_matches:
+                raw_text = tm.group(1)
+                text = _xml_unescape(raw_text)
+                
+                if is_superscript:
+                    converted = []
+                    for char in text:
+                        converted.append(SUPERSCRIPT_MAP.get(char, char))
+                    result.append("".join(converted))
+                elif is_subscript:
+                    converted = []
+                    for char in text:
+                        converted.append(SUBSCRIPT_MAP.get(char, char))
+                    result.append("".join(converted))
+                else:
+                    result.append(text)
+                    
+        return "".join(result)
+    except Exception as e:
+        print(f"    XML 解析失败: {e}")
+        return None
+
+
+def extract_text_with_superscript_subscript(range_obj):
+    """
+    提取WPS/Word范围中的文本，保留上标和下标格式
+    
+    Args:
+        range_obj: WPS/Word Range对象
+        
+    Returns:
+        str: 提取的文本，上标/下标字符已转换为Unicode上标/下标字符
+    """
+    # 策略1: 优先尝试通过 WordOpenXML 提取
+    try:
+        xml_content = None
+        try:
+            # 尝试获取 XML，如果 COM 不支持会报错
+            xml_content = range_obj.WordOpenXML
+        except:
+            pass
+            
+        if xml_content and isinstance(xml_content, str) and len(xml_content) > 0:
+            xml_text = _extract_text_from_xml(xml_content)
+            if xml_text is not None:
+                return xml_text
+    except Exception as e:
+        print(f"    WordOpenXML 提取异常，回退到逐字符遍历: {e}")
+
+    # 策略2: 回退到逐字符遍历 (增强版)
+    try:
+        result = []
+        characters = range_obj.Characters
+        char_count = characters.Count
+        
+        # 遍历每个字符
+        for i in range(1, char_count + 1):
+            try:
+                char = characters(i)
+                char_text = char.Text
+                font = char.Font
+                
+                is_superscript = False
+                is_subscript = False
+                
+                # 检查上标 (包括标准上标属性和位置偏移)
+                try:
+                    sup_val = font.Superscript
+                    # 检查是否开启了上标属性 (-1=True, 9999999=Undefined)
+                    if sup_val == -1 or sup_val == True:
+                        is_superscript = True
+                    else:
+                        # 检查位置偏移 (单位：磅)
+                        # 如果没有开启 Superscript，但位置提升了 > 1.5 磅，也视为上标
+                        pos_val = font.Position
+                        if pos_val > 1.5:
+                            is_superscript = True
+                except:
+                    pass
+                
+                # 检查下标
+                try:
+                    sub_val = font.Subscript
+                    if sub_val == -1 or sub_val == True:
+                        is_subscript = True
+                    else:
+                        # 检查位置下沉
+                        pos_val = font.Position
+                        if pos_val < -1.5:
+                            is_subscript = True
+                except:
+                    pass
+                
+                # 转换字符
+                if is_superscript and char_text in SUPERSCRIPT_MAP:
+                    result.append(SUPERSCRIPT_MAP[char_text])
+                elif is_subscript and char_text in SUBSCRIPT_MAP:
+                    result.append(SUBSCRIPT_MAP[char_text])
+                else:
+                    result.append(char_text)
+                    
+            except Exception as char_e:
+                # 容错处理
+                try:
+                    result.append(characters(i).Text)
+                except:
+                    pass
+        
+        return ''.join(result)
+        
+    except Exception as e:
+        # 最终回退
+        print(f"    提取带上标/下标文本时出错: {e}")
+        try:
+            return range_obj.Text
+        except:
+            return ""
+
+
 def extract_table_as_text(table):
     """
     提取WPS/Word表格，转换为Markdown表格格式，便于大模型理解表格结构
@@ -163,7 +362,8 @@ def extract_table_as_text(table):
             for col_idx in range(1, cols_count + 1):
                 try:
                     cell = table.Cell(row_idx, col_idx)
-                    cell_text = cell.Range.Text
+                    # 使用上标/下标提取函数保留科学计数法等格式
+                    cell_text = extract_text_with_superscript_subscript(cell.Range)
                     # 清理单元格文本：移除末尾的特殊字符（\r\x07）并清理空白
                     cell_text = cell_text.rstrip('\r\x07\n').strip()
                     # 将换行符替换为空格，避免破坏Markdown表格格式
@@ -256,8 +456,8 @@ def extract_text_with_list_numbers(range_obj):
                     except:
                         pass
                 
-                # 获取段落文本，保留原始内容，不做任何清理
-                para_text = para.Range.Text
+                # 获取段落文本，保留原始内容和上标/下标格式
+                para_text = extract_text_with_superscript_subscript(para.Range)
                 
                 if para_text:
                     if has_list and list_string:
@@ -280,17 +480,17 @@ def extract_text_with_list_numbers(range_obj):
                         result_lines.append(para_text)
                         
             except Exception as para_e:
-                # 如果处理某个段落失败，回退到直接提取文本
+                # 如果处理某个段落失败，回退到直接提取文本（带上标/下标）
                 try:
-                    para_text = para.Range.Text
+                    para_text = extract_text_with_superscript_subscript(para.Range)
                     if para_text:
                         result_lines.append(para_text)
                 except:
                     pass
         
-        # 如果没有提取到任何内容，回退到直接提取文本
+        # 如果没有提取到任何内容，回退到直接提取文本（带上标/下标）
         if not result_lines:
-            return range_obj.Text
+            return extract_text_with_superscript_subscript(range_obj)
         
         # 直接连接所有段落文本，保留所有原始格式和符号
         return ''.join(result_lines)
@@ -299,8 +499,8 @@ def extract_text_with_list_numbers(range_obj):
         print(f"    提取带编号文本时出错: {e}")
         import traceback
         traceback.print_exc()
-        # 如果出错，回退到纯文本提取
-        return range_obj.Text
+        # 如果出错，回退到带上标/下标的文本提取
+        return extract_text_with_superscript_subscript(range_obj)
 
 
 def extract_content_with_tables(range_obj):
@@ -388,8 +588,8 @@ def extract_content_with_tables(range_obj):
         try:
             return extract_text_with_list_numbers(range_obj)
         except:
-            # 如果带编号提取也失败，使用纯文本作为最后回退
-            return range_obj.Text
+            # 如果带编号提取也失败，使用带上标/下标的文本作为最后回退
+            return extract_text_with_superscript_subscript(range_obj)
 
 
 def extract_tender_params(state: TenderGraphState, config) -> TenderGraphState:

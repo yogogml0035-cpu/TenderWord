@@ -33,49 +33,142 @@ except ImportError:
         from TenderWord.logging_utils import log_state
         from TenderWord.state import TenderGraphState
 
-POLISH_PROMPT = """# Role
-你是一台**严格的文档格式克隆机**。严禁发挥主观能动性，严禁补充任何行业惯例内容。
+POLISH_PROMPT = """
+# Role
+你是一台**智能招标文件生成机器**。你的核心能力是**“结构复刻”**和**“动态填充”**。
 
-# The Prime Directives (最高禁令 - 必须死守)
-1.  **禁止加戏（Anti-Hallucination）：** 严禁根据“行业标准”自动补充章节。如果【参考内容】里没有“商务要求”、“评标办法”、“合同条款”或“投标文件编制要求”，你的输出里**绝对不能出现**这些章节。
-2.  **结构镜像（Structure Mirroring）：** 你的输出文档的**一级大标题（一、二、三...）的数量和名称**，必须与【参考内容】**完全一致**。
-    * 如果参考内容只有“一、二、三、五”，你也只能输出“一、二、三、五”。
-    * 严禁插入新的大标题（如“四、商务要求”）。
-3.  **禁止废话：** 不要输出任何“好的”、“根据您的要求...”等对话内容。直接输出文档。
-4.  **禁止Markdown格式：** 输出纯文本，不要使用 `**` 加粗或 `---` 分隔符。
+# The Prime Directives (最高禁令)
+1.  **严禁加戏：** 严禁自动补充【参考内容】中没有的章节（如商务、评标、合同等）。
+2.  **严禁Markdown装饰：** 输出纯文本，不要使用 `**` (加粗) 或 `---` (分隔符)。
+3.  **严格镜像：** 输出文档的**一级大标题（序号及名称）**必须与【参考内容】**完全一致**。如果参考内容是“二、技术要求”，你就不能写成“三、技术需求”。
+4.  **条款完整：** 【参考内容】中的法律条款（付款方式、售后通用语），必须**逐字照抄**。
 
-# Task
-以【参考内容】为**唯一的结构模版**，将【技术参数】的数据填入其中。
+# Logic Rules (核心逻辑分支)
 
-# Logic Rules (核心逻辑)
+请先扫描【技术参数】的内容特征，然后按顺序匹配以下逻辑：
 
-## 1. 骨架锁定 (Skeleton Lock) - 关键！
-* 请先扫描【参考内容】的一级标题。
-* **规则：** 输出文档的目录结构必须严格等于参考内容的目录结构。
-* **错误示范：** 参考内容只有“技术需求”和“售后”，你自动加了“商务要求”。 -> **(严禁！)**
-* **正确操作：** 参考内容有什么标题，你就写什么标题；参考内容没写的，一律不写。
+## 1. 动态定位规则 (首先执行)
+* **识别技术章节：** 在开始写入数据前，请先在【参考内容】中找到**描述设备具体指标的那一章**（可能是“二、技术要求”，也可能是“三、技术规格”等）。
+* **锁定目标：** 下面的所有“写入技术参数”的操作，都必须发生在你识别出的**这一个章节**内，保持该章节原有的序号和标题不变。
 
-## 2. 内容置换 (Content Swap)
-* **设备数据：** 忽略【参考内容】里的旧设备（如原位杂交仪），使用【技术参数】里的新设备（如荧光细胞计数仪等）及预算、数量。
-* **多设备处理：** 在“技术需求”章节下，如果【技术参数】含多个设备，但是技术参数并没有描述成包件的，请按照“设备一：XXX”、“设备二：XXX”的格式列出。
+## 2. 结构分支判断 (按顺序匹配)
 
-## 3. 条款保留 (Text Retention)
-* **付款方式：** 必须**逐字逐句**抄写【参考内容】中的付款方式条款（方式一、二、三），不要修改，不要省略。
-* **通用条款：** 【参考内容】中的“★售后服务要求”下的文字，除年限数字根据技术参数修改外，其余法律措辞（如“供应商须接受...”）必须保留。
+### 分支 A：多包件项目 (Multi-Package)
+* **触发条件：** 【技术参数】中明确出现了“第1包”、“包1”、“包件A”等分包描述。
+* **执行动作：**
+    * 必须为每个包件生成独立的大标题（格式如“**第X包：[包件名称]**”）。
+    * **在每个包件的大标题下**，完整克隆【参考内容】的所有章节结构（包括项目概述、付款方式、以及你定位到的**技术章节**）。
+    * *注意：* 保持“第X包”作为最高层级，不要将其降级为设备。
+
+### 分支 B：单包多设备项目 (Single Package, Multi-Device)
+* **触发条件：** 无分包描述，但【技术参数】包含多个独立设备（如：荧光细胞计数仪、冰箱、PCR仪）。
+* **执行动作：**
+    * 只生成一次【参考内容】的完整结构。
+    * 在你定位到的**技术章节**内部，必须对设备进行分层，使用“**设备一：[名称]**”、“**设备二：[名称]**”的格式分别列出参数。
+
+### 分支 C：单一设备项目 (Single Device)
+* **触发条件：** 无分包描述，且只有一种设备。
+* **执行动作：**
+    * 只生成一次【参考内容】的完整结构。
+    * 在你定位到的**技术章节**内部，直接列出该设备的参数，**不需要**添加“设备一”这样的前缀。
 
 ---
 # Input Data
 
-【参考内容】(这是你的结构监狱，严禁越狱)：
+【参考内容】(这是唯一的结构模版，请严格复刻其目录结构)：
 [{origin_tender_params}]
 
-【技术参数】(这是你的填充弹药)：
+【技术参数】(这是内容源，请根据上述分支判断结构)：
 [{tender_params}]"""
 
 
 def _sanitize_filename(name: str) -> str:
     """Remove characters invalid in Windows file names."""
     return re.sub(r'[<>:"/\\|?*]', "_", name).strip()
+
+
+# Unicode 上标和下标字符映射表
+_SUPERSCRIPT_MAP = {
+    '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+    '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+    '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾',
+    'n': 'ⁿ', 'i': 'ⁱ',
+}
+
+_SUBSCRIPT_MAP = {
+    '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
+    '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+    '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎',
+    'a': 'ₐ', 'e': 'ₑ', 'o': 'ₒ', 'x': 'ₓ',
+}
+
+
+def _extract_text_with_superscript_subscript(range_obj):
+    """
+    提取WPS/Word范围中的文本，保留上标和下标格式
+    
+    Args:
+        range_obj: WPS/Word Range对象
+        
+    Returns:
+        str: 提取的文本，上标/下标字符已转换为Unicode上标/下标字符
+    """
+    try:
+        result = []
+        characters = range_obj.Characters
+        char_count = characters.Count
+        
+        # 遍历每个字符
+        for i in range(1, char_count + 1):
+            try:
+                char = characters(i)
+                char_text = char.Text
+                font = char.Font
+                
+                # 检查是否是上标
+                is_superscript = False
+                is_subscript = False
+                
+                try:
+                    superscript_val = font.Superscript
+                    # Word COM 返回 -1 或 True 表示上标，0 或 False 表示否
+                    # 9999999 (wdUndefined) 表示混合状态，不应视为上标
+                    # 显式检查以处理各种可能的返回值类型
+                    is_superscript = (superscript_val == True) or (superscript_val == -1)
+                except:
+                    pass
+                
+                try:
+                    subscript_val = font.Subscript
+                    # 同样的逻辑处理下标
+                    is_subscript = (subscript_val == True) or (subscript_val == -1)
+                except:
+                    pass
+                
+                # 根据上标/下标状态转换字符
+                if is_superscript and char_text in _SUPERSCRIPT_MAP:
+                    result.append(_SUPERSCRIPT_MAP[char_text])
+                elif is_subscript and char_text in _SUBSCRIPT_MAP:
+                    result.append(_SUBSCRIPT_MAP[char_text])
+                else:
+                    result.append(char_text)
+                    
+            except Exception as char_e:
+                # 如果处理某个字符失败，尝试获取原始文本
+                try:
+                    result.append(characters(i).Text)
+                except:
+                    pass
+        
+        return ''.join(result)
+        
+    except Exception as e:
+        # 如果出错，回退到普通文本提取
+        print(f"    提取带上标/下标文本时出错: {e}")
+        try:
+            return range_obj.Text
+        except:
+            return ""
 
 
 def _extract_table_as_text(table):
@@ -102,7 +195,8 @@ def _extract_table_as_text(table):
             for col_idx in range(1, cols_count + 1):
                 try:
                     cell = table.Cell(row_idx, col_idx)
-                    cell_text = cell.Range.Text
+                    # 使用上标/下标提取函数保留科学计数法等格式
+                    cell_text = _extract_text_with_superscript_subscript(cell.Range)
                     # 清理单元格文本：移除末尾的特殊字符（\r\x07）并清理空白
                     cell_text = cell_text.rstrip('\r\x07\n').strip()
                     # 将换行符替换为空格，避免破坏Markdown表格格式
@@ -116,7 +210,7 @@ def _extract_table_as_text(table):
             table_data.append(row_data)
         
         if not table_data:
-            return table.Range.Text
+            return _extract_text_with_superscript_subscript(table.Range)
         
         # 构建Markdown表格
         markdown_lines = []
@@ -143,9 +237,9 @@ def _extract_table_as_text(table):
         print(f"    提取表格时出错: {e}")
         import traceback
         traceback.print_exc()
-        # 如果出错，回退到原始文本提取
+        # 如果出错，回退到带上标/下标的文本提取
         try:
-            return table.Range.Text
+            return _extract_text_with_superscript_subscript(table.Range)
         except:
             return ""
 
@@ -195,8 +289,8 @@ def _extract_text_with_list_numbers(range_obj):
                         print(f"    无法获取段落列表，使用直接文本提取: {e1}, {e2}, {e3}")
                     
                     try:
-                        # 尝试直接获取文本
-                        text = range_obj.Text
+                        # 尝试使用上标/下标提取
+                        text = _extract_text_with_superscript_subscript(range_obj)
                         if text:
                             return text
                     except Exception as text_e:
@@ -244,8 +338,8 @@ def _extract_text_with_list_numbers(range_obj):
                     except:
                         pass
                 
-                # 获取段落文本，保留原始内容，不做任何清理
-                para_text = para_range.Text
+                # 获取段落文本，保留原始内容和上标/下标格式
+                para_text = _extract_text_with_superscript_subscript(para_range)
                 
                 if para_text:
                     if has_list and list_string:
@@ -268,22 +362,22 @@ def _extract_text_with_list_numbers(range_obj):
                         result_lines.append(para_text)
                         
             except Exception as para_e:
-                # 如果处理某个段落失败，回退到直接提取文本
+                # 如果处理某个段落失败，回退到直接提取文本（带上标/下标）
                 # 检查是否是对象删除错误
                 if "对象已被删除" in str(para_e) or "无效指针" in str(para_e):
                     # 对象已失效，跳过这个段落
                     continue
                 try:
-                    para_text = para.Range.Text
+                    para_text = _extract_text_with_superscript_subscript(para.Range)
                     if para_text:
                         result_lines.append(para_text)
                 except:
                     # 如果连文本都无法获取，跳过这个段落
                     pass
         
-        # 如果没有提取到任何内容，回退到直接提取文本
+        # 如果没有提取到任何内容，回退到直接提取文本（带上标/下标）
         if not result_lines:
-            return range_obj.Text
+            return _extract_text_with_superscript_subscript(range_obj)
         
         # 直接连接所有段落文本，保留所有原始格式和符号
         return ''.join(result_lines)
@@ -292,11 +386,11 @@ def _extract_text_with_list_numbers(range_obj):
         print(f"    提取带编号文本时出错: {e}")
         import traceback
         traceback.print_exc()
-        # 如果出错，回退到纯文本提取
+        # 如果出错，回退到带上标/下标的文本提取
         try:
-            return range_obj.Text
+            return _extract_text_with_superscript_subscript(range_obj)
         except:
-            # 如果连 Text 都无法获取，返回空字符串
+            # 如果连文本都无法获取，返回空字符串
             print("    警告: 无法提取任何文本内容")
             return ""
 
@@ -414,11 +508,11 @@ def _extract_content_with_tables(range_obj):
         try:
             return _extract_text_with_list_numbers(range_obj)
         except:
-            # 如果带编号提取也失败，使用纯文本作为最后回退
+            # 如果带编号提取也失败，使用带上标/下标的文本作为最后回退
             try:
-                return range_obj.Text
+                return _extract_text_with_superscript_subscript(range_obj)
             except:
-                # 如果连 Text 都无法获取，返回空字符串
+                # 如果连文本都无法获取，返回空字符串
                 print("    警告: 无法提取任何内容")
                 return ""
 
@@ -553,7 +647,11 @@ def _extract_text_from_word_file(file_path: str) -> str:
                             print(f"    检测到对象失效，尝试直接提取文本...")
                             try:
                                 if doc:
-                                    return doc.Content.Text
+                                    try:
+                                        # 尝试保留上标格式
+                                        return _extract_text_with_superscript_subscript(doc.Content)
+                                    except:
+                                        return doc.Content.Text
                             except:
                                 pass
                         raise
@@ -589,6 +687,11 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
             raise ValueError(f"tender_params_path 不是文件: {tender_param_path}")
 
         tender_params = _extract_text_from_word_file(str(file_path_obj))
+        print(f"[generate_polished_text] 从文件提取技术参数完成，长度: {len(tender_params)}")
+        # 简单检查是否有上标字符
+        superscript_chars = set(_SUPERSCRIPT_MAP.values())
+        has_superscript = any(c in superscript_chars for c in tender_params)
+        print(f"[generate_polished_text] 提取内容是否包含上标: {has_superscript}")
     
 
     agent_config = AgentConfig.from_runnable_config(config)
@@ -692,8 +795,8 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
     project_name = str(state.get("project_name", "") or "").strip()
     filename_parts = [_sanitize_filename(part) for part in (project_number, project_name) if part]
     filename = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
-    filename = f"{filename}.txt"
-
+    timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    filename = f"{filename}-{timestamp}.txt"
     # 优先使用 origin_tender_path 所在目录，其次 tender_param_path，再次 prompts 目录
     output_dir = None
     try:

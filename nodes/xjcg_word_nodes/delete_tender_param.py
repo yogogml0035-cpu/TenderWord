@@ -367,9 +367,29 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
                             if tables:
                                 tbl = tables[0]
                                 tbl_rng = tbl.Range
+                                
+                                # === 关键修复：检查表格是否超出删除范围（包含后置锚点）===
+                                if tbl_rng.End > after_start_pos:
+                                    print("  提示: 表格超出删除范围（可能包含后置锚点），启用安全截断删除")
+                                    try:
+                                        # 只删除到锚点之前
+                                        safe_del_rng = doc.Range(tbl_rng.Start, after_start_pos)
+                                        if is_range_locked(safe_del_rng):
+                                            before_end_pos = after_start_pos
+                                        else:
+                                            safe_del_rng.Delete()
+                                        continue
+                                    except Exception as safe_tbl_e:
+                                        print(f"  安全删除表格部分失败: {safe_tbl_e}")
+                                        before_end_pos = after_start_pos
+                                        continue
+                                
                                 if is_range_locked(tbl_rng):
                                     # 跳过被保护表格，移动指针到表格末尾继续
                                     before_end_pos = tbl_rng.End
+                                    # 防御性检查：确保不跳过锚点
+                                    if before_end_pos > after_start_pos:
+                                        before_end_pos = after_start_pos
                                     continue
                                 try:
                                     tbl.Delete()
@@ -378,6 +398,9 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
                                     try:
                                         safe_start = max(delete_rng.Start, tbl_rng.Start - 1)
                                         safe_end = min(delete_rng.End, tbl_rng.End + 1)
+                                        # 再次确保不超过 after_start_pos
+                                        if safe_end > after_start_pos:
+                                            safe_end = after_start_pos
                                         doc.Range(safe_start, safe_end).Delete()
                                         continue
                                     except Exception as del_tbl_e:
@@ -386,6 +409,9 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
                                             print(f"  删除表格失败: {del_tbl_e}")
                                         # 即使失败，移动指针以避免卡死
                                         before_end_pos = min(doc_end, tbl_rng.End)
+                                        # 确保不跳过锚点
+                                        if before_end_pos > after_start_pos:
+                                            before_end_pos = after_start_pos
                                         continue
                             
                             # 其次删除范围内的第一段
@@ -395,9 +421,30 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
                                 paras = []
                             if paras:
                                 para_rng = paras[0].Range
+                                
+                                # === 关键修复：检查段落是否超出删除范围（包含后置锚点）===
+                                if para_rng.End > after_start_pos:
+                                    # 这种情况通常发生在锚点位于段落中间或段落末尾（如软回车）
+                                    # 我们必须确保不删除锚点
+                                    try:
+                                        # 只删除到锚点之前
+                                        safe_del_rng = doc.Range(para_rng.Start, after_start_pos)
+                                        if is_range_locked(safe_del_rng):
+                                            before_end_pos = after_start_pos
+                                        else:
+                                            safe_del_rng.Delete()
+                                        continue
+                                    except Exception as safe_para_e:
+                                        print(f"  安全删除段落部分失败: {safe_para_e}")
+                                        before_end_pos = after_start_pos
+                                        continue
+
                                 if is_range_locked(para_rng):
                                     # 跳过受保护段落，移动指针到段末
                                     before_end_pos = para_rng.End
+                                    # 防御性检查：确保不跳过锚点
+                                    if before_end_pos > after_start_pos:
+                                        before_end_pos = after_start_pos
                                     continue
                                 try:
                                     para_rng.Delete()
@@ -407,6 +454,9 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
                                     if "锁定" not in err and "locked" not in err.lower() and "-2146823683" not in err:
                                         print(f"  删除段落失败: {para_del_e}")
                                     before_end_pos = min(doc_end, para_rng.End)
+                                    # 确保不跳过锚点
+                                    if before_end_pos > after_start_pos:
+                                        before_end_pos = after_start_pos
                                     continue
                             
                             # 若无段落/表格可删，尝试按字符删除一个小块
