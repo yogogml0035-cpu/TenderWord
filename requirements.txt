@@ -1,0 +1,7 @@
+langgraph
+langchain-core
+langchain-deepseek
+python-dotenv
+pywin32
+python-docx
+streamlit

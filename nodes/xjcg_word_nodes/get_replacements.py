@@ -1,0 +1,1023 @@
+from __future__ import annotations
+
+import os
+import re
+import time
+import pythoncom
+import win32com.client as win32
+from typing import Dict, List, Optional, Tuple
+
+# 处理相对导入和直接运行的情况
+try:
+    from ...logging_utils import log_state
+    from ...state import TenderGraphState
+except ImportError:
+    # 直接运行时使用绝对导入
+    import pathlib
+    import sys
+    
+    # 先尝试直接导入（假设 TenderWord/ 目录已在 sys.path 中）
+    try:
+        from logging_utils import log_state
+        from state import TenderGraphState
+    except ImportError:
+        # 如果失败，添加父目录并使用 TenderWord 前缀
+        ROOT = pathlib.Path(__file__).resolve().parents[2]
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from TenderWord.logging_utils import log_state
+        from TenderWord.state import TenderGraphState
+
+# Word constants
+wdFindStop = 0
+
+
+def _force_close_word(word, log_parts=None, max_attempts=5):
+    """
+    强制关闭 Word 应用程序，确保进程完全退出。
+    
+    参数:
+        word: Word.Application 对象
+        log_parts: 可选的日志列表
+        max_attempts: 最大尝试次数
+    
+    返回:
+        bool: True 如果成功关闭，False 如果失败
+    """
+    if word is None:
+        return True
+    
+    import time
+    
+    for attempt in range(max_attempts):
+        try:
+            # 尝试访问对象属性来检查是否有效
+            _ = word.Name
+            # 如果还能访问，说明还没关闭，尝试关闭
+            word.Quit(SaveChanges=False)
+            if log_parts is not None:
+                log_parts.append(f"Word 应用程序已关闭 (尝试 {attempt + 1})")
+            time.sleep(0.2)
+        except AttributeError:
+            # 对象已断开，说明已经关闭了
+            if log_parts is not None:
+                log_parts.append("Word 应用程序已关闭")
+            return True
+        except Exception as e:
+            if attempt < max_attempts - 1:
+                # 继续重试
+                time.sleep(0.2)
+                continue
+            else:
+                # 最后一次尝试失败
+                if log_parts is not None:
+                    log_parts.append(f"警告: 经过 {max_attempts} 次尝试后仍无法关闭 Word: {e}")
+                return False
+    
+    # 最后验证是否真的关闭了
+    try:
+        _ = word.Name
+        # 如果还能访问，说明关闭失败
+        if log_parts is not None:
+            log_parts.append("警告: Word 应用程序可能仍在运行")
+        return False
+    except AttributeError:
+        # 对象已断开，说明关闭成功
+        return True
+
+
+# 提取函数：每个字段的查找逻辑
+def extract_project_number(doc_content: str, first_page_header: str, state: TenderGraphState, log_parts: List[str]) -> Optional[str]:
+    """从页眉中提取 project_number"""
+    if not first_page_header or not state.get("project_number"):
+        return None
+    
+    project_number_pattern = r'项目编号[:：]\s*([^；;]+)'
+    match = re.search(project_number_pattern, first_page_header)
+    if match:
+        number_text = match.group(1).strip()
+        number_match = re.search(r'(\d+)$', number_text)
+        if number_match:
+            extracted_number = number_match.group(1)
+            log_parts.append(f"从页眉中提取项目编号: {extracted_number} (来源: {number_text})")
+            return extracted_number
+        else:
+            log_parts.append(f"无法从项目编号文本中提取数字: {number_text}")
+    else:
+        log_parts.append("在页眉中未找到 '项目编号' 模式")
+    return None
+
+
+def extract_project_name(doc_content: str, first_page_header: str, state: TenderGraphState, log_parts: List[str]) -> Optional[str]:
+    """从页眉中提取 project_name"""
+    if not first_page_header or not state.get("project_name"):
+        return None
+    
+    project_name_pattern = r'项目名称[:：]\s*([^；;]+)'
+    match = re.search(project_name_pattern, first_page_header)
+    if match:
+        extracted_name = match.group(1).strip()
+        extracted_name = re.sub(r'采购$', '', extracted_name).strip()
+        log_parts.append(f"从页眉中提取项目名称: {extracted_name}")
+        return extracted_name
+    else:
+        log_parts.append("在页眉中未找到 '项目名称' 模式")
+    return None
+
+
+def extract_buyer_name(doc_content: str, state: TenderGraphState, log_parts: List[str]) -> Optional[str]:
+    """从首页正文中提取 buyer_name"""
+    if not doc_content or not state.get("buyer_name"):
+        return None
+    
+    first_page_content = doc_content[:5000] if len(doc_content) > 5000 else doc_content
+    buyer_pos = doc_content.find("采购人")
+    if buyer_pos != -1:
+        search_start = max(0, buyer_pos - 100)
+        search_end = min(len(doc_content), buyer_pos + 2000)
+        first_page_content = doc_content[search_start:search_end]
+        log_parts.append(f"在位置 {buyer_pos} 找到 '采购人'，在范围 [{search_start}, {search_end}] 中搜索")
+    else:
+        log_parts.append("在文档中未找到 '采购人'，在前 5000 个字符中搜索")
+    
+    buyer_name_pattern = r'采购人[:：]\s*([^\n\r]+?)(?:\s*\n\s*采购代理机构|采购代理机构)'
+    match = re.search(buyer_name_pattern, first_page_content, re.DOTALL)
+    if match:
+        extracted_buyer_name = match.group(1).strip()
+        log_parts.append(f"从首页提取采购人名称: {extracted_buyer_name}")
+        return extracted_buyer_name
+    else:
+        buyer_name_pattern2 = r'采购人[:：]\s*([^采购]+?)(?=\s*采购代理机构)'
+        match2 = re.search(buyer_name_pattern2, first_page_content, re.DOTALL)
+        if match2:
+            extracted_buyer_name = match2.group(1).strip()
+            log_parts.append(f"提取采购人名称 (备用模式): {extracted_buyer_name}")
+            return extracted_buyer_name
+        else:
+            log_parts.append(f"在首页内容中未找到 '采购人' 模式")
+    return None
+
+
+def extract_project_content(doc_content: str, state: TenderGraphState, log_parts: List[str]) -> Optional[str]:
+    """从正文中提取 project_content"""
+    if not doc_content or not state.get("project_content"):
+        return None
+    
+    start_marker1 = "2、项目基本信息"
+    start_pos1 = doc_content.find(start_marker1)
+    
+    if start_pos1 == -1:
+        log_parts.append("未找到起始标记 '2、项目基本信息'")
+        return None
+    
+    log_parts.append(f"在位置 {start_pos1} 找到起始标记1 '{start_marker1}'")
+    
+    start_marker2_pattern = r'的委托[，,]\s*现以询价采购的方式就下列\s*货物和相关服务进行采购[。.]'
+    search_after_marker1 = start_pos1 + len(start_marker1)
+    match = re.search(start_marker2_pattern, doc_content[search_after_marker1:], re.DOTALL)
+    
+    if not match:
+        log_parts.append(f"在标记1之后未找到起始标记2模式")
+        return None
+    
+    front_end_pos = search_after_marker1 + match.end()
+    end_marker1 = "3、合格供应商资格条件"
+    end_pos1 = doc_content.find(end_marker1, front_end_pos)
+    
+    if end_pos1 == -1:
+        log_parts.append(f"未找到结束标记1 '{end_marker1}'")
+        return None
+    
+    log_parts.append(f"在位置 {end_pos1} 找到结束标记1 '{end_marker1}'")
+    
+    # 定义所有可能的结束标记
+    end_markers = [
+        "交付地点",
+        "交付日期",
+        "供应商",
+        "项目交付地点",
+        "项目交付日期"
+    ]
+    
+    # 在 front_end_pos 和 end_pos1 之间查找所有结束标记
+    found_positions = []
+    for marker in end_markers:
+        pos = doc_content.find(marker, front_end_pos, end_pos1)
+        if pos != -1:
+            found_positions.append((pos, marker))
+            log_parts.append(f"在位置 {pos} 找到结束标记 '{marker}'")
+    
+    if not found_positions:
+        log_parts.append(f"在 front_end 和 end_marker1 之间未找到任何结束标记")
+        return None
+    
+    # 找到最早出现的结束标记
+    earliest_pos, earliest_marker = min(found_positions, key=lambda x: x[0])
+    log_parts.append(f"使用最早出现的结束标记 '{earliest_marker}' (位置: {earliest_pos})")
+    
+    # 找到该标记所在行的起始位置
+    marker_line_start = earliest_pos
+    while marker_line_start > front_end_pos and doc_content[marker_line_start - 1] not in ['\n', '\r']:
+        marker_line_start -= 1
+    
+    log_parts.append(f"结束标记行起始位置: {marker_line_start}")
+    
+    content_start = front_end_pos
+    while content_start < len(doc_content) and doc_content[content_start] in ['\n', '\r', ' ', '\t']:
+        content_start += 1
+    
+    log_parts.append(f"内容起始位置: {content_start}")
+    
+    raw_extracted = doc_content[content_start:marker_line_start]
+    log_parts.append(f"原始提取长度: {len(raw_extracted)} 个字符")
+    
+    lines = raw_extracted.split('\n')
+    cleaned_lines = []
+    for line in lines:
+        line_stripped = line.strip('\r')
+        # 排除包含任何结束标记的行
+        if line_stripped and not any(marker in line_stripped for marker in end_markers):
+            cleaned_lines.append(line_stripped)
+    
+    extracted_content = '\n'.join(cleaned_lines)
+    
+    if extracted_content:
+        log_parts.append(f"成功提取项目内容")
+        return extracted_content
+    else:
+        log_parts.append("清理后提取的内容为空")
+    return None
+
+
+def extract_bzj_rule(doc_content: str, state: TenderGraphState, log_parts: List[str]) -> Optional[str]:
+    """从正文中提取 bzj_rule"""
+    if not doc_content or not state.get("bzj_rule"):
+        return None
+    
+    section_marker = "18、保证金"
+    section_pos = doc_content.find(section_marker)
+    
+    if section_pos == -1:
+        log_parts.append(f"未找到节标记 '{section_marker}'")
+        return None
+    
+    log_parts.append(f"在位置 {section_pos} 找到节标记 '{section_marker}'")
+    
+    search_start = section_pos + len(section_marker)
+    search_end = min(len(doc_content), section_pos + 2000)
+    search_range = doc_content[search_start:search_end]
+    
+    bzj_pattern = r'18\.1\s*保证金金额[:：]\s*([^。]+?)(?:[。]|$)'
+    match = re.search(bzj_pattern, search_range, re.DOTALL)
+    
+    if match:
+        extracted_bzj = match.group(1).strip()
+        log_parts.append(f"提取保证金规则: {extracted_bzj}")
+        return extracted_bzj
+    else:
+        bzj_pattern2 = r'18\.1\s*保证金金额[:：]\s*([^。\n]+?)(?:[。]\n\s*户名|$)'
+        match2 = re.search(bzj_pattern2, search_range, re.DOTALL)
+        if match2:
+            extracted_bzj = match2.group(1).strip()
+            log_parts.append(f"提取保证金规则 (备用模式): {extracted_bzj}")
+            return extracted_bzj
+        else:
+            log_parts.append(f"在 '{section_marker}' 之后未找到 '18.1保证金金额：' 模式")
+    return None
+
+
+def extract_contact_fields(doc_content: str, state: TenderGraphState, log_parts: List[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """从正文中提取 project_zbr_xbr, zbr_xbr_tel, zbr_pinyin"""
+    if not doc_content:
+        return None, None, None
+    
+    agency_marker = "采购代理机构名称："
+    agency_pos = doc_content.find(agency_marker)
+    
+    if agency_pos == -1:
+        log_parts.append(f"在文档中未找到 '采购代理机构名称：' 标记")
+        return None, None, None
+    
+    log_parts.append(f"在位置 {agency_pos} 找到 '采购代理机构名称：' 标记")
+    
+    zipcode_marker = "邮编："
+    zipcode_pos = doc_content.find(zipcode_marker, agency_pos)
+    
+    if zipcode_pos == -1:
+        log_parts.append(f"在 '采购代理机构名称：' 之后未找到 '邮编：' 标记")
+        search_start = agency_pos + len(agency_marker)
+        search_end = min(len(doc_content), agency_pos + 2000)
+    else:
+        log_parts.append(f"在位置 {zipcode_pos} 找到 '邮编：' 标记")
+        zipcode_line_end = zipcode_pos
+        while zipcode_line_end < len(doc_content) and doc_content[zipcode_line_end] not in ['\n', '\r']:
+            zipcode_line_end += 1
+        while zipcode_line_end < len(doc_content) and doc_content[zipcode_line_end] in ['\n', '\r']:
+            zipcode_line_end += 1
+        search_start = zipcode_line_end
+        search_end = min(len(doc_content), search_start + 2000)
+    
+    search_range = doc_content[search_start:search_end]
+    log_parts.append(f"在范围 [{search_start}, {search_end}] 中搜索，内容长度: {len(search_range)}")
+    
+    project_zbr_xbr = None
+    zbr_xbr_tel = None
+    zbr_pinyin = None
+    
+    if state.get("project_zbr_xbr"):
+        contact_pattern = r'联系人[:：]\s*([^\n\r]+)'
+        match = re.search(contact_pattern, search_range)
+        if match:
+            project_zbr_xbr = match.group(1).strip()
+            log_parts.append(f"提取项目负责人/项目经办人: {project_zbr_xbr}")
+        else:
+            log_parts.append("在 '采购代理机构名称：' 部分之后未找到 '联系人' 模式")
+    
+    if state.get("zbr_xbr_tel"):
+        tel_pattern = r'电话[:：]\s*[^\n\r]*转\s*([^\n\r]+)'
+        match = re.search(tel_pattern, search_range)
+        if match:
+            zbr_xbr_tel = match.group(1).strip()
+            log_parts.append(f"提取负责人/经办人电话: {zbr_xbr_tel}")
+        else:
+            log_parts.append("在 '采购代理机构名称：' 部分之后未找到 '电话...转' 模式")
+    
+    if state.get("zbr_pinyin"):
+        email_pattern = r'电子邮箱[:：]\s*([^@\n\r]+)@'
+        match = re.search(email_pattern, search_range)
+        if match:
+            zbr_pinyin = match.group(1).strip()
+            log_parts.append(f"提取负责人拼音: {zbr_pinyin}")
+        else:
+            log_parts.append("在 '采购代理机构名称：' 部分之后未找到 '电子邮箱' 模式")
+    
+    return project_zbr_xbr, zbr_xbr_tel, zbr_pinyin
+
+
+def get_replacements(state: TenderGraphState, config) -> TenderGraphState:
+    """
+    在 Word 文档中查找需要替换的占位符，并根据 state 中的字段建立映射关系。
+    
+    这个节点会：
+    1. 打开 origin_tender_path 的 Word 文档
+    2. 读取文档内容，查找所有可能的占位符
+    3. 根据 state 中的字段（project_name, project_number, project_content, bzj_rule, 
+       buyer_name, project_zbr_xbr, zbr_xbr_tel, zbr_pinyin）查找对应的占位符
+    4. 将找到的占位符信息保存到 state 中，并根据 placeholder_mapping 生成替换列表
+    """
+    start_time = time.time()
+    print(f"[get_replacements] 开始执行...")
+    
+    template_path = state.get("origin_tender_path")
+    
+    if not template_path:
+        raise ValueError("需要 origin_tender_path 来获取替换内容")
+    
+    # 确保路径是绝对路径（Word COM 对象需要绝对路径）
+    import os
+    if not os.path.isabs(template_path):
+        template_path = os.path.abspath(template_path)
+    
+    # 检查文件是否存在
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"未找到模板文档: {template_path}")
+    
+    # 检查文件是否可读
+    if not os.access(template_path, os.R_OK):
+        raise PermissionError(f"无法读取模板文档: {template_path}")
+    
+    found_placeholders: Dict[str, str] = {}  # {field_name: found_placeholder}
+    log_parts = []
+    word = None
+    doc = None
+    com_initialized = False
+    
+    try:
+        pythoncom.CoInitialize()
+        com_initialized = True
+
+        # 直接使用 Microsoft Word，休眠一定时间让之前的实例完全关闭
+        initial_delay = 2.0  # 创建前等待 2 秒，让之前的实例有时间完全关闭
+        log_parts.append(f"等待 {initial_delay} 秒后创建 Microsoft Word 实例...")
+        print(f"[get_replacements] 等待 {initial_delay} 秒后创建 Microsoft Word 实例...")
+        time.sleep(initial_delay)
+        
+        word = None
+        try:
+            # 方法1: 尝试获取已运行的 Word 实例
+            try:
+                word = win32.GetActiveObject("Word.Application")
+                word.Visible = False
+                word.DisplayAlerts = 0
+                log_parts.append("成功获取已运行的 Word 实例")
+            except Exception:
+                # 方法2: 创建新的 Word 实例
+                try:
+                    word = win32.DispatchEx("Word.Application")
+                    word.Visible = False
+                    word.DisplayAlerts = 0
+                    # 给 Word 一点时间完成初始化
+                    time.sleep(0.5)
+                    log_parts.append("成功创建新的 Word 实例 (DispatchEx)")
+                except Exception:
+                    # 方法3: 使用 EnsureDispatch 作为备选
+                    try:
+                        word = win32.gencache.EnsureDispatch("Word.Application")
+                        word.Visible = False
+                        word.DisplayAlerts = 0
+                        time.sleep(0.5)
+                        log_parts.append("成功创建新的 Word 实例 (EnsureDispatch)")
+                    except Exception as e:
+                        raise RuntimeError(f"无法创建 Microsoft Word 应用程序实例: {e}")
+        except ImportError:
+            raise RuntimeError("无法导入 win32com.client，请确保已安装 pywin32")
+        
+        # 验证 Word 对象是否可用
+        try:
+            app_name = word.Name
+            log_parts.append(f"使用 Microsoft Word (名称: {app_name})")
+        except Exception as word_name_e:
+            raise RuntimeError(f"Word 实例创建但验证失败: {word_name_e}")
+        
+        try:
+            # 尝试打开文档，添加更详细的错误处理
+            try:
+                # 使用参数自动处理错误，不显示确认对话框
+                # ConfirmConversions=False: 不显示转换确认对话框
+                # ReadOnly=True: 以只读模式打开，避免锁定问题
+                # AddToRecentFiles=False: 不添加到最近文件列表
+                # NoEncodingDialog=True: 不显示编码对话框
+                doc = word.Documents.Open(
+                    FileName=template_path,
+                    ConfirmConversions=False,
+                    ReadOnly=True,
+                    AddToRecentFiles=False,
+                    NoEncodingDialog=True
+                )
+                log_parts.append(f"已打开: {template_path}")
+                
+                # 立即验证文档对象是否有效
+                # 添加短暂延迟，让 Word 完全打开文档
+                time.sleep(0.1)
+                
+                # 验证文档对象
+                try:
+                    doc_name = doc.Name
+                    log_parts.append(f"文档名称: {doc_name}")
+                except (AttributeError, Exception) as e:
+                    # 文档对象无效（可能是 AttributeError 或 COM 错误），尝试关闭并重新打开
+                    error_type = type(e).__name__
+                    error_code = getattr(e, 'args', [None])[0] if hasattr(e, 'args') and e.args else None
+                    log_parts.append(f"警告: 打开后文档对象立即无效 (错误: {error_type}, 代码: {error_code})，尝试关闭并重试...")
+                    
+                    # 尝试关闭文档
+                    try:
+                        if doc:
+                            doc.Close(SaveChanges=False)
+                    except:
+                        pass
+                    doc = None
+                    
+                    # 检查 Word 应用程序对象是否仍然有效
+                    word_valid = False
+                    try:
+                        _ = word.Name
+                        word_valid = True
+                        log_parts.append("Word 应用程序对象仍然有效")
+                    except (AttributeError, Exception) as word_check_error:
+                        log_parts.append(f"Word 应用程序对象无效 (错误: {type(word_check_error).__name__})，将重新创建...")
+                        # 尝试关闭旧的 Word 对象
+                        try:
+                            if word:
+                                _force_close_word(word, log_parts, max_attempts=3)
+                        except:
+                            pass
+                        # 等待一下，确保进程退出
+                        time.sleep(1.0)
+                        
+                        # 重新创建 Word 应用程序对象
+                        try:
+                            import win32com.client as win32client
+                            try:
+                                word = win32client.GetActiveObject("Word.Application")
+                            except Exception:
+                                word = win32client.DispatchEx("Word.Application")
+                            word.Visible = False
+                            word.DisplayAlerts = 0
+                            time.sleep(0.5)
+                            log_parts.append("Word 应用程序对象重新创建成功")
+                            word_valid = True
+                        except Exception as recreate_error:
+                            error_msg = f"重新创建 Word 应用程序失败: {recreate_error}"
+                            log_parts.append(error_msg)
+                            raise ValueError(error_msg)
+                    
+                    if not word_valid:
+                        error_msg = "Word 应用程序对象无效且无法重新创建"
+                        log_parts.append(error_msg)
+                        raise ValueError(error_msg)
+                    
+                    # 等待一下，让 Word 释放文件
+                    time.sleep(1.0)
+                    
+                    # 重新打开文档
+                    try:
+                        doc = word.Documents.Open(
+                            FileName=template_path,
+                            ConfirmConversions=False,
+                            ReadOnly=True,
+                            AddToRecentFiles=False,
+                            NoEncodingDialog=True
+                        )
+                        time.sleep(1)  # 增加延迟时间，确保文档完全打开
+                        doc_name = doc.Name
+                        log_parts.append(f"文档重新打开成功: {doc_name}")
+                    except Exception as retry_error:
+                        error_msg = f"初始失败后重新打开文档失败: {retry_error}"
+                        log_parts.append(error_msg)
+                        # 确保关闭 Word
+                        if word:
+                            _force_close_word(word, log_parts, max_attempts=5)
+                        raise ValueError(error_msg)
+            except Exception as open_error:
+                error_msg = f"打开文档 '{template_path}' 失败: {open_error}"
+                log_parts.append(error_msg)
+                error_code = getattr(open_error, 'args', [None])[0] if hasattr(open_error, 'args') and open_error.args else None
+                
+                # 如果是 COM 错误（RPC 服务器不可用或接口未知），尝试重新创建 Word 对象并重试一次
+                is_com_rpc_error = (
+                    error_code in (-2147023174, -2147023179)
+                    or 'RPC' in str(open_error)
+                    or '接口未知' in str(open_error)
+                )
+                if is_com_rpc_error:
+                    log_parts.append("检测到 COM/RPC 错误，尝试重新创建 Word 应用程序并重试...")
+                    try:
+                        # 关闭旧的 Word 对象
+                        if word:
+                            _force_close_word(word, log_parts, max_attempts=3)
+                        # 等待一下，确保进程退出
+                        time.sleep(1.0)
+                        # 重新创建 Word 应用程序对象
+                        try:
+                            word = win32.GetActiveObject("Word.Application")
+                        except Exception:
+                            word = win32.DispatchEx("Word.Application")
+                        word.Visible = False
+                        word.DisplayAlerts = 0
+                        time.sleep(0.5)
+                        log_parts.append("Word 应用程序对象已重新创建，正在重试打开文档...")
+                        # 重试打开文档
+                        try:
+                            doc = word.Documents.Open(
+                                FileName=template_path,
+                                ConfirmConversions=False,
+                                ReadOnly=True,
+                                AddToRecentFiles=False,
+                                NoEncodingDialog=True
+                            )
+                            log_parts.append(f"重试后文档打开成功: {template_path}")
+                            time.sleep(0.2)
+                            doc_name = doc.Name
+                            log_parts.append(f"文档名称: {doc_name}")
+                        except Exception as retry_error:
+                            error_msg = f"重新创建 Word 应用程序后打开文档失败: {retry_error}"
+                            log_parts.append(error_msg)
+                            if word:
+                                _force_close_word(word, log_parts, max_attempts=5)
+                            raise ValueError(error_msg)
+                    except Exception as recreate_error:
+                        error_msg = f"重新创建 Word 应用程序失败: {recreate_error}"
+                        log_parts.append(error_msg)
+                        if word:
+                            _force_close_word(word, log_parts, max_attempts=5)
+                        raise ValueError(error_msg)
+                else:
+                    # 非 COM 错误，按原逻辑处理
+                    # 检查可能的原因
+                    if not os.path.exists(template_path):
+                        log_parts.append(f"文件不存在: {template_path}")
+                    else:
+                        log_parts.append("文件存在但无法打开。可能的原因:")
+                        log_parts.append("  - 文件被其他应用程序锁定 (例如 Word)")
+                        log_parts.append("  - 文件已损坏")
+                        log_parts.append("  - 权限不足")
+                    # 确保关闭 Word
+                    if word:
+                        try:
+                            word.Quit(SaveChanges=False)
+                        except:
+                            pass
+                    raise
+            
+            # 再次验证文档对象是否有效（双重检查）
+            if doc is None:
+                error_msg = "打开后文档对象为 None"
+                log_parts.append(error_msg)
+                if word:
+                    _force_close_word(word, log_parts, max_attempts=5)
+                raise ValueError(error_msg)
+            
+            try:
+                _ = doc.Name  # 尝试访问属性来验证对象是否有效
+            except (AttributeError, Exception) as e:
+                error_type = type(e).__name__
+                error_msg = f"文档对象无效 (COM 对象已断开连接，错误: {error_type})"
+                log_parts.append(error_msg)
+                # 确保关闭 Word
+                if word:
+                    _force_close_word(word, log_parts, max_attempts=5)
+                raise ValueError(error_msg)
+            
+            # Try to unprotect if needed
+            try:
+                protection_type = doc.ProtectionType
+                if protection_type != -1:
+                    try:
+                        doc.Unprotect()
+                        log_parts.append("文档已取消保护")
+                    except Exception as e:
+                        log_parts.append(f"警告: 无法取消文档保护: {e}")
+            except Exception as e:
+                log_parts.append(f"警告: 无法检查文档保护类型: {e}")
+            
+            # 读取文档全文内容用于分析
+            # 添加异常处理，防止 COM 对象断开
+            try:
+                doc_content = doc.Content.Text
+                log_parts.append(f"文档内容长度: {len(doc_content)} 个字符")
+            except AttributeError as e:
+                error_msg = f"无法访问文档内容: {e}。文档对象可能已断开连接。"
+                log_parts.append(error_msg)
+                # 确保关闭文档和 Word
+                if 'doc' in locals() and doc:
+                    try:
+                        doc.Close(SaveChanges=False)
+                    except:
+                        pass
+                if 'word' in locals() and word:
+                    _force_close_word(word, log_parts, max_attempts=5)
+                if com_initialized:
+                    try:
+                        pythoncom.CoUninitialize()
+                    except:
+                        pass
+                raise ValueError(error_msg)
+            except Exception as e:
+                error_msg = f"读取文档内容时出错: {e}"
+                log_parts.append(error_msg)
+                # 确保关闭文档和 Word
+                if 'doc' in locals() and doc:
+                    try:
+                        doc.Close(SaveChanges=False)
+                    except:
+                        pass
+                if 'word' in locals() and word:
+                    _force_close_word(word, log_parts, max_attempts=5)
+                if com_initialized:
+                    try:
+                        pythoncom.CoUninitialize()
+                    except:
+                        pass
+                raise
+            
+            # 提取首页页眉内容
+            try:
+                # 获取第一页的页眉（wdHeaderFooterPrimary = 1）
+                first_page_header = doc.Sections(1).Headers(1).Range.Text
+            except Exception as e:
+                log_parts.append(f"读取页眉时出错: {e}")
+                first_page_header = ""
+            
+            # 按顺序同步执行各个字段的查找
+            # 注意：contact_fields 函数返回三个值，需要特殊处理
+            
+            # 提取 project_content
+            if state.get("project_content"):
+                try:
+                    result = extract_project_content(doc_content, state, log_parts)
+                    if result is not None:
+                        found_placeholders["project_content"] = result
+                except Exception as e:
+                    log_parts.append(f"提取项目内容时出错: {e}")
+
+            # 提取 project_number
+            if state.get("project_number"):
+                try:
+                    result = extract_project_number(doc_content, first_page_header, state, log_parts)
+                    if result is not None:
+                        found_placeholders["project_number"] = result
+                except Exception as e:
+                    log_parts.append(f"提取项目编号时出错: {e}")
+            
+            # 提取 project_name
+            if state.get("project_name"):
+                try:
+                    result = extract_project_name(doc_content, first_page_header, state, log_parts)
+                    if result is not None:
+                        found_placeholders["project_name"] = result
+                except Exception as e:
+                    log_parts.append(f"提取项目名称时出错: {e}")
+            
+            # 提取 buyer_name
+            if state.get("buyer_name"):
+                try:
+                    result = extract_buyer_name(doc_content, state, log_parts)
+                    if result is not None:
+                        found_placeholders["buyer_name"] = result
+                except Exception as e:
+                    log_parts.append(f"提取采购人名称时出错: {e}")
+            
+            
+            # 提取 bzj_rule
+            if state.get("bzj_rule"):
+                try:
+                    result = extract_bzj_rule(doc_content, state, log_parts)
+                    if result is not None:
+                        found_placeholders["bzj_rule"] = result
+                except Exception as e:
+                    log_parts.append(f"提取保证金规则时出错: {e}")
+            
+            # 提取 contact_fields（返回三个值）
+            if state.get("project_zbr_xbr") or state.get("zbr_xbr_tel") or state.get("zbr_pinyin"):
+                try:
+                    project_zbr_xbr, zbr_xbr_tel, zbr_pinyin = extract_contact_fields(doc_content, state, log_parts)
+                    if project_zbr_xbr:
+                        found_placeholders["project_zbr_xbr"] = project_zbr_xbr
+                    if zbr_xbr_tel:
+                        found_placeholders["zbr_xbr_tel"] = zbr_xbr_tel
+                    if zbr_pinyin:
+                        found_placeholders["zbr_pinyin"] = zbr_pinyin
+                except Exception as e:
+                    log_parts.append(f"提取联系字段时出错: {e}")
+            
+            # TODO: 后续按顺序添加其他占位符的查找逻辑
+            
+            # 记录查找结果
+            if found_placeholders:
+                log_parts.append(f"在文档中找到 {len(found_placeholders)} 个占位符")
+            else:
+                log_parts.append("在文档中未找到占位符")
+            
+        except Exception as e:
+            error_msg = f"读取文档时出错: {e}"
+            log_parts.append(error_msg)
+            # 在重新抛出异常之前，确保关闭文档和 Word
+            if 'doc' in locals() and doc:
+                try:
+                    doc.Close(SaveChanges=False)
+                except:
+                    pass
+            if 'word' in locals() and word:
+                _force_close_word(word, log_parts, max_attempts=5)
+            raise
+        finally:
+            # 安全地关闭文档（必须在关闭 Word 之前）
+            if 'doc' in locals() and doc:
+                try:
+                    # 检查文档对象是否仍然有效
+                    try:
+                        _ = doc.Name  # 尝试访问属性来检查对象是否有效
+                        doc.Close(SaveChanges=False)
+                        log_parts.append("文档已成功关闭")
+                    except AttributeError:
+                        # 如果对象已断开，尝试强制关闭
+                        try:
+                            doc.Close(SaveChanges=False)
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        log_parts.append(f"警告: 关闭文档时出错: {e}")
+                except Exception:
+                    pass
+            
+            # 安全地关闭 Word 应用程序（必须最后执行）
+            # 使用强制关闭函数确保 Word 完全退出
+            if 'word' in locals() and word:
+                _force_close_word(word, log_parts, max_attempts=5)
+            
+            # 添加延迟，确保 Word 进程完全退出
+            log_parts.append("等待 Word 进程完全退出...")
+            time.sleep(1.5)  # 增加等待时间，确保进程完全退出
+            
+            # 清理残留的 Word 进程（如果正常关闭失败）
+            try:
+                import psutil
+                word_processes = []
+                for proc in psutil.process_iter(['pid', 'name', 'create_time']):
+                    try:
+                        proc_name = proc.info['name'].lower()
+                        if proc_name == 'winword.exe':
+                            pid = proc.info['pid']
+                            # 检查进程创建时间，只清理最近10分钟内创建的进程
+                            create_time = proc.info.get('create_time', 0)
+                            if create_time > 0:
+                                age_seconds = time.time() - create_time
+                                if age_seconds < 600:  # 10分钟内创建的
+                                    word_processes.append(pid)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                
+                if word_processes:
+                    log_parts.append(f"检测到 {len(word_processes)} 个可能的残留 Word 进程: {word_processes}")
+                    for pid in word_processes:
+                        try:
+                            proc = psutil.Process(pid)
+                            proc.terminate()
+                            log_parts.append(f"已终止残留进程 (PID: {pid})")
+                        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                            log_parts.append(f"无法终止进程 {pid}: {e}")
+                        except Exception as e:
+                            log_parts.append(f"终止进程 {pid} 时出错: {e}")
+            except ImportError:
+                log_parts.append("未安装 psutil，无法检查残留进程")
+            except Exception as cleanup_e:
+                log_parts.append(f"检查残留进程时出错: {cleanup_e}")
+            
+            # 安全地清理 COM（必须在关闭 Word 之后）
+            if com_initialized:
+                try:
+                    pythoncom.CoUninitialize()
+                except Exception:
+                    pass
+    
+    except Exception as e:
+        error_msg = f"初始化 Word COM 时出错: {e}"
+        log_parts.append(error_msg)
+        # 即使发生异常，也要确保关闭 Word 和清理 COM
+        if 'doc' in locals() and doc:
+            try:
+                doc.Close(SaveChanges=False)
+            except:
+                pass
+        if 'word' in locals() and word:
+            _force_close_word(word, log_parts, max_attempts=5)
+        if com_initialized:
+            try:
+                pythoncom.CoUninitialize()
+            except:
+                pass
+        raise
+    
+    # Update state with found placeholders
+    new_state_dict = dict(state)
+    # 将找到的占位符信息保存到 state 中
+    # 可以使用一个新的字段来存储，或者直接使用现有的字段
+    # 这里我们创建一个新字段 placeholder_mapping 来存储字段名到占位符的映射
+    new_state_dict["placeholder_mapping"] = found_placeholders
+    
+    # 根据 placeholder_mapping 生成替换列表
+    replacements = []
+    if found_placeholders:
+        # 定义字段名列表（对应 state 中的字段）
+        field_names = [
+            "project_content",
+            "project_number",
+            "project_name",
+            "bzj_rule",
+            "buyer_name",
+            "project_zbr_xbr",
+            "zbr_xbr_tel",
+            "zbr_pinyin",
+        ]
+        
+        # 根据 placeholder_mapping 生成替换列表
+        for field_name in field_names:
+            # 检查是否有该字段的占位符映射（从文档中提取的旧值）
+            old_value = found_placeholders.get(field_name)
+            if not old_value:
+                continue
+            
+            # 获取该字段的新值（从 state 中获取）
+            new_value = state.get(field_name)
+            if not new_value:
+                log_parts.append(f"字段 '{field_name}' 有占位符 '{old_value}' 但 state 中没有新值，跳过")
+                continue
+            
+            # 如果旧值和新值相同，跳过替换
+            if old_value == new_value:
+                log_parts.append(f"字段 '{field_name}': 旧值 '{old_value}' 等于新值，跳过")
+                continue
+            
+            # 生成替换对 (旧值, 新值)
+            replacements.append((old_value, new_value))
+            log_parts.append(f"为字段 '{field_name}' 生成替换: '{old_value}' -> '{new_value}'")
+        
+        # 如果没有生成任何替换项，记录日志
+        if not replacements:
+            log_parts.append("未生成任何替换 (所有字段要么缺失要么未更改)")
+        else:
+            log_parts.append(f"生成了 {len(replacements)} 对替换")
+            # 详细列出所有替换对
+            for i, (old_val, new_val) in enumerate(replacements, 1):
+                # 截断过长的值以便显示
+                old_display = old_val[:50] + "..." if len(old_val) > 50 else old_val
+                new_display = new_val[:50] + "..." if len(new_val) > 50 else new_val
+                log_parts.append(f"  [{i}] ({old_display}, {new_display})")
+    else:
+        log_parts.append("未找到占位符映射，跳过替换生成")
+    
+    # 只返回需要更新的键，避免并行执行时的状态冲突
+    # 在 LangGraph 中，并行节点应该只返回部分状态更新
+    replacement_log = "; ".join(log_parts)
+    new_state = TenderGraphState(
+        placeholder_mapping=found_placeholders,
+        replacements=replacements,
+        replacement_log=replacement_log
+    )
+    # 为了日志记录，创建完整状态（仅用于日志）
+    full_state_for_log = dict(state)
+    full_state_for_log.update({
+        "placeholder_mapping": found_placeholders,
+        "replacements": replacements,
+        "replacement_log": replacement_log
+    })
+    log_state("get_replacements", TenderGraphState(**full_state_for_log))
+    
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"[get_replacements] 执行完成，耗时: {elapsed_time:.2f} 秒 ({elapsed_time*1000:.0f} 毫秒)")
+    
+    return new_state
+
+
+if __name__ == "__main__":
+    """
+    测试模块：测试从指定文档中提取占位符的功能
+    """
+    import pathlib
+    import sys
+    
+    # 添加项目根目录到路径，以便导入模块
+    ROOT = pathlib.Path(__file__).resolve().parents[2]
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    
+    # 重新导入必要的模块（使用绝对导入）
+    from TenderWord.state import TenderGraphState
+    
+    # 测试文档路径列表
+    test_doc_paths = [
+        "TenderFile/252699-原位杂交仪-询价文件-初稿1 - 副本.doc"
+    ]
+    
+    # 循环测试每个文件
+    for doc_idx, test_doc_path_str in enumerate(test_doc_paths, 1):
+        # 基于项目根目录解析路径
+        test_doc_path = (ROOT / test_doc_path_str).resolve()
+        
+        print("\n" + "=" * 80)
+        print(f"测试 {doc_idx}/{len(test_doc_paths)}: get_replacements 节点")
+        print("=" * 80)
+        print(f"测试文档路径: {test_doc_path}")
+        print(f"文档是否存在: {test_doc_path.exists()}")
+        print()
+        
+        if not test_doc_path.exists():
+            print(f"警告: 文档不存在: {test_doc_path}，跳过此文件")
+            print()
+            continue
+        
+        # 创建测试状态
+        test_state: TenderGraphState = {
+            "origin_tender_path": str(test_doc_path),
+            "project_number": "253505",  
+            "project_name": "细胞电转仪", 
+            "project_content": "项目名称及数量：细胞电转仪   壹套",
+            "bzj_rule": "项目预算的2%",
+            "buyer_name": "复旦大学附属中山医院",
+            "project_zbr_xbr": "徐旭东、任彧晟",
+            "zbr_xbr_tel": "8605、8625",
+            "zbr_pinyin": "xuxudong",
+        }
+        
+        try:
+            # 调用 get_replacements 函数
+            result_state = get_replacements(test_state, config=None)
+            
+            placeholder_mapping = result_state.get("placeholder_mapping", {})
+            if placeholder_mapping:
+                print(f"\n找到 {len(placeholder_mapping)} 个占位符:\n")
+                for field_name, placeholder_value in placeholder_mapping.items():
+                    # 显示占位符内容，如果包含换行符则保持原格式
+                    print(f"{field_name}: {repr(placeholder_value)}")
+                    print()
+            else:
+                print("\n未找到任何占位符")
+            
+            # 打印日志
+            # replacement_log = result_state.get("replacement_log", "")
+            # if replacement_log:
+            #     print("\n" + "=" * 80)
+            #     print("处理日志")
+            #     print("=" * 80)
+            #     print(replacement_log)
+            
+        except Exception as e:
+            print(f"\n错误: {e}")
+            import traceback
+            traceback.print_exc()
+            print(f"\n继续测试下一个文件...")
+            print()
+            continue
+
