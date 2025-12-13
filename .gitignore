@@ -2,6 +2,7 @@ logs/tender_agent.log
 prompts
 
 # Python 缓存文件
+__pycache__
 __pycache__/
 *.py[cod]
 *$py.class
