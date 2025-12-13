@@ -125,6 +125,15 @@ with tab:
             type=["doc", "docx"],
             help="请上传包含原始技术参数的 Word 文件（.doc 或 .docx）",
         )
+        
+        # 添加模型选择
+        model_option = st.selectbox(
+            "选择生成模型",
+            ["DeepSeek", "豆包 (Doubao)", "千问 (Qwen)"],
+            index=0,
+            key="llm_model_select"
+        )
+        
         submitted = st.form_submit_button("开始生成")
 
     if submitted:
@@ -190,7 +199,9 @@ with tab:
                 st.markdown("**运行日志**")
                 log_placeholder = st.empty()
             with col_llm:
-                st.markdown("**DeepSeek大模型响应**")
+                st.markdown("**AI生成采购需求**")
+                # 显示当前选中的模型
+                st.caption(f"当前模型: {model_option}")
                 llm_placeholder = st.empty()
 
             # 使用队列在后台线程和主线程之间传递日志
@@ -200,6 +211,14 @@ with tab:
 
             # 用于存储后台线程的执行结果
             result_holder = {"result": None, "error": None, "done": False}
+            
+            # 映射模型名称到内部标识符
+            model_map = {
+                "DeepSeek": "deepseek",
+                "豆包 (Doubao)": "doubao", 
+                "千问 (Qwen)": "qwen"
+            }
+            selected_model_id = model_map.get(model_option, "deepseek")
 
             def run_graph_in_thread():
                 """在后台线程中执行 graph"""
@@ -220,6 +239,7 @@ with tab:
                                         "configurable": {
                                             "llm_stream_callback": llm_streamer.update,
                                             "suppress_llm_stdout": True,
+                                            "model_provider": selected_model_id,  # 传递选择的模型
                                         }
                                     },
                                 )
@@ -293,7 +313,8 @@ with tab:
                         # 将生成记录添加到 session_state
                         st.session_state.history.append({
                             "path": str(prepared_path_obj),
-                            "time": time.strftime("%H:%M:%S", time.localtime())
+                            "time": time.strftime("%H:%M:%S", time.localtime()),
+                            "model": model_option
                         })
                         
                         # 显示文件路径和下载按钮
@@ -327,7 +348,12 @@ with st.sidebar:
                     with open(path_obj, "rb") as f:
                         file_bytes = f.read()
                     
-                    st.caption(f" {time_str} -{path_obj.name}")
+                    # 获取模型名称，兼容旧的历史记录
+                    model_name = item.get("model", "DeepSeek")
+                    # 显示模型和时间，文件名
+                    st.caption(f"🤖 {model_name} | 🕒 {time_str}")
+                    st.caption(f"📜 {path_obj.name}")
+                    
                     st.download_button(
                         label=f"📥下载生成文件",
                         data=file_bytes,

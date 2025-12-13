@@ -19,12 +19,13 @@ except ImportError:
         from logging_utils import log_state
         from state import TenderGraphState
     except ImportError:
-        # 如果失败，添加父目录并使用 TenderWord 前缀
+        # 如果失败，添加项目根目录到 sys.path
         ROOT = pathlib.Path(__file__).resolve().parents[2]
         if str(ROOT) not in sys.path:
             sys.path.insert(0, str(ROOT))
-        from TenderWord.logging_utils import log_state
-        from TenderWord.state import TenderGraphState
+        # 从项目根目录直接导入
+        from logging_utils import log_state
+        from state import TenderGraphState
 
 # WPS/Word constants (WPS 兼容 Word 的常量)
 wdFindStop = 0
@@ -155,41 +156,27 @@ SUBSCRIPT_MAP = {
 }
 
 
-def _extract_text_from_xml(xml_content):
+def _extract_text_from_xml(xml_content, preserve_structure=False):
     """
     从 WordOpenXML 解析文本，识别上标/下标（支持 vertAlign 和 position）
+    
+    Args:
+        xml_content: Word XML 内容字符串
+        preserve_structure: 是否保留文档结构（段落换行、表格等）
+                          True: 保留段落边界的换行符，适用于提取整个文档
+                          False: 不保留换行，适用于提取单个单元格或段落内的文本
+    
+    Returns:
+        str: 提取的文本，上标/下标字符已转换为Unicode上标/下标字符
     """
     try:
         import re
         # 简单的 XML 实体解码
         def _xml_unescape(text):
             return text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"').replace("&apos;", "'")
-
-        result = []
         
-        # 查找所有的 run (<w:r>...</w:r>)
-        # 使用 DOTALL 模式让 . 匹配换行符
-        run_pattern = re.compile(r'<w:r\b.*?>(.*?)</w:r>', re.DOTALL)
-        
-        # 1. 查找标准上标/下标属性 <w:vertAlign w:val="superscript"/>
-        align_pattern = re.compile(r'<w:vertAlign\s+w:val=["\'](superscript|subscript)["\']\s*/>')
-        
-        # 2. 查找位置偏移 <w:position w:val="6"/> (val 单位是半磅)
-        # 阈值设为 3 (1.5磅)，通常上标偏移量会大于这个值
-        position_pattern = re.compile(r'<w:position\s+w:val=["\'](-?\d+)["\']\s*/>')
-        
-        # 查找文本 <w:t>...</w:t>
-        text_pattern = re.compile(r'<w:t\b.*?>(.*?)</w:t>', re.DOTALL)
-        
-        pos = 0
-        while True:
-            match = run_pattern.search(xml_content, pos)
-            if not match:
-                break
-            
-            run_content = match.group(1)
-            pos = match.end()
-            
+        def _process_run(run_content, align_pattern, position_pattern, text_pattern):
+            """处理单个 run，返回处理后的文本"""
             # --- 判别上标/下标 ---
             is_superscript = False
             is_subscript = False
@@ -218,6 +205,7 @@ def _extract_text_from_xml(xml_content):
                         pass
             
             # --- 提取文本并转换 ---
+            run_texts = []
             text_matches = text_pattern.finditer(run_content)
             for tm in text_matches:
                 raw_text = tm.group(1)
@@ -227,18 +215,153 @@ def _extract_text_from_xml(xml_content):
                     converted = []
                     for char in text:
                         converted.append(SUPERSCRIPT_MAP.get(char, char))
-                    result.append("".join(converted))
+                    run_texts.append("".join(converted))
                 elif is_subscript:
                     converted = []
                     for char in text:
                         converted.append(SUBSCRIPT_MAP.get(char, char))
-                    result.append("".join(converted))
+                    run_texts.append("".join(converted))
                 else:
-                    result.append(text)
+                    run_texts.append(text)
+            
+            return "".join(run_texts)
+
+        # 查找所有的 run (<w:r>...</w:r>)
+        # 使用 DOTALL 模式让 . 匹配换行符
+        run_pattern = re.compile(r'<w:r\b[^>]*>(.*?)</w:r>', re.DOTALL)
+        
+        # 1. 查找标准上标/下标属性 <w:vertAlign w:val="superscript"/>
+        align_pattern = re.compile(r'<w:vertAlign\s+w:val=["\'](superscript|subscript)["\']\s*/>')
+        
+        # 2. 查找位置偏移 <w:position w:val="6"/> (val 单位是半磅)
+        # 阈值设为 3 (1.5磅)，通常上标偏移量会大于这个值
+        position_pattern = re.compile(r'<w:position\s+w:val=["\'](-?\d+)["\']\s*/>')
+        
+        # 查找文本 <w:t>...</w:t>
+        text_pattern = re.compile(r'<w:t\b[^>]*>(.*?)</w:t>', re.DOTALL)
+
+        if not preserve_structure:
+            # 原始逻辑：不保留结构，适用于单个段落或单元格
+            result = []
+            pos = 0
+            while True:
+                match = run_pattern.search(xml_content, pos)
+                if not match:
+                    break
+                
+                run_content = match.group(1)
+                pos = match.end()
+                
+                run_text = _process_run(run_content, align_pattern, position_pattern, text_pattern)
+                if run_text:
+                    result.append(run_text)
+                        
+            return "".join(result)
+        
+        else:
+            # 保留结构模式：识别段落边界，保留换行和表格
+            # 段落模式 <w:p>...</w:p>
+            para_pattern = re.compile(r'<w:p\b[^>]*>(.*?)</w:p>', re.DOTALL)
+            # 表格模式 <w:tbl>...</w:tbl>
+            table_pattern = re.compile(r'<w:tbl\b[^>]*>(.*?)</w:tbl>', re.DOTALL)
+            # 表格行 <w:tr>...</w:tr>
+            row_pattern = re.compile(r'<w:tr\b[^>]*>(.*?)</w:tr>', re.DOTALL)
+            # 表格单元格 <w:tc>...</w:tc>
+            cell_pattern = re.compile(r'<w:tc\b[^>]*>(.*?)</w:tc>', re.DOTALL)
+            
+            result_parts = []
+            
+            # 按顺序处理内容：找到所有段落和表格，按位置排序处理
+            # 先找出所有段落和表格的位置
+            elements = []
+            
+            for match in para_pattern.finditer(xml_content):
+                # 检查这个段落是否在表格内（如果在 <w:tbl> 和 </w:tbl> 之间则跳过）
+                para_start = match.start()
+                # 简单检查：往前找最近的 <w:tbl 和 </w:tbl>
+                before_content = xml_content[:para_start]
+                last_tbl_open = before_content.rfind('<w:tbl')
+                last_tbl_close = before_content.rfind('</w:tbl>')
+                # 如果最近的 <w:tbl 比 </w:tbl> 更靠后，说明在表格内
+                if last_tbl_open > last_tbl_close:
+                    continue  # 跳过表格内的段落，由表格处理
+                elements.append(('para', match.start(), match.group(1)))
+            
+            for match in table_pattern.finditer(xml_content):
+                elements.append(('table', match.start(), match.group(1)))
+            
+            # 按位置排序
+            elements.sort(key=lambda x: x[1])
+            
+            for elem_type, _, content in elements:
+                if elem_type == 'para':
+                    # 处理段落：提取所有 run 中的文本
+                    para_texts = []
+                    for run_match in run_pattern.finditer(content):
+                        run_content = run_match.group(1)
+                        run_text = _process_run(run_content, align_pattern, position_pattern, text_pattern)
+                        if run_text:
+                            para_texts.append(run_text)
                     
-        return "".join(result)
+                    para_text = "".join(para_texts)
+                    if para_text.strip():  # 只添加非空段落
+                        result_parts.append(para_text)
+                
+                elif elem_type == 'table':
+                    # 处理表格：转换为 Markdown 格式
+                    table_rows = []
+                    for row_match in row_pattern.finditer(content):
+                        row_content = row_match.group(1)
+                        row_cells = []
+                        for cell_match in cell_pattern.finditer(row_content):
+                            cell_content = cell_match.group(1)
+                            # 提取单元格中所有段落的文本
+                            cell_texts = []
+                            for para_match in para_pattern.finditer(cell_content):
+                                para_content = para_match.group(1)
+                                para_texts = []
+                                for run_match in run_pattern.finditer(para_content):
+                                    run_content = run_match.group(1)
+                                    run_text = _process_run(run_content, align_pattern, position_pattern, text_pattern)
+                                    if run_text:
+                                        para_texts.append(run_text)
+                                if para_texts:
+                                    cell_texts.append("".join(para_texts))
+                            
+                            # 单元格内多个段落用空格连接，避免破坏 Markdown 表格
+                            cell_text = " ".join(cell_texts).strip()
+                            # 转义管道符号
+                            cell_text = cell_text.replace('|', '\\|')
+                            row_cells.append(cell_text)
+                        
+                        if row_cells:
+                            table_rows.append(row_cells)
+                    
+                    # 生成 Markdown 表格
+                    if table_rows:
+                        md_lines = []
+                        # 表头
+                        header = table_rows[0]
+                        md_lines.append("| " + " | ".join(header) + " |")
+                        # 分隔行
+                        md_lines.append("| " + " | ".join(["---"] * len(header)) + " |")
+                        # 数据行
+                        for row in table_rows[1:]:
+                            # 确保列数一致
+                            while len(row) < len(header):
+                                row.append("")
+                            row = row[:len(header)]
+                            md_lines.append("| " + " | ".join(row) + " |")
+                        
+                        result_parts.append("\n".join(md_lines))
+            
+            # 用换行符连接所有部分
+            return "\n".join(result_parts)
+    
     except Exception as e:
         print(f"    XML 解析失败: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -460,24 +583,42 @@ def extract_text_with_list_numbers(range_obj):
                 para_text = extract_text_with_superscript_subscript(para.Range)
                 
                 if para_text:
+                    # 获取原文档中段落的实际文本，以保留换行格式
+                    try:
+                        original_para_text = para.Range.Text
+                        # 检查原文档段落末尾是否有换行符（通常是 \r）
+                        has_trailing_newline = original_para_text.endswith('\r') or original_para_text.endswith('\n')
+                        # 清理特殊控制字符
+                        para_text_clean = para_text.replace('\x07', '')
+                        # 如果原文档有换行符，但提取的文本没有，则添加
+                        if has_trailing_newline and not (para_text_clean.endswith('\r') or para_text_clean.endswith('\n')):
+                            # 使用原文档的换行符格式
+                            if original_para_text.endswith('\r\n'):
+                                para_text_clean += '\r\n'
+                            elif original_para_text.endswith('\r'):
+                                para_text_clean += '\r'
+                            elif original_para_text.endswith('\n'):
+                                para_text_clean += '\n'
+                    except:
+                        # 如果无法获取原文档文本，只清理特殊字符
+                        para_text_clean = para_text.replace('\x07', '')
+                    
                     if has_list and list_string:
                         # 如果有自动编号，将编号添加到文本前
                         # 检查文本开头是否已经包含编号（避免重复）
                         # 去除编号字符串两端的空格（编号本身不应该有前后空格）
                         list_string_clean = list_string.strip()
                         # 检查去除前导空白后的文本是否以编号开头
-                        para_text_stripped = para_text.lstrip()
+                        para_text_stripped = para_text_clean.lstrip()
                         if para_text_stripped and para_text_stripped.startswith(list_string_clean):
-                            # 文本已经包含编号，直接使用原始文本（保留所有格式）
-                            result_lines.append(para_text)
+                            # 文本已经包含编号，直接使用原始文本（保留所有格式包括换行）
+                            result_lines.append(para_text_clean)
                         else:
                             # 文本不包含编号，添加编号
-                            # 保留原始文本的所有格式（包括前导空格、换行符等）
-                            # 在文本最前面添加编号和空格
-                            result_lines.append(list_string_clean + " " + para_text)
+                            result_lines.append(list_string_clean + " " + para_text_clean)
                     else:
-                        # 没有自动编号，直接添加原始文本
-                        result_lines.append(para_text)
+                        # 没有自动编号，直接添加原始文本（保留所有格式包括换行）
+                        result_lines.append(para_text_clean)
                         
             except Exception as para_e:
                 # 如果处理某个段落失败，回退到直接提取文本（带上标/下标）
@@ -492,7 +633,8 @@ def extract_text_with_list_numbers(range_obj):
         if not result_lines:
             return extract_text_with_superscript_subscript(range_obj)
         
-        # 直接连接所有段落文本，保留所有原始格式和符号
+        # 直接连接所有段落文本，保留原文档的实际格式（包括换行符）
+        # 不统一添加换行，让原文档的格式自然保留
         return ''.join(result_lines)
         
     except Exception as e:
@@ -577,7 +719,8 @@ def extract_content_with_tables(range_obj):
         if not result_parts:
             return extract_text_with_list_numbers(range_obj)
         
-        # 直接连接各部分，保留原始格式，不添加额外的分隔符
+        # 直接连接各部分，保留原文档的实际格式
+        # 不添加额外的换行符，让原文档的格式自然保留
         return ''.join(result_parts)
         
     except Exception as e:
@@ -1177,8 +1320,8 @@ if __name__ == "__main__":
         diagnose_wps_installation()
         sys.exit(0)
     
-    # 重新导入必要的模块（使用绝对导入）
-    from TenderWord.state import TenderGraphState
+    # 重新导入必要的模块（从项目根目录直接导入）
+    from state import TenderGraphState
     
     # 测试文档路径列表
     test_doc_paths = [

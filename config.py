@@ -24,6 +24,15 @@ class AgentConfig:
     llm_temperature: float = field(
         default_factory=lambda: float(os.getenv("TENDER_LLM_TEMPERATURE", "0.1"))
     )
+    llm_provider: str = field(
+        default_factory=lambda: os.getenv("TENDER_LLM_PROVIDER", "deepseek")
+    )
+    llm_api_key: str = field(
+        default_factory=lambda: os.getenv("TENDER_LLM_API_KEY", "")
+    )
+    llm_base_url: str = field(
+        default_factory=lambda: os.getenv("TENDER_LLM_BASE_URL", "")
+    )
 
     @classmethod
     def from_runnable_config(cls, config: RunnableConfig | None) -> "AgentConfig":

@@ -191,7 +191,7 @@ def replace_content(state: TenderGraphState, config) -> TenderGraphState:
         
         def process_replacements_in_range(rng, replacements_to_process, story_type_name, doc):
             """在指定的 Range 中处理替换"""
-            comment_text = "ERP内容生成"  # 统一的批注内容
+            comment_text = "ERP系统数据"  # 统一的批注内容
             
             for rep_idx, (search_text, replace_text) in enumerate(replacements_to_process, 1):
                 print(f"  [{rep_idx}/{len(replacements_to_process)}] 正在在 [{story_type_name}] 中搜索 '{search_text}'...")

@@ -8,6 +8,10 @@ import re
 import time
 
 from langchain_deepseek import ChatDeepSeek
+from volcenginesdkarkruntime import Ark
+from openai import OpenAI
+import os
+
 
 # 处理相对导入和直接运行的情况
 try:
@@ -24,14 +28,15 @@ except ImportError:
         from logging_utils import log_state
         from state import TenderGraphState
     except ImportError:
-        # 如果失败，添加父目录并使用 TenderWord 前缀
+        # 如果失败，添加项目根目录到 sys.path
         import pathlib
         ROOT = pathlib.Path(__file__).resolve().parents[2]
         if str(ROOT) not in sys.path:
             sys.path.insert(0, str(ROOT))
-        from TenderWord.config import AgentConfig
-        from TenderWord.logging_utils import log_state
-        from TenderWord.state import TenderGraphState
+        # 从项目根目录直接导入
+        from config import AgentConfig
+        from logging_utils import log_state
+        from state import TenderGraphState
 
 POLISH_PROMPT = """
 # Role
@@ -103,9 +108,220 @@ _SUBSCRIPT_MAP = {
 }
 
 
+def _extract_text_from_xml(xml_content, preserve_structure=False):
+    """
+    从 WordOpenXML 解析文本，识别上标/下标（支持 vertAlign 和 position）
+    
+    Args:
+        xml_content: Word XML 内容字符串
+        preserve_structure: 是否保留文档结构（段落换行、表格等）
+                          True: 保留段落边界的换行符，适用于提取整个文档
+                          False: 不保留换行，适用于提取单个单元格或段落内的文本
+    
+    Returns:
+        str: 提取的文本，上标/下标字符已转换为Unicode上标/下标字符
+    """
+    try:
+        # 简单的 XML 实体解码
+        def _xml_unescape(text):
+            return text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"').replace("&apos;", "'")
+        
+        def _process_run(run_content, align_pattern, position_pattern, text_pattern):
+            """处理单个 run，返回处理后的文本"""
+            # --- 判别上标/下标 ---
+            is_superscript = False
+            is_subscript = False
+            
+            # 检查 vertAlign
+            align_match = align_pattern.search(run_content)
+            if align_match:
+                val = align_match.group(1)
+                if val == 'superscript':
+                    is_superscript = True
+                elif val == 'subscript':
+                    is_subscript = True
+            
+            # 如果没有 vertAlign，检查 position
+            if not is_superscript and not is_subscript:
+                pos_match = position_pattern.search(run_content)
+                if pos_match:
+                    try:
+                        # 单位是半磅 (1/144 英寸)
+                        val = int(pos_match.group(1))
+                        if val >= 4:  # 偏移 >= 2磅 视为上标
+                            is_superscript = True
+                        elif val <= -4: # 偏移 <= -2磅 视为下标
+                            is_subscript = True
+                    except:
+                        pass
+            
+            # --- 提取文本并转换 ---
+            run_texts = []
+            text_matches = text_pattern.finditer(run_content)
+            for tm in text_matches:
+                raw_text = tm.group(1)
+                text = _xml_unescape(raw_text)
+                
+                if is_superscript:
+                    converted = []
+                    for char in text:
+                        converted.append(_SUPERSCRIPT_MAP.get(char, char))
+                    run_texts.append("".join(converted))
+                elif is_subscript:
+                    converted = []
+                    for char in text:
+                        converted.append(_SUBSCRIPT_MAP.get(char, char))
+                    run_texts.append("".join(converted))
+                else:
+                    run_texts.append(text)
+            
+            return "".join(run_texts)
+
+        # 查找所有的 run (<w:r>...</w:r>)
+        # 使用 DOTALL 模式让 . 匹配换行符
+        run_pattern = re.compile(r'<w:r\b[^>]*>(.*?)</w:r>', re.DOTALL)
+        
+        # 1. 查找标准上标/下标属性 <w:vertAlign w:val="superscript"/>
+        align_pattern = re.compile(r'<w:vertAlign\s+w:val=["\'](superscript|subscript)["\']\s*/>')
+        
+        # 2. 查找位置偏移 <w:position w:val="6"/> (val 单位是半磅)
+        # 阈值设为 3 (1.5磅)，通常上标偏移量会大于这个值
+        position_pattern = re.compile(r'<w:position\s+w:val=["\'](-?\d+)["\']\s*/>')
+        
+        # 查找文本 <w:t>...</w:t>
+        text_pattern = re.compile(r'<w:t\b[^>]*>(.*?)</w:t>', re.DOTALL)
+
+        if not preserve_structure:
+            # 原始逻辑：不保留结构，适用于单个段落或单元格
+            result = []
+            pos = 0
+            while True:
+                match = run_pattern.search(xml_content, pos)
+                if not match:
+                    break
+                
+                run_content = match.group(1)
+                pos = match.end()
+                
+                run_text = _process_run(run_content, align_pattern, position_pattern, text_pattern)
+                if run_text:
+                    result.append(run_text)
+                        
+            return "".join(result)
+        
+        else:
+            # 保留结构模式：识别段落边界，保留换行和表格
+            # 段落模式 <w:p>...</w:p>
+            para_pattern = re.compile(r'<w:p\b[^>]*>(.*?)</w:p>', re.DOTALL)
+            # 表格模式 <w:tbl>...</w:tbl>
+            table_pattern = re.compile(r'<w:tbl\b[^>]*>(.*?)</w:tbl>', re.DOTALL)
+            # 表格行 <w:tr>...</w:tr>
+            row_pattern = re.compile(r'<w:tr\b[^>]*>(.*?)</w:tr>', re.DOTALL)
+            # 表格单元格 <w:tc>...</w:tc>
+            cell_pattern = re.compile(r'<w:tc\b[^>]*>(.*?)</w:tc>', re.DOTALL)
+            
+            result_parts = []
+            
+            # 按顺序处理内容：找到所有段落和表格，按位置排序处理
+            # 先找出所有段落和表格的位置
+            elements = []
+            
+            for match in para_pattern.finditer(xml_content):
+                # 检查这个段落是否在表格内（如果在 <w:tbl> 和 </w:tbl> 之间则跳过）
+                para_start = match.start()
+                # 简单检查：往前找最近的 <w:tbl 和 </w:tbl>
+                before_content = xml_content[:para_start]
+                last_tbl_open = before_content.rfind('<w:tbl')
+                last_tbl_close = before_content.rfind('</w:tbl>')
+                # 如果最近的 <w:tbl 比 </w:tbl> 更靠后，说明在表格内
+                if last_tbl_open > last_tbl_close:
+                    continue  # 跳过表格内的段落，由表格处理
+                elements.append(('para', match.start(), match.group(1)))
+            
+            for match in table_pattern.finditer(xml_content):
+                elements.append(('table', match.start(), match.group(1)))
+            
+            # 按位置排序
+            elements.sort(key=lambda x: x[1])
+            
+            for elem_type, _, content in elements:
+                if elem_type == 'para':
+                    # 处理段落：提取所有 run 中的文本
+                    para_texts = []
+                    for run_match in run_pattern.finditer(content):
+                        run_content = run_match.group(1)
+                        run_text = _process_run(run_content, align_pattern, position_pattern, text_pattern)
+                        if run_text:
+                            para_texts.append(run_text)
+                    
+                    para_text = "".join(para_texts)
+                    if para_text.strip():  # 只添加非空段落
+                        result_parts.append(para_text)
+                
+                elif elem_type == 'table':
+                    # 处理表格：转换为 Markdown 格式
+                    table_rows = []
+                    for row_match in row_pattern.finditer(content):
+                        row_content = row_match.group(1)
+                        row_cells = []
+                        for cell_match in cell_pattern.finditer(row_content):
+                            cell_content = cell_match.group(1)
+                            # 提取单元格中所有段落的文本
+                            cell_texts = []
+                            for para_match in para_pattern.finditer(cell_content):
+                                para_content = para_match.group(1)
+                                para_texts = []
+                                for run_match in run_pattern.finditer(para_content):
+                                    run_content = run_match.group(1)
+                                    run_text = _process_run(run_content, align_pattern, position_pattern, text_pattern)
+                                    if run_text:
+                                        para_texts.append(run_text)
+                                if para_texts:
+                                    cell_texts.append("".join(para_texts))
+                            
+                            # 单元格内多个段落用空格连接，避免破坏 Markdown 表格
+                            cell_text = " ".join(cell_texts).strip()
+                            # 转义管道符号
+                            cell_text = cell_text.replace('|', '\\|')
+                            row_cells.append(cell_text)
+                        
+                        if row_cells:
+                            table_rows.append(row_cells)
+                    
+                    # 生成 Markdown 表格
+                    if table_rows:
+                        md_lines = []
+                        # 表头
+                        header = table_rows[0]
+                        md_lines.append("| " + " | ".join(header) + " |")
+                        # 分隔行
+                        md_lines.append("| " + " | ".join(["---"] * len(header)) + " |")
+                        # 数据行
+                        for row in table_rows[1:]:
+                            # 确保列数一致
+                            while len(row) < len(header):
+                                row.append("")
+                            row = row[:len(header)]
+                            md_lines.append("| " + " | ".join(row) + " |")
+                        
+                        result_parts.append("\n".join(md_lines))
+            
+            # 用换行符连接所有部分
+            return "\n".join(result_parts)
+    
+    except Exception as e:
+        print(f"    XML 解析失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 def _extract_text_with_superscript_subscript(range_obj):
     """
     提取WPS/Word范围中的文本，保留上标和下标格式
+    
+    优先使用 WordOpenXML 提取（支持 vertAlign 和 position 偏移），
+    如果 XML 提取失败则回退到逐字符遍历方式。
     
     Args:
         range_obj: WPS/Word Range对象
@@ -113,6 +329,23 @@ def _extract_text_with_superscript_subscript(range_obj):
     Returns:
         str: 提取的文本，上标/下标字符已转换为Unicode上标/下标字符
     """
+    # 策略1: 优先尝试通过 WordOpenXML 提取
+    try:
+        xml_content = None
+        try:
+            # 尝试获取 XML，如果 COM 不支持会报错
+            xml_content = range_obj.WordOpenXML
+        except:
+            pass
+            
+        if xml_content and isinstance(xml_content, str) and len(xml_content) > 0:
+            xml_text = _extract_text_from_xml(xml_content)
+            if xml_text is not None:
+                return xml_text
+    except Exception as e:
+        print(f"    WordOpenXML 提取异常，回退到逐字符遍历: {e}")
+
+    # 策略2: 回退到逐字符遍历 (增强版，支持位置偏移检测)
     try:
         result = []
         characters = range_obj.Characters
@@ -129,19 +362,38 @@ def _extract_text_with_superscript_subscript(range_obj):
                 is_superscript = False
                 is_subscript = False
                 
+                # 检查上标 (包括标准上标属性和位置偏移)
                 try:
-                    superscript_val = font.Superscript
+                    sup_val = font.Superscript
                     # Word COM 返回 -1 或 True 表示上标，0 或 False 表示否
                     # 9999999 (wdUndefined) 表示混合状态，不应视为上标
-                    # 显式检查以处理各种可能的返回值类型
-                    is_superscript = (superscript_val == True) or (superscript_val == -1)
+                    if sup_val == -1 or sup_val == True:
+                        is_superscript = True
+                    else:
+                        # 检查位置偏移 (单位：磅)
+                        # 如果没有开启 Superscript，但位置提升了 > 1.5 磅，也视为上标
+                        try:
+                            pos_val = font.Position
+                            if pos_val > 1.5:
+                                is_superscript = True
+                        except:
+                            pass
                 except:
                     pass
                 
+                # 检查下标
                 try:
-                    subscript_val = font.Subscript
-                    # 同样的逻辑处理下标
-                    is_subscript = (subscript_val == True) or (subscript_val == -1)
+                    sub_val = font.Subscript
+                    if sub_val == -1 or sub_val == True:
+                        is_subscript = True
+                    elif not is_superscript:
+                        # 检查位置偏移 (负值表示下移)
+                        try:
+                            pos_val = font.Position
+                            if pos_val < -1.5:
+                                is_subscript = True
+                        except:
+                            pass
                 except:
                     pass
                 
@@ -342,24 +594,42 @@ def _extract_text_with_list_numbers(range_obj):
                 para_text = _extract_text_with_superscript_subscript(para_range)
                 
                 if para_text:
+                    # 获取原文档中段落的实际文本，以保留换行格式
+                    try:
+                        original_para_text = para_range.Text
+                        # 检查原文档段落末尾是否有换行符（通常是 \r）
+                        has_trailing_newline = original_para_text.endswith('\r') or original_para_text.endswith('\n')
+                        # 清理特殊控制字符
+                        para_text_clean = para_text.replace('\x07', '')
+                        # 如果原文档有换行符，但提取的文本没有，则添加
+                        if has_trailing_newline and not (para_text_clean.endswith('\r') or para_text_clean.endswith('\n')):
+                            # 使用原文档的换行符格式
+                            if original_para_text.endswith('\r\n'):
+                                para_text_clean += '\r\n'
+                            elif original_para_text.endswith('\r'):
+                                para_text_clean += '\r'
+                            elif original_para_text.endswith('\n'):
+                                para_text_clean += '\n'
+                    except:
+                        # 如果无法获取原文档文本，只清理特殊字符
+                        para_text_clean = para_text.replace('\x07', '')
+                    
                     if has_list and list_string:
                         # 如果有自动编号，将编号添加到文本前
                         # 检查文本开头是否已经包含编号（避免重复）
                         # 去除编号字符串两端的空格（编号本身不应该有前后空格）
                         list_string_clean = list_string.strip()
                         # 检查去除前导空白后的文本是否以编号开头
-                        para_text_stripped = para_text.lstrip()
+                        para_text_stripped = para_text_clean.lstrip()
                         if para_text_stripped and para_text_stripped.startswith(list_string_clean):
-                            # 文本已经包含编号，直接使用原始文本（保留所有格式）
-                            result_lines.append(para_text)
+                            # 文本已经包含编号，直接使用原始文本（保留所有格式包括换行）
+                            result_lines.append(para_text_clean)
                         else:
                             # 文本不包含编号，添加编号
-                            # 保留原始文本的所有格式（包括前导空格、换行符等）
-                            # 在文本最前面添加编号和空格
-                            result_lines.append(list_string_clean + " " + para_text)
+                            result_lines.append(list_string_clean + " " + para_text_clean)
                     else:
-                        # 没有自动编号，直接添加原始文本
-                        result_lines.append(para_text)
+                        # 没有自动编号，直接添加原始文本（保留所有格式包括换行）
+                        result_lines.append(para_text_clean)
                         
             except Exception as para_e:
                 # 如果处理某个段落失败，回退到直接提取文本（带上标/下标）
@@ -379,7 +649,8 @@ def _extract_text_with_list_numbers(range_obj):
         if not result_lines:
             return _extract_text_with_superscript_subscript(range_obj)
         
-        # 直接连接所有段落文本，保留所有原始格式和符号
+        # 直接连接所有段落文本，保留原文档的实际格式（包括换行符）
+        # 不统一添加换行，让原文档的格式自然保留
         return ''.join(result_lines)
         
     except Exception as e:
@@ -497,7 +768,8 @@ def _extract_content_with_tables(range_obj):
         if not result_parts:
             return _extract_text_with_list_numbers(range_obj)
         
-        # 直接连接各部分，保留原始格式，不添加额外的分隔符
+        # 直接连接各部分，保留原文档的实际格式
+        # 不添加额外的换行符，让原文档的格式自然保留
         return ''.join(result_parts)
         
     except Exception as e:
@@ -695,16 +967,11 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
     
 
     agent_config = AgentConfig.from_runnable_config(config)
-    api_key = os.getenv("DEEPSEEK_API_KEY")
-    if not api_key:
-        raise ValueError("DEEPSEEK_API_KEY is not set")
-
-    llm = ChatDeepSeek(
-        model=agent_config.llm_model,
-        temperature=agent_config.llm_temperature,
-        api_key=api_key,
-        max_tokens=8192
-    )
+    
+    # 获取配置的 model_provider，默认为 deepseek
+    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+    model_provider = configurable.get("model_provider", "deepseek")
+    print(f"[generate_polished_text] 使用模型: {model_provider}")
 
     prompt = POLISH_PROMPT.format(
         tender_params=tender_params,
@@ -747,32 +1014,117 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
             return
         print(text, end="", flush=True)
 
-    def _chunk_to_text(chunk) -> str:
-        if chunk is None:
-            return ""
-        text = getattr(chunk, "content", None)
-        if isinstance(text, list):
-            text = "".join([str(t) for t in text if t is not None])
-        if not text and hasattr(chunk, "message"):
-            text = getattr(chunk.message, "content", "")  # type: ignore[attr-defined]
-        return str(text) if text else ""
-
     content_parts = []
-    stream_method = getattr(llm, "astream", None)
-    invoke_method = getattr(llm, "ainvoke", None)
-    if callable(stream_method):
+    content = ""
+
+    # 根据模型提供商选择不同的调用方式
+    if model_provider == "doubao":
         try:
-            async for chunk in stream_method(prompt):
-                chunk_text = _chunk_to_text(chunk)
-                if not chunk_text:
-                    continue
-                content_parts.append(chunk_text)
-                _log_chunk(chunk_text)
-                _push_stream_update("".join(content_parts))
-            print()  # 换行，避免日志粘连
+            # Doubao (Ark) Implementation
+            client = Ark(
+                base_url="https://ark.cn-beijing.volces.com/api/v3",
+                api_key=os.getenv('ARK_API_KEY', '4d317907-2558-4916-910e-d64921e45fca')
+            )
+            completion = client.chat.completions.create(
+                model="doubao-seed-1-6-251015",
+                messages=[
+                    {"role": "user", "content": prompt},
+                ],
+                stream=True,
+                max_completion_tokens=32768,
+                thinking={"type": "disabled"},
+            )
+            
+            for chunk in completion:
+                if chunk.choices[0].delta.content is not None:
+                    chunk_text = chunk.choices[0].delta.content
+                    content_parts.append(chunk_text)
+                    _log_chunk(chunk_text)
+                    _push_stream_update("".join(content_parts))
+            print()
             content = "".join(content_parts)
-        except Exception as stream_exc:
-            print(f"流式获取失败，回退到非流式: {stream_exc}")
+            
+        except Exception as e:
+            print(f"Doubao 模型调用失败: {e}")
+            raise e
+
+    elif model_provider == "qwen":
+        try:
+            # Qwen Implementation
+            client = OpenAI(
+                api_key=os.getenv("DASHSCOPE_API_KEY", 'sk-9891014d27c54228949cd81e1311df48'),
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            )
+            completion = client.chat.completions.create(
+                model="qwen-plus",
+                messages=[{'role': 'user', 'content': prompt}],
+                stream=True,
+                stream_options={"include_usage": True},
+                extra_body={"max_input_tokens": 1000000, "enable_thinking": False}
+            )
+            
+            for chunk in completion:
+                # Qwen compatible mode might return chunk with choices
+                if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if hasattr(delta, 'content') and delta.content:
+                        chunk_text = delta.content
+                        content_parts.append(chunk_text)
+                        _log_chunk(chunk_text)
+                        _push_stream_update("".join(content_parts))
+            print()
+            content = "".join(content_parts)
+
+        except Exception as e:
+            print(f"Qwen 模型调用失败: {e}")
+            raise e
+
+    else:
+        # Default: DeepSeek
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        if not api_key:
+            raise ValueError("DEEPSEEK_API_KEY is not set")
+
+        llm = ChatDeepSeek(
+            model=agent_config.llm_model,
+            temperature=agent_config.llm_temperature,
+            api_key=api_key,
+            max_tokens=8192
+        )
+
+        def _chunk_to_text(chunk) -> str:
+            if chunk is None:
+                return ""
+            text = getattr(chunk, "content", None)
+            if isinstance(text, list):
+                text = "".join([str(t) for t in text if t is not None])
+            if not text and hasattr(chunk, "message"):
+                text = getattr(chunk.message, "content", "")  # type: ignore[attr-defined]
+            return str(text) if text else ""
+
+        stream_method = getattr(llm, "astream", None)
+        invoke_method = getattr(llm, "ainvoke", None)
+        if callable(stream_method):
+            try:
+                async for chunk in stream_method(prompt):
+                    chunk_text = _chunk_to_text(chunk)
+                    if not chunk_text:
+                        continue
+                    content_parts.append(chunk_text)
+                    _log_chunk(chunk_text)
+                    _push_stream_update("".join(content_parts))
+                print()  # 换行，避免日志粘连
+                content = "".join(content_parts)
+            except Exception as stream_exc:
+                print(f"流式获取失败，回退到非流式: {stream_exc}")
+                if callable(invoke_method):
+                    response = await invoke_method(prompt)
+                    content = getattr(response, "content", response)
+                else:
+                    response = llm.invoke(prompt)
+                    content = getattr(response, "content", response)
+                _push_stream_update(str(content))
+        else:
             if callable(invoke_method):
                 response = await invoke_method(prompt)
                 content = getattr(response, "content", response)
@@ -780,14 +1132,6 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
                 response = llm.invoke(prompt)
                 content = getattr(response, "content", response)
             _push_stream_update(str(content))
-    else:
-        if callable(invoke_method):
-            response = await invoke_method(prompt)
-            content = getattr(response, "content", response)
-        else:
-            response = llm.invoke(prompt)
-            content = getattr(response, "content", response)
-        _push_stream_update(str(content))
     # content = """"""
 
     # 将大模型生成的内容写入 txt 文件，命名：项目编号-项目名称-初稿.txt
@@ -844,9 +1188,9 @@ if __name__ == "__main__":
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     
-    # 重新导入必要的模块（使用绝对导入）
-    from TenderWord.state import TenderGraphState
-    from TenderWord.nodes.xjcg_word_nodes.extract_tender_params import extract_tender_params
+    # 重新导入必要的模块（从项目根目录直接导入）
+    from state import TenderGraphState
+    from nodes.xjcg_word_nodes.extract_tender_params import extract_tender_params
     
     # 测试配置：参考文档路径和技术参数路径
     # 可以根据需要修改这两个路径

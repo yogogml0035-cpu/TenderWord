@@ -19,12 +19,13 @@ except ImportError:
         from logging_utils import log_state
         from state import TenderGraphState
     except ImportError:
-        # 如果失败，添加父目录并使用 TenderWord 前缀
+        # 如果失败，添加项目根目录到 sys.path
         ROOT = pathlib.Path(__file__).resolve().parents[2]
         if str(ROOT) not in sys.path:
             sys.path.insert(0, str(ROOT))
-        from TenderWord.logging_utils import log_state
-        from TenderWord.state import TenderGraphState
+        # 从项目根目录直接导入
+        from logging_utils import log_state
+        from state import TenderGraphState
 
 # WPS/Word constants (WPS 兼容 Word 的常量)
 wdFindStop = 0
