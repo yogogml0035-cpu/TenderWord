@@ -2,22 +2,18 @@ from __future__ import annotations
 
 import os
 import time
-import pythoncom
-import win32com.client as win32
 
-# 处理相对导入和直接运行的情况
-try:
-    from ...logging_utils import log_state
-    from ...state import TenderGraphState
-except ImportError:
-    # 直接运行时使用绝对导入
-    import pathlib
-    import sys
-    ROOT = pathlib.Path(__file__).resolve().parents[2]
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
-    from logging_utils import log_state
-    from state import TenderGraphState
+import pathlib
+import sys
+
+# 添加项目根目录到 sys.path
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from logging_utils import log_state
+from state import TenderGraphState
+from util.word_application_util import create_word_application, close_word_application
 
 # Word constants
 wdFindStop = 0
@@ -92,6 +88,7 @@ def replace_content(state: TenderGraphState, config) -> TenderGraphState:
     replacement_log_parts = []
     word = None
     doc = None
+    com_initialized = False
     
     # 统计信息
     total_stats = {
@@ -104,19 +101,15 @@ def replace_content(state: TenderGraphState, config) -> TenderGraphState:
     failed_replacements = []
     
     try:
-        pythoncom.CoInitialize()
-        
+        # 使用统一的工具函数创建 Word 应用程序
         # 独立实例 + 预留时间，避免前序节点关闭未完成导致句柄失效
-        initial_delay = 1.0  # 创建前等待 1 秒，让之前的实例有时间完全关闭
-        print(f"[replace_content] 等待 {initial_delay} 秒后创建 Microsoft Word 实例...")
-        time.sleep(initial_delay)
-        
-        # 使用 DispatchEx 独立实例
-        word = win32.DispatchEx("Word.Application")
-        word.Visible = False
-        word.DisplayAlerts = 0
-        time.sleep(1)
-        print("[replace_content] 成功创建新的 Word 实例 (DispatchEx)")
+        word, com_initialized = create_word_application(
+            initial_delay=1.0,  # 创建前等待 1 秒，让之前的实例有时间完全关闭
+            post_init_delay=1.0,  # 给 Word 完成初始化的时间
+            use_existing=False,  # 使用独立实例
+            verify=False,  # 验证步骤在工具函数中已包含
+            node_name="replace_content"
+        )
         
         # 打开文档时增加重试以避免 COM 接口尚未就绪
         open_attempts = 3
@@ -304,80 +297,14 @@ def replace_content(state: TenderGraphState, config) -> TenderGraphState:
             
     finally:
         print("[replace_content] 开始清理资源...")
-        # 安全关闭文档
-        if doc:
-            try:
-                print("[replace_content] 正在关闭文档...")
-                try:
-                    _ = doc.Name  # 尝试访问属性来检查对象是否有效
-                    doc.Close(SaveChanges=False)
-                    print("[replace_content] 文档已关闭")
-                except AttributeError:
-                    print("[replace_content] 文档对象已断开，无需关闭")
-                except Exception as close_doc_e:
-                    print(f"[replace_content] 关闭文档时出错: {close_doc_e}")
-            except Exception:
-                pass
-        
-        # 安全关闭 Word 应用程序
-        if word:
-            try:
-                print("[replace_content] 正在关闭 Word 应用程序...")
-                try:
-                    _ = word.Name  # 尝试访问属性来检查对象是否有效
-                    word.Quit(SaveChanges=False)
-                    print("[replace_content] Word 应用程序已关闭")
-                except AttributeError:
-                    print("[replace_content] Word 对象已断开，无需关闭")
-                except Exception as quit_word_e:
-                    print(f"[replace_content] 关闭 Word 应用程序时出错: {quit_word_e}")
-            except Exception:
-                pass
-        
-        # 添加延迟，确保 Word 进程完全退出
-        print("[replace_content] 等待 Word 进程完全退出...")
-        time.sleep(1.5)  # 增加等待时间
-        
-        # 清理残留的 Word 进程
-        try:
-            import psutil
-            word_processes = []
-            for proc in psutil.process_iter(['pid', 'name', 'create_time']):
-                try:
-                    proc_name = proc.info['name'].lower()
-                    if proc_name == 'winword.exe':
-                        pid = proc.info['pid']
-                        create_time = proc.info.get('create_time', 0)
-                        if create_time > 0:
-                            age_seconds = time.time() - create_time
-                            if age_seconds < 600:  # 10分钟内创建的
-                                word_processes.append(pid)
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-            
-            if word_processes:
-                print(f"[replace_content] 检测到 {len(word_processes)} 个可能的残留 Word 进程: {word_processes}")
-                for pid in word_processes:
-                    try:
-                        proc = psutil.Process(pid)
-                        proc.terminate()
-                        print(f"[replace_content] 已终止残留进程 (PID: {pid})")
-                    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                        print(f"[replace_content] 无法终止进程 {pid}: {e}")
-                    except Exception as e:
-                        print(f"[replace_content] 终止进程 {pid} 时出错: {e}")
-        except ImportError:
-            print("[replace_content] 未安装 psutil，无法检查残留进程")
-        except Exception as cleanup_e:
-            print(f"[replace_content] 检查残留进程时出错: {cleanup_e}")
-        
-        # 安全清理 COM
-        try:
-            print("[replace_content] 清理 COM 资源...")
-            pythoncom.CoUninitialize()
-            print("[replace_content] COM 资源已清理")
-        except Exception as com_e:
-            print(f"[replace_content] 清理 COM 时出错: {com_e}")
+        # 使用统一的工具函数关闭 Word 应用程序
+        close_word_application(
+            word_app=word,
+            doc=doc,
+            com_initialized=com_initialized,
+            wait_time=1.5,
+            node_name="replace_content"
+        )
     
     # Update state with replacement log
     new_state_dict = dict(state)

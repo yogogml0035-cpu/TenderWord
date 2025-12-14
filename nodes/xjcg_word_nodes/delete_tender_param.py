@@ -2,30 +2,18 @@ from __future__ import annotations
 
 import os
 import time
-import pythoncom
-import win32com.client as win32
 
-# 处理相对导入和直接运行的情况
-try:
-    from ...logging_utils import log_state
-    from ...state import TenderGraphState
-except ImportError:
-    # 直接运行时使用绝对导入
-    import pathlib
-    import sys
+import pathlib
+import sys
 
-    # 先尝试直接导入（假设 TenderWord/ 目录已在 sys.path 中）
-    try:
-        from logging_utils import log_state
-        from state import TenderGraphState
-    except ImportError:
-        # 如果失败，添加项目根目录到 sys.path
-        ROOT = pathlib.Path(__file__).resolve().parents[2]
-        if str(ROOT) not in sys.path:
-            sys.path.insert(0, str(ROOT))
-        # 从项目根目录直接导入
-        from logging_utils import log_state
-        from state import TenderGraphState
+# 添加项目根目录到 sys.path
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from logging_utils import log_state
+from state import TenderGraphState
+from util.word_application_util import create_word_application, close_word_application
 
 # WPS/Word constants (WPS 兼容 Word 的常量)
 wdFindStop = 0
@@ -78,34 +66,18 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
     
     wps = None
     doc = None
+    com_initialized = False
     
     try:
-        pythoncom.CoInitialize()
-
+        # 使用统一的工具函数创建 Word 应用程序
         # 独立实例 + 预留时间，避免前序节点关闭未完成导致句柄失效
-        initial_delay = 2.0  # 创建前等待 2 秒，让之前的实例有时间完全关闭
-        print(f"[delete_tender_param] 等待 {initial_delay} 秒后创建 Microsoft Word 实例...")
-        time.sleep(initial_delay)
-        
-        wps = None
-        try:
-            import win32com.client as win32client
-            
-            # 创建新的独立实例，减少共享句柄风险
-            wps = win32client.DispatchEx("Word.Application")
-            wps.Visible = False
-            wps.DisplayAlerts = 0
-            time.sleep(1.0)  # 给 Word 初始化的时间
-            print("[delete_tender_param] 成功创建新的 Word 实例 (DispatchEx)")
-        except ImportError:
-            raise RuntimeError("无法导入 win32com.client，请确保已安装 pywin32")
-        
-        # 验证 Word 对象是否可用
-        try:
-            app_name = wps.Name
-            print(f"[delete_tender_param] 使用 Microsoft Word (名称: {app_name})")
-        except Exception as word_name_e:
-            raise RuntimeError(f"Word 实例创建但验证失败: {word_name_e}")
+        wps, com_initialized = create_word_application(
+            initial_delay=2.0,  # 创建前等待 2 秒，让之前的实例有时间完全关闭
+            post_init_delay=1.0,  # 给 Word 初始化的时间
+            use_existing=False,  # 不使用已运行的实例，创建新的独立实例
+            verify=True,
+            node_name="delete_tender_param"
+        )
 
         open_attempts = 3
         last_error = None
@@ -620,103 +592,14 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
         
     finally:
         print("[delete_tender_param] 开始清理资源...")
-        # 安全关闭文档
-        if doc:
-            try:
-                print("[delete_tender_param] 正在关闭文档...")
-                # 检查文档是否仍然有效
-                try:
-                    _ = doc.Name  # 尝试访问属性来检查对象是否有效
-                    doc.Close(SaveChanges=False)
-                    print("[delete_tender_param] 文档已关闭")
-                except AttributeError:
-                    # 对象已断开，说明已经关闭了
-                    print("[delete_tender_param] 文档对象已断开，无需关闭")
-                    pass
-                except Exception as close_doc_e:
-                    print(f"[delete_tender_param] 关闭文档时出错: {close_doc_e}")
-            except Exception as e:
-                print(f"[delete_tender_param] 关闭文档时发生异常: {e}")
-                pass
-        
-        # 安全关闭 Word 应用程序
-        if wps:
-            try:
-                print("[delete_tender_param] 正在关闭 Word 应用程序...")
-                # 检查 wps 对象是否仍然有效
-                try:
-                    _ = wps.Name  # 尝试访问属性来检查对象是否有效
-                    wps.Quit(SaveChanges=False)
-                    print("[delete_tender_param] Word 应用程序已关闭")
-                except AttributeError:
-                    # 对象已断开，说明已经关闭了
-                    print("[delete_tender_param] Word 对象已断开，无需关闭")
-                    pass
-                except Exception as quit_wps_e:
-                    print(f"[delete_tender_param] 关闭 Word 应用程序时出错: {quit_wps_e}")
-            except Exception as e:
-                print(f"[delete_tender_param] 关闭 Word 时发生异常: {e}")
-                pass
-        
-        # 添加延迟，确保 Word 进程完全退出
-        print("[delete_tender_param] 等待 Word 进程完全退出...")
-        time.sleep(1.5)  # 增加等待时间，确保进程完全退出
-        
-        # 清理残留的 Word 进程（如果正常关闭失败）
-        try:
-            import psutil
-            word_processes = []
-            current_pid = None
-            if wps:
-                try:
-                    # 尝试获取当前 Word 进程的 PID
-                    import win32process
-                    handle = wps.Hwnd
-                    _, current_pid = win32process.GetWindowThreadProcessId(handle)
-                except Exception:
-                    pass
-            
-            for proc in psutil.process_iter(['pid', 'name', 'create_time']):
-                try:
-                    proc_name = proc.info['name'].lower()
-                    if proc_name == 'winword.exe':
-                        pid = proc.info['pid']
-                        # 排除当前进程（如果已知）
-                        if current_pid and pid == current_pid:
-                            continue
-                        # 检查进程创建时间，只清理最近10分钟内创建的进程（可能是我们创建的）
-                        create_time = proc.info.get('create_time', 0)
-                        if create_time > 0:
-                            age_seconds = time.time() - create_time
-                            if age_seconds < 600:  # 10分钟内创建的
-                                word_processes.append(pid)
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-            
-            if word_processes:
-                print(f"[delete_tender_param] 检测到 {len(word_processes)} 个可能的残留 Word 进程: {word_processes}")
-                # 尝试终止这些进程
-                for pid in word_processes:
-                    try:
-                        proc = psutil.Process(pid)
-                        proc.terminate()
-                        print(f"[delete_tender_param] 已终止残留进程 (PID: {pid})")
-                    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                        print(f"[delete_tender_param] 无法终止进程 {pid}: {e}")
-                    except Exception as e:
-                        print(f"[delete_tender_param] 终止进程 {pid} 时出错: {e}")
-        except ImportError:
-            print("[delete_tender_param] 未安装 psutil，无法检查残留进程")
-        except Exception as cleanup_e:
-            print(f"[delete_tender_param] 检查残留进程时出错: {cleanup_e}")
-        
-        # 安全清理 COM
-        try:
-            print("[delete_tender_param] 清理 COM 资源...")
-            pythoncom.CoUninitialize()
-            print("[delete_tender_param] COM 资源已清理")
-        except Exception as com_e:
-            print(f"[delete_tender_param] 清理 COM 时出错: {com_e}")
+        # 使用统一的工具函数关闭 Word 应用程序
+        close_word_application(
+            word_app=wps,
+            doc=doc,
+            com_initialized=com_initialized,
+            wait_time=1.5,
+            node_name="delete_tender_param"
+        )
     
     # 更新状态
     new_state_dict = dict(state)

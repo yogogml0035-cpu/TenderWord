@@ -5,24 +5,18 @@ import shutil
 import time
 from typing import Dict, Iterable, Tuple
 
-import pythoncom
-import win32com.client as win32
+import pathlib
+import sys
 
-# 处理相对导入和直接运行的情况
-try:
-    from ...config import AgentConfig
-    from ...logging_utils import log_state, log_state_start
-    from ...state import TenderGraphState
-except ImportError:
-    # 直接运行时使用绝对导入
-    import pathlib
-    import sys
-    ROOT = pathlib.Path(__file__).resolve().parents[2]
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
-    from config import AgentConfig
-    from logging_utils import log_state, log_state_start
-    from state import TenderGraphState
+# 添加项目根目录到 sys.path
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from config import AgentConfig
+from logging_utils import log_state, log_state_start
+from state import TenderGraphState
+from util.word_application_util import create_word_application, close_word_application
 
 WD_FIND_STOP = 0
 WD_COLLAPSE_END = 0
@@ -107,11 +101,14 @@ def prepare_template(state: TenderGraphState, config) -> TenderGraphState:
     doc = None
     com_initialized = False
     try:
-        pythoncom.CoInitialize()
-        com_initialized = True
-        word = win32.Dispatch("Word.Application")
-        word.Visible = False
-        word.DisplayAlerts = 0  # 不显示警告对话框
+        # 使用统一的工具函数创建 Word 应用程序
+        word, com_initialized = create_word_application(
+            initial_delay=0.0,  # 不需要等待
+            post_init_delay=0.0,  # 不需要等待
+            use_existing=False,  # 创建新实例
+            verify=False,  # 验证步骤在工具函数中已包含
+            node_name="prepare_template"
+        )
         
         # 使用与 get_replacements.py 和 replace_content.py 相同的参数打开文档
         doc = word.Documents.Open(
@@ -129,63 +126,15 @@ def prepare_template(state: TenderGraphState, config) -> TenderGraphState:
         # 因为可能是文档本身的问题，后续节点会处理
         import logging
         logging.warning(f"警告: 无法验证复制的文档 '{working_path}': {e}")
-        # 即使出错，也要确保关闭 Word
-        if 'doc' in locals() and doc:
-            try:
-                doc.Close(SaveChanges=False)
-            except:
-                pass
-        if 'word' in locals() and word:
-            try:
-                word.Quit(SaveChanges=False)
-            except:
-                pass
     finally:
-        # 安全地关闭文档（必须在关闭 Word 之前）
-        if 'doc' in locals() and doc:
-            try:
-                # 检查文档是否仍然有效
-                try:
-                    _ = doc.Name
-                    doc.Close(SaveChanges=False)
-                except AttributeError:
-                    # 如果对象已断开，尝试强制关闭
-                    try:
-                        doc.Close(SaveChanges=False)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-            except Exception:
-                pass
-        
-        # 安全地关闭 Word 应用程序（必须最后执行）
-        if 'word' in locals() and word:
-            try:
-                # 检查 word 对象是否仍然有效
-                try:
-                    _ = word.Name
-                    word.Quit(SaveChanges=False)
-                except AttributeError:
-                    # 如果对象已断开，尝试强制退出
-                    try:
-                        word.Quit(SaveChanges=False)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-            except Exception:
-                pass
-        
-        # 添加短暂延迟，确保 Word 进程完全退出
-        time.sleep(0.2)
-        
-        # 安全地清理 COM（必须在关闭 Word 之后）
-        if com_initialized:
-            try:
-                pythoncom.CoUninitialize()
-            except Exception:
-                pass
+        # 使用统一的工具函数关闭 Word 应用程序
+        close_word_application(
+            word_app=word,
+            doc=doc,
+            com_initialized=com_initialized,
+            wait_time=0.2,
+            node_name="prepare_template"
+        )
     
     stats = None
 

@@ -3,88 +3,22 @@ from __future__ import annotations
 import os
 import re
 import time
-import pythoncom
-import win32com.client as win32
 from typing import Dict, List, Optional, Tuple
 
-# 处理相对导入和直接运行的情况
-try:
-    from ...logging_utils import log_state
-    from ...state import TenderGraphState
-except ImportError:
-    # 直接运行时使用绝对导入
-    import pathlib
-    import sys
-    
-    # 先尝试直接导入（假设 TenderWord/ 目录已在 sys.path 中）
-    try:
-        from logging_utils import log_state
-        from state import TenderGraphState
-    except ImportError:
-        # 如果失败，添加项目根目录到 sys.path
-        ROOT = pathlib.Path(__file__).resolve().parents[2]
-        if str(ROOT) not in sys.path:
-            sys.path.insert(0, str(ROOT))
-        # 从项目根目录直接导入
-        from logging_utils import log_state
-        from state import TenderGraphState
+import pathlib
+import sys
+
+# 添加项目根目录到 sys.path
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from logging_utils import log_state
+from state import TenderGraphState
+from util.word_application_util import create_word_application, close_word_application
 
 # Word constants
 wdFindStop = 0
-
-
-def _force_close_word(word, log_parts=None, max_attempts=5):
-    """
-    强制关闭 Word 应用程序，确保进程完全退出。
-    
-    参数:
-        word: Word.Application 对象
-        log_parts: 可选的日志列表
-        max_attempts: 最大尝试次数
-    
-    返回:
-        bool: True 如果成功关闭，False 如果失败
-    """
-    if word is None:
-        return True
-    
-    import time
-    
-    for attempt in range(max_attempts):
-        try:
-            # 尝试访问对象属性来检查是否有效
-            _ = word.Name
-            # 如果还能访问，说明还没关闭，尝试关闭
-            word.Quit(SaveChanges=False)
-            if log_parts is not None:
-                log_parts.append(f"Word 应用程序已关闭 (尝试 {attempt + 1})")
-            time.sleep(0.2)
-        except AttributeError:
-            # 对象已断开，说明已经关闭了
-            if log_parts is not None:
-                log_parts.append("Word 应用程序已关闭")
-            return True
-        except Exception as e:
-            if attempt < max_attempts - 1:
-                # 继续重试
-                time.sleep(0.2)
-                continue
-            else:
-                # 最后一次尝试失败
-                if log_parts is not None:
-                    log_parts.append(f"警告: 经过 {max_attempts} 次尝试后仍无法关闭 Word: {e}")
-                return False
-    
-    # 最后验证是否真的关闭了
-    try:
-        _ = word.Name
-        # 如果还能访问，说明关闭失败
-        if log_parts is not None:
-            log_parts.append("警告: Word 应用程序可能仍在运行")
-        return False
-    except AttributeError:
-        # 对象已断开，说明关闭成功
-        return True
 
 
 # 提取函数：每个字段的查找逻辑
@@ -394,51 +328,16 @@ def get_replacements(state: TenderGraphState, config) -> TenderGraphState:
     com_initialized = False
     
     try:
-        pythoncom.CoInitialize()
-        com_initialized = True
-
+        # 使用统一的工具函数创建 Word 应用程序
         # 直接使用 Microsoft Word，休眠一定时间让之前的实例完全关闭
-        initial_delay = 2.0  # 创建前等待 2 秒，让之前的实例有时间完全关闭
-        log_parts.append(f"等待 {initial_delay} 秒后创建 Microsoft Word 实例...")
-        print(f"[get_replacements] 等待 {initial_delay} 秒后创建 Microsoft Word 实例...")
-        time.sleep(initial_delay)
-        
-        word = None
-        try:
-            # 方法1: 尝试获取已运行的 Word 实例
-            try:
-                word = win32.GetActiveObject("Word.Application")
-                word.Visible = False
-                word.DisplayAlerts = 0
-                log_parts.append("成功获取已运行的 Word 实例")
-            except Exception:
-                # 方法2: 创建新的 Word 实例
-                try:
-                    word = win32.DispatchEx("Word.Application")
-                    word.Visible = False
-                    word.DisplayAlerts = 0
-                    # 给 Word 一点时间完成初始化
-                    time.sleep(0.5)
-                    log_parts.append("成功创建新的 Word 实例 (DispatchEx)")
-                except Exception:
-                    # 方法3: 使用 EnsureDispatch 作为备选
-                    try:
-                        word = win32.gencache.EnsureDispatch("Word.Application")
-                        word.Visible = False
-                        word.DisplayAlerts = 0
-                        time.sleep(0.5)
-                        log_parts.append("成功创建新的 Word 实例 (EnsureDispatch)")
-                    except Exception as e:
-                        raise RuntimeError(f"无法创建 Microsoft Word 应用程序实例: {e}")
-        except ImportError:
-            raise RuntimeError("无法导入 win32com.client，请确保已安装 pywin32")
-        
-        # 验证 Word 对象是否可用
-        try:
-            app_name = word.Name
-            log_parts.append(f"使用 Microsoft Word (名称: {app_name})")
-        except Exception as word_name_e:
-            raise RuntimeError(f"Word 实例创建但验证失败: {word_name_e}")
+        word, com_initialized = create_word_application(
+            initial_delay=2.0,  # 创建前等待 2 秒，让之前的实例有时间完全关闭
+            post_init_delay=0.5,  # 给 Word 一点时间完成初始化
+            use_existing=True,  # 尝试获取已运行的 Word 实例
+            verify=True,
+            node_name="get_replacements"
+        )
+        log_parts.append("成功创建/获取 Word 实例")
         
         try:
             # 尝试打开文档，添加更详细的错误处理
@@ -490,22 +389,21 @@ def get_replacements(state: TenderGraphState, config) -> TenderGraphState:
                         # 尝试关闭旧的 Word 对象
                         try:
                             if word:
-                                _force_close_word(word, log_parts, max_attempts=3)
+                                close_word_application(word_app=word, doc=None, com_initialized=False, wait_time=0.0, node_name="get_replacements")
                         except:
                             pass
                         # 等待一下，确保进程退出
                         time.sleep(1.0)
                         
-                        # 重新创建 Word 应用程序对象
+                        # 使用统一的工具函数重新创建 Word 应用程序对象
                         try:
-                            import win32com.client as win32client
-                            try:
-                                word = win32client.GetActiveObject("Word.Application")
-                            except Exception:
-                                word = win32client.DispatchEx("Word.Application")
-                            word.Visible = False
-                            word.DisplayAlerts = 0
-                            time.sleep(0.5)
+                            word, com_initialized = create_word_application(
+                                initial_delay=0.0,  # 已经等待过了
+                                post_init_delay=0.5,  # 给 Word 一点时间完成初始化
+                                use_existing=True,  # 尝试获取已运行的 Word 实例
+                                verify=False,  # 不需要验证
+                                node_name="get_replacements"
+                            )
                             log_parts.append("Word 应用程序对象重新创建成功")
                             word_valid = True
                         except Exception as recreate_error:
@@ -538,7 +436,7 @@ def get_replacements(state: TenderGraphState, config) -> TenderGraphState:
                         log_parts.append(error_msg)
                         # 确保关闭 Word
                         if word:
-                            _force_close_word(word, log_parts, max_attempts=5)
+                            close_word_application(word_app=word, doc=None, com_initialized=False, wait_time=0.0, node_name="get_replacements")
                         raise ValueError(error_msg)
             except Exception as open_error:
                 error_msg = f"打开文档 '{template_path}' 失败: {open_error}"
@@ -556,17 +454,15 @@ def get_replacements(state: TenderGraphState, config) -> TenderGraphState:
                     try:
                         # 关闭旧的 Word 对象
                         if word:
-                            _force_close_word(word, log_parts, max_attempts=3)
-                        # 等待一下，确保进程退出
-                        time.sleep(1.0)
+                            close_word_application(word_app=word, doc=None, com_initialized=False, wait_time=1.0, node_name="get_replacements")
                         # 重新创建 Word 应用程序对象
-                        try:
-                            word = win32.GetActiveObject("Word.Application")
-                        except Exception:
-                            word = win32.DispatchEx("Word.Application")
-                        word.Visible = False
-                        word.DisplayAlerts = 0
-                        time.sleep(0.5)
+                        word, _ = create_word_application(
+                            initial_delay=0.0,
+                            post_init_delay=0.5,
+                            use_existing=True,
+                            verify=False,
+                            node_name="get_replacements"
+                        )
                         log_parts.append("Word 应用程序对象已重新创建，正在重试打开文档...")
                         # 重试打开文档
                         try:
@@ -585,13 +481,13 @@ def get_replacements(state: TenderGraphState, config) -> TenderGraphState:
                             error_msg = f"重新创建 Word 应用程序后打开文档失败: {retry_error}"
                             log_parts.append(error_msg)
                             if word:
-                                _force_close_word(word, log_parts, max_attempts=5)
+                                close_word_application(word_app=word, doc=None, com_initialized=False, wait_time=0.0, node_name="get_replacements")
                             raise ValueError(error_msg)
                     except Exception as recreate_error:
                         error_msg = f"重新创建 Word 应用程序失败: {recreate_error}"
                         log_parts.append(error_msg)
                         if word:
-                            _force_close_word(word, log_parts, max_attempts=5)
+                            close_word_application(word_app=word, doc=None, com_initialized=False, wait_time=0.0, node_name="get_replacements")
                         raise ValueError(error_msg)
                 else:
                     # 非 COM 错误，按原逻辑处理
@@ -605,18 +501,15 @@ def get_replacements(state: TenderGraphState, config) -> TenderGraphState:
                         log_parts.append("  - 权限不足")
                     # 确保关闭 Word
                     if word:
-                        try:
-                            word.Quit(SaveChanges=False)
-                        except:
-                            pass
+                        close_word_application(word_app=word, doc=None, com_initialized=False, wait_time=0.0, node_name="get_replacements")
                     raise
             
             # 再次验证文档对象是否有效（双重检查）
             if doc is None:
                 error_msg = "打开后文档对象为 None"
                 log_parts.append(error_msg)
-                if word:
-                    _force_close_word(word, log_parts, max_attempts=5)
+                # 使用统一的工具函数关闭 Word 应用程序
+                close_word_application(word_app=word, doc=None, com_initialized=com_initialized, wait_time=0.0, node_name="get_replacements")
                 raise ValueError(error_msg)
             
             try:
@@ -627,7 +520,7 @@ def get_replacements(state: TenderGraphState, config) -> TenderGraphState:
                 log_parts.append(error_msg)
                 # 确保关闭 Word
                 if word:
-                    _force_close_word(word, log_parts, max_attempts=5)
+                    close_word_application(word_app=word, doc=None, com_initialized=False, wait_time=0.0, node_name="get_replacements")
                 raise ValueError(error_msg)
             
             # Try to unprotect if needed
@@ -656,13 +549,8 @@ def get_replacements(state: TenderGraphState, config) -> TenderGraphState:
                         doc.Close(SaveChanges=False)
                     except:
                         pass
-                if 'word' in locals() and word:
-                    _force_close_word(word, log_parts, max_attempts=5)
-                if com_initialized:
-                    try:
-                        pythoncom.CoUninitialize()
-                    except:
-                        pass
+                # 使用统一的工具函数关闭 Word 应用程序
+                close_word_application(word_app=word, doc=None, com_initialized=com_initialized, wait_time=0.0, node_name="get_replacements")
                 raise ValueError(error_msg)
             except Exception as e:
                 error_msg = f"读取文档内容时出错: {e}"
@@ -673,13 +561,8 @@ def get_replacements(state: TenderGraphState, config) -> TenderGraphState:
                         doc.Close(SaveChanges=False)
                     except:
                         pass
-                if 'word' in locals() and word:
-                    _force_close_word(word, log_parts, max_attempts=5)
-                if com_initialized:
-                    try:
-                        pythoncom.CoUninitialize()
-                    except:
-                        pass
+                # 使用统一的工具函数关闭 Word 应用程序
+                close_word_application(word_app=word, doc=None, com_initialized=com_initialized, wait_time=0.0, node_name="get_replacements")
                 raise
             
             # 提取首页页眉内容
@@ -770,94 +653,36 @@ def get_replacements(state: TenderGraphState, config) -> TenderGraphState:
                 except:
                     pass
             if 'word' in locals() and word:
-                _force_close_word(word, log_parts, max_attempts=5)
+                close_word_application(word_app=word, doc=None, com_initialized=com_initialized, wait_time=0.0, node_name="get_replacements")
+            elif com_initialized:
+                try:
+                    # 使用统一的工具函数关闭 Word 应用程序
+                    close_word_application(word_app=None, doc=None, com_initialized=True, wait_time=0.0, node_name="get_replacements")
+                except:
+                    pass
             raise
         finally:
-            # 安全地关闭文档（必须在关闭 Word 之前）
-            if 'doc' in locals() and doc:
-                try:
-                    # 检查文档对象是否仍然有效
-                    try:
-                        _ = doc.Name  # 尝试访问属性来检查对象是否有效
-                        doc.Close(SaveChanges=False)
-                        log_parts.append("文档已成功关闭")
-                    except AttributeError:
-                        # 如果对象已断开，尝试强制关闭
-                        try:
-                            doc.Close(SaveChanges=False)
-                        except Exception:
-                            pass
-                    except Exception as e:
-                        log_parts.append(f"警告: 关闭文档时出错: {e}")
-                except Exception:
-                    pass
-            
-            # 安全地关闭 Word 应用程序（必须最后执行）
-            # 使用强制关闭函数确保 Word 完全退出
-            if 'word' in locals() and word:
-                _force_close_word(word, log_parts, max_attempts=5)
-            
-            # 添加延迟，确保 Word 进程完全退出
-            log_parts.append("等待 Word 进程完全退出...")
-            time.sleep(1.5)  # 增加等待时间，确保进程完全退出
-            
-            # 清理残留的 Word 进程（如果正常关闭失败）
-            try:
-                import psutil
-                word_processes = []
-                for proc in psutil.process_iter(['pid', 'name', 'create_time']):
-                    try:
-                        proc_name = proc.info['name'].lower()
-                        if proc_name == 'winword.exe':
-                            pid = proc.info['pid']
-                            # 检查进程创建时间，只清理最近10分钟内创建的进程
-                            create_time = proc.info.get('create_time', 0)
-                            if create_time > 0:
-                                age_seconds = time.time() - create_time
-                                if age_seconds < 600:  # 10分钟内创建的
-                                    word_processes.append(pid)
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-                
-                if word_processes:
-                    log_parts.append(f"检测到 {len(word_processes)} 个可能的残留 Word 进程: {word_processes}")
-                    for pid in word_processes:
-                        try:
-                            proc = psutil.Process(pid)
-                            proc.terminate()
-                            log_parts.append(f"已终止残留进程 (PID: {pid})")
-                        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                            log_parts.append(f"无法终止进程 {pid}: {e}")
-                        except Exception as e:
-                            log_parts.append(f"终止进程 {pid} 时出错: {e}")
-            except ImportError:
-                log_parts.append("未安装 psutil，无法检查残留进程")
-            except Exception as cleanup_e:
-                log_parts.append(f"检查残留进程时出错: {cleanup_e}")
-            
-            # 安全地清理 COM（必须在关闭 Word 之后）
-            if com_initialized:
-                try:
-                    pythoncom.CoUninitialize()
-                except Exception:
-                    pass
+            # 使用统一的工具函数关闭 Word 应用程序
+            close_word_application(
+                word_app=word,
+                doc=doc,
+                com_initialized=com_initialized,
+                wait_time=1.5,
+                node_name="get_replacements"
+            )
+            log_parts.append("资源清理完成")
     
     except Exception as e:
         error_msg = f"初始化 Word COM 时出错: {e}"
         log_parts.append(error_msg)
         # 即使发生异常，也要确保关闭 Word 和清理 COM
-        if 'doc' in locals() and doc:
-            try:
-                doc.Close(SaveChanges=False)
-            except:
-                pass
-        if 'word' in locals() and word:
-            _force_close_word(word, log_parts, max_attempts=5)
-        if com_initialized:
-            try:
-                pythoncom.CoUninitialize()
-            except:
-                pass
+        close_word_application(
+            word_app=word,
+            doc=doc,
+            com_initialized=com_initialized,
+            wait_time=1.5,
+            node_name="get_replacements"
+        )
         raise
     
     # Update state with found placeholders

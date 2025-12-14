@@ -129,7 +129,7 @@ with tab:
         # 添加模型选择
         model_option = st.selectbox(
             "选择生成模型",
-            ["DeepSeek", "豆包 (Doubao)", "千问 (Qwen)"],
+            ["深度求索（DeepSeek）", "豆包 (Doubao)", "千问 (Qwen)"],
             index=0,
             key="llm_model_select"
         )
@@ -214,7 +214,7 @@ with tab:
             
             # 映射模型名称到内部标识符
             model_map = {
-                "DeepSeek": "deepseek",
+                "深度求索（DeepSeek）": "deepseek",
                 "豆包 (Doubao)": "doubao", 
                 "千问 (Qwen)": "qwen"
             }
@@ -318,7 +318,7 @@ with tab:
                         })
                         
                         # 显示文件路径和下载按钮
-                        st.markdown(f"**输出文件：** `{prepared_path}`")
+                        st.markdown(f"**输出文件：** `{prepared_path_obj}`")
                         st.download_button(
                             label="下载生成的文件",
                             data=file_data,

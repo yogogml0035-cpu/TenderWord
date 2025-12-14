@@ -3,23 +3,19 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-import pythoncom
-import win32com.client as win32
 import time
 
-# 处理相对导入和直接运行的情况
-try:
-    from ...logging_utils import log_state
-    from ...state import TenderGraphState
-except ImportError:
-    # 直接运行时使用绝对导入
-    import pathlib
-    import sys
-    ROOT = pathlib.Path(__file__).resolve().parents[2]
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
-    from logging_utils import log_state
-    from state import TenderGraphState
+import pathlib
+import sys
+
+# 添加项目根目录到 sys.path
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from logging_utils import log_state
+from state import TenderGraphState
+from util.word_application_util import create_word_application, close_word_application
 
 # Word constants
 wdGoToPage = 1
@@ -37,34 +33,37 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
     start_time = time.perf_counter()
     print("[update_word] 开始执行...")
     
-    """Insert polished text into Word document at the specified anchor location."""
+    """在指定锚点位置将润色后的文本插入到 Word 文档中。"""
     prepared_doc_path = state.get("prepared_doc_path")
     polished_text = state.get("polished_text")
     insertion_before_text = state.get("insertion_before_text")
     insertion_after_text = state.get("insertion_after_text")
     
     if not prepared_doc_path:
-        raise ValueError("prepared_doc_path is required to insert content into Word")
+        raise ValueError("需要 prepared_doc_path 来插入内容到 Word 文档")
     if not polished_text:
-        raise ValueError("polished_text is required to insert content into Word")
+        raise ValueError("需要 polished_text 来插入内容到 Word 文档")
     if not insertion_before_text or not insertion_after_text:
         raise ValueError("insertion_before_text 和 insertion_after_text 必须提供，用于定位插入范围")
     
-    # Split polished_text into content_list (lines)
+    # 将 polished_text 拆分为内容列表（按行）
     content_list = [line.strip() for line in polished_text.split("\n") if line.strip()]
     
     insertion_log_parts = []
     word = None
     doc = None
+    com_initialized = False
     
     try:
-        pythoncom.CoInitialize()
+        # 使用统一的工具函数创建 Word 应用程序
         # 独立实例，避免与其他节点共享同一 Word 进程导致句柄失效
-        word = win32.DispatchEx("Word.Application")
-        word.Visible = False  # Set to False for background processing
-        word.DisplayAlerts = 0
-        time.sleep(1)  # 等待上一个节点关闭文档/进程
-        doc = None
+        word, com_initialized = create_word_application(
+            initial_delay=0.0,  # 不需要等待
+            post_init_delay=1.0,  # 等待上一个节点关闭文档/进程
+            use_existing=False,  # 使用独立实例
+            verify=False,  # 验证步骤在工具函数中已包含
+            node_name="update_word"
+        )
         
         try:
             open_attempts = 3
@@ -87,7 +86,7 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                         raise
             insertion_log_parts.append(f"已打开文档: {prepared_doc_path}")
             
-            # Try to unprotect if needed
+            # 如果需要，尝试取消保护
             if doc.ProtectionType != -1:
                 try:
                     doc.Unprotect()
@@ -150,47 +149,47 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
             
             selection = word.Selection
             
-            # Navigate to target page start
+            # 导航到目标页起始位置
             selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
             page_start = selection.Start
             page_start_page = selection.Information(wdActiveEndPageNumber)
             
-            # Find the end of target page (start of next page or end of document)
+            # 查找目标页的结束位置（下一页的起始位置或文档末尾）
             next_page = target_page + 1
             selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
             page_end = selection.Start
             page_end_page = selection.Information(wdActiveEndPageNumber)
             
-            # If target page doesn't exist or we're at the end, use document end
+            # 如果目标页不存在或已到达文档末尾，使用文档末尾
             if page_start_page != target_page or page_end == page_start:
                 page_end = doc.Content.End
             elif page_end_page == next_page:
-                # Next page exists, use its start as end
+                # 下一页存在，使用其起始位置作为结束位置
                 pass
             else:
-                # At end of document
+                # 已到达文档末尾
                 page_end = doc.Content.End
             
-            # Create range for the target page
+            # 为目标页创建范围
             if page_end > page_start:
                 page_rng = doc.Range(page_start, page_end)
                 
-                # Step 1: Find non-editable fields in the page
+                # 步骤1：在页面中查找不可编辑字段
                 insertion_log_parts.append(f"步骤1：在第 {target_page} 页查找不可编辑字段...")
                 
                 protected_keywords = ["交付日期", "付款方式"]
                 protected_fields = {}  # {keyword: paragraph_range}
                 
-                # Find protected fields in the page
+                # 在页面中查找受保护字段
                 for para in page_rng.Paragraphs:
                     para_text = para.Range.Text.strip()
                     for keyword in protected_keywords:
                         if keyword in para_text and "：" in para_text:
                             if keyword not in protected_fields:
                                 protected_fields[keyword] = para.Range
-                                insertion_log_parts.append(f"  Found protected field: {keyword}")
+                                insertion_log_parts.append(f"  找到受保护字段: {keyword}")
                 
-                # Step 2: Split content_list into blocks based on protected fields
+                # 步骤2：根据受保护字段将内容列表拆分为块
                 insertion_log_parts.append("步骤2：按字段拆分内容块...")
                 
                 # Find indices of protected fields in content_list (找最先出现的)
@@ -218,30 +217,30 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                 insertion_log_parts.append(f"  块2: {len(block2)} 条（交付日期区段）")
                 insertion_log_parts.append(f"  块3: {len(block3)} 条（付款方式之后）")
                 
-                # Step 3: Delete all editable content
+                # 步骤3：删除所有可编辑内容
                 insertion_log_parts.append(f"步骤3：删除第 {target_page} 页可编辑内容...")
                 
                 paras = list(page_rng.Paragraphs)
                 deleted_count = 0
                 
-                # Iterate from end to start
+                # 从末尾向起始位置迭代
                 for i in range(len(paras) - 1, -1, -1):
                     try:
                         para = paras[i]
                         para_text = para.Range.Text.strip()
                         
-                        # Skip empty paragraphs
+                        # 跳过空段落
                         if not para_text or para_text == "\r" or para_text == "\n" or len(para_text) == 0:
                             continue
                         
-                        # Check if paragraph contains protected keywords
+                        # 检查段落是否包含受保护关键字
                         is_protected = False
                         for keyword in protected_keywords:
                             if keyword in para_text:
                                 is_protected = True
                                 break
                         
-                        # If not protected, try to delete
+                        # 如果未受保护，尝试删除
                         if not is_protected:
                             try:
                                 para_rng = para.Range
@@ -255,26 +254,26 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                 
                 insertion_log_parts.append(f"步骤3完成：已删除 {deleted_count} 个可编辑段落。")
                 
-                # Step 4: Insert content by blocks
+                # 步骤4：按块插入内容
                 insertion_log_parts.append("步骤4：按块插入内容...")
                 
-                # Re-get page range after deletion
+                # 删除后重新获取页面范围
                 selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
                 page_start_after = selection.Start
                 selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
                 page_end_after = selection.Start if selection.Information(wdActiveEndPageNumber) == next_page else doc.Content.End
                 page_rng_after = doc.Range(page_start_after, page_end_after)
                 
-                # Formatting settings
+                # 格式设置
                 insert_font_name = "宋体"
                 insert_font_size = 12
 
-                # Detect markdown-style tables (lines starting with '|' and followed by separator rows)
+                # 检测 Markdown 风格的表格（以 '|' 开头，后跟分隔符行）
                 def is_table_separator_line(line: str) -> bool:
                     return bool(re.match(r"^\s*\|\s*:?-{3,}.*\|\s*$", line))
 
                 def parse_table_block(lines, start_idx):
-                    """Parse consecutive markdown table lines into rows and return rows, next_idx."""
+                    """解析连续的 Markdown 表格行为行，并返回行和下一个索引。"""
                     table_lines = []
                     i = start_idx
                     while i < len(lines) and lines[i].strip().startswith("|"):
@@ -295,7 +294,7 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
 
                     rows = []
                     for line in all_lines:
-                        # Split by '|' and drop empty edges
+                        # 按 '|' 分割并去除空边缘
                         cells = [cell.strip() for cell in line.split("|")]
                         if cells and cells[0] == "":
                             cells = cells[1:]
@@ -306,7 +305,7 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                     return rows, i
 
                 def convert_lines_to_items(lines):
-                    """Convert plain lines to a list of items (text or table)."""
+                    """将普通行转换为项目列表（文本或表格）。"""
                     items = []
                     idx = 0
                     while idx < len(lines):
@@ -320,7 +319,7 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                             idx += 1
                     return items
                 
-                # Helper function to insert content with formatting
+                # 辅助函数：插入带格式的内容
                 def insert_content_with_formatting(insert_range, line):
                     start_pos = insert_range.End
                     insert_range.InsertAfter(line + "\r")
@@ -340,7 +339,7 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                     return inserted_rng
                 
                 def insert_table_with_formatting(insert_range, rows):
-                    """Insert a markdown-parsed table at the current range."""
+                    """在当前范围插入一个 Markdown 解析的表格。"""
                     if not rows:
                         return None
 
@@ -348,7 +347,7 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                     start_pos = insert_range.End
                     table_range = doc.Range(start_pos, start_pos)
                     table = doc.Tables.Add(table_range, len(rows), cols)
-                    # Apply borders so the table matches the "有边框" expectation
+                    # 应用边框，使表格符合"有边框"的预期
                     try:
                         table.Borders.Enable = True
                     except Exception:
@@ -397,7 +396,7 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                     insert_range.Collapse(wdCollapseEnd)
                     return table
                     
-                # Helper function to update protected field value
+                # 辅助函数：更新受保护字段的值
                 def update_protected_field(keyword, new_value):
                     if keyword not in protected_fields:
                         return False
@@ -410,29 +409,29 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                         if colon_pos >= 0:
                             try:
                                 value_start = para_rng.Start + colon_pos + 1
-                                value_end = para_rng.End - 1  # Exclude paragraph mark
+                                value_end = para_rng.End - 1  # 排除段落标记
                                 value_rng = doc.Range(value_start, value_end)
                                 
-                                # Remove line breaks from value
+                                # 从值中移除换行符
                                 new_value_clean = new_value.replace("\r", "").replace("\n", "").strip()
                                 value_rng.Text = new_value_clean
                                 value_rng.Font.Name = insert_font_name
                                 value_rng.Font.Size = insert_font_size
                                 
-                                insertion_log_parts.append(f"  Updated protected field '{keyword}': {new_value_clean[:50]}...")
+                                insertion_log_parts.append(f"  已更新受保护字段 '{keyword}': {new_value_clean[:50]}...")
                                 return True
                             except Exception as e:
-                                insertion_log_parts.append(f"  Warning: Could not update '{keyword}': {e}")
+                                insertion_log_parts.append(f"  警告: 无法更新 '{keyword}': {e}")
                                 return False
                     return False
                     
-                # Insert Block 1 (before 交付日期)
-                insertion_log_parts.append("  Inserting Block 1...")
+                # 插入块1（在交付日期之前）
+                insertion_log_parts.append("  正在插入块1...")
                 selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
                 insert_rng = selection.Range
                 insert_rng.Collapse(wdCollapseStart)
                 
-                # If 交付日期 field exists, insert before it
+                # 如果交付日期字段存在，在其之前插入
                 if "交付日期" in protected_fields:
                     delivery_date_rng = protected_fields["交付日期"]
                     insert_rng.Start = delivery_date_rng.Start
@@ -444,12 +443,12 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                     try:
                         if item["type"] == "text":
                             inserted_rng = insert_content_with_formatting(insert_rng, item["line"])
-                            insertion_log_parts.append(f"    Inserted: {item['line'][:50]}...")
+                            insertion_log_parts.append(f"    已插入: {item['line'][:50]}...")
                         elif item["type"] == "table":
                             insert_table_with_formatting(insert_rng, item["rows"])
-                            insertion_log_parts.append(f"    Inserted table with {len(item['rows'])} rows.")
+                            insertion_log_parts.append(f"    已插入表格，行数 {len(item['rows'])}。")
                     except Exception as e:
-                        insertion_log_parts.append(f"    Error inserting item: {e}")
+                        insertion_log_parts.append(f"    插入项出错: {e}")
                 
                 # Update 交付日期 field value
                 if delivery_date_line and "交付日期" in protected_fields:
@@ -457,19 +456,19 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                         new_value = delivery_date_line.split("：", 1)[1]
                         update_protected_field("交付日期", new_value)
                     
-                    # Insert Block 2 (between 交付日期 and 付款方式)
+                    # 插入块2（在交付日期和付款方式之间）
                     insertion_log_parts.append("  插入块2...")
                     if "交付日期" in protected_fields and "付款方式" in protected_fields:
                         delivery_date_rng = protected_fields["交付日期"]
                         payment_method_rng = protected_fields["付款方式"]
                         
-                        # Insert after 交付日期 field, before 付款方式 field
+                        # 在交付日期字段之后、付款方式字段之前插入
                         insert_rng.Start = delivery_date_rng.End
                         insert_rng.End = payment_method_rng.Start
                         insert_rng.Collapse(wdCollapseStart)
                         
-                        # Insert block2 content (excluding the 交付日期 line itself)
-                        block2_items = convert_lines_to_items(block2[1:])  # Skip first line (交付日期 line)
+                        # 插入块2内容（排除交付日期行本身）
+                        block2_items = convert_lines_to_items(block2[1:])  # 跳过第一行（交付日期行）
                         for item in block2_items:
                             try:
                                 if item["type"] == "text":
@@ -481,7 +480,7 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                             except Exception as e:
                                 insertion_log_parts.append(f"    插入项出错: {e}")
                     elif "交付日期" in protected_fields:
-                        # Only 交付日期 exists, insert after it
+                        # 仅存在交付日期，在其后插入
                         delivery_date_rng = protected_fields["交付日期"]
                         insert_rng.Start = delivery_date_rng.End
                         insert_rng.End = delivery_date_rng.End
@@ -505,7 +504,7 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                             new_value = payment_method_line.split("：", 1)[1]
                             update_protected_field("付款方式", new_value)
                     
-                    # Insert Block 3 (after 付款方式)
+                    # 插入块3（在付款方式之后）
                     block3_items = convert_lines_to_items(block3)
                     insertion_log_parts.append(f"  插入块3（{len(block3_items)} 条）...")
                     if len(block3_items) == 0:
@@ -523,7 +522,7 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                         insert_rng.Collapse(wdCollapseStart)
                         insertion_log_parts.append(f"    在付款方式字段后插入，位置 {insert_rng.Start}")
                     else:
-                        # If 付款方式 doesn't exist, insert at end of page
+                        # 如果付款方式不存在，在页面末尾插入
                         selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
                         insert_rng = selection.Range
                         insert_rng.Collapse(wdCollapseEnd)
@@ -545,17 +544,17 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                     
                     insertion_log_parts.append(f"  块3插入完成: {inserted_count}/{len(block3_items)} 条。")
                     
-                    # Step 5: Remove empty paragraphs and line breaks from all editable content
+                    # 步骤5：从所有可编辑内容中移除空段落和换行符
                     insertion_log_parts.append("步骤5：清理空段落与换行...")
                     
-                    # Multiple passes to ensure all empty paragraphs are deleted
+                    # 多次遍历以确保所有空段落都被删除
                     max_passes = 5
                     total_empty_deleted = 0
                     
                     for pass_num in range(1, max_passes + 1):
                         insertion_log_parts.append(f"  步骤5.1 第 {pass_num} 轮：删除空段落...")
                         
-                        # Re-get page range (it changes after deletions)
+                        # 重新获取页面范围（删除后会发生变化）
                         selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
                         page_start_final = selection.Start
                         selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
@@ -565,12 +564,12 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                         paras_final = list(page_rng_final.Paragraphs)
                         empty_deleted = 0
                         
-                        # Iterate from end to start to avoid index issues
+                        # 从末尾向起始位置迭代，避免索引问题
                         for i in range(len(paras_final) - 1, -1, -1):
                             try:
                                 para = paras_final[i]
                                 
-                                # Skip paragraphs in tables to prevent corruption
+                                # 跳过表格中的段落，防止损坏
                                 if para.Range.Information(wdWithInTable):
                                     continue
                                 
@@ -585,15 +584,15 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                                 
                                 # Only process editable paragraphs
                                 if not is_protected:
-                                    # Get raw text for thorough checking
+                                    # 获取原始文本以便彻底检查
                                     raw_text = para.Range.Text
-                                    # Remove paragraph mark for checking
+                                    # 移除段落标记以便检查
                                     raw_text_no_mark = raw_text.rstrip("\r\n")
                                     
-                                    # Remove all possible whitespace characters
+                                    # 移除所有可能的空白字符
                                     raw_cleaned = raw_text_no_mark.replace("\r", "").replace("\n", "").replace(" ", "").replace("\t", "").replace("\u00A0", "").replace("\u2000", "").replace("\u2001", "").replace("\u2002", "").replace("\u2003", "").replace("\u2004", "").replace("\u2005", "").replace("\u2006", "").replace("\u2007", "").replace("\u2008", "").replace("\u2009", "").replace("\u200A", "").replace("\u200B", "").strip()
                                     
-                                    # Only delete if completely empty (no visible characters at all)
+                                    # 仅在完全为空时删除（没有任何可见字符）
                                     if len(raw_cleaned) == 0:
                                         try:
                                             para.Range.Delete()
@@ -607,17 +606,17 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                         total_empty_deleted += empty_deleted
                         insertion_log_parts.append(f"  第 {pass_num} 轮完成：删除空段 {empty_deleted} 个。")
                         
-                        # If no empty paragraphs were deleted in this pass, we're done
+                        # 如果本轮没有删除空段落，则完成
                         if empty_deleted == 0:
                             insertion_log_parts.append(f"  未再发现空段，第 {pass_num} 轮后停止。")
                             break
                     
                     insertion_log_parts.append(f"  步骤5.1完成：共删除空段 {total_empty_deleted} 个，用时 {pass_num} 轮。")
                     
-                    # Second pass: Remove line breaks from editable paragraphs
+                    # 第二轮：从可编辑段落中移除换行符
                     insertion_log_parts.append("  步骤5.2：清理可编辑段落中的换行...")
                     
-                    # Re-get page range after deleting empty paragraphs
+                    # 删除空段落后重新获取页面范围
                     selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
                     page_start_clean = selection.Start
                     selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
@@ -625,69 +624,69 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                     page_rng_clean = doc.Range(page_start_clean, page_end_clean)
                     
                     cleaned_count = 0
-                    paras_to_delete = []  # Collect paragraphs that become empty after cleaning
+                    paras_to_delete = []  # 收集清理后变为空的段落
                     
                     for para in page_rng_clean.Paragraphs:
-                        # Skip paragraphs in tables to prevent corruption
+                        # 跳过表格中的段落，防止损坏
                         if para.Range.Information(wdWithInTable):
                             continue
 
                         para_text = para.Range.Text.strip()
                         
-                        # Skip empty paragraphs (they should have been deleted in Step 5.1)
+                        # 跳过空段落（它们应该在步骤5.1中已被删除）
                         if not para_text or para_text == "\r" or para_text == "\n":
                             continue
                         
-                        # Check if paragraph is protected
+                        # 检查段落是否受保护
                         is_protected = False
                         for keyword in protected_keywords:
                             if keyword in para_text:
                                 is_protected = True
                                 break
                         
-                        # Remove line breaks from editable paragraphs
+                        # 从可编辑段落中移除换行符
                         if not is_protected:
                             try:
                                 para_rng = para.Range
-                                # Get full text including paragraph mark
+                                # 获取包括段落标记的完整文本
                                 full_text = para_rng.Text
                                 
-                                # Remove paragraph mark temporarily for processing
+                                # 临时移除段落标记以便处理
                                 text_without_mark = full_text.rstrip("\r\n")
                                 
-                                # Check if there's actual content before processing
+                                # 在处理前检查是否有实际内容
                                 if not text_without_mark or len(text_without_mark.strip()) == 0:
                                     continue
                                 
-                                # Remove all line breaks and carriage returns
+                                # 移除所有换行符和回车符
                                 cleaned_text = text_without_mark.replace("\r", "").replace("\n", "").replace("\r\n", "")
                                 
-                                # Also remove multiple spaces (optional, but helps clean up)
+                                # 同时移除多个空格（可选，但有助于清理）
                                 cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
                                 
-                                # Only replace if:
-                                # 1. cleaned_text is not empty (has content)
-                                # 2. cleaned_text is different from original (actually changed)
+                                # 仅在以下情况下替换：
+                                # 1. cleaned_text 不为空（有内容）
+                                # 2. cleaned_text 与原始文本不同（实际已更改）
                                 if cleaned_text and len(cleaned_text) > 0 and cleaned_text != text_without_mark:
-                                    # Replace with cleaned text (add back paragraph mark)
+                                    # 用清理后的文本替换（添加回段落标记）
                                     para_rng.Text = cleaned_text + "\r"
                                     cleaned_count += 1
                                     insertion_log_parts.append(f"    已清理: {cleaned_text[:50]}...")
                                 elif cleaned_text and len(cleaned_text) > 0:
-                                    # Text is already clean, no change needed
+                                    # 文本已经清理，无需更改
                                     pass
                                 else:
-                                    # cleaned_text is empty after cleaning, mark for deletion
+                                    # 清理后 cleaned_text 为空，标记为删除
                                     if len(cleaned_text) == 0:
                                         paras_to_delete.append(para_rng)
                                         insertion_log_parts.append(f"    标记删除（清理后为空）: '{para_text[:50]}...'")
                             except Exception as e:
                                 insertion_log_parts.append(f"    警告: 无法清理段落 '{para_text[:50]}...': {e}")
                     
-                    # Delete paragraphs that became empty after cleaning
+                    # 删除清理后变为空的段落
                     if paras_to_delete:
                         insertion_log_parts.append(f"  删除清理后变空的段落 {len(paras_to_delete)} 个...")
-                        for para_rng in reversed(paras_to_delete):  # Delete from end to start
+                        for para_rng in reversed(paras_to_delete):  # 从末尾向起始位置删除
                             try:
                                 para_rng.Delete()
                             except Exception as e:
@@ -695,7 +694,7 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                     
                     insertion_log_parts.append(f"  步骤5.2完成：清理 {cleaned_count} 段，删除 {len(paras_to_delete)} 个空段。")
                     
-                    # Final pass: One more check for any remaining empty paragraphs
+                    # 最终轮：再次检查是否有剩余的空段落
                     insertion_log_parts.append("  步骤5.3：最终检查剩余空段落...")
                     selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
                     page_start_final = selection.Start
@@ -709,7 +708,7 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                         try:
                             para = paras_final[i]
                             
-                            # Skip paragraphs in tables
+                            # 跳过表格中的段落
                             if para.Range.Information(wdWithInTable):
                                 continue
 
@@ -745,31 +744,28 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
                     insertion_log_parts.append("内容处理成功。")
             
             doc.Save()
-            insertion_log_parts.append("Document saved.")
+            insertion_log_parts.append("文档已保存。")
 
         except Exception as e:
-            error_msg = f"Error during Word processing: {e}"
+            error_msg = f"Word 处理过程中出错: {e}"
             insertion_log_parts.append(error_msg)
             raise
         finally:
-            try:
-                if doc:
-                    doc.Close()
-            except Exception:
-                pass
-            try:
-                if word:
-                    word.Quit()
-            except Exception:
-                pass
-            pythoncom.CoUninitialize()
+            # 使用统一的工具函数关闭 Word 应用程序
+            close_word_application(
+                word_app=word,
+                doc=doc,
+                com_initialized=com_initialized,
+                wait_time=0.0,  # 不需要额外等待
+                node_name="update_word"
+            )
     
     except Exception as e:
-        error_msg = f"Error initializing Word COM: {e}"
+        error_msg = f"初始化 Word COM 时出错: {e}"
         insertion_log_parts.append(error_msg)
         raise
     
-    # Update state with insertion log
+    # 使用插入日志更新状态
     new_state_dict = dict(state)
     insertion_log = "; ".join(insertion_log_parts)
     new_state_dict["insertion_log"] = insertion_log
