@@ -13,7 +13,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from config import AgentConfig
 from logging_utils import log_state, log_state_start
 from state import TenderGraphState
 from util.word_application_util import create_word_application, close_word_application
@@ -27,12 +26,10 @@ def prepare_template(state: TenderGraphState, config) -> TenderGraphState:
     start_time = time.time()
     print(f"[prepare_template] 开始执行...")
     
-    agent_config = AgentConfig.from_runnable_config(config)
-
-    template_override = state.get("origin_tender_path")
+    template_path = state.get("origin_tender_path")
 
     template_path = os.path.abspath(
-        template_override or agent_config.resolve_template_path()
+        template_path
     )
 
     if not os.path.exists(template_path):

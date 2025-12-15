@@ -9,15 +9,13 @@ import time
 
 from langchain_deepseek import ChatDeepSeek
 from volcenginesdkarkruntime import Ark
-from openai import OpenAI
-import os
+from openai import OpenAI, AsyncOpenAI
+import asyncio
 
 
     # 直接运行时使用绝对导入
 import sys
 
-
-from config import AgentConfig
 from logging_utils import log_state
 from state import TenderGraphState
    
@@ -33,7 +31,8 @@ from util.word_extraction_utils import (
 )
 
 from util.word_application_util import create_word_application, close_word_application
-   
+from dotenv import load_dotenv
+load_dotenv()
 
 def extract_text_from_word_file(file_path: str) -> str:
     """从 Word 文件中提取所有文本内容，包括表格和自动编号"""
@@ -146,8 +145,6 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
         tender_params = extract_text_from_word_file(str(file_path_obj))
         print(f"[generate_polished_text] 从文件提取技术参数完成，长度: {len(tender_params)}")
     
-
-    agent_config = AgentConfig.from_runnable_config(config)
     
     # 获取配置的 model_provider，默认为 deepseek
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
@@ -163,8 +160,12 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
     # 保存提示词到文件
     prompts_dir = pathlib.Path(__file__).resolve().parents[2] / "prompts"
     prompts_dir.mkdir(exist_ok=True)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    prompt_file = prompts_dir / f"prompt_{timestamp}.txt"
+    project_number = str(state.get("project_number", "") or "").strip()
+    project_name = str(state.get("project_name", "") or "").strip()
+    filename_parts = [_sanitize_filename(part) for part in (project_number, project_name) if part]
+    timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    prompt_file = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
+    prompt_file = prompts_dir / f"prompt_{prompt_file}_{timestamp}.txt"
     try:
         with open(prompt_file, "w", encoding="utf-8") as f:
             f.write(prompt)
@@ -202,29 +203,56 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
     # 根据模型提供商选择不同的调用方式
     if model_provider == "doubao":
         try:
-            # Doubao (Ark) Implementation
+            # Doubao (Ark) Implementation - 异步调用
             client = Ark(
-                base_url="https://ark.cn-beijing.volces.com/api/v3",
-                api_key=os.getenv('ARK_API_KEY', '4d317907-2558-4916-910e-d64921e45fca')
-            )
-            completion = client.chat.completions.create(
-                model="doubao-seed-1-6-251015",
-                messages=[
-                    {"role": "user", "content": prompt},
-                ],
-                stream=True,
-                max_completion_tokens=32768,
-                thinking={"type": "disabled"},
+                base_url=os.getenv('ARK_BASE_URL'),
+                api_key=os.getenv('ARK_API_KEY')
             )
             
-            for chunk in completion:
-                if chunk.choices[0].delta.content is not None:
-                    chunk_text = chunk.choices[0].delta.content
-                    content_parts.append(chunk_text)
-                    _log_chunk(chunk_text)
-                    _push_stream_update("".join(content_parts))
-            print()
-            content = "".join(content_parts)
+            # 定义同步非流式处理函数
+            def _doubao_non_stream_sync():
+                response = client.chat.completions.create(
+                    model=os.getenv("DOUBAO_MODEL"),
+                    messages=[
+                        {"role": "user", "content": prompt},
+                    ],
+                    stream=False,
+                    max_completion_tokens=32768,
+                    thinking={"type": "disabled"},
+                )
+                return response.choices[0].message.content if response.choices else ""
+            
+            # 尝试异步流式调用
+            try:
+                # 使用 asyncio.to_thread 在线程中执行同步流式调用
+                # 由于流式响应需要实时处理，我们需要在线程中处理并实时更新
+                def _process_stream():
+                    completion = client.chat.completions.create(
+                        model=os.getenv("DOUBAO_MODEL"),
+                        messages=[
+                            {"role": "user", "content": prompt},
+                        ],
+                        stream=True,
+                        max_completion_tokens=32768,
+                        thinking={"type": "disabled"},
+                    )
+                    parts = []
+                    for chunk in completion:
+                        if chunk.choices[0].delta.content is not None:
+                            chunk_text = chunk.choices[0].delta.content
+                            parts.append(chunk_text)
+                            content_parts.append(chunk_text)
+                            _log_chunk(chunk_text)
+                            _push_stream_update("".join(content_parts))
+                    return "".join(parts)
+                
+                content = await asyncio.to_thread(_process_stream)
+                print()
+            except Exception as stream_exc:
+                print(f"Doubao 流式调用失败，回退到非流式: {stream_exc}")
+                # 回退到非流式调用
+                content = await asyncio.to_thread(_doubao_non_stream_sync)
+                _push_stream_update(str(content))
             
         except Exception as e:
             print(f"Doubao 模型调用失败: {e}")
@@ -232,30 +260,44 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
 
     elif model_provider == "qwen":
         try:
-            # Qwen Implementation
-            client = OpenAI(
-                api_key=os.getenv("DASHSCOPE_API_KEY", 'sk-9891014d27c54228949cd81e1311df48'),
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-            )
-            completion = client.chat.completions.create(
-                model="qwen-plus",
-                messages=[{'role': 'user', 'content': prompt}],
-                stream=True,
-                stream_options={"include_usage": True},
-                extra_body={"max_input_tokens": 1000000, "enable_thinking": False}
+            # Qwen Implementation - 异步调用
+            client = AsyncOpenAI(
+                api_key=os.getenv("DASHSCOPE_API_KEY"),
+                base_url=os.getenv("DASHSCOPE_BASE_URL"),
             )
             
-            for chunk in completion:
-                # Qwen compatible mode might return chunk with choices
-                if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-                    if hasattr(delta, 'content') and delta.content:
-                        chunk_text = delta.content
-                        content_parts.append(chunk_text)
-                        _log_chunk(chunk_text)
-                        _push_stream_update("".join(content_parts))
-            print()
-            content = "".join(content_parts)
+            # 尝试异步流式调用
+            try:
+                completion = await client.chat.completions.create(
+                    model=os.getenv("QWEN_MODEL"),
+                    messages=[{'role': 'user', 'content': prompt}],
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    extra_body={"max_input_tokens": 1000000, "enable_thinking": False}
+                )
+                
+                async for chunk in completion:
+                    # Qwen compatible mode might return chunk with choices
+                    if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
+                        delta = chunk.choices[0].delta
+                        if hasattr(delta, 'content') and delta.content:
+                            chunk_text = delta.content
+                            content_parts.append(chunk_text)
+                            _log_chunk(chunk_text)
+                            _push_stream_update("".join(content_parts))
+                print()
+                content = "".join(content_parts)
+            except Exception as stream_exc:
+                print(f"Qwen 流式调用失败，回退到非流式: {stream_exc}")
+                # 回退到非流式调用
+                response = await client.chat.completions.create(
+                    model=os.getenv("QWEN_MODEL"),
+                    messages=[{'role': 'user', 'content': prompt}],
+                    stream=False,
+                    extra_body={"max_input_tokens": 1000000, "enable_thinking": False}
+                )
+                content = response.choices[0].message.content if response.choices else ""
+                _push_stream_update(str(content))
 
         except Exception as e:
             print(f"Qwen 模型调用失败: {e}")
@@ -268,8 +310,7 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
             raise ValueError("DEEPSEEK_API_KEY is not set")
 
         llm = ChatDeepSeek(
-            model=agent_config.llm_model,
-            temperature=agent_config.llm_temperature,
+            model=os.getenv("DEEPSEEK_MODEL"),
             api_key=api_key,
             max_tokens=8192
         )
@@ -320,8 +361,8 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
     project_number = str(state.get("project_number", "") or "").strip()
     project_name = str(state.get("project_name", "") or "").strip()
     filename_parts = [_sanitize_filename(part) for part in (project_number, project_name) if part]
-    filename = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    filename = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
     filename = f"{filename}-{timestamp}.txt"
     # 优先使用 origin_tender_path 所在目录，其次 tender_param_path，再次 prompts 目录
     output_dir = None

@@ -1,3 +1,4 @@
+# 日志
 logs/tender_agent.log
 prompts
 
@@ -13,6 +14,7 @@ venv/
 env/
 ENV/
 .venv/
+.env
 
 # IDE 配置（可选）
 .vscode/
@@ -24,3 +26,6 @@ ENV/
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 测试文件
+test_env_vars.py
