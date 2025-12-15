@@ -4,6 +4,10 @@ Word 文档提取工具函数
 """
 
 import re
+import pathlib
+import time
+
+from util.word_application_util import create_word_application, close_word_application
 
 
 # Unicode 上标和下标字符映射表
@@ -701,4 +705,91 @@ def extract_content_with_tables(range_obj):
                 # 如果连文本都无法获取，返回空字符串
                 print("    警告: 无法提取任何内容")
                 return ""
+
+
+def extract_text_from_word_file(file_path: str) -> str:
+    """从 Word 文件中提取所有文本内容，包括表格和自动编号"""
+    file_path_obj = pathlib.Path(file_path)
+    
+    # 检查文件是否存在
+    if not file_path_obj.exists():
+        raise FileNotFoundError(f"文件不存在: {file_path}")
+    
+    # 根据文件扩展名选择不同的读取方式
+    # 注意：.docx 和 .doc 都使用 win32com 读取，以便正确提取自动编号
+    if file_path_obj.suffix.lower() in (".docx", ".doc"):
+        # 对于 .docx 和 .doc 文件，使用 win32com（需要 Windows 环境）
+        # 使用 extract_content_with_tables 来提取内容，保留表格格式和自动编号
+        try:
+            from pywintypes import com_error
+            
+            # 使用统一的工具函数创建 Word 应用程序
+            # 增加重试机制和休眠时间，处理上次实例未完全关闭的情况
+            max_retries = 3
+            retry_delay = 2.0  # 每次重试前等待 2 秒
+            initial_delay = 2.0  # 首次尝试前等待 2 秒，确保上一个节点完全关闭
+            
+            word = None
+            doc = None
+            com_initialized = False
+            
+            for retry in range(max_retries):
+                if retry > 0:
+                    print(f"    第 {retry + 1} 次重试创建 Word 应用程序实例（等待 {retry_delay} 秒后重试）...")
+                    time.sleep(retry_delay)
+                
+                try:
+                    word, com_initialized = create_word_application(
+                        initial_delay=initial_delay if retry == 0 else 0.0,  # 只在第一次等待
+                        post_init_delay=0.0,  # 不需要额外等待
+                        use_existing=False,  # 不使用已运行的实例
+                        verify=False,  # 不需要验证
+                        node_name=""  # 不输出节点名称
+                    )
+                    break  # 成功创建，退出重试循环
+                except Exception as e:
+                    error_str = str(e)
+                    # 如果是 RPC 错误，继续重试
+                    if ("RPC" in error_str or "-2147023174" in error_str) and retry < max_retries - 1:
+                        print(f"    检测到 RPC 错误，将在 {retry_delay} 秒后重试: {e}")
+                        continue
+                    # 如果不是 RPC 错误或已达到最大重试次数，抛出异常
+                    raise
+            
+            try:
+                
+                # 允许一次重试，缓解 COM 断开
+                for attempt in (1, 2):
+                    try:
+                        doc = word.Documents.Open(str(file_path_obj.resolve()), ReadOnly=True)
+                        # 立即获取 Content 对象，避免后续对象失效
+                        content_range = doc.Content
+                        # 使用 extract_content_with_tables 提取内容，保留表格格式和自动编号
+                        document_text = extract_content_with_tables(content_range)
+                        return document_text
+                    except com_error as ce:
+                        # -2147417848: RPC/COM 断开，等待后重试
+                        # -2147467261: 无效指针
+                        # -2147352567: 对象已被删除
+                        hresult = getattr(ce, "hresult", None)
+                        if attempt == 1 and hresult in (-2147417848, -2147467261, -2147352567):
+                            print(f"    检测到 COM 错误 (hresult={hresult})，等待后重试...")
+                            time.sleep(1.5)
+                            continue
+                        raise
+            finally:
+                # 使用统一的工具函数关闭 Word 应用程序
+                close_word_application(
+                    word_app=word,
+                    doc=doc,
+                    com_initialized=com_initialized,
+                    wait_time=0.0,
+                    node_name=""
+                )
+        except ImportError:
+            raise ValueError("读取 Word 文件需要 pywin32 库，且只能在 Windows 环境下运行")
+        except Exception as e:
+            raise ValueError(f"读取 Word 文件失败: {e}")
+    else:
+        raise ValueError(f"不支持的文件格式: {file_path_obj.suffix}")
 

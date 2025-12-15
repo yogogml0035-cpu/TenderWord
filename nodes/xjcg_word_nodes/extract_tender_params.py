@@ -16,6 +16,7 @@ from state import TenderGraphState
 from util.word_application_util import create_word_application, close_word_application
 from util.word_extraction_utils import (
     extract_content_with_tables,
+    extract_text_from_word_file,
 )
 
 # WPS/Word constants (WPS 兼容 Word 的常量)
@@ -350,6 +351,21 @@ def extract_tender_params(state: TenderGraphState, config) -> TenderGraphState:
     # 保存页码范围供后续节点复用
     new_state_dict["start_page"] = locals().get("start_page")
     new_state_dict["end_page"] = locals().get("end_page")
+    
+    # 如果提供了 tender_param_path，从文件中提取 tender_params 并更新状态
+    tender_param_path = state.get("tender_param_path")
+    if tender_param_path:
+        print(f"[extract_tender_params] 检测到 tender_param_path，开始提取技术参数...")
+        file_path_obj = pathlib.Path(tender_param_path)
+        if not file_path_obj.exists():
+            raise ValueError(f"tender_param_path 不存在: {tender_param_path}")
+        if not file_path_obj.is_file():
+            raise ValueError(f"tender_param_path 不是文件: {tender_param_path}")
+        
+        tender_params = extract_text_from_word_file(str(file_path_obj))
+        print(f"[extract_tender_params] 从文件提取技术参数完成，长度: {len(tender_params)}")
+        new_state_dict["tender_params"] = tender_params
+    
     new_state = TenderGraphState(**new_state_dict)
     log_state("extract_tender_params", new_state)
     
