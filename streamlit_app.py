@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from graph import build_graph
+from nodes.xjcg_word_nodes.fetch_tender_data import fetch_tender_data
 
 GRAPH = build_graph()
 
@@ -88,6 +89,10 @@ st.markdown(
 if "history" not in st.session_state:
     st.session_state.history = []
 
+# 初始化招标数据（初始为空，只有点击获取后才显示）
+if "tender_data" not in st.session_state:
+    st.session_state.tender_data = None
+
 # 单页表单
 tab, = st.tabs(["生成询价采购文件"])
 
@@ -96,23 +101,74 @@ with tab:
         "1. 上传待处理的 Word 模板文件\n"
         "2. 上传包含原始技术参数的 Word 文件\n"
         "3. 点击\"开始生成\"后等待完成提示，再到对应路径查看 Word 结果或直接下载\n\n"
-        "**本次默认替换的内容：**\n"
-        "- 插入技术参数位置：在\"第三章  采购需求\"之后，\"第四章  响应文件有关格式\"之前\n"
-        "- 项目名称：测试项目名称\n"
-        "- 项目编号：测试项目编号\n"
-        "- 项目内容：\n"
-        "  - 第1包：测试包件1   贰台\n"
-        "  - 第2包：测试包件2   壹套\n"
-        "  - 第3包：测试包件3   壹套\n"
-        "- 保证金规则：\n"
-        "  - 第1包：人民币1000元整；\n"
-        "  - 第2包：人民币2000元整；\n"
-        "  - 第3包：人民币3000元整\n"
-        "- 采购人名称：测试采购人医院\n"
-        "- 项目主办人/协办人：测试主办人、测试协办人\n"
-        "- 主办人/协办人电话：8888、6666\n"
-        "- 主办人拼音：wangshiqi"
     )
+    
+    # 招标编号输入和获取按钮
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        tender_no_input = st.text_input(
+            "招标编号",
+            value="",
+            placeholder="请输入招标编号",
+            key="tender_no_input"
+        )
+    with col2:
+        st.write("")  # 占位，用于对齐按钮
+        st.write("")  # 占位，用于对齐按钮
+        fetch_button = st.button("获取", key="fetch_tender_data")
+    
+    # 处理获取按钮点击
+    if fetch_button:
+        if not tender_no_input or not tender_no_input.strip():
+            st.error("请输入招标编号")
+        else:
+            try:
+                with st.spinner("正在获取招标数据..."):
+                    tender_data = fetch_tender_data(tender_no_input.strip())
+                    # 更新 session_state
+                    st.session_state.tender_data = tender_data
+                    st.success("数据获取成功！")
+            except Exception as e:
+                st.error(f"获取数据失败：{str(e)}")
+    
+    # 显示当前使用的数据（只有获取到数据后才显示）
+    if st.session_state.tender_data is not None:
+        tender_data = st.session_state.tender_data
+        st.markdown("**本次默认替换的内容：**")
+        st.markdown(f"- 插入技术参数位置：在\"第三章  采购需求\"之后，\"第四章  响应文件有关格式\"之前")
+        st.markdown(f"- 项目名称：{tender_data['project_name']}")
+        st.markdown(f"- 项目编号：{tender_data['project_number']}")
+        
+        # 格式化显示项目内容
+        project_content = tender_data['project_content'].strip()
+        st.markdown("- 项目内容：")
+        if project_content:
+            # 如果有换行符，按行显示；否则直接显示
+            if '\n' in project_content:
+                project_content_lines = project_content.split('\n')
+                for line in project_content_lines:
+                    if line.strip():
+                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {line.strip()}", unsafe_allow_html=True)
+            else:
+                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {project_content}", unsafe_allow_html=True)
+        
+        # 格式化显示保证金规则
+        bzj_rule = tender_data['bzj_rule'].strip()
+        st.markdown("- 保证金规则：")
+        if bzj_rule:
+            # 如果有换行符，按行显示；否则直接显示
+            if '\n' in bzj_rule:
+                bzj_rule_lines = bzj_rule.split('\n')
+                for line in bzj_rule_lines:
+                    if line.strip():
+                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {line.strip()}", unsafe_allow_html=True)
+            else:
+                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {bzj_rule}", unsafe_allow_html=True)
+        
+        st.markdown(f"- 采购人名称：{tender_data['buyer_name']}")
+        st.markdown(f"- 项目主办人/协办人：{tender_data['project_zbr_xbr']}")
+        st.markdown(f"- 主办人/协办人电话：{tender_data['zbr_xbr_tel']}")
+        st.markdown(f"- 主办人拼音：{tender_data['zbr_pinyin']}")
 
     with st.form("tender_doc_form"):
         uploaded_file = st.file_uploader(
@@ -141,6 +197,8 @@ with tab:
             st.error("请上传 Word 模板文件")
         elif not origin_text_file:
             st.error("请上传原始技术参数文件")
+        elif st.session_state.tender_data is None:
+            st.error("请先点击\"获取\"按钮获取招标数据")
         else:
             # 保存上传的模板文件到指定目录
             template_extension = pathlib.Path(uploaded_file.name).suffix
@@ -174,6 +232,9 @@ with tab:
             origin_tender_path = str(saved_reference_path.resolve())
             tender_param_path = str(saved_param_path.resolve())
             
+            # 从 session_state 获取招标数据
+            tender_data = st.session_state.tender_data
+            
             initial_state = {
                 # 上传文件路径
                 "origin_tender_path": origin_tender_path,
@@ -181,14 +242,14 @@ with tab:
                 # 固定参数（与 graph.py 中保持一致）
                 "insertion_before_text": "第三章  采购需求",
                 "insertion_after_text": "第四章  响应文件有关格式",
-                "project_name": "测试项目名称",
-                "project_number": "测试项目编号",
-                "project_content": "第1包：测试包件1  贰台\n第2包：测试包件2  壹套\n第3包：测试包件3  壹套",
-                "bzj_rule": "第1包：人民币1000元整；\n                第2包：人民币2000元整；\n                第3包：人民币3000元整",
-                "buyer_name": "测试采购人医院",
-                "project_zbr_xbr": "测试主办人、测试协办人",
-                "zbr_xbr_tel": "8888、6666",
-                "zbr_pinyin": "wangshiqi",
+                "project_name": tender_data["project_name"],
+                "project_number": tender_data["project_number"],
+                "project_content": tender_data["project_content"],
+                "bzj_rule": tender_data["bzj_rule"],
+                "buyer_name": tender_data["buyer_name"],
+                "project_zbr_xbr": tender_data["project_zbr_xbr"],
+                "zbr_xbr_tel": tender_data["zbr_xbr_tel"],
+                "zbr_pinyin": tender_data["zbr_pinyin"],
             }
 
             status_placeholder = st.empty()

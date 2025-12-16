@@ -15,9 +15,7 @@ pip install -r TenderWord\requirements.txt
 
 ## 启动方式
 ```powershell
-cd D:\PythonProject
-.\.venv\Scripts\activate  # 如果已创建虚拟环境
-streamlit run TenderWord\streamlit_app.py
+streamlit run streamlit_app.py
 ```
 
 启动后浏览器会自动打开（或按照终端提示访问本地地址）。
