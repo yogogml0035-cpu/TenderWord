@@ -93,6 +93,7 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
 
     content_parts = []
     content = ""
+    TIMEOUT_SECONDS = 20  # 20秒超时
 
     # 根据模型提供商选择不同的调用方式
     if model_provider == "doubao":
@@ -121,6 +122,7 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
                 # 使用 asyncio.to_thread 在线程中执行同步流式调用
                 # 由于流式响应需要实时处理，我们需要在线程中处理并实时更新
                 def _process_stream():
+                    start_time = time.time()
                     completion = client.chat.completions.create(
                         model=os.getenv("DOUBAO_MODEL"),
                         messages=[
@@ -131,7 +133,14 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
                         thinking={"type": "disabled"},
                     )
                     parts = []
+                    first_chunk_received = False
                     for chunk in completion:
+                        if not first_chunk_received:
+                            elapsed = time.time() - start_time
+                            if elapsed > TIMEOUT_SECONDS:
+                                print(f"\n警告: Doubao 流式调用超时（{TIMEOUT_SECONDS}秒内未收到响应）")
+                                return ""
+                            first_chunk_received = True
                         if chunk.choices[0].delta.content is not None:
                             chunk_text = chunk.choices[0].delta.content
                             parts.append(chunk_text)
@@ -140,17 +149,30 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
                             _push_stream_update("".join(content_parts))
                     return "".join(parts)
                 
-                content = await asyncio.to_thread(_process_stream)
+                content = await asyncio.wait_for(
+                    asyncio.to_thread(_process_stream),
+                    timeout=TIMEOUT_SECONDS
+                )
                 print()
+            except asyncio.TimeoutError:
+                print(f"\n警告: Doubao 模型调用超时（{TIMEOUT_SECONDS}秒），返回空内容")
+                content = ""
             except Exception as stream_exc:
                 print(f"Doubao 流式调用失败，回退到非流式: {stream_exc}")
-                # 回退到非流式调用
-                content = await asyncio.to_thread(_doubao_non_stream_sync)
-                _push_stream_update(str(content))
+                try:
+                    # 回退到非流式调用，也添加超时
+                    content = await asyncio.wait_for(
+                        asyncio.to_thread(_doubao_non_stream_sync),
+                        timeout=TIMEOUT_SECONDS
+                    )
+                    _push_stream_update(str(content))
+                except asyncio.TimeoutError:
+                    print(f"\n警告: Doubao 非流式调用超时（{TIMEOUT_SECONDS}秒），返回空内容")
+                    content = ""
             
         except Exception as e:
-            print(f"Doubao 模型调用失败: {e}")
-            raise e
+            print(f"Doubao 模型调用失败: {e}，返回空内容")
+            content = ""
 
     elif model_provider == "qwen":
         try:
@@ -162,40 +184,61 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
             
             # 尝试异步流式调用
             try:
-                completion = await client.chat.completions.create(
-                    model=os.getenv("QWEN_MODEL"),
-                    messages=[{'role': 'user', 'content': prompt}],
-                    stream=True,
-                    stream_options={"include_usage": True},
-                    extra_body={"max_input_tokens": 1000000, "enable_thinking": False}
-                )
+                async def _qwen_stream_call():
+                    start_time = time.time()
+                    completion = await client.chat.completions.create(
+                        model=os.getenv("QWEN_MODEL"),
+                        messages=[{'role': 'user', 'content': prompt}],
+                        stream=True,
+                        stream_options={"include_usage": True},
+                        extra_body={"max_input_tokens": 1000000, "enable_thinking": False}
+                    )
+                    
+                    first_chunk_received = False
+                    async for chunk in completion:
+                        if not first_chunk_received:
+                            elapsed = time.time() - start_time
+                            if elapsed > TIMEOUT_SECONDS:
+                                print(f"\n警告: Qwen 流式调用超时（{TIMEOUT_SECONDS}秒内未收到响应）")
+                                return ""
+                            first_chunk_received = True
+                        # Qwen compatible mode might return chunk with choices
+                        if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
+                            delta = chunk.choices[0].delta
+                            if hasattr(delta, 'content') and delta.content:
+                                chunk_text = delta.content
+                                content_parts.append(chunk_text)
+                                _log_chunk(chunk_text)
+                                _push_stream_update("".join(content_parts))
+                    return "".join(content_parts)
                 
-                async for chunk in completion:
-                    # Qwen compatible mode might return chunk with choices
-                    if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
-                        delta = chunk.choices[0].delta
-                        if hasattr(delta, 'content') and delta.content:
-                            chunk_text = delta.content
-                            content_parts.append(chunk_text)
-                            _log_chunk(chunk_text)
-                            _push_stream_update("".join(content_parts))
+                content = await asyncio.wait_for(_qwen_stream_call(), timeout=TIMEOUT_SECONDS)
                 print()
-                content = "".join(content_parts)
+            except asyncio.TimeoutError:
+                print(f"\n警告: Qwen 流式调用超时（{TIMEOUT_SECONDS}秒），返回空内容")
+                content = ""
             except Exception as stream_exc:
                 print(f"Qwen 流式调用失败，回退到非流式: {stream_exc}")
-                # 回退到非流式调用
-                response = await client.chat.completions.create(
-                    model=os.getenv("QWEN_MODEL"),
-                    messages=[{'role': 'user', 'content': prompt}],
-                    stream=False,
-                    extra_body={"max_input_tokens": 1000000, "enable_thinking": False}
-                )
-                content = response.choices[0].message.content if response.choices else ""
-                _push_stream_update(str(content))
+                try:
+                    # 回退到非流式调用，也添加超时
+                    response = await asyncio.wait_for(
+                        client.chat.completions.create(
+                            model=os.getenv("QWEN_MODEL"),
+                            messages=[{'role': 'user', 'content': prompt}],
+                            stream=False,
+                            extra_body={"max_input_tokens": 1000000, "enable_thinking": False}
+                        ),
+                        timeout=TIMEOUT_SECONDS
+                    )
+                    content = response.choices[0].message.content if response.choices else ""
+                    _push_stream_update(str(content))
+                except asyncio.TimeoutError:
+                    print(f"\n警告: Qwen 非流式调用超时（{TIMEOUT_SECONDS}秒），返回空内容")
+                    content = ""
 
         except Exception as e:
-            print(f"Qwen 模型调用失败: {e}")
-            raise e
+            print(f"Qwen 模型调用失败: {e}，返回空内容")
+            content = ""
 
     else:
         # Default: DeepSeek
@@ -224,32 +267,60 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
         invoke_method = getattr(llm, "ainvoke", None)
         if callable(stream_method):
             try:
-                async for chunk in stream_method(prompt):
-                    chunk_text = _chunk_to_text(chunk)
-                    if not chunk_text:
-                        continue
-                    content_parts.append(chunk_text)
-                    _log_chunk(chunk_text)
-                    _push_stream_update("".join(content_parts))
+                async def _deepseek_stream_call():
+                    start_time = time.time()
+                    first_chunk_received = False
+                    async for chunk in stream_method(prompt):
+                        if not first_chunk_received:
+                            elapsed = time.time() - start_time
+                            if elapsed > TIMEOUT_SECONDS:
+                                print(f"\n警告: DeepSeek 流式调用超时（{TIMEOUT_SECONDS}秒内未收到响应）")
+                                return ""
+                            first_chunk_received = True
+                        chunk_text = _chunk_to_text(chunk)
+                        if not chunk_text:
+                            continue
+                        content_parts.append(chunk_text)
+                        _log_chunk(chunk_text)
+                        _push_stream_update("".join(content_parts))
+                    return "".join(content_parts)
+                
+                content = await asyncio.wait_for(_deepseek_stream_call(), timeout=TIMEOUT_SECONDS)
                 print()  # 换行，避免日志粘连
-                content = "".join(content_parts)
+            except asyncio.TimeoutError:
+                print(f"\n警告: DeepSeek 流式调用超时（{TIMEOUT_SECONDS}秒），返回空内容")
+                content = ""
             except Exception as stream_exc:
                 print(f"流式获取失败，回退到非流式: {stream_exc}")
+                try:
+                    if callable(invoke_method):
+                        response = await asyncio.wait_for(invoke_method(prompt), timeout=TIMEOUT_SECONDS)
+                        content = getattr(response, "content", response)
+                    else:
+                        response = await asyncio.wait_for(
+                            asyncio.to_thread(llm.invoke, prompt),
+                            timeout=TIMEOUT_SECONDS
+                        )
+                        content = getattr(response, "content", response)
+                    _push_stream_update(str(content))
+                except asyncio.TimeoutError:
+                    print(f"\n警告: DeepSeek 非流式调用超时（{TIMEOUT_SECONDS}秒），返回空内容")
+                    content = ""
+        else:
+            try:
                 if callable(invoke_method):
-                    response = await invoke_method(prompt)
+                    response = await asyncio.wait_for(invoke_method(prompt), timeout=TIMEOUT_SECONDS)
                     content = getattr(response, "content", response)
                 else:
-                    response = llm.invoke(prompt)
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(llm.invoke, prompt),
+                        timeout=TIMEOUT_SECONDS
+                    )
                     content = getattr(response, "content", response)
                 _push_stream_update(str(content))
-        else:
-            if callable(invoke_method):
-                response = await invoke_method(prompt)
-                content = getattr(response, "content", response)
-            else:
-                response = llm.invoke(prompt)
-                content = getattr(response, "content", response)
-            _push_stream_update(str(content))
+            except asyncio.TimeoutError:
+                print(f"\n警告: DeepSeek 非流式调用超时（{TIMEOUT_SECONDS}秒），返回空内容")
+                content = ""
     # content = """"""
 
     # 将大模型生成的内容写入 txt 文件，命名：项目编号-项目名称-初稿.txt

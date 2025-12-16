@@ -7,7 +7,11 @@ import re
 import pathlib
 import time
 
-from util.word_application_util import create_word_application, close_word_application
+from util.word_application_util import (
+    create_word_application,
+    close_word_application,
+)
+from util.word_com_manager import is_rpc_error, calculate_retry_delay, MAX_RETRIES
 
 
 # Unicode 上标和下标字符映射表
@@ -740,11 +744,11 @@ def extract_text_from_word_file(file_path: str) -> str:
                 
                 try:
                     word, com_initialized = create_word_application(
-                        initial_delay=initial_delay if retry == 0 else 0.0,  # 只在第一次等待
-                        post_init_delay=0.0,  # 不需要额外等待
-                        use_existing=False,  # 不使用已运行的实例
+                        initial_delay=initial_delay if retry == 0 else 0.5,  # 重试时也等待
+                        post_init_delay=0.5,  # 给 Word 时间初始化
+                        use_existing=False,  # 并发环境下必须使用独立实例
                         verify=False,  # 不需要验证
-                        node_name=""  # 不输出节点名称
+                        node_name="word_extraction"  # 添加节点名称用于日志
                     )
                     break  # 成功创建，退出重试循环
                 except Exception as e:

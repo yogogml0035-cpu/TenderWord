@@ -14,6 +14,7 @@ if not logger.handlers:
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
+    logger.propagate = False  # 阻止日志传播到根 logger，避免输出到控制台
 
 
 def log_state_start(label: str, state: Mapping[str, Any]) -> None:

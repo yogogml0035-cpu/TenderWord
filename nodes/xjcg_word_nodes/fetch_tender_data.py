@@ -57,7 +57,6 @@ def fetch_tender_data(tender_no: str) -> Dict:
             "zbr_pinyin": data.get("zbr_pinyin", ""),
         }
         
-        print(tender_data)
         return tender_data
         
     except requests.exceptions.RequestException as e:

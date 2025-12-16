@@ -13,7 +13,12 @@ if str(ROOT) not in sys.path:
 
 from logging_utils import log_state
 from state import TenderGraphState
-from util.word_application_util import create_word_application, close_word_application
+from util.word_application_util import (
+    create_word_application,
+    close_word_application,
+    open_document_with_retry,
+)
+from util.word_com_manager import com_lock, is_rpc_error, calculate_retry_delay, MAX_RETRIES
 from util.word_extraction_utils import (
     extract_content_with_tables,
     extract_text_from_word_file,
@@ -77,11 +82,11 @@ def extract_tender_params(state: TenderGraphState, config) -> TenderGraphState:
     
     try:
         # 使用统一的工具函数创建 Word 应用程序
-        # 直接使用 Microsoft Word，休眠一定时间让之前的实例完全关闭
+        # 在并发环境下使用独立实例，避免多用户冲突
         wps, com_initialized = create_word_application(
-            initial_delay=0.2,  # 创建前等待 0.2 秒，让之前的实例有时间完全关闭
+            initial_delay=0.5,  # 创建前等待，让之前的实例有时间完全关闭
             post_init_delay=0.5,  # 给 Word 一点时间完成初始化
-            use_existing=True,  # 尝试获取已运行的 Word 实例
+            use_existing=False,  # 并发环境下必须使用独立实例
             verify=True,
             node_name="extract_tender_params"
         )
@@ -128,7 +133,7 @@ def extract_tender_params(state: TenderGraphState, config) -> TenderGraphState:
                     wps, com_initialized = create_word_application(
                         initial_delay=1.0,  # 等待 1 秒，确保之前的实例完全关闭
                         post_init_delay=0.5,  # 给 Word 一点时间完成初始化
-                        use_existing=True,  # 尝试获取已运行的 Word 实例
+                        use_existing=False,  # 并发环境下必须使用独立实例
                         verify=True,
                         node_name="extract_tender_params"
                     )

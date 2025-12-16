@@ -13,7 +13,13 @@ if str(ROOT) not in sys.path:
 
 from logging_utils import log_state
 from state import TenderGraphState
-from util.word_application_util import create_word_application, close_word_application
+from util.word_application_util import (
+    create_word_application,
+    close_word_application,
+    open_document_with_retry,
+    save_document_with_retry,
+)
+from util.word_com_manager import com_lock, is_rpc_error, calculate_retry_delay, MAX_RETRIES
 
 # Word constants
 wdFindStop = 0
