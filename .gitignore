@@ -30,3 +30,5 @@ Thumbs.db
 # 测试文件
 test_env_vars.py
 test_concurrent.py
+
+docs

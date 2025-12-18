@@ -122,6 +122,10 @@ if "user_session_id" not in st.session_state:
 if "tender_data" not in st.session_state:
     st.session_state.tender_data = None
 
+# 初始化取消请求标志
+if "cancel_requested" not in st.session_state:
+    st.session_state.cancel_requested = False
+
 # 检查是否需要禁用下载按钮
 if st.session_state.get("should_disable_downloads", False):
     # 注入JavaScript来禁用下载按钮
@@ -308,12 +312,31 @@ with tab:
         # 添加模型选择
         model_option = st.selectbox(
             "选择生成模型",
-            ["深度求索（DeepSeek）", "豆包 (Doubao)", "千问 (Qwen)"],
+            ["千问 (Qwen)", "深度求索（DeepSeek）", "豆包 (Doubao)"],
             index=0,
             key="llm_model_select"
         )
         
         submitted = st.form_submit_button("开始生成", disabled=st.session_state.is_generating, use_container_width=True)
+
+    # 在表单外显示取消按钮（只在生成过程中显示）
+    if st.session_state.is_generating:
+        task_id_for_cancel = st.session_state.get("current_task_id")
+        if st.button("❌ 取消生成", key="cancel_task_btn", type="secondary", use_container_width=True):
+            # 执行取消操作
+            if task_id_for_cancel and TASK_QUEUE.cancel_task(task_id_for_cancel):
+                st.session_state.cancel_requested = True
+                st.session_state.is_generating = False
+                st.session_state.current_task_id = None
+                st.session_state.should_enable_downloads = True  # 恢复下载按钮
+                st.session_state.last_result = {
+                    "success": False,
+                    "error": "任务已被用户取消",
+                    "cancelled": True
+                }
+                st.rerun()
+            else:
+                st.warning("无法取消任务（可能已完成或已取消）")
 
     # 1. 处理点击事件：验证并准备环境，触发重运行
     if submitted and not st.session_state.is_generating:
@@ -372,45 +395,63 @@ with tab:
 
     # 2. 处理生成过程：在 is_generating 状态下运行
     if st.session_state.is_generating:
-        # 在生成过程中持续禁用侧边栏中的下载按钮
-        st.components.v1.html("""
+        # 在生成过程中持续禁用侧边栏中的下载按钮，并检测用户离开页面
+        task_id_for_js = st.session_state.get("current_task_id", "")
+        st.components.v1.html(f"""
             <script>
-                (function() {
-                    function disableDownloadButtons() {
-                        try {
+                (function() {{
+                    const taskId = "{task_id_for_js}";
+                    
+                    function disableDownloadButtons() {{
+                        try {{
                             const parentDoc = window.parent.document;
                             const sidebar = parentDoc.querySelector('[data-testid="stSidebar"]');
                             
-                            if (sidebar) {
+                            if (sidebar) {{
                                 // 查找所有下载按钮
                                 const allButtons = sidebar.querySelectorAll('button');
-                                allButtons.forEach(btn => {
+                                allButtons.forEach(btn => {{
                                     const buttonText = btn.textContent || '';
                                     const buttonLabel = btn.getAttribute('aria-label') || '';
                                     // 检查是否是下载按钮
                                     if (buttonText.includes('下载') || 
                                         buttonText.includes('download') ||
                                         buttonLabel.includes('下载') ||
-                                        buttonLabel.includes('download')) {
+                                        buttonLabel.includes('download')) {{
                                         // 禁用按钮
                                         btn.disabled = true;
                                         btn.style.opacity = '0.5';
                                         btn.style.cursor = 'not-allowed';
                                         // 添加标记
                                         btn.setAttribute('data-was-disabled', 'true');
-                                    }
-                                });
-                            }
-                        } catch (e) {
+                                    }}
+                                }});
+                            }}
+                        }} catch (e) {{
                             // 静默处理错误
-                        }
-                    }
+                        }}
+                    }}
                     
                     // 立即执行
                     disableDownloadButtons();
                     // 定期检查并禁用（防止用户手动展开侧边栏后按钮恢复）
                     setInterval(disableDownloadButtons, 1000);
-                })();
+                    
+                    // 监听页面关闭/离开事件
+                    // 注意：由于浏览器安全限制，beforeunload 中无法发送可靠的请求
+                    // 心跳超时机制会处理用户离开的情况
+                    window.addEventListener('beforeunload', function(e) {{
+                        // 在页面关闭时，心跳会停止，后台线程会自动检测并取消任务
+                        console.log('用户正在离开页面，任务将在心跳超时后自动取消');
+                    }});
+                    
+                    // 监听页面可见性变化（用户切换标签页）
+                    document.addEventListener('visibilitychange', function() {{
+                        if (document.hidden) {{
+                            console.log('页面进入后台，心跳可能会受影响');
+                        }}
+                    }});
+                }})();
             </script>
         """, height=0)
         
@@ -570,9 +611,25 @@ with tab:
         current_log = ""
         current_llm = ""
         current_progress_count = 0
+        last_heartbeat_time = time.time()
+        heartbeat_interval = 3.0  # 每3秒发送一次心跳
         
         while not result_holder["done"] or not log_queue.empty():
             try:
+                # 定期发送心跳（在循环开始时检查）
+                current_time = time.time()
+                if current_time - last_heartbeat_time >= heartbeat_interval:
+                    TASK_QUEUE.update_heartbeat(task_id)
+                    last_heartbeat_time = current_time
+                
+                # 检查任务是否被取消（可能是心跳超时或用户主动取消）
+                task = TASK_QUEUE.get_task(task_id)
+                if task and task.status == TaskStatus.CANCELLED:
+                    # 任务已被取消，退出循环
+                    result_holder["error"] = (Exception("任务已被取消"), "任务已被用户取消或心跳超时")
+                    result_holder["done"] = True
+                    break
+                
                 # 非阻塞获取，超时 0.05 秒
                 msg_type, msg_content = log_queue.get(timeout=0.05)
                 
@@ -601,6 +658,13 @@ with tab:
             except queue.Empty:
                 # 队列为空时，检查并更新队列等待状态
                 task = TASK_QUEUE.get_task(task_id)
+                
+                # 检查任务是否被取消
+                if task and task.status == TaskStatus.CANCELLED:
+                    result_holder["error"] = (Exception("任务已被取消"), "任务已被用户取消或心跳超时")
+                    result_holder["done"] = True
+                    break
+                
                 # 如果任务已完成/失败但 log_queue 还没空，继续 loop
                 if task and task.status == TaskStatus.QUEUED:
                     waiting = TASK_QUEUE.get_waiting_count(task_id)
@@ -636,7 +700,16 @@ with tab:
              TASK_QUEUE.complete_task(task_id, result=result_holder["result"])
 
         # 处理结果并保存到 last_result
-        if result_holder["error"]:
+        task = TASK_QUEUE.get_task(task_id)
+        is_cancelled = task and task.status == TaskStatus.CANCELLED
+        
+        if is_cancelled:
+            st.session_state.last_result = {
+                "success": False,
+                "error": "任务已被取消（用户主动取消或心跳超时）",
+                "cancelled": True
+            }
+        elif result_holder["error"]:
             exc, tb = result_holder["error"]
             st.session_state.last_result = {
                 "success": False,
@@ -690,9 +763,20 @@ with tab:
                 with st.expander("查看 AI 生成内容"):
                     st.code(result.get("llm_logs", ""), language="text")
                     
+            elif result.get("cancelled"):
+                st.warning("⚠️ **任务已取消**")
+                st.info(result.get("error", "任务被取消"))
             else:
-                st.error("❌ **生成失败**")
-                st.code(result.get("error", ""), language="text")
+                error_msg = result.get("error", "")
+                # 检测是否是大模型超时错误，显示更友好的提示
+                if "大模型响应超时失败" in error_msg or "LLMTimeoutError" in error_msg:
+                    st.error("❌ **大模型响应超时**")
+                    st.warning("⏱️ 大模型响应超时失败，请尝试其他模型或者重新生成")
+                    with st.expander("查看详细错误信息"):
+                        st.code(error_msg, language="text")
+                else:
+                    st.error("❌ **生成失败**")
+                    st.code(error_msg, language="text")
 
     # 确保 History 在生成成功时被更新
     # 可以在 is_generating 块结束前做，或者在这里做检查。

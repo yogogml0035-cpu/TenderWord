@@ -44,7 +44,6 @@ def fetch_tender_data(tender_no: str) -> Dict:
             raise ValueError("接口返回数据中缺少 'data' 字段")
         
         data = result["data"]
-        
         # 提取所需字段
         tender_data = {
             "project_name": data.get("project_name", ""),

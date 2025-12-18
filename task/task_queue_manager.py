@@ -113,6 +113,8 @@ class Task:
     completed_at: Optional[datetime] = None
     # 存储日志队列，以便在页面重载后重新连接
     log_queue: Optional[queue.Queue] = None
+    # 心跳时间戳，用于检测用户是否还在页面上
+    last_heartbeat: Optional[datetime] = None
     
     @property
     def elapsed_time(self) -> Optional[float]:
@@ -120,6 +122,13 @@ class Task:
         if self.started_at:
             end_time = self.completed_at or datetime.now()
             return (end_time - self.started_at).total_seconds()
+        return None
+    
+    @property
+    def heartbeat_age(self) -> Optional[float]:
+        """计算距离上次心跳的时间（秒）"""
+        if self.last_heartbeat:
+            return (datetime.now() - self.last_heartbeat).total_seconds()
         return None
 
 
@@ -154,6 +163,19 @@ class TaskQueueManager:
         self._data_lock = threading.RLock()
         self._progress_callbacks: Dict[str, Callable] = {}
         self._cancel_events: Dict[str, threading.Event] = {}  # 取消事件
+        
+        # 心跳超时配置（秒）
+        self._heartbeat_timeout = 10.0  # 10秒未收到心跳则认为用户已离开
+        self._cleanup_interval = 5.0    # 每5秒检查一次超时任务
+        
+        # 启动后台清理线程
+        self._cleanup_thread_stop = threading.Event()
+        self._cleanup_thread = threading.Thread(
+            target=self._heartbeat_cleanup_loop,
+            daemon=True,
+            name="TaskHeartbeatCleanup"
+        )
+        self._cleanup_thread.start()
     
     def create_task(self, user_session_id: str) -> Task:
         """
@@ -170,12 +192,72 @@ class TaskQueueManager:
             task = Task(
                 task_id=task_id,
                 user_session_id=user_session_id,
-                created_at=datetime.now()
+                created_at=datetime.now(),
+                last_heartbeat=datetime.now()  # 初始化心跳时间
             )
             self._tasks[task_id] = task
             self._queue.append(task_id)
             self._cancel_events[task_id] = threading.Event()  # 创建取消事件
             return task
+    
+    def update_heartbeat(self, task_id: str) -> bool:
+        """
+        更新任务的心跳时间
+        
+        Args:
+            task_id: 任务ID
+            
+        Returns:
+            是否成功更新（任务存在且未完成）
+        """
+        with self._data_lock:
+            task = self._tasks.get(task_id)
+            if not task:
+                return False
+            
+            # 只有排队中或运行中的任务才更新心跳
+            if task.status in (TaskStatus.QUEUED, TaskStatus.RUNNING):
+                task.last_heartbeat = datetime.now()
+                return True
+            return False
+    
+    def _heartbeat_cleanup_loop(self):
+        """
+        后台线程：定期检查并清理心跳超时的任务
+        """
+        while not self._cleanup_thread_stop.is_set():
+            try:
+                self._check_and_cancel_timeout_tasks()
+            except Exception as e:
+                # 后台线程不能崩溃，静默处理错误
+                print(f"[TaskQueue] 心跳检测线程出错: {e}")
+            
+            # 等待下一次检查
+            self._cleanup_thread_stop.wait(self._cleanup_interval)
+    
+    def _check_and_cancel_timeout_tasks(self):
+        """
+        检查并取消心跳超时的任务
+        """
+        with self._data_lock:
+            now = datetime.now()
+            tasks_to_cancel = []
+            
+            for task_id, task in self._tasks.items():
+                # 只检查排队中或运行中的任务
+                if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING):
+                    continue
+                
+                # 检查心跳是否超时
+                if task.last_heartbeat:
+                    age = (now - task.last_heartbeat).total_seconds()
+                    if age > self._heartbeat_timeout:
+                        tasks_to_cancel.append((task_id, age))
+        
+        # 在锁外执行取消操作（cancel_task 会自己获取锁）
+        for task_id, age in tasks_to_cancel:
+            print(f"[TaskQueue] 任务 {task_id} 心跳超时 ({age:.1f}秒)，自动取消")
+            self.cancel_task(task_id)
     
     def get_task(self, task_id: str) -> Optional[Task]:
         """获取任务信息"""
@@ -321,6 +403,13 @@ class TaskQueueManager:
         with self._data_lock:
             task = self._tasks.get(task_id)
             if not task:
+                return
+            
+            # 如果任务已经被取消，不要覆盖状态
+            if task.status == TaskStatus.CANCELLED:
+                # 只清理当前任务ID（如果正在执行的话）
+                if self._current_task_id == task_id:
+                    self._current_task_id = None
                 return
             
             task.completed_at = datetime.now()
