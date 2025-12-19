@@ -242,7 +242,7 @@ with tab:
     with col2:
         st.write("")  # 占位，用于对齐按钮
         st.write("")  # 占位，用于对齐按钮
-        fetch_button = st.button("获取项目信息", key="fetch_tender_data", use_container_width=True)
+        fetch_button = st.button("获取信息", key="fetch_tender_data", use_container_width=True)
     
     # 处理获取按钮点击
     if fetch_button:
@@ -312,7 +312,7 @@ with tab:
         # 添加模型选择
         model_option = st.selectbox(
             "选择生成模型",
-            ["千问 (Qwen)", "深度求索（DeepSeek）", "豆包 (Doubao)"],
+            ["深度求索（DeepSeek）", "千问 (Qwen)", "豆包 (Doubao)"],
             index=0,
             key="llm_model_select"
         )

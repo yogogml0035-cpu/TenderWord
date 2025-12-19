@@ -36,7 +36,7 @@ class NodeName(Enum):
 
 # 节点显示名称映射
 NODE_DISPLAY_NAMES = {
-    NodeName.PREPARE_TEMPLATE: "准备模板",
+    NodeName.PREPARE_TEMPLATE: "复制原始模板文件",
     NodeName.EXTRACT_TENDER_PARAMS: "提取原始采购需求",
     NodeName.DELETE_TENDER_PARAM: "删除原始采购需求",
     NodeName.GET_REPLACEMENTS: "获取原始项目信息",
@@ -560,11 +560,11 @@ class TaskQueueManager:
                     return f"⏳ 排队中，前面还有 {waiting} 位用户"
 
 
-# 全局实例
-task_queue = TaskQueueManager()
+# 全局实例（模块内部使用）
+_task_queue = TaskQueueManager()
 
 
 def get_task_queue() -> TaskQueueManager:
     """获取全局任务队列管理器实例"""
-    return task_queue
+    return _task_queue
 
