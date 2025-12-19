@@ -1,6 +1,6 @@
 # TenderWord Web (Streamlit) 快速上手
 
-基于 LangGraph/Streamlit 的招标文档处理 MVP。页面已简化：仅需上传 2 个文件，其余参数使用 `graph.py` 中的固定默认值。
+基于 LangGraph/Streamlit 的招标文档处理。页面已简化：仅需上传 2 个文件，其余参数使用 `graph.py` 中的固定默认值。
 
 ## 环境准备
 - Python 3.10+（建议 64 位）
