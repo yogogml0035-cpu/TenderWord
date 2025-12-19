@@ -42,7 +42,7 @@ NODE_DISPLAY_NAMES = {
     NodeName.GET_REPLACEMENTS: "获取原始项目信息",
     NodeName.REPLACE_CONTENT: "替换最新项目信息",
     NodeName.GENERATE_POLISHED_TEXT: "AI生成采购需求",
-    NodeName.UPDATE_WORD: "输出招标文件",
+    NodeName.UPDATE_WORD: "生成招标文件",
 }
 
 # 总节点数
