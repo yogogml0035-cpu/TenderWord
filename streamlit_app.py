@@ -312,7 +312,7 @@ with tab:
         # 添加模型选择
         model_option = st.selectbox(
             "选择生成模型",
-            ["深度求索（DeepSeek）", "千问 (Qwen)", "豆包 (Doubao)"],
+            ["深度求索（DeepSeek）", "豆包 (Doubao)", "千问 (Qwen)"],
             index=0,
             key="llm_model_select"
         )
