@@ -231,7 +231,7 @@ with tab:
     )
     
     # 招标编号输入和获取按钮
-    col1, col2 = st.columns([10, 1])
+    col1, col2 = st.columns([8, 1])
     with col1:
         tender_no_input = st.text_input(
             "招标编号",
@@ -612,7 +612,7 @@ with tab:
         current_llm = ""
         current_progress_count = 0
         last_heartbeat_time = time.time()
-        heartbeat_interval = 3.0  # 每3秒发送一次心跳
+        heartbeat_interval = 2.0  # 每2秒发送一次心跳
         
         while not result_holder["done"] or not log_queue.empty():
             try:

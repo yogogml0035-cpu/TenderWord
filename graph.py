@@ -394,9 +394,13 @@ def invoke_with_timing(graph_instance, initial_state: dict, verbose: bool = True
 
 async def invoke_with_timing_async(graph_instance, initial_state: dict, verbose: bool = True, config=None):
     """
-    异步执行 graph 并统计时间（带全局锁，确保并发安全）
+    异步执行 graph 并统计时间（带公平锁 + 文件锁，确保并发安全且按队列顺序执行）
     
-    注意：虽然是异步函数，但由于 COM 限制，实际执行仍然是串行的
+    执行流程：
+    1. 首先通过公平锁机制等待轮到自己（按队列顺序）
+    2. 然后获取文件锁（保护 Word COM 操作）
+    3. 执行 graph
+    4. 释放锁并通知下一个任务
     
     Config 参数说明：
         - task_id: 任务ID，用于进度追踪
@@ -418,12 +422,24 @@ async def invoke_with_timing_async(graph_instance, initial_state: dict, verbose:
         stdout_writer = config["configurable"].get("stdout_writer")
         stderr_writer = config["configurable"].get("stderr_writer")
     
-    # 计算等待位置（在获取锁之前，不要输出到重定向的 stdout）
-    waiting_count = 0
+    # ============================================================================
+    # 第一步：公平锁 - 等待轮到自己（按队列顺序）
+    # ============================================================================
     if task_id:
         waiting_count = queue.get_waiting_count(task_id)
+        if waiting_count > 0:
+            print(f"[FairLock] 任务 {task_id} 开始排队等待，前面有 {waiting_count} 个任务")
+        
+        # 阻塞等待，直到轮到自己
+        got_turn = queue.wait_for_turn(task_id)
+        if not got_turn:
+            # 任务被取消或超时
+            raise TaskCancelledException(f"任务 {task_id} 在等待执行时被取消或超时")
     
-    # 使用同步锁（因为 COM 操作必须串行）
+    # ============================================================================
+    # 第二步：文件锁 - 保护 Word COM 操作（跨进程互斥）
+    # ============================================================================
+    # 使用文件锁（因为 COM 操作必须串行，且需要跨进程保护）
     # 重要：stdout/stderr 重定向必须在获取锁之后才设置，否则多线程会互相覆盖
     with _graph_execution_lock:
         # 在锁内设置 stdout/stderr 重定向，确保只有正在执行的任务会重定向输出
@@ -432,8 +448,6 @@ async def invoke_with_timing_async(graph_instance, initial_state: dict, verbose:
         
         with stdout_ctx, stderr_ctx:
             # 现在可以安全地打印日志了
-            if waiting_count > 0:
-                print(f"[Graph] 任务 {task_id} 之前排队等待了 {waiting_count} 位用户")
             print(f"[Graph] 任务 {task_id} 获取到执行锁，开始执行...")
             
             # 标记任务开始
@@ -451,7 +465,7 @@ async def invoke_with_timing_async(graph_instance, initial_state: dict, verbose:
                 elapsed = time.time() - begin_ts
                 print(f"[Graph] 任务 {task_id} 执行完成，释放锁")
                 
-                # 标记任务完成
+                # 标记任务完成（这会自动通知下一个等待的任务）
                 if task_id:
                     queue.complete_task(task_id, result=None if error_msg else "success", error=error_msg)
             

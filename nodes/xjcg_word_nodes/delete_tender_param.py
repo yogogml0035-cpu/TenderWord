@@ -70,14 +70,14 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
     if not os.access(prepared_doc_path, os.W_OK):
         raise PermissionError(f"无法写入准备好的文档: {prepared_doc_path}")
     
-    wps = None
+    word = None
     doc = None
     com_initialized = False
     
     try:
         # 使用统一的工具函数创建 Word 应用程序
         # 独立实例 + 预留时间，避免前序节点关闭未完成导致句柄失效
-        wps, com_initialized = create_word_application(
+        word, com_initialized = create_word_application(
             initial_delay=2.0,  # 创建前等待 2 秒，让之前的实例有时间完全关闭
             post_init_delay=1.0,  # 给 Word 初始化的时间
             use_existing=False,  # 不使用已运行的实例，创建新的独立实例
@@ -89,7 +89,7 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
         last_error = None
         for attempt in range(1, open_attempts + 1):
             try:
-                doc = wps.Documents.Open(
+                doc = word.Documents.Open(
                     FileName=prepared_doc_path,
                     ConfirmConversions=False,
                     ReadOnly=False,  # 需要写入以删除内容
@@ -172,7 +172,7 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
         else:
             # 将 before_end_pos 调整到前置锚点所在页的下一页起始处，避免第三章内容残留
             try:
-                selection = wps.Selection
+                selection = word.Selection
                 selection.GoTo(wdGoToPage, wdGoToAbsolute, before_page + 1)
                 next_page_start = selection.Start
                 if next_page_start > before_end_pos:
@@ -566,7 +566,7 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
                         try:
                             print("  开始保存文档...")
                             try:
-                                wps.ScreenUpdating = False
+                                word.ScreenUpdating = False
                             except Exception:
                                 pass
                             
@@ -575,7 +575,7 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
                             print("  文档已保存（删除完成）")
                             
                             try:
-                                wps.ScreenUpdating = True
+                                word.ScreenUpdating = True
                             except Exception:
                                 pass
                         except Exception as save_e:
@@ -600,7 +600,7 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
         print("[delete_tender_param] 开始清理资源...")
         # 使用统一的工具函数关闭 Word 应用程序
         close_word_application(
-            word_app=wps,
+            word_app=word,
             doc=doc,
             com_initialized=com_initialized,
             wait_time=1.5,

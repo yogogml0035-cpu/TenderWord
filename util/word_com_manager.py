@@ -34,7 +34,7 @@ _com_lock = threading.RLock()
 MAX_RETRIES = 5  # 最大重试次数
 BASE_RETRY_DELAY = 1.0  # 基础重试延迟（秒）
 MAX_RETRY_DELAY = 10.0  # 最大重试延迟（秒）
-LOCK_TIMEOUT = 300.0  # 锁超时时间（秒），5分钟
+LOCK_TIMEOUT = 1800.0  # 锁超时时间（秒）
 
 # RPC 错误代码
 RPC_ERROR_CODES = (

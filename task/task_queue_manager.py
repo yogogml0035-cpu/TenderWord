@@ -140,6 +140,7 @@ class TaskQueueManager:
     1. 管理任务队列，按提交顺序执行
     2. 追踪每个任务的执行进度
     3. 提供队列状态查询接口
+    4. 提供公平锁机制，确保任务按队列顺序获取执行权
     """
     _instance = None
     _lock = threading.Lock()
@@ -164,9 +165,13 @@ class TaskQueueManager:
         self._progress_callbacks: Dict[str, Callable] = {}
         self._cancel_events: Dict[str, threading.Event] = {}  # 取消事件
         
+        # ============ 公平锁机制 ============
+        # 条件变量：用于线程等待和通知，确保按队列顺序执行
+        self._execution_condition = threading.Condition(self._data_lock)
+        
         # 心跳超时配置（秒）
-        self._heartbeat_timeout = 10.0  # 10秒未收到心跳则认为用户已离开
-        self._cleanup_interval = 5.0    # 每5秒检查一次超时任务
+        self._heartbeat_timeout = 4.4  # 配置时间内未收到心跳则认为用户已离开
+        self._cleanup_interval = 1.5  # 每次检查一次超时任务的时间
         
         # 启动后台清理线程
         self._cleanup_thread_stop = threading.Event()
@@ -342,7 +347,7 @@ class TaskQueueManager:
         Returns:
             是否成功开始
         """
-        with self._data_lock:
+        with self._execution_condition:  # 使用条件变量的锁
             task = self._tasks.get(task_id)
             if not task:
                 return False
@@ -400,7 +405,7 @@ class TaskQueueManager:
             result: 执行结果
             error: 错误信息（如果有）
         """
-        with self._data_lock:
+        with self._execution_condition:  # 使用条件变量的锁
             task = self._tasks.get(task_id)
             if not task:
                 return
@@ -410,6 +415,8 @@ class TaskQueueManager:
                 # 只清理当前任务ID（如果正在执行的话）
                 if self._current_task_id == task_id:
                     self._current_task_id = None
+                    # 通知等待的线程
+                    self._execution_condition.notify_all()
                 return
             
             task.completed_at = datetime.now()
@@ -423,6 +430,9 @@ class TaskQueueManager:
             # 清理进度回调和取消事件
             self._progress_callbacks.pop(task_id, None)
             self._cancel_events.pop(task_id, None)
+            
+            # 通知等待的线程（下一个任务可以开始了）
+            self._execution_condition.notify_all()
     
     def cancel_task(self, task_id: str) -> bool:
         """
@@ -434,7 +444,7 @@ class TaskQueueManager:
         Returns:
             是否成功取消（True: 成功取消, False: 任务不存在或已完成）
         """
-        with self._data_lock:
+        with self._execution_condition:  # 使用条件变量的锁
             task = self._tasks.get(task_id)
             if not task:
                 return False
@@ -458,6 +468,8 @@ class TaskQueueManager:
                 # 清理
                 self._progress_callbacks.pop(task_id, None)
                 self._cancel_events.pop(task_id, None)
+                # 通知其他等待的线程（队列顺序可能变化了）
+                self._execution_condition.notify_all()
                 return True
             
             # 如果任务正在运行，标记为取消（线程会检查并退出）
@@ -469,9 +481,93 @@ class TaskQueueManager:
                     self._current_task_id = None
                 # 清理
                 self._progress_callbacks.pop(task_id, None)
+                # 通知其他等待的线程
+                self._execution_condition.notify_all()
                 return True
             
             return False
+    
+    # ============================================================================
+    # 公平锁机制：确保任务按队列顺序执行
+    # ============================================================================
+    
+    def wait_for_turn(self, task_id: str, timeout: float = 1200.0) -> bool:
+        """
+        等待轮到自己执行（公平锁机制）
+        
+        线程调用此方法后会阻塞，直到：
+        1. 轮到自己执行（队列中第一个 + 没有其他任务正在运行）
+        2. 任务被取消
+        3. 超时
+        
+        Args:
+            task_id: 任务ID
+            timeout: 超时时间（秒），默认 1200 秒
+            
+        Returns:
+            bool: True 表示轮到自己执行，False 表示被取消或超时
+        """
+        start_time = time.time()
+        
+        with self._execution_condition:
+            while True:
+                # 检查任务是否存在
+                task = self._tasks.get(task_id)
+                if not task:
+                    # print(f"[FairLock] 任务 {task_id} 不存在，放弃等待")
+                    return False
+                
+                # 检查任务是否被取消
+                if task.status == TaskStatus.CANCELLED:
+                    # print(f"[FairLock] 任务 {task_id} 已被取消，放弃等待")
+                    return False
+                
+                # 检查是否轮到自己执行
+                # 条件：1. 没有正在执行的任务  2. 自己是队列中第一个等待的任务
+                if self._current_task_id is None:
+                    # 找到队列中第一个等待中的任务
+                    first_waiting_task_id = None
+                    for tid in self._queue:
+                        t = self._tasks.get(tid)
+                        if t and t.status == TaskStatus.QUEUED:
+                            first_waiting_task_id = tid
+                            break
+                    
+                    if first_waiting_task_id == task_id:
+                        # print(f"[FairLock] 任务 {task_id} 轮到执行，获取执行权")
+                        return True
+                
+                # 还没轮到自己，计算剩余超时时间
+                elapsed = time.time() - start_time
+                remaining_timeout = timeout - elapsed
+                
+                if remaining_timeout <= 0:
+                    print(f"[FairLock] 任务 {task_id} 等待超时")
+                    return False
+                
+                # 等待通知（带超时）
+                # 当有任务完成、取消或队列变化时，会收到通知
+                self._execution_condition.wait(timeout=min(remaining_timeout, 1.0))
+    
+    def release_turn(self, task_id: str):
+        """
+        释放执行权并通知下一个等待的任务
+        
+        任务执行完成后调用此方法，会：
+        1. 清除当前执行任务标记
+        2. 通知所有等待的线程重新检查是否轮到自己
+        
+        Args:
+            task_id: 任务ID
+        """
+        with self._execution_condition:
+            # 只有当前正在执行的任务才能释放
+            if self._current_task_id == task_id:
+                self._current_task_id = None
+                print(f"[FairLock] 任务 {task_id} 释放执行权")
+            
+            # 通知所有等待的线程
+            self._execution_condition.notify_all()
     
     def is_task_cancelled(self, task_id: str) -> bool:
         """
