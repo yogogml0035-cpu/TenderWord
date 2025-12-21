@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from logging_utils import log_state
-from state import TenderGraphState
+from state import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
@@ -40,7 +40,7 @@ def _get_page_number(rng) -> int:
         return -1
 
 
-def replace_content(state: TenderGraphState, config) -> TenderGraphState:
+def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     """
     在 Word 文档中替换指定的内容，包括页眉页脚等所有部分。
     
@@ -87,7 +87,7 @@ def replace_content(state: TenderGraphState, config) -> TenderGraphState:
         replacement_log = "未指定替换内容，跳过内容替换。"
         new_state_dict = dict(state)
         new_state_dict["replacement_log"] = replacement_log
-        new_state = TenderGraphState(**new_state_dict)
+        new_state = XjcgTenderGraphState(**new_state_dict)
         log_state("replace_content", new_state)
         return new_state
     
@@ -318,7 +318,7 @@ def replace_content(state: TenderGraphState, config) -> TenderGraphState:
     replacement_log = "\n".join(replacement_log_parts)
     new_state_dict["replacement_log"] = replacement_log
     new_state_dict["replace_content_done"] = True
-    new_state = TenderGraphState(**new_state_dict)
+    new_state = XjcgTenderGraphState(**new_state_dict)
     log_state("replace_content", new_state)
     
     end_time = time.time()

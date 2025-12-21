@@ -25,7 +25,7 @@ from nodes.xjcg_word_nodes import (
     extract_tender_params,
     delete_tender_param
 )
-from state import TenderGraphState, TextFormatState
+from state import XjcgTenderGraphState, TextFormatState
 from task.task_queue_manager import get_task_queue
 
 
@@ -261,10 +261,10 @@ def build_word_operations_subgraph():
     子图流程：
     START → delete_tender_param → get_replacements → replace_content → END
     
-    子图使用与主图相同的状态类型 TenderGraphState，
+    子图使用与主图相同的状态类型 XjcgTenderGraphState，
     这样可以直接共享状态，无需状态转换。
     """
-    subgraph_builder = StateGraph(TenderGraphState)
+    subgraph_builder = StateGraph(XjcgTenderGraphState)
     
     # 添加子图节点（使用进度追踪包装）
     subgraph_builder.add_node("delete_tender_param", 
@@ -315,7 +315,7 @@ def build_graph():
     
     最后在 update_word 汇合。
     """
-    builder = StateGraph(TenderGraphState)
+    builder = StateGraph(XjcgTenderGraphState)
     
     # 添加主图节点（使用进度追踪包装）
     builder.add_node("prepare_template", 

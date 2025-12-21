@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from logging_utils import log_state
-from state import TenderGraphState
+from state import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
@@ -33,7 +33,7 @@ wdActiveEndPageNumber = 3
     
 
 
-def extract_tender_params(state: TenderGraphState, config) -> TenderGraphState:
+def extract_tender_params(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     """
     根据前后内容定位插入位置，提取该位置的 WPS/Word 内容并存储到 tender_params 状态中。
     
@@ -59,7 +59,7 @@ def extract_tender_params(state: TenderGraphState, config) -> TenderGraphState:
         print(f"[extract_tender_params] 警告: 未提供 insertion_before_text 或 insertion_after_text，跳过提取")
         new_state_dict = dict(state)
         new_state_dict["tender_params"] = ""
-        new_state = TenderGraphState(**new_state_dict)
+        new_state = XjcgTenderGraphState(**new_state_dict)
         log_state("extract_tender_params", new_state)
         return new_state
     
@@ -371,7 +371,7 @@ def extract_tender_params(state: TenderGraphState, config) -> TenderGraphState:
         print(f"[extract_tender_params] 从文件提取技术参数完成，长度: {len(tender_params)}")
         new_state_dict["tender_params"] = tender_params
     
-    new_state = TenderGraphState(**new_state_dict)
+    new_state = XjcgTenderGraphState(**new_state_dict)
     log_state("extract_tender_params", new_state)
     
     end_time = time.time()
@@ -395,7 +395,7 @@ if __name__ == "__main__":
     
     
     # 重新导入必要的模块（从项目根目录直接导入）
-    from state import TenderGraphState
+    from state import XjcgTenderGraphState
     
     # 测试文档路径列表
     test_doc_paths = [
@@ -426,7 +426,7 @@ if __name__ == "__main__":
             time.sleep(1.0)  # 增加等待时间，确保 WPS 完全关闭
         
         # 创建测试状态
-        test_state: TenderGraphState = {
+        test_state: XjcgTenderGraphState = {
             "prepared_doc_path": str(test_doc_path),
             "insertion_before_text": "第三章  采购需求",
             "insertion_after_text": "第四章  响应文件有关格式",

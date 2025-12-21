@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from logging_utils import log_state
-from state import TenderGraphState
+from state import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
@@ -27,7 +27,7 @@ wdFindStop = 0
 
 
 # 提取函数：每个字段的查找逻辑
-def extract_project_number(doc_content: str, first_page_header: str, state: TenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_project_number(doc_content: str, first_page_header: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从页眉中提取 project_number"""
     if not first_page_header or not state.get("project_number"):
         return None
@@ -48,7 +48,7 @@ def extract_project_number(doc_content: str, first_page_header: str, state: Tend
     return None
 
 
-def extract_project_name(doc_content: str, first_page_header: str, state: TenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_project_name(doc_content: str, first_page_header: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从页眉中提取 project_name"""
     if not first_page_header or not state.get("project_name"):
         return None
@@ -65,7 +65,7 @@ def extract_project_name(doc_content: str, first_page_header: str, state: Tender
     return None
 
 
-def extract_buyer_name(doc_content: str, state: TenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_buyer_name(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从首页正文中提取 buyer_name"""
     if not doc_content or not state.get("buyer_name"):
         return None
@@ -98,7 +98,7 @@ def extract_buyer_name(doc_content: str, state: TenderGraphState, log_parts: Lis
     return None
 
 
-def extract_project_content(doc_content: str, state: TenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_project_content(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从正文中提取 project_content"""
     if not doc_content or not state.get("project_content"):
         return None
@@ -189,7 +189,7 @@ def extract_project_content(doc_content: str, state: TenderGraphState, log_parts
     return None
 
 
-def extract_bzj_rule(doc_content: str, state: TenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_bzj_rule(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从正文中提取 bzj_rule"""
     if not doc_content or not state.get("bzj_rule"):
         return None
@@ -226,7 +226,7 @@ def extract_bzj_rule(doc_content: str, state: TenderGraphState, log_parts: List[
     return None
 
 
-def extract_contact_fields(doc_content: str, state: TenderGraphState, log_parts: List[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def extract_contact_fields(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """从正文中提取 project_zbr_xbr, zbr_xbr_tel, zbr_pinyin"""
     if not doc_content:
         return None, None, None
@@ -294,7 +294,7 @@ def extract_contact_fields(doc_content: str, state: TenderGraphState, log_parts:
     return project_zbr_xbr, zbr_xbr_tel, zbr_pinyin
 
 
-def get_replacements(state: TenderGraphState, config) -> TenderGraphState:
+def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     """
     在 Word 文档中查找需要替换的占位符，并根据 state 中的字段建立映射关系。
     
@@ -751,7 +751,7 @@ def get_replacements(state: TenderGraphState, config) -> TenderGraphState:
     # 只返回需要更新的键，避免并行执行时的状态冲突
     # 在 LangGraph 中，并行节点应该只返回部分状态更新
     replacement_log = "; ".join(log_parts)
-    new_state = TenderGraphState(
+    new_state = XjcgTenderGraphState(
         placeholder_mapping=found_placeholders,
         replacements=replacements,
         replacement_log=replacement_log
@@ -763,7 +763,7 @@ def get_replacements(state: TenderGraphState, config) -> TenderGraphState:
         "replacements": replacements,
         "replacement_log": replacement_log
     })
-    log_state("get_replacements", TenderGraphState(**full_state_for_log))
+    log_state("get_replacements", XjcgTenderGraphState(**full_state_for_log))
     
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -785,7 +785,7 @@ if __name__ == "__main__":
         sys.path.insert(0, str(ROOT))
     
     # 重新导入必要的模块（从项目根目录直接导入）
-    from state import TenderGraphState
+    from state import XjcgTenderGraphState
     
     # 测试文档路径列表
     test_doc_paths = [
@@ -810,7 +810,7 @@ if __name__ == "__main__":
             continue
         
         # 创建测试状态
-        test_state: TenderGraphState = {
+        test_state: XjcgTenderGraphState = {
             "origin_tender_path": str(test_doc_path),
             "project_number": "253505",  
             "project_name": "细胞电转仪", 

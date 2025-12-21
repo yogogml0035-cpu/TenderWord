@@ -17,11 +17,8 @@ from util.word_application_util import (
 
 from util.word_com_manager import (
     com_lock,
-    com_session,
     is_rpc_error,
     calculate_retry_delay,
-    with_com_retry,
-    WordComOperation,
     MAX_RETRIES,
     RPC_ERROR_CODES,
 )
@@ -49,11 +46,8 @@ __all__ = [
     'save_document_with_retry',
     # word_com_manager
     'com_lock',
-    'com_session',
     'is_rpc_error',
     'calculate_retry_delay',
-    'with_com_retry',
-    'WordComOperation',
     'MAX_RETRIES',
     'RPC_ERROR_CODES',
     # word_extraction_utils

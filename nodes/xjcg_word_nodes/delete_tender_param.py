@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from logging_utils import log_state
-from state import TenderGraphState
+from state import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
@@ -29,7 +29,7 @@ wdGoToAbsolute = 1
 wdActiveEndPageNumber = 3
 
 
-def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
+def delete_tender_param(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     """
     根据前后内容定位插入位置，删除该位置的 WPS/Word 内容。
     
@@ -54,7 +54,7 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
         # 如果没有提供前后文本，跳过删除
         print(f"[delete_tender_param] 警告: 未提供 insertion_before_text 或 insertion_after_text，跳过删除")
         new_state_dict = dict(state)
-        new_state = TenderGraphState(**new_state_dict)
+        new_state = XjcgTenderGraphState(**new_state_dict)
         log_state("delete_tender_param", new_state)
         return new_state
     
@@ -609,7 +609,7 @@ def delete_tender_param(state: TenderGraphState, config) -> TenderGraphState:
     
     # 更新状态
     new_state_dict = dict(state)
-    new_state = TenderGraphState(**new_state_dict)
+    new_state = XjcgTenderGraphState(**new_state_dict)
     log_state("delete_tender_param", new_state)
     
     end_time = time.time()

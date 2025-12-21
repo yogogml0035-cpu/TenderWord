@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from logging_utils import log_state, log_state_start
-from state import TenderGraphState
+from state import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
@@ -27,7 +27,7 @@ WD_COLLAPSE_END = 0
 WD_NO_PROTECTION = -1
 
 
-def prepare_template(state: TenderGraphState, config) -> TenderGraphState:
+def prepare_template(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     start_time = time.time()
     print(f"[prepare_template] 开始执行...")
     
@@ -148,7 +148,7 @@ def prepare_template(state: TenderGraphState, config) -> TenderGraphState:
             "insertion_log": ", ".join(f"{k}x{v}" for k, v in stats.items()) if stats else "无替换",
         }
     )
-    new_state = TenderGraphState(**new_state_dict)
+    new_state = XjcgTenderGraphState(**new_state_dict)
     log_state_start("prepare_template", new_state)
     log_state("prepare_template", new_state)
     

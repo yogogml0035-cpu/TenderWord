@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from logging_utils import log_state
-from state import TenderGraphState
+from state import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
@@ -35,7 +35,7 @@ wdFindStop = 0
 wdWithInTable = 12
 
 
-def update_word(state: TenderGraphState, config) -> TenderGraphState:
+def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     start_time = time.perf_counter()
     print("[update_word] 开始执行...")
     
@@ -775,7 +775,7 @@ def update_word(state: TenderGraphState, config) -> TenderGraphState:
     new_state_dict = dict(state)
     insertion_log = "; ".join(insertion_log_parts)
     new_state_dict["insertion_log"] = insertion_log
-    new_state = TenderGraphState(**new_state_dict)
+    new_state = XjcgTenderGraphState(**new_state_dict)
     log_state("update_word", new_state)
     
     duration = time.perf_counter() - start_time
