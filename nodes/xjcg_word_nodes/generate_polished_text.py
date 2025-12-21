@@ -7,26 +7,16 @@ import pathlib
 import re
 import time
 
-from volcenginesdkarkruntime import Ark
-from openai import OpenAI, AsyncOpenAI
-import asyncio
-
-
 # 直接运行时使用绝对导入
 import sys
 
 from logging_utils import log_state
 from state import TenderGraphState
-
-
-class LLMTimeoutError(Exception):
-    """大模型响应超时异常"""
-    def __init__(self, model_name: str, timeout_seconds: int):
-        self.model_name = model_name
-        self.timeout_seconds = timeout_seconds
-        super().__init__(
-            f"大模型响应超时失败（{model_name} 在 {timeout_seconds} 秒内未响应），请尝试其他模型或者重新生成"
-        )
+from util.llm_stream_utils import (
+    LLMTimeoutError,
+    StreamCallbacks,
+    stream_llm_completion,
+)
    
 
 def _sanitize_filename(name: str) -> str:
@@ -100,154 +90,24 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
             return
         print(text, end="", flush=True)
 
-    content_parts = []
-    content = ""
-    TIMEOUT_SECONDS = 10  # 10秒超时
+    # 超时配置
+    TIMEOUT_SECONDS = 10  # 超时时间
+    CHECK_INTERVAL = 3.0  # 检查间隔
 
-    # 根据模型提供商选择不同的调用方式
-    if model_provider == "doubao":
-        try:
-            # Doubao (Ark) Implementation - 异步调用
-            client = Ark(
-                base_url=os.getenv('ARK_BASE_URL'),
-                api_key=os.getenv('ARK_API_KEY')
-            )
-            
-            # 使用 asyncio.to_thread 在线程中执行同步流式调用
-            # 由于流式响应需要实时处理，我们需要在线程中处理并实时更新
-            def _process_stream():
-                last_chunk_time = time.time()  # 记录上次收到 chunk 的时间
-                completion = client.chat.completions.create(
-                    model=os.getenv("DOUBAO_MODEL"),
-                    messages=[
-                        {"role": "user", "content": prompt},
-                    ],
-                    stream=True,
-                    max_completion_tokens=32768,
-                    thinking={"type": "disabled"},
-                )
-                parts = []
-                for chunk in completion:
-                    # 检查距离上次收到 chunk 的间隔是否超时
-                    elapsed = time.time() - last_chunk_time
-                    if elapsed > TIMEOUT_SECONDS:
-                        print(f"\n错误: Doubao 流式响应间隔超时（{elapsed:.1f}秒未收到新响应）")
-                        raise LLMTimeoutError("豆包 (Doubao)", TIMEOUT_SECONDS)
-                    last_chunk_time = time.time()  # 重置计时器
-                    
-                    if chunk.choices[0].delta.content is not None:
-                        chunk_text = chunk.choices[0].delta.content
-                        parts.append(chunk_text)
-                        content_parts.append(chunk_text)
-                        _log_chunk(chunk_text)
-                        _push_stream_update("".join(content_parts))
-                return "".join(parts)
-            
-            # 移除整体超时限制，只依赖 chunk 间隔超时
-            content = await asyncio.to_thread(_process_stream)
-            print()
-            
-        except LLMTimeoutError:
-            raise  # 直接向上抛出超时异常
-        except Exception as e:
-            print(f"Doubao 流式调用失败: {e}")
-            raise
-
-    elif model_provider == "qwen":
-        try:
-            # Qwen Implementation - 异步调用
-            client = AsyncOpenAI(
-                api_key=os.getenv("DASHSCOPE_API_KEY"),
-                base_url=os.getenv("DASHSCOPE_BASE_URL"),
-            )
-            
-            async def _qwen_stream_call():
-                last_chunk_time = time.time()  # 记录上次收到 chunk 的时间
-                completion = await client.chat.completions.create(
-                    model=os.getenv("QWEN_MODEL"),
-                    messages=[{'role': 'user', 'content': prompt}],
-                    stream=True,
-                    stream_options={"include_usage": True},
-                    extra_body={"max_input_tokens": 1000000, "enable_thinking": False}
-                )
-                
-                async for chunk in completion:
-                    # 检查距离上次收到 chunk 的间隔是否超时
-                    elapsed = time.time() - last_chunk_time
-                    if elapsed > TIMEOUT_SECONDS:
-                        print(f"\n错误: Qwen 流式响应间隔超时（{elapsed:.1f}秒未收到新响应）")
-                        raise LLMTimeoutError("千问 (Qwen)", TIMEOUT_SECONDS)
-                    last_chunk_time = time.time()  # 重置计时器
-                    
-                    # Qwen compatible mode might return chunk with choices
-                    if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
-                        delta = chunk.choices[0].delta
-                        if hasattr(delta, 'content') and delta.content:
-                            chunk_text = delta.content
-                            content_parts.append(chunk_text)
-                            _log_chunk(chunk_text)
-                            _push_stream_update("".join(content_parts))
-                return "".join(content_parts)
-            
-            # 移除整体超时限制，只依赖 chunk 间隔超时
-            content = await _qwen_stream_call()
-            print()
-
-        except LLMTimeoutError:
-            raise  # 直接向上抛出超时异常
-        except Exception as e:
-            print(f"Qwen 流式调用失败: {e}")
-            raise
-
-    else:
-        try:
-            api_key = os.getenv("DEEPSEEK_API_KEY")
-            if not api_key:
-                raise ValueError("DEEPSEEK_API_KEY is not set")
-            
-            base_url = os.getenv("DEEPSEEK_BASE_URL")
-            client = AsyncOpenAI(
-                api_key=api_key,
-                base_url=base_url,
-            )
-            
-            async def _deepseek_stream_call():
-                last_chunk_time = time.time()  # 记录上次收到 chunk 的时间
-                completion = await client.chat.completions.create(
-                    model=os.getenv("DEEPSEEK_MODEL"),
-                    messages=[{'role': 'user', 'content': prompt}],
-                    stream=True,
-                    max_tokens=8192,
-                    temperature=0.1
-                )
-                
-                async for chunk in completion:
-                    # 检查距离上次收到 chunk 的间隔是否超时
-                    elapsed = time.time() - last_chunk_time
-                    if elapsed > TIMEOUT_SECONDS:
-                        print(f"\n错误: DeepSeek 流式响应间隔超时（{elapsed:.1f}秒未收到新响应）")
-                        raise LLMTimeoutError("深度求索 (DeepSeek)", TIMEOUT_SECONDS)
-                    last_chunk_time = time.time()  # 重置计时器
-                    
-                    if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
-                        delta = chunk.choices[0].delta
-                        if hasattr(delta, 'content') and delta.content:
-                            chunk_text = delta.content
-                            content_parts.append(chunk_text)
-                            _log_chunk(chunk_text)
-                            _push_stream_update("".join(content_parts))
-                return "".join(content_parts)
-            
-            # 移除整体超时限制，只依赖 chunk 间隔超时
-            content = await _deepseek_stream_call()
-            print()
-
-        except LLMTimeoutError:
-            raise  # 直接向上抛出超时异常
-        except Exception as e:
-            print(f"DeepSeek 流式调用失败: {e}")
-            raise
-    # content = """"""
+    # 创建回调函数集合
+    callbacks = StreamCallbacks(
+        on_chunk=_log_chunk,
+        on_update=_push_stream_update,
+    )
+    
+    # 调用统一的流式 LLM 接口
+    content = await stream_llm_completion(
+        model_provider=model_provider,
+        prompt=prompt,
+        callbacks=callbacks,
+        timeout_seconds=TIMEOUT_SECONDS,
+        check_interval=CHECK_INTERVAL,
+    )
 
     # 将大模型生成的内容写入 txt 文件，命名：项目编号-项目名称-初稿.txt
     project_number = str(state.get("project_number", "") or "").strip()
@@ -256,7 +116,7 @@ async def generate_polished_text(state: TenderGraphState, config) -> TenderGraph
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
     filename = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
     filename = f"{filename}-{timestamp}.txt"
-    # 优先使用 origin_tender_path 所在目录，其次 tender_param_path，再次 prompts 目录
+
     output_dir = None
     try:
         if origin_tender_path:

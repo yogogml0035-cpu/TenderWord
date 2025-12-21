@@ -312,7 +312,7 @@ with tab:
         # 添加模型选择
         model_option = st.selectbox(
             "选择生成模型",
-            ["深度求索（DeepSeek）", "豆包 (Doubao)", "千问 (Qwen)"],
+            ["深度求索（DeepSeek）", "通义千问 (Qwen)", "豆包 (Doubao)"],
             index=0,
             key="llm_model_select"
         )
@@ -503,9 +503,9 @@ with tab:
 
             # 映射模型名称到内部标识符
             model_map = {
-                "深度求索（DeepSeek）": "deepseek",
-                "豆包 (Doubao)": "doubao", 
-                "千问 (Qwen)": "qwen"
+                "深度求索(DeepSeek)": "deepseek",
+                "豆包(Doubao)": "doubao", 
+                "通义千问(Qwen)": "qwen"
             }
             selected_model_id = model_map.get(model_option, "deepseek")
             
@@ -612,7 +612,7 @@ with tab:
         current_llm = ""
         current_progress_count = 0
         last_heartbeat_time = time.time()
-        heartbeat_interval = 2.0  # 每2秒发送一次心跳
+        heartbeat_interval = 1.5  # 发送一次心跳的间隔
         
         while not result_holder["done"] or not log_queue.empty():
             try:
@@ -731,7 +731,7 @@ with tab:
             if prepared_path and pathlib.Path(prepared_path).exists():
                  st.session_state.history.append({
                     "path": prepared_path,
-                    "time": time.strftime("%H:%M:%S", time.localtime()),
+                    "time": time.strftime("%H:%M", time.localtime()),
                     "model": model_option
                 })
 
