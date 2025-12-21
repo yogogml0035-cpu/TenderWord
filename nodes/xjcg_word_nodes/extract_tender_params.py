@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import time
-
 import pathlib
 import sys
 
@@ -11,25 +10,24 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from logging_utils import log_state
 from state import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
     open_document_with_retry,
+    unprotect_document,
 )
-from util.word_com_manager import com_lock, is_rpc_error, calculate_retry_delay, MAX_RETRIES
 from util.word_extraction_utils import (
     extract_content_with_tables,
     extract_text_from_word_file,
 )
-
-# WPS/Word constants (WPS 兼容 Word 的常量)
-wdFindStop = 0
-wdCollapseEnd = 0
-wdGoToPage = 1
-wdGoToAbsolute = 1
-wdActiveEndPageNumber = 3
+from util.word_constants import (
+    wdFindStop,
+    wdCollapseEnd,
+    wdGoToPage,
+    wdGoToAbsolute,
+    wdActiveEndPageNumber,
+)
     
 
 
@@ -60,7 +58,6 @@ def extract_tender_params(state: XjcgTenderGraphState, config) -> XjcgTenderGrap
         new_state_dict = dict(state)
         new_state_dict["tender_params"] = ""
         new_state = XjcgTenderGraphState(**new_state_dict)
-        log_state("extract_tender_params", new_state)
         return new_state
     
     # 确保路径是绝对路径（WPS/Word COM 对象需要绝对路径）
@@ -91,129 +88,16 @@ def extract_tender_params(state: XjcgTenderGraphState, config) -> XjcgTenderGrap
             node_name="extract_tender_params"
         )
 
-        try:
-            # 第一次尝试打开文档（只读模式，因为只需要提取内容）
-            doc = wps.Documents.Open(
-                FileName=prepared_doc_path,
-                ConfirmConversions=False,
-                ReadOnly=True,  # 只读模式，只需要提取内容
-                AddToRecentFiles=False,
-                NoEncodingDialog=True
-            )
-            print(f"已打开文档: {prepared_doc_path}")
-        except Exception as open_error:
-            # 参考 get_replacements 的逻辑，针对 COM/RPC 错误做一次重试
-            error_code = (
-                open_error.args[0]
-                if hasattr(open_error, "args") and open_error.args
-                else None
-            )
-            # -2147023174: RPC 服务器不可用
-            # -2147023179: 接口未知
-            is_com_rpc_error = (
-                error_code in (-2147023174, -2147023179)
-                or "RPC" in str(open_error)
-                or "接口未知" in str(open_error)
-            )
-            if is_com_rpc_error:
-                print("[extract_tender_params] 检测到 COM/RPC 错误，尝试重新创建 Word 应用程序并重试...")
-                try:
-                    # 使用统一的工具函数关闭旧的 Word 应用程序
-                    close_word_application(
-                        word_app=wps,
-                        doc=None,
-                        com_initialized=com_initialized,
-                        wait_time=1.0,
-                        node_name="extract_tender_params"
-                    )
-                    wps = None
-                    com_initialized = False
-
-                    # 使用统一的工具函数重新创建 Word 应用程序对象
-                    wps, com_initialized = create_word_application(
-                        initial_delay=1.0,  # 等待 1 秒，确保之前的实例完全关闭
-                        post_init_delay=0.5,  # 给 Word 一点时间完成初始化
-                        use_existing=False,  # 并发环境下必须使用独立实例
-                        verify=True,
-                        node_name="extract_tender_params"
-                    )
-                    print("[extract_tender_params] Word 应用程序对象已重新创建，正在重试打开文档...")
-
-                    # 重试打开文档（只读模式）
-                    doc = wps.Documents.Open(
-                        FileName=prepared_doc_path,
-                        ConfirmConversions=False,
-                        ReadOnly=True,
-                        AddToRecentFiles=False,
-                        NoEncodingDialog=True
-                    )
-                    print(f"重试后已打开文档: {prepared_doc_path}")
-                    time.sleep(0.2)
-                except Exception as retry_error:
-                    error_msg = f"重新创建 Word 应用程序后打开文档失败: {retry_error}"
-                    print(f"[extract_tender_params] {error_msg}")
-                    # 尝试获取更详细的错误信息
-                    import traceback
-                    print(f"[extract_tender_params] 详细错误信息:")
-                    traceback.print_exc()
-                    # 使用统一的工具函数确保关闭 Word
-                    close_word_application(
-                        word_app=wps,
-                        doc=None,
-                        com_initialized=com_initialized,
-                        wait_time=0.5,
-                        node_name="extract_tender_params"
-                    )
-                    raise
-            else:
-                # 非 COM 错误，按原逻辑处理
-                print(f"[extract_tender_params] 首次打开失败，等待 1 秒重试: {open_error}")
-                time.sleep(1.0)
-                try:
-                    doc = wps.Documents.Open(
-                        FileName=prepared_doc_path,
-                        ConfirmConversions=False,
-                        ReadOnly=True,
-                        AddToRecentFiles=False,
-                        NoEncodingDialog=True
-                    )
-                    print(f"重试后已打开文档: {prepared_doc_path}")
-                except Exception as retry_error:
-                    error_msg = f"打开文档失败: {retry_error}"
-                    print(f"[extract_tender_params] {error_msg}")
-                    # 尝试获取更详细的错误信息
-                    import traceback
-                    print(f"[extract_tender_params] 详细错误信息:")
-                    traceback.print_exc()
-                    raise
+        # 使用统一的工具函数打开文档（带重试机制）
+        doc = open_document_with_retry(
+            word_app=wps,
+            file_path=prepared_doc_path,
+            read_only=True,  # 只读模式，只需要提取内容
+            node_name="extract_tender_params"
+        )
         
-        # 尝试取消保护（如果需要）
-        try:
-            protection_type = doc.ProtectionType
-            print(f"文档保护类型: {protection_type} (-1 表示无保护)")
-            if protection_type != -1:  # -1 表示 wdNoProtection
-                try:
-                    # 尝试获取密码（如果有的话，这里传空字符串）
-                    doc.Unprotect("")
-                    print("已取消文档保护")
-                except Exception as unprotect_e:
-                    print(f"警告: 取消文档保护失败: {unprotect_e}")
-                    # 尝试强制取消保护
-                    try:
-                        doc.ProtectionType = -1
-                        print("已强制设置文档为无保护状态")
-                    except Exception:
-                        pass
-        except Exception as prot_e:
-            print(f"警告: 检查文档保护时出错: {prot_e}")
-        
-        # 确保文档可编辑
-        try:
-            if doc.ProtectContent:
-                print("警告: 文档内容仍受保护，尝试强制取消...")
-                doc.ProtectContent = False
-        except Exception:
-            pass
+        # 使用统一的工具函数取消文档保护
+        unprotect_document(doc, node_name="extract_tender_params")
         
         # 在文档正文中查找前后文本，使用字体和字号匹配
         doc_content = doc.Content
@@ -372,7 +256,6 @@ def extract_tender_params(state: XjcgTenderGraphState, config) -> XjcgTenderGrap
         new_state_dict["tender_params"] = tender_params
     
     new_state = XjcgTenderGraphState(**new_state_dict)
-    log_state("extract_tender_params", new_state)
     
     end_time = time.time()
     elapsed_time = end_time - start_time

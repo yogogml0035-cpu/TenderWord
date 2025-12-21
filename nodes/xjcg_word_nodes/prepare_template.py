@@ -3,8 +3,6 @@ from __future__ import annotations
 import os
 import shutil
 import time
-from typing import Dict, Iterable, Tuple
-
 import pathlib
 import sys
 
@@ -13,18 +11,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from logging_utils import log_state, log_state_start
 from state import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
-    open_document_with_retry,
 )
-from util.word_com_manager import com_lock, is_rpc_error, calculate_retry_delay, MAX_RETRIES
-
-WD_FIND_STOP = 0
-WD_COLLAPSE_END = 0
-WD_NO_PROTECTION = -1
 
 
 def prepare_template(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
@@ -149,8 +140,6 @@ def prepare_template(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
         }
     )
     new_state = XjcgTenderGraphState(**new_state_dict)
-    log_state_start("prepare_template", new_state)
-    log_state("prepare_template", new_state)
     
     end_time = time.time()
     elapsed_time = end_time - start_time

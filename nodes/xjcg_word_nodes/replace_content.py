@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import time
-
 import pathlib
 import sys
 
@@ -11,20 +10,18 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from logging_utils import log_state
 from state import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
     open_document_with_retry,
-    save_document_with_retry,
+    unprotect_document,
 )
-from util.word_com_manager import com_lock, is_rpc_error, calculate_retry_delay, MAX_RETRIES
-
-# Word constants
-wdFindStop = 0
-wdCollapseEnd = 0
-wdActiveEndPageNumber = 7  # Information property constant for page number
+from util.word_constants import (
+    wdFindStop,
+    wdCollapseEnd,
+    wdActiveEndPageNumber,
+)
 
 
 def _get_page_number(rng) -> int:
@@ -88,7 +85,6 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
         new_state_dict = dict(state)
         new_state_dict["replacement_log"] = replacement_log
         new_state = XjcgTenderGraphState(**new_state_dict)
-        log_state("replace_content", new_state)
         return new_state
     
     replacement_log_parts = []
@@ -117,36 +113,17 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
             node_name="replace_content"
         )
         
-        # 打开文档时增加重试以避免 COM 接口尚未就绪
-        open_attempts = 3
-        last_error = None
-        for attempt in range(1, open_attempts + 1):
-            try:
-                doc = word.Documents.Open(
-                    FileName=prepared_doc_path,
-                    ConfirmConversions=False,
-                    ReadOnly=False,
-                    AddToRecentFiles=False,
-                    NoEncodingDialog=True
-                )
-                break
-            except Exception as e:
-                last_error = e
-                if attempt < open_attempts:
-                    time.sleep(1.0)
-                else:
-                    raise
-        if doc is None and last_error:
-            # 理论上上面的 raise 已经抛出，但为了保险保留提示
-            raise last_error
+        # 使用统一的工具函数打开文档（带重试机制）
+        doc = open_document_with_retry(
+            word_app=word,
+            file_path=prepared_doc_path,
+            read_only=False,
+            node_name="replace_content"
+        )
         replacement_log_parts.append(f"已打开: {prepared_doc_path}")
         
-        # 尝试取消保护
-        try:
-            if doc.ProtectionType != -1:  # -1 表示 wdNoProtection
-                doc.Unprotect()
-        except Exception:
-            pass
+        # 使用统一的工具函数取消文档保护
+        unprotect_document(doc, node_name="replace_content")
         
         print(f"开始替换 {len(replacements)} 对替换内容...")
         
@@ -319,7 +296,6 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
     new_state_dict["replacement_log"] = replacement_log
     new_state_dict["replace_content_done"] = True
     new_state = XjcgTenderGraphState(**new_state_dict)
-    log_state("replace_content", new_state)
     
     end_time = time.time()
     elapsed_time = end_time - start_time

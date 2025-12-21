@@ -7,11 +7,15 @@ Word 应用程序创建工具函数
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import time
 import pythoncom
 from typing import Optional, Tuple
+
+# 获取 logger
+logger = logging.getLogger(__name__)
 
 try:
     import win32com.client as win32
@@ -62,7 +66,7 @@ def clear_win32com_cache() -> bool:
         bool: 如果成功清除缓存返回 True，否则返回 False
     """
     if win32com is None:
-        print("[win32com缓存] win32com 未安装，无法清除缓存")
+        logger.warning("[win32com缓存] win32com 未安装，无法清除缓存")
         return False
     
     try:
@@ -70,7 +74,7 @@ def clear_win32com_cache() -> bool:
         gen_py_path = win32com.__gen_path__
         
         if not gen_py_path:
-            print("[win32com缓存] 未找到 gen_py 缓存路径")
+            logger.warning("[win32com缓存] 未找到 gen_py 缓存路径")
             return False
         
         # 获取父目录（gen_py 目录本身，而不是版本子目录）
@@ -83,9 +87,9 @@ def clear_win32com_cache() -> bool:
             cache_dir = gen_py_path
         
         if os.path.exists(cache_dir):
-            print(f"[win32com缓存] 正在删除缓存目录: {cache_dir}")
+            logger.info(f"[win32com缓存] 正在删除缓存目录: {cache_dir}")
             shutil.rmtree(cache_dir, ignore_errors=True)
-            print(f"[win32com缓存] 缓存目录已删除")
+            logger.info("[win32com缓存] 缓存目录已删除")
             
             # 重置 gencache 的内部状态
             try:
@@ -95,15 +99,15 @@ def clear_win32com_cache() -> bool:
                     if hasattr(win32.gencache, '_GetGencache'):
                         win32.gencache._GetGencache()
             except Exception as reset_e:
-                print(f"[win32com缓存] 重置 gencache 状态时出错 (可忽略): {reset_e}")
+                logger.debug(f"[win32com缓存] 重置 gencache 状态时出错 (可忽略): {reset_e}")
             
             return True
         else:
-            print(f"[win32com缓存] 缓存目录不存在: {cache_dir}")
+            logger.debug(f"[win32com缓存] 缓存目录不存在: {cache_dir}")
             return True  # 目录不存在也算成功
             
     except Exception as e:
-        print(f"[win32com缓存] 清除缓存时出错: {e}")
+        logger.error(f"[win32com缓存] 清除缓存时出错: {e}")
         return False
 
 
@@ -166,7 +170,7 @@ def _create_word_application_internal(
     
     # 创建前等待，让之前的实例有时间完全关闭
     if initial_delay > 0:
-        print(f"{log_prefix}等待 {initial_delay} 秒后创建 Microsoft Word 实例...")
+        logger.debug(f"{log_prefix}等待 {initial_delay} 秒后创建 Microsoft Word 实例...")
         time.sleep(initial_delay)
     
     # 初始化 COM
@@ -190,8 +194,8 @@ def _create_word_application_internal(
             
             if is_rpc_error(e) and attempt < MAX_RETRIES:
                 delay = calculate_retry_delay(attempt)
-                print(f"{log_prefix}创建 Word 失败 (尝试 {attempt + 1}/{MAX_RETRIES + 1}): {e}")
-                print(f"{log_prefix}等待 {delay:.1f} 秒后重试...")
+                logger.warning(f"{log_prefix}创建 Word 失败 (尝试 {attempt + 1}/{MAX_RETRIES + 1}): {e}")
+                logger.info(f"{log_prefix}等待 {delay:.1f} 秒后重试...")
                 time.sleep(delay)
             else:
                 # 创建失败，清理 COM
@@ -220,7 +224,7 @@ def _create_word_application_internal(
     if verify:
         try:
             app_name = word_app.Name
-            print(f"{log_prefix}使用 Microsoft Word (名称: {app_name})")
+            logger.info(f"{log_prefix}使用 Microsoft Word (名称: {app_name})")
         except Exception as verify_e:
             if com_initialized:
                 try:
@@ -260,7 +264,7 @@ def _try_create_word_app(use_existing: bool, node_name: str, cache_cleared: bool
             word_app.Visible = False
             word_app.DisplayAlerts = 0
             creation_method = "GetActiveObject"
-            print(f"{log_prefix}成功获取已运行的 Word 实例")
+            logger.info(f"{log_prefix}成功获取已运行的 Word 实例")
         except Exception as e:
             last_exception = e
             pass  # 继续尝试其他方法
@@ -272,7 +276,7 @@ def _try_create_word_app(use_existing: bool, node_name: str, cache_cleared: bool
             word_app.Visible = False
             word_app.DisplayAlerts = 0
             creation_method = "DispatchEx"
-            print(f"{log_prefix}成功创建新的 Word 实例 (DispatchEx)")
+            logger.info(f"{log_prefix}成功创建新的 Word 实例 (DispatchEx)")
         except Exception as e:
             last_exception = e
             pass  # 继续尝试其他方法
@@ -284,7 +288,7 @@ def _try_create_word_app(use_existing: bool, node_name: str, cache_cleared: bool
             word_app.Visible = False
             word_app.DisplayAlerts = 0
             creation_method = "EnsureDispatch"
-            print(f"{log_prefix}成功创建新的 Word 实例 (EnsureDispatch)")
+            logger.info(f"{log_prefix}成功创建新的 Word 实例 (EnsureDispatch)")
         except Exception as e:
             last_exception = e
             # 所有方法都失败，检查是否为缓存错误
@@ -293,13 +297,13 @@ def _try_create_word_app(use_existing: bool, node_name: str, cache_cleared: bool
     # 如果创建失败，检查是否为缓存损坏错误
     if word_app is None and last_exception is not None:
         if not cache_cleared and is_gencache_error(last_exception):
-            print(f"{log_prefix}检测到 win32com 缓存损坏，正在自动清除缓存...")
+            logger.warning(f"{log_prefix}检测到 win32com 缓存损坏，正在自动清除缓存...")
             if clear_win32com_cache():
-                print(f"{log_prefix}缓存已清除，正在重试创建 Word 实例...")
+                logger.info(f"{log_prefix}缓存已清除，正在重试创建 Word 实例...")
                 # 递归调用，标记已清除缓存
                 return _try_create_word_app(use_existing, node_name, cache_cleared=True)
             else:
-                print(f"{log_prefix}清除缓存失败，请手动删除 win32com gen_py 缓存目录")
+                logger.error(f"{log_prefix}清除缓存失败，请手动删除 win32com gen_py 缓存目录")
         
         # 抛出最后的异常
         raise RuntimeError(f"无法创建 Microsoft Word 应用程序实例: {last_exception}")
@@ -354,38 +358,38 @@ def _close_word_application_internal(
     # 安全关闭文档（必须在关闭 Word 之前）
     if doc is not None:
         try:
-            print(f"{log_prefix}正在关闭文档...")
+            logger.debug(f"{log_prefix}正在关闭文档...")
             try:
                 _ = doc.Name  # 尝试访问属性来检查对象是否有效
                 doc.Close(SaveChanges=False)
-                print(f"{log_prefix}文档已关闭")
+                logger.debug(f"{log_prefix}文档已关闭")
             except AttributeError:
                 # 对象已断开，说明已经关闭了
-                print(f"{log_prefix}文档对象已断开，无需关闭")
+                logger.debug(f"{log_prefix}文档对象已断开，无需关闭")
             except Exception as close_doc_e:
-                print(f"{log_prefix}关闭文档时出错: {close_doc_e}")
+                logger.warning(f"{log_prefix}关闭文档时出错: {close_doc_e}")
         except Exception as e:
-            print(f"{log_prefix}关闭文档时发生异常: {e}")
+            logger.warning(f"{log_prefix}关闭文档时发生异常: {e}")
     
     # 安全关闭 Word 应用程序
     if word_app is not None:
         try:
-            print(f"{log_prefix}正在关闭 Word 应用程序...")
+            logger.debug(f"{log_prefix}正在关闭 Word 应用程序...")
             try:
                 _ = word_app.Name  # 尝试访问属性来检查对象是否有效
                 word_app.Quit(SaveChanges=False)
-                print(f"{log_prefix}Word 应用程序已关闭")
+                logger.info(f"{log_prefix}Word 应用程序已关闭")
             except AttributeError:
                 # 对象已断开，说明已经关闭了
-                print(f"{log_prefix}Word 对象已断开，无需关闭")
+                logger.debug(f"{log_prefix}Word 对象已断开，无需关闭")
             except Exception as quit_word_e:
-                print(f"{log_prefix}关闭 Word 应用程序时出错: {quit_word_e}")
+                logger.warning(f"{log_prefix}关闭 Word 应用程序时出错: {quit_word_e}")
         except Exception as e:
-            print(f"{log_prefix}关闭 Word 时发生异常: {e}")
+            logger.warning(f"{log_prefix}关闭 Word 时发生异常: {e}")
     
     # 添加延迟，确保 Word 进程完全退出
     if wait_time > 0:
-        print(f"{log_prefix}等待 Word 进程完全退出...")
+        logger.debug(f"{log_prefix}等待 Word 进程完全退出...")
         time.sleep(wait_time)
     
     # 注意：不再清理残留的 Word 进程
@@ -396,11 +400,11 @@ def _close_word_application_internal(
     # 安全清理 COM（必须在关闭 Word 之后）
     if com_initialized:
         try:
-            print(f"{log_prefix}清理 COM 资源...")
+            logger.debug(f"{log_prefix}清理 COM 资源...")
             pythoncom.CoUninitialize()
-            print(f"{log_prefix}COM 资源已清理")
+            logger.debug(f"{log_prefix}COM 资源已清理")
         except Exception as com_e:
-            print(f"{log_prefix}清理 COM 时出错: {com_e}")
+            logger.warning(f"{log_prefix}清理 COM 时出错: {com_e}")
 
 
 def open_document_with_retry(
@@ -460,15 +464,15 @@ def _open_document_internal(
                 AddToRecentFiles=False,
                 NoEncodingDialog=True
             )
-            print(f"{log_prefix}已打开文档: {file_path}")
+            logger.info(f"{log_prefix}已打开文档: {file_path}")
             return doc
         except Exception as e:
             last_exception = e
             
             if is_rpc_error(e) and attempt < max_retries:
                 delay = calculate_retry_delay(attempt)
-                print(f"{log_prefix}打开文档失败 (尝试 {attempt + 1}/{max_retries + 1}): {e}")
-                print(f"{log_prefix}等待 {delay:.1f} 秒后重试...")
+                logger.warning(f"{log_prefix}打开文档失败 (尝试 {attempt + 1}/{max_retries + 1}): {e}")
+                logger.info(f"{log_prefix}等待 {delay:.1f} 秒后重试...")
                 time.sleep(delay)
             else:
                 raise
@@ -501,18 +505,79 @@ def save_document_with_retry(
         for attempt in range(max_retries + 1):
             try:
                 doc.Save()
-                print(f"{log_prefix}文档已保存")
+                logger.info(f"{log_prefix}文档已保存")
                 return
             except Exception as e:
                 last_exception = e
                 
                 if is_rpc_error(e) and attempt < max_retries:
                     delay = calculate_retry_delay(attempt)
-                    print(f"{log_prefix}保存文档失败 (尝试 {attempt + 1}/{max_retries + 1}): {e}")
-                    print(f"{log_prefix}等待 {delay:.1f} 秒后重试...")
+                    logger.warning(f"{log_prefix}保存文档失败 (尝试 {attempt + 1}/{max_retries + 1}): {e}")
+                    logger.info(f"{log_prefix}等待 {delay:.1f} 秒后重试...")
                     time.sleep(delay)
                 else:
                     raise
         
         if last_exception:
             raise last_exception
+
+
+def unprotect_document(
+    doc: any,
+    node_name: str = "",
+) -> bool:
+    """
+    取消文档保护（统一的文档保护处理函数）
+    
+    尝试多种方法取消文档保护，包括：
+    1. 检查保护类型
+    2. 使用空密码取消保护
+    3. 强制设置保护类型
+    4. 禁用内容保护
+    
+    参数:
+        doc: Word.Document 对象
+        node_name: 节点名称，用于日志输出
+        
+    返回:
+        bool: 是否成功取消保护（或文档本身无保护）
+    """
+    log_prefix = f"[{node_name}] " if node_name else ""
+    
+    # 检查保护类型
+    try:
+        protection_type = doc.ProtectionType
+        logger.debug(f"{log_prefix}文档保护类型: {protection_type} (-1 表示无保护)")
+        
+        if protection_type == -1:  # wdNoProtection
+            return True  # 无保护，无需处理
+        
+        # 尝试使用空密码取消保护
+        try:
+            doc.Unprotect("")
+            logger.info(f"{log_prefix}已取消文档保护")
+            return True
+        except Exception as unprotect_e:
+            logger.warning(f"{log_prefix}使用空密码取消保护失败: {unprotect_e}")
+            
+            # 尝试强制设置保护类型为无保护
+            try:
+                doc.ProtectionType = -1
+                logger.info(f"{log_prefix}已强制设置文档为无保护状态")
+                return True
+            except Exception as force_e:
+                logger.warning(f"{log_prefix}强制设置保护类型失败: {force_e}")
+                
+    except Exception as prot_e:
+        logger.warning(f"{log_prefix}检查文档保护时出错: {prot_e}")
+    
+    # 尝试禁用内容保护
+    try:
+        if hasattr(doc, 'ProtectContent') and doc.ProtectContent:
+            logger.warning(f"{log_prefix}文档内容仍受保护，尝试强制取消...")
+            doc.ProtectContent = False
+            return True
+    except Exception:
+        pass
+    
+    return False

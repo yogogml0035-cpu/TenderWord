@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional
-
 import time
-
 import pathlib
 import sys
 
@@ -13,26 +11,24 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from logging_utils import log_state
 from state import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
     open_document_with_retry,
-    save_document_with_retry,
+    unprotect_document,
 )
-from util.word_com_manager import com_lock, is_rpc_error, calculate_retry_delay, MAX_RETRIES
-
-# Word constants
-wdGoToPage = 1
-wdGoToAbsolute = 1
-wdLineSpace1pt5 = 1
-wdOutlineLevelBodyText = 10
-wdCollapseStart = 1
-wdCollapseEnd = 0
-wdActiveEndPageNumber = 3
-wdFindStop = 0
-wdWithInTable = 12
+from util.word_constants import (
+    wdGoToPage,
+    wdGoToAbsolute,
+    wdLineSpace1pt5,
+    wdOutlineLevelBodyText,
+    wdCollapseStart,
+    wdCollapseEnd,
+    wdActiveEndPageNumber,
+    wdFindStop,
+    wdWithInTable,
+)
 
 
 def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
@@ -72,33 +68,18 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
         )
         
         try:
-            open_attempts = 3
-            last_error = None
-            for attempt in range(1, open_attempts + 1):
-                try:
-                    doc = word.Documents.Open(
-                        FileName=prepared_doc_path,
-                        ConfirmConversions=False,
-                        ReadOnly=False,
-                        AddToRecentFiles=False,
-                        NoEncodingDialog=True
-                    )
-                    break
-                except Exception as e:
-                    last_error = e
-                    if attempt < open_attempts:
-                        time.sleep(1.0)
-                    else:
-                        raise
+            # 使用统一的工具函数打开文档（带重试机制）
+            doc = open_document_with_retry(
+                word_app=word,
+                file_path=prepared_doc_path,
+                read_only=False,
+                node_name="update_word"
+            )
             insertion_log_parts.append(f"已打开文档: {prepared_doc_path}")
             
-            # 如果需要，尝试取消保护
-            if doc.ProtectionType != -1:
-                try:
-                    doc.Unprotect()
-                    insertion_log_parts.append("已取消文档保护")
-                except:
-                    pass
+            # 使用统一的工具函数取消文档保护
+            if unprotect_document(doc, node_name="update_word"):
+                insertion_log_parts.append("已取消文档保护")
 
             # 优先使用 extract_tender_params 已计算好的页范围，避免重复查找
             start_page = state.get("start_page")
@@ -776,7 +757,6 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     insertion_log = "; ".join(insertion_log_parts)
     new_state_dict["insertion_log"] = insertion_log
     new_state = XjcgTenderGraphState(**new_state_dict)
-    log_state("update_word", new_state)
     
     duration = time.perf_counter() - start_time
     duration_ms = duration * 1000

@@ -10,7 +10,6 @@ import time
 # 直接运行时使用绝对导入
 import sys
 
-from logging_utils import log_state
 from state import XjcgTenderGraphState
 from util.llm_stream_utils import (
     LLMTimeoutError,
@@ -142,7 +141,6 @@ async def generate_polished_text(state: XjcgTenderGraphState, config) -> XjcgTen
     # 为了日志记录，创建完整状态（仅用于日志）
     full_state_for_log = dict(state)
     full_state_for_log.update({"polished_text": content, "generate_polished_done": True})
-    log_state("generate_polished_text", XjcgTenderGraphState(**full_state_for_log))
     
     duration = time.perf_counter() - start_time
     duration_ms = duration * 1000

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import time
-
 import pathlib
 import sys
 
@@ -11,22 +10,20 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from logging_utils import log_state
 from state import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
     open_document_with_retry,
-    save_document_with_retry,
+    unprotect_document,
 )
-from util.word_com_manager import com_lock, is_rpc_error, calculate_retry_delay, MAX_RETRIES
-
-# WPS/Word constants (WPS 兼容 Word 的常量)
-wdFindStop = 0
-wdCollapseEnd = 0
-wdGoToPage = 1
-wdGoToAbsolute = 1
-wdActiveEndPageNumber = 3
+from util.word_constants import (
+    wdFindStop,
+    wdCollapseEnd,
+    wdGoToPage,
+    wdGoToAbsolute,
+    wdActiveEndPageNumber,
+)
 
 
 def delete_tender_param(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
@@ -55,7 +52,6 @@ def delete_tender_param(state: XjcgTenderGraphState, config) -> XjcgTenderGraphS
         print(f"[delete_tender_param] 警告: 未提供 insertion_before_text 或 insertion_after_text，跳过删除")
         new_state_dict = dict(state)
         new_state = XjcgTenderGraphState(**new_state_dict)
-        log_state("delete_tender_param", new_state)
         return new_state
     
     # 确保路径是绝对路径（WPS/Word COM 对象需要绝对路径）
@@ -85,54 +81,16 @@ def delete_tender_param(state: XjcgTenderGraphState, config) -> XjcgTenderGraphS
             node_name="delete_tender_param"
         )
 
-        open_attempts = 3
-        last_error = None
-        for attempt in range(1, open_attempts + 1):
-            try:
-                doc = word.Documents.Open(
-                    FileName=prepared_doc_path,
-                    ConfirmConversions=False,
-                    ReadOnly=False,  # 需要写入以删除内容
-                    AddToRecentFiles=False,
-                    NoEncodingDialog=True
-                )
-                print(f"已打开文档: {prepared_doc_path}")
-                break
-            except Exception as open_error:
-                last_error = open_error
-                print(f"[delete_tender_param] 打开文档失败（第 {attempt} 次）: {open_error}")
-                if attempt < open_attempts:
-                    time.sleep(1.0)
-                else:
-                    raise RuntimeError(f"无法打开文档进行删除操作: {open_error}")
+        # 使用统一的工具函数打开文档（带重试机制）
+        doc = open_document_with_retry(
+            word_app=word,
+            file_path=prepared_doc_path,
+            read_only=False,  # 需要写入以删除内容
+            node_name="delete_tender_param"
+        )
         
-        # 尝试取消保护（如果需要）
-        try:
-            protection_type = doc.ProtectionType
-            print(f"文档保护类型: {protection_type} (-1 表示无保护)")
-            if protection_type != -1:  # -1 表示 wdNoProtection
-                try:
-                    # 尝试获取密码（如果有的话，这里传空字符串）
-                    doc.Unprotect("")
-                    print("已取消文档保护")
-                except Exception as unprotect_e:
-                    print(f"警告: 取消文档保护失败: {unprotect_e}")
-                    # 尝试强制取消保护
-                    try:
-                        doc.ProtectionType = -1
-                        print("已强制设置文档为无保护状态")
-                    except Exception:
-                        pass
-        except Exception as prot_e:
-            print(f"警告: 检查文档保护时出错: {prot_e}")
-        
-        # 确保文档可编辑
-        try:
-            if doc.ProtectContent:
-                print("警告: 文档内容仍受保护，尝试强制取消...")
-                doc.ProtectContent = False
-        except Exception:
-            pass
+        # 使用统一的工具函数取消文档保护
+        unprotect_document(doc, node_name="delete_tender_param")
         
         # 在文档正文中查找前后文本，使用字体和字号匹配
         doc_content = doc.Content
@@ -610,7 +568,6 @@ def delete_tender_param(state: XjcgTenderGraphState, config) -> XjcgTenderGraphS
     # 更新状态
     new_state_dict = dict(state)
     new_state = XjcgTenderGraphState(**new_state_dict)
-    log_state("delete_tender_param", new_state)
     
     end_time = time.time()
     elapsed_time = end_time - start_time

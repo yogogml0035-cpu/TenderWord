@@ -4,7 +4,6 @@ import os
 import re
 import time
 from typing import Dict, List, Optional, Tuple
-
 import pathlib
 import sys
 
@@ -13,17 +12,14 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from logging_utils import log_state
 from state import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
     open_document_with_retry,
+    unprotect_document,
 )
-from util.word_com_manager import com_lock, is_rpc_error, calculate_retry_delay, MAX_RETRIES
-
-# Word constants
-wdFindStop = 0
+from util.word_constants import wdFindStop
 
 
 # 提取函数：每个字段的查找逻辑
@@ -345,230 +341,22 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
         log_parts.append("成功创建/获取 Word 实例")
         
         try:
-            # 尝试打开文档，添加更详细的错误处理
-            try:
-                # 使用参数自动处理错误，不显示确认对话框
-                # ConfirmConversions=False: 不显示转换确认对话框
-                # ReadOnly=True: 以只读模式打开，避免锁定问题
-                # AddToRecentFiles=False: 不添加到最近文件列表
-                # NoEncodingDialog=True: 不显示编码对话框
-                doc = word.Documents.Open(
-                    FileName=template_path,
-                    ConfirmConversions=False,
-                    ReadOnly=True,
-                    AddToRecentFiles=False,
-                    NoEncodingDialog=True
-                )
-                log_parts.append(f"已打开: {template_path}")
-                
-                # 立即验证文档对象是否有效
-                # 添加短暂延迟，让 Word 完全打开文档
-                time.sleep(0.1)
-                
-                # 验证文档对象
-                try:
-                    doc_name = doc.Name
-                    log_parts.append(f"文档名称: {doc_name}")
-                except (AttributeError, Exception) as e:
-                    # 文档对象无效（可能是 AttributeError 或 COM 错误），尝试关闭并重新打开
-                    error_type = type(e).__name__
-                    error_code = getattr(e, 'args', [None])[0] if hasattr(e, 'args') and e.args else None
-                    log_parts.append(f"警告: 打开后文档对象立即无效 (错误: {error_type}, 代码: {error_code})，尝试关闭并重试...")
-                    
-                    # 尝试关闭文档
-                    try:
-                        if doc:
-                            doc.Close(SaveChanges=False)
-                    except:
-                        pass
-                    doc = None
-                    
-                    # 检查 Word 应用程序对象是否仍然有效
-                    word_valid = False
-                    try:
-                        _ = word.Name
-                        word_valid = True
-                        log_parts.append("Word 应用程序对象仍然有效")
-                    except (AttributeError, Exception) as word_check_error:
-                        log_parts.append(f"Word 应用程序对象无效 (错误: {type(word_check_error).__name__})，将重新创建...")
-                        # 尝试关闭旧的 Word 对象
-                        try:
-                            if word:
-                                close_word_application(word_app=word, doc=None, com_initialized=False, wait_time=0.0, node_name="get_replacements")
-                        except:
-                            pass
-                        # 等待一下，确保进程退出
-                        time.sleep(1.0)
-                        
-                        # 使用统一的工具函数重新创建 Word 应用程序对象
-                        try:
-                            word, com_initialized = create_word_application(
-                                initial_delay=0.5,  # 等待一下确保资源释放
-                                post_init_delay=0.5,  # 给 Word 一点时间完成初始化
-                                use_existing=False,  # 并发环境下必须使用独立实例
-                                verify=False,  # 不需要验证
-                                node_name="get_replacements"
-                            )
-                            log_parts.append("Word 应用程序对象重新创建成功")
-                            word_valid = True
-                        except Exception as recreate_error:
-                            error_msg = f"重新创建 Word 应用程序失败: {recreate_error}"
-                            log_parts.append(error_msg)
-                            raise ValueError(error_msg)
-                    
-                    if not word_valid:
-                        error_msg = "Word 应用程序对象无效且无法重新创建"
-                        log_parts.append(error_msg)
-                        raise ValueError(error_msg)
-                    
-                    # 等待一下，让 Word 释放文件
-                    time.sleep(1.0)
-                    
-                    # 重新打开文档
-                    try:
-                        doc = word.Documents.Open(
-                            FileName=template_path,
-                            ConfirmConversions=False,
-                            ReadOnly=True,
-                            AddToRecentFiles=False,
-                            NoEncodingDialog=True
-                        )
-                        time.sleep(1)  # 增加延迟时间，确保文档完全打开
-                        doc_name = doc.Name
-                        log_parts.append(f"文档重新打开成功: {doc_name}")
-                    except Exception as retry_error:
-                        error_msg = f"初始失败后重新打开文档失败: {retry_error}"
-                        log_parts.append(error_msg)
-                        # 确保关闭 Word
-                        if word:
-                            close_word_application(word_app=word, doc=None, com_initialized=False, wait_time=0.0, node_name="get_replacements")
-                        raise ValueError(error_msg)
-            except Exception as open_error:
-                error_msg = f"打开文档 '{template_path}' 失败: {open_error}"
-                log_parts.append(error_msg)
-                error_code = getattr(open_error, 'args', [None])[0] if hasattr(open_error, 'args') and open_error.args else None
-                
-                # 如果是 COM 错误（RPC 服务器不可用或接口未知），尝试重新创建 Word 对象并重试一次
-                is_com_rpc_error = (
-                    error_code in (-2147023174, -2147023179)
-                    or 'RPC' in str(open_error)
-                    or '接口未知' in str(open_error)
-                )
-                if is_com_rpc_error:
-                    log_parts.append("检测到 COM/RPC 错误，尝试重新创建 Word 应用程序并重试...")
-                    try:
-                        # 关闭旧的 Word 对象
-                        if word:
-                            close_word_application(word_app=word, doc=None, com_initialized=False, wait_time=1.0, node_name="get_replacements")
-                        # 重新创建 Word 应用程序对象
-                        word, _ = create_word_application(
-                            initial_delay=0.5,
-                            post_init_delay=0.5,
-                            use_existing=False,  # 并发环境下必须使用独立实例
-                            verify=False,
-                            node_name="get_replacements"
-                        )
-                        log_parts.append("Word 应用程序对象已重新创建，正在重试打开文档...")
-                        # 重试打开文档
-                        try:
-                            doc = word.Documents.Open(
-                                FileName=template_path,
-                                ConfirmConversions=False,
-                                ReadOnly=True,
-                                AddToRecentFiles=False,
-                                NoEncodingDialog=True
-                            )
-                            log_parts.append(f"重试后文档打开成功: {template_path}")
-                            time.sleep(0.2)
-                            doc_name = doc.Name
-                            log_parts.append(f"文档名称: {doc_name}")
-                        except Exception as retry_error:
-                            error_msg = f"重新创建 Word 应用程序后打开文档失败: {retry_error}"
-                            log_parts.append(error_msg)
-                            if word:
-                                close_word_application(word_app=word, doc=None, com_initialized=False, wait_time=0.0, node_name="get_replacements")
-                            raise ValueError(error_msg)
-                    except Exception as recreate_error:
-                        error_msg = f"重新创建 Word 应用程序失败: {recreate_error}"
-                        log_parts.append(error_msg)
-                        if word:
-                            close_word_application(word_app=word, doc=None, com_initialized=False, wait_time=0.0, node_name="get_replacements")
-                        raise ValueError(error_msg)
-                else:
-                    # 非 COM 错误，按原逻辑处理
-                    # 检查可能的原因
-                    if not os.path.exists(template_path):
-                        log_parts.append(f"文件不存在: {template_path}")
-                    else:
-                        log_parts.append("文件存在但无法打开。可能的原因:")
-                        log_parts.append("  - 文件被其他应用程序锁定 (例如 Word)")
-                        log_parts.append("  - 文件已损坏")
-                        log_parts.append("  - 权限不足")
-                    # 确保关闭 Word
-                    if word:
-                        close_word_application(word_app=word, doc=None, com_initialized=False, wait_time=0.0, node_name="get_replacements")
-                    raise
+            # 使用统一的工具函数打开文档（带重试机制）
+            doc = open_document_with_retry(
+                word_app=word,
+                file_path=template_path,
+                read_only=True,
+                node_name="get_replacements"
+            )
+            log_parts.append(f"已打开: {template_path}")
             
-            # 再次验证文档对象是否有效（双重检查）
-            if doc is None:
-                error_msg = "打开后文档对象为 None"
-                log_parts.append(error_msg)
-                # 使用统一的工具函数关闭 Word 应用程序
-                close_word_application(word_app=word, doc=None, com_initialized=com_initialized, wait_time=0.0, node_name="get_replacements")
-                raise ValueError(error_msg)
-            
-            try:
-                _ = doc.Name  # 尝试访问属性来验证对象是否有效
-            except (AttributeError, Exception) as e:
-                error_type = type(e).__name__
-                error_msg = f"文档对象无效 (COM 对象已断开连接，错误: {error_type})"
-                log_parts.append(error_msg)
-                # 确保关闭 Word
-                if word:
-                    close_word_application(word_app=word, doc=None, com_initialized=False, wait_time=0.0, node_name="get_replacements")
-                raise ValueError(error_msg)
-            
-            # Try to unprotect if needed
-            try:
-                protection_type = doc.ProtectionType
-                if protection_type != -1:
-                    try:
-                        doc.Unprotect()
-                        log_parts.append("文档已取消保护")
-                    except Exception as e:
-                        log_parts.append(f"警告: 无法取消文档保护: {e}")
-            except Exception as e:
-                log_parts.append(f"警告: 无法检查文档保护类型: {e}")
+            # 使用统一的工具函数取消文档保护
+            if unprotect_document(doc, node_name="get_replacements"):
+                log_parts.append("文档已取消保护")
             
             # 读取文档全文内容用于分析
-            # 添加异常处理，防止 COM 对象断开
-            try:
-                doc_content = doc.Content.Text
-                log_parts.append(f"文档内容长度: {len(doc_content)} 个字符")
-            except AttributeError as e:
-                error_msg = f"无法访问文档内容: {e}。文档对象可能已断开连接。"
-                log_parts.append(error_msg)
-                # 确保关闭文档和 Word
-                if 'doc' in locals() and doc:
-                    try:
-                        doc.Close(SaveChanges=False)
-                    except:
-                        pass
-                # 使用统一的工具函数关闭 Word 应用程序
-                close_word_application(word_app=word, doc=None, com_initialized=com_initialized, wait_time=0.0, node_name="get_replacements")
-                raise ValueError(error_msg)
-            except Exception as e:
-                error_msg = f"读取文档内容时出错: {e}"
-                log_parts.append(error_msg)
-                # 确保关闭文档和 Word
-                if 'doc' in locals() and doc:
-                    try:
-                        doc.Close(SaveChanges=False)
-                    except:
-                        pass
-                # 使用统一的工具函数关闭 Word 应用程序
-                close_word_application(word_app=word, doc=None, com_initialized=com_initialized, wait_time=0.0, node_name="get_replacements")
-                raise
+            doc_content = doc.Content.Text
+            log_parts.append(f"文档内容长度: {len(doc_content)} 个字符")
             
             # 提取首页页眉内容
             try:
@@ -763,7 +551,6 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
         "replacements": replacements,
         "replacement_log": replacement_log
     })
-    log_state("get_replacements", XjcgTenderGraphState(**full_state_for_log))
     
     end_time = time.time()
     elapsed_time = end_time - start_time
