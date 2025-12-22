@@ -225,8 +225,8 @@ tab, = st.tabs(["生成询价采购文件"])
 with tab:
     st.markdown(
         "1. 输入完整的招标编号（包含招标编号前缀），点击\"获取项目信息\"获取项目信息\n"
-        "2. 上传待处理的 Word 模板文件\n"
-        "3. 上传包含原始技术参数的 Word 文件\n"
+        "2. 上传作为参考的询价采购 Word 文件（清洁稿）\n"
+        "3. 上传包含采购需求参数的 Word 文件\n"
         "4. 点击\"开始生成\"后等待完成提示，再到对应路径查看 Word 结果或直接下载\n\n"
     )
     
@@ -762,6 +762,19 @@ with tab:
                     st.code(result.get("logs", ""), language="text")
                 with st.expander("查看 AI 生成内容"):
                     st.code(result.get("llm_logs", ""), language="text")
+                    
+                prepared_path = result.get("prepared_path")
+                if prepared_path and pathlib.Path(prepared_path).exists():
+                    prepared_path_obj = pathlib.Path(prepared_path)
+                    with open(prepared_path_obj, "rb") as f:
+                        file_data = f.read()
+                    st.download_button(
+                        label="📥下载生成文件",
+                        data=file_data,
+                        file_name=prepared_path_obj.name,
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document" if prepared_path_obj.suffix == ".docx" else "application/msword",
+                        key="download_prepared_doc"
+                    )
                     
             elif result.get("cancelled"):
                 st.warning("⚠️ **任务已取消**")
