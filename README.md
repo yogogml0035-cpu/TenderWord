@@ -28,7 +28,18 @@ python diagnose_word.py
 streamlit run streamlit_app.py
 ```
 
-启动后浏览器会自动打开（或按照终端提示访问本地地址）。
+### 自定义IP和端口
+如果需要自定义服务地址和端口，可以使用以下参数：
+
+```powershell
+# 绑定到所有网络接口，端口8502
+streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8502
+
+# 绑定到特定IP和端口
+streamlit run streamlit_app.py --server.address 192.168.1.100 --server.port 8080
+```
+
+启动后浏览器会自动打开（或按照终端提示访问指定地址）。
 
 ## 使用说明（界面操作）
 1) 上传参考 Word 文件 → 对应 `origin_tender_path`  
