@@ -5,6 +5,7 @@
 ## 环境准备
 - Python 3.10+（建议 64 位）
 - Windows 建议在 PowerShell 中运行
+- **Microsoft Word 或 WPS Office**（必需，用于处理 Word 文档）
 
 ```powershell
 cd D:\PythonProject
@@ -12,6 +13,15 @@ python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r TenderWord\requirements.txt
 ```
+
+### Word COM 环境检查
+如果换电脑后出现 Word COM 相关错误，请先运行诊断工具：
+
+```powershell
+python diagnose_word.py
+```
+
+详细排查指南请参考：[Word COM 问题排查指南](docs/Word_COM_问题排查指南.md)
 
 ## 启动方式
 ```powershell
@@ -31,6 +41,15 @@ streamlit run streamlit_app.py
 - 生成完成后页面会显示输出文件路径，并提供下载按钮。
 
 ## 常见问题
+
+### Word COM 相关问题
+- **错误：无法创建 Word 应用程序实例**
+  - 运行 `python diagnose_word.py` 检查环境
+  - 确保已安装 Microsoft Word 或 WPS Office
+  - 检查 pywin32 是否正确安装：`pip install pywin32`
+  - 详细排查指南：[Word COM 问题排查指南](docs/Word_COM_问题排查指南.md)
+
+### Streamlit 相关问题
 - 直接运行 `python streamlit_app.py` 会出现 `missing ScriptRunContext` 警告，请使用 `streamlit run TenderWord\streamlit_app.py` 启动。
 - 如需更改默认参数，请修改 `TenderWord/graph.py` 中的 `initial_state` 示例或对应节点逻辑后再启动。
 

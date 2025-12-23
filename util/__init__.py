@@ -5,6 +5,7 @@
 - word_application_util: Word 应用程序创建和管理工具
 - word_com_manager: COM 并发访问管理器
 - word_extraction_utils: Word 文档内容提取工具
+- word_diagnostics: Word COM 环境诊断工具
 - llm_stream_utils: LLM 流式响应工具（心跳超时检测）
 """
 

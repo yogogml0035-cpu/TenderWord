@@ -33,6 +33,17 @@ from util.word_com_manager import (
     RPC_ERROR_CODES,
 )
 
+# 导入诊断工具
+try:
+    from util.word_diagnostics import (
+        diagnose_word_com_environment,
+        format_diagnosis_report,
+        check_word_installation,
+    )
+    DIAGNOSTICS_AVAILABLE = True
+except ImportError:
+    DIAGNOSTICS_AVAILABLE = False
+
 
 def is_gencache_error(exception: Exception) -> bool:
     """
@@ -164,7 +175,16 @@ def _create_word_application_internal(
     调用此函数前应该已经获取了全局锁。
     """
     if win32 is None:
-        raise RuntimeError("无法导入 win32com.client，请确保已安装 pywin32")
+        error_msg = "无法导入 win32com.client，请确保已安装 pywin32\n"
+        error_msg += "安装命令: pip install pywin32\n"
+        if DIAGNOSTICS_AVAILABLE:
+            try:
+                diagnosis = diagnose_word_com_environment()
+                error_msg += "\n环境诊断信息:\n"
+                error_msg += format_diagnosis_report(diagnosis)
+            except Exception:
+                pass
+        raise RuntimeError(error_msg)
     
     log_prefix = f"[{node_name}] " if node_name else ""
     
@@ -305,8 +325,40 @@ def _try_create_word_app(use_existing: bool, node_name: str, cache_cleared: bool
             else:
                 logger.error(f"{log_prefix}清除缓存失败，请手动删除 win32com gen_py 缓存目录")
         
-        # 抛出最后的异常
-        raise RuntimeError(f"无法创建 Microsoft Word 应用程序实例: {last_exception}")
+        # 生成详细的错误信息
+        error_msg = f"无法创建 Word 应用程序实例\n"
+        error_msg += f"错误详情: {last_exception}\n\n"
+        
+        # 添加诊断信息
+        if DIAGNOSTICS_AVAILABLE:
+            try:
+                word_check = check_word_installation()
+                if not word_check.get("installed"):
+                    error_msg += "【问题诊断】\n"
+                    error_msg += f"  ✗ 未检测到 Word 或 WPS 安装\n"
+                    error_msg += f"  错误: {word_check.get('error', 'Unknown')}\n\n"
+                    error_msg += "【解决方案】\n"
+                    error_msg += "  1. 确保已安装 Microsoft Word 或 WPS Office\n"
+                    error_msg += "  2. 如果已安装但检测不到，可能需要:\n"
+                    error_msg += "     - 修复 Office 安装\n"
+                    error_msg += "     - 重新注册 COM 组件 (以管理员身份运行: regsvr32 /s <Office路径>\\MSO.DLL)\n"
+                    error_msg += "     - 检查 Word 版本是否与 pywin32 兼容\n"
+                else:
+                    word_name = word_check.get("name", "Word")
+                    word_version = word_check.get("version", "Unknown")
+                    error_msg += "【环境信息】\n"
+                    error_msg += f"  检测到: {word_name} (版本: {word_version})\n"
+                    error_msg += f"  COM ProgID: {word_check.get('com_progid', 'Unknown')}\n\n"
+                    error_msg += "【可能的原因】\n"
+                    error_msg += "  1. Word 版本不兼容（建议使用 Office 2016 或更高版本）\n"
+                    error_msg += "  2. Word 正在被其他程序占用\n"
+                    error_msg += "  3. COM 接口注册问题\n"
+                    error_msg += "  4. 权限不足（尝试以管理员身份运行）\n"
+            except Exception as diag_e:
+                logger.debug(f"{log_prefix}生成诊断信息时出错: {diag_e}")
+        
+        # 抛出详细的异常
+        raise RuntimeError(error_msg)
     
     return word_app
 
