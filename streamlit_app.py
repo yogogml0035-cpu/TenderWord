@@ -242,7 +242,7 @@ with tab:
     with col2:
         st.write("")  # 占位，用于对齐按钮
         st.write("")  # 占位，用于对齐按钮
-        fetch_button = st.button("获取信息", key="fetch_tender_data", use_container_width=True)
+        fetch_button = st.button("获取信息", key="fetch_tender_data", use_container_width=True, disabled=st.session_state.is_generating)
     
     # 处理获取按钮点击
     if fetch_button:
