@@ -18,6 +18,7 @@ ENV/
 
 # IDE 配置（可选）
 .vscode/
+.claude/
 .idea/
 *.swp
 *.swo
@@ -32,3 +33,9 @@ test_env_vars.py
 test_concurrent.py
 
 docs
+Claude.md
+OPTIMIZATION_PLAN.md
+RAG集成方案_易读版.md
+RAG集成方案详解.md
+OPTIMIZATION_PLAN_易读版.md
+.gitignore
