@@ -34,8 +34,5 @@ test_concurrent.py
 
 docs
 Claude.md
-OPTIMIZATION_PLAN.md
-RAG集成方案_易读版.md
-RAG集成方案详解.md
-OPTIMIZATION_PLAN_易读版.md
 .gitignore
+test_guide/

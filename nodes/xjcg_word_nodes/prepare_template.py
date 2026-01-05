@@ -42,15 +42,15 @@ def prepare_template(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
     # 构建文件名：project_number-project_name-初稿-YYYYMMDD-HHMMSS.doc
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
     if project_number and project_name:
-        filename = f"{project_number}-{project_name}-初稿-{timestamp}.doc"
+        filename = f"{project_number}-{project_name}-初稿-{timestamp}.docx"
     elif project_number:
-        filename = f"{project_number}-初稿-{timestamp}.doc"
+        filename = f"{project_number}-初稿-{timestamp}.docx"
     elif project_name:
-        filename = f"{project_name}-初稿-{timestamp}.doc"
+        filename = f"{project_name}-初稿-{timestamp}.docx"
     else:
         # 如果没有项目信息，使用原来的命名方式
         root, _ = os.path.splitext(os.path.basename(template_path))
-        filename = f"{root}_processed-{timestamp}.doc"
+        filename = f"{root}_processed-{timestamp}.docx"
     
     working_path = os.path.join(template_dir, filename)
 
