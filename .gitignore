@@ -35,4 +35,4 @@ test_concurrent.py
 docs
 Claude.md
 .gitignore
-test_guide/
+test_doc/

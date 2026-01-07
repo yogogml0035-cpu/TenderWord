@@ -296,6 +296,17 @@ with tab:
         st.markdown(f"- 项目主办人/协办人替换为：{tender_data['project_zbr_xbr']}")
         st.markdown(f"- 主办人/协办人电话替换为：{tender_data['zbr_xbr_tel']}")
         st.markdown(f"- 主办人拼音替换为：{tender_data['zbr_pinyin']}")
+        shell_start_date = tender_data.get("shell_start_date", "")
+        shell_end_date = tender_data.get("shell_end_date", "")
+        submit_date = tender_data.get("submit_date", "")
+        if shell_start_date:
+            st.markdown(f"- 售标开始时间替换为：{shell_start_date}")
+        if shell_end_date:
+            st.markdown(f"- 售标结束时间替换为：{shell_end_date}")
+        if submit_date:
+            st.markdown(f"- 递交文件截止时间替换为：{submit_date}")
+        st.markdown(f"- 发布平台替换为：{tender_data.get("platform")}")
+        st.markdown(f"- 服务费规则替换为：{tender_data.get("service_fee")}")
 
     with st.form("tender_doc_form"):
         uploaded_file = st.file_uploader(

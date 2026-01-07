@@ -31,6 +31,11 @@ class XjcgTenderGraphState(TypedDict, total=False):
     project_zbr_xbr: str  # 项目负责人和项目协助人
     zbr_xbr_tel: str  # 负责人和协助人电话
     zbr_pinyin: str  # 负责人拼音
+    shell_start_date: str
+    shell_end_date: str
+    submit_date: str
+    platform: str
+    service_fee: str
     generate_polished_done: bool  # generate_polished_text 是否完成
     replace_content_done: bool  # replace_content 是否完成
 

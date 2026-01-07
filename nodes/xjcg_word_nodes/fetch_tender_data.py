@@ -23,7 +23,12 @@ def fetch_tender_data(tender_no: str) -> Dict:
             "buyer_name": str,
             "project_zbr_xbr": str,
             "zbr_xbr_tel": str,
-            "zbr_pinyin": str
+            "zbr_pinyin": str,
+            "shell_start_date": str,
+            "shell_end_date": str,
+            "submit_date": str,
+            "platform": str,
+            "service_fee": str,
         }
         
     Raises:
@@ -54,6 +59,11 @@ def fetch_tender_data(tender_no: str) -> Dict:
             "project_zbr_xbr": data.get("project_zbr_xbr", ""),
             "zbr_xbr_tel": data.get("zbr_xbr_tel", ""),
             "zbr_pinyin": data.get("zbr_pinyin", ""),
+            "shell_start_date": data.get("shell_start_date", ""),
+            "shell_end_date": data.get("shell_end_date", ""),
+            "submit_date": data.get("submit_date", ""),
+            "platform": data.get("platform", ""),
+            "service_fee": data.get("service_fee", ""),
         }
         
         return tender_data

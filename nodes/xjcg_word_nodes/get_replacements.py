@@ -222,6 +222,205 @@ def extract_bzj_rule(doc_content: str, state: XjcgTenderGraphState, log_parts: L
     return None
 
 
+def extract_shell_dates(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Tuple[Optional[str], Optional[str]]:
+    if not doc_content or (not state.get("shell_start_date") and not state.get("shell_end_date")):
+        return None, None
+    
+    start_marker = "4、获取询价通知书方式"
+    end_marker = "（1）关注微信公众号"
+    
+    start_pos = doc_content.find(start_marker)
+    
+    if start_pos == -1:
+        log_parts.append("未找到起始标记 '4、获取询价通知书方式'")
+        return None, None
+    
+    log_parts.append(f"在位置 {start_pos} 找到起始标记 '{start_marker}'")
+    
+    search_after = start_pos + len(start_marker)
+    end_pos = doc_content.find(end_marker, search_after)
+    
+    if end_pos == -1:
+        log_parts.append(f"未找到结束标记 '{end_marker}'")
+        return None, None
+    
+    log_parts.append(f"在位置 {end_pos} 找到结束标记 '{end_marker}'")
+    
+    search_range = doc_content[search_after:end_pos]
+    log_parts.append(f"找到售标时间说明范围，长度: {len(search_range)} 个字符")
+    
+    shell_start_date = None
+    shell_end_date = None
+    
+    if state.get("shell_start_date"):
+        time_patterns_start = [
+            r'(\d{4}年\d{1,2}月\d{1,2}日\s*起)',
+            r'(\d{4}年\s*月\s*日\s*起)',
+            r'(\s*年\s*月\s*日\s*起)'
+        ]
+        for time_pattern in time_patterns_start:
+            match = re.search(time_pattern, search_range, re.DOTALL)
+            if match:
+                shell_start_date = match.group(1).strip()
+                log_parts.append(f"提取售标开始时间: {shell_start_date}")
+                break
+        if shell_start_date is None:
+            log_parts.append("在售标时间说明范围内未找到售标开始时间模式")
+    
+    if state.get("shell_end_date"):
+        time_patterns_end = [
+            r'(\d{4}年\d{1,2}月\d{1,2}日\s*止)',
+            r'(\d{4}年\s*月\s*日\s*止)',
+            r'(\s*年\s*月\s*日\s*止)'
+        ]
+        for time_pattern in time_patterns_end:
+            match = re.search(time_pattern, search_range, re.DOTALL)
+            if match:
+                shell_end_date = match.group(1).strip()
+                log_parts.append(f"提取售标结束时间: {shell_end_date}")
+                break
+        if shell_end_date is None:
+            log_parts.append("在售标时间说明范围内未找到售标结束时间模式")
+    
+    return shell_start_date, shell_end_date
+
+
+
+
+def extract_submit_date(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+    """从正文中提取 submit_date (递交文件时间)"""
+    if not doc_content or not state.get("submit_date"):
+        return None
+    
+    start_marker = "截止时间："
+    end_marker = "地点："
+    
+    start_pos = doc_content.find(start_marker)
+    
+    if start_pos == -1:
+        log_parts.append("未找到起始标记 '截止时间：'")
+        return None
+    
+    log_parts.append(f"在位置 {start_pos} 找到起始标记 '{start_marker}'")
+    
+    search_after = start_pos + len(start_marker)
+    end_pos = doc_content.find(end_marker, search_after)
+    
+    if end_pos == -1:
+        log_parts.append("未找到结束标记 '地点：'")
+        return None
+    
+    log_parts.append(f"在位置 {end_pos} 找到结束标记 '{end_marker}'")
+    
+    search_range = doc_content[search_after:end_pos]
+    log_parts.append(f"在 '截止时间：' 和 '地点：' 之间搜索递交文件时间，范围长度: {len(search_range)} 个字符")
+    
+    time_patterns = [
+        r'(\d{4}年\d{1,2}月\d{1,2}日\s*\d{1,2}:\d{2})',
+        r'(\d{4}年\s*月\s*日\s*\d{1,2}:\d{2})',
+        r'(\s*年\s*月\s*日\s*\d{1,2}:\d{2})'
+    ]
+    extracted_date = None
+    for time_pattern in time_patterns:
+        match = re.search(time_pattern, search_range, re.DOTALL)
+        if match:
+            extracted_date = match.group(1).strip()
+            break
+    
+    if extracted_date:
+        log_parts.append(f"提取递交文件时间: {extracted_date}")
+        return extracted_date
+    else:
+        log_parts.append("在 '截止时间：' 和 '地点：' 范围内未找到递交文件时间模式")
+    return None
+
+
+def extract_platform(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+    """从正文中提取 platform (发布平台)"""
+    if not doc_content or not state.get("platform"):
+        return None
+    
+    start_marker = "采购人、采购代理机构均将通过"
+    end_marker = "公开发布"
+    
+    start_pos = doc_content.find(start_marker)
+    if start_pos == -1:
+        log_parts.append("未找到起始标记 '采购人、采购代理机构均将通过'")
+        return None
+    
+    log_parts.append(f"在位置 {start_pos} 找到起始标记 '{start_marker}'")
+    
+    search_after = start_pos + len(start_marker)
+    end_pos = doc_content.find(end_marker, search_after)
+    
+    if end_pos == -1:
+        log_parts.append("未找到结束标记 '公开发布'")
+        return None
+    
+    log_parts.append(f"在位置 {end_pos} 找到结束标记 '{end_marker}'")
+    
+    search_range = doc_content[search_after:end_pos]
+    log_parts.append(f"在 '采购人、采购代理机构均将通过' 和 '公开发布' 之间搜索发布平台，范围长度: {len(search_range)} 个字符")
+    
+    platform_pattern = r'\s*([^（(]+)\s*[（(]([^）)]+)[）)]'
+    match = re.search(platform_pattern, search_range, re.DOTALL)
+    
+    if match:
+        platform_name = match.group(1).strip()
+        platform_url = match.group(2).strip()
+        extracted_platform = f"{platform_name}（{platform_url}）"
+        log_parts.append(f"提取发布平台: {extracted_platform}")
+        return extracted_platform
+    else:
+        log_parts.append("在文档中未找到发布平台模式")
+    return None
+
+
+def extract_service_fee(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+    """从正文中提取 service_fee (服务费)"""
+    if not doc_content or not state.get("service_fee"):
+        return None
+    
+    # 先找到服务费说明的范围
+    start_marker = "标准和规定交纳代理服务费"
+    end_marker = "成交供应商在接受成交通知书的同时需向采购代理机构一次性付清代理服务费"
+    
+    start_pos = doc_content.find(start_marker)
+    end_pos = doc_content.find(end_marker)
+    
+    if start_pos == -1:
+        log_parts.append("未找到起始标记 '标准和规定交纳代理服务费'")
+        return None
+    
+    if end_pos == -1:
+        log_parts.append("未找到结束标记 '成交供应商在接受成交通知书的同时需向采购代理机构一次性付清代理服务费'")
+        return None
+    
+    # 提取范围内的内容
+    search_range = doc_content[start_pos:end_pos]
+    log_parts.append(f"找到服务费说明范围，位置: {start_pos}-{end_pos}")
+    
+    # 在范围内查找服务费相关模式
+    fee_pattern = r'百分之([\u4e00-\u9fa5]+\s*\([^)]+\))'
+    match = re.search(fee_pattern, search_range)
+    
+    if match:
+        extracted_fee = "百分之" + match.group(1)
+        log_parts.append(f"提取服务费: {extracted_fee}")
+        return extracted_fee
+    else:
+        # 尝试其他模式
+        fee_pattern2 = r'服务费为成交金额的\s*([^。]+)'
+        match2 = re.search(fee_pattern2, search_range)
+        if match2:
+            extracted_fee = match2.group(1).strip()
+            log_parts.append(f"提取服务费 (备用模式): {extracted_fee}")
+            return extracted_fee
+        else:
+            log_parts.append("在服务费说明范围内未找到服务费模式")
+    return None
+
+
 def extract_contact_fields(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """从正文中提取 project_zbr_xbr, zbr_xbr_tel, zbr_pinyin"""
     if not doc_content:
@@ -415,7 +614,6 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
                 except Exception as e:
                     log_parts.append(f"提取保证金规则时出错: {e}")
             
-            # 提取 contact_fields（返回三个值）
             if state.get("project_zbr_xbr") or state.get("zbr_xbr_tel") or state.get("zbr_pinyin"):
                 try:
                     project_zbr_xbr, zbr_xbr_tel, zbr_pinyin = extract_contact_fields(doc_content, state, log_parts)
@@ -428,7 +626,42 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
                 except Exception as e:
                     log_parts.append(f"提取联系字段时出错: {e}")
             
-            # TODO: 后续按顺序添加其他占位符的查找逻辑
+            if state.get("shell_start_date") or state.get("shell_end_date"):
+                try:
+                    shell_start_date, shell_end_date = extract_shell_dates(doc_content, state, log_parts)
+                    if shell_start_date:
+                        found_placeholders["shell_start_date"] = shell_start_date
+                    if shell_end_date:
+                        found_placeholders["shell_end_date"] = shell_end_date
+                except Exception as e:
+                    log_parts.append(f"提取售标时间时出错: {e}")
+            
+            # 提取 submit_date
+            if state.get("submit_date"):
+                try:
+                    result = extract_submit_date(doc_content, state, log_parts)
+                    if result is not None:
+                        found_placeholders["submit_date"] = result
+                except Exception as e:
+                    log_parts.append(f"提取递交文件时间时出错: {e}")
+            
+            # 提取 platform
+            if state.get("platform"):
+                try:
+                    result = extract_platform(doc_content, state, log_parts)
+                    if result is not None:
+                        found_placeholders["platform"] = result
+                except Exception as e:
+                    log_parts.append(f"提取发布平台时出错: {e}")
+            
+            # 提取 service_fee
+            if state.get("service_fee"):
+                try:
+                    result = extract_service_fee(doc_content, state, log_parts)
+                    if result is not None:
+                        found_placeholders["service_fee"] = result
+                except Exception as e:
+                    log_parts.append(f"提取服务费时出错: {e}")
             
             # 记录查找结果
             if found_placeholders:
@@ -498,6 +731,11 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
             "project_zbr_xbr",
             "zbr_xbr_tel",
             "zbr_pinyin",
+            "shell_start_date",
+            "shell_end_date",
+            "submit_date",
+            "platform",
+            "service_fee",
         ]
         
         # 根据 placeholder_mapping 生成替换列表
@@ -576,7 +814,12 @@ if __name__ == "__main__":
     
     # 测试文档路径列表
     test_doc_paths = [
-        "TenderFile/252699-原位杂交仪-询价文件-初稿1 - 副本.doc"
+        "test_doc/251918-询价文件-发售稿.doc",
+        "test_doc/252699-原位杂交仪-询价文件-发售稿.doc",
+        "test_doc/252700-荧光细胞计数仪、超低温冰箱、PCR仪-询价文件-初稿1.doc",
+        "test_doc/253000-细胞自动计数仪-询价文件-发售稿.doc",
+        "test_doc/253392-询价文件-初稿.doc",
+        "test_doc/253505-细胞电转仪-询价文件-初稿1.doc",
     ]
     
     # 循环测试每个文件
@@ -607,6 +850,11 @@ if __name__ == "__main__":
             "project_zbr_xbr": "徐旭东、任彧晟",
             "zbr_xbr_tel": "8605、8625",
             "zbr_pinyin": "xuxudong",
+            "shell_start_date": "2025年12月12日",
+            "shell_end_date": "2025年12月15日",
+            "submit_date": "2025年12月12日11:00",
+            "platform": "中国采购与招标网（https://www.chinabidding.cn/）",
+            "service_fee": "百分之壹伍（1.5%）",
         }
         
         try:
