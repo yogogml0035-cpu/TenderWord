@@ -238,7 +238,7 @@ def extract_text_from_xml(xml_content, preserve_structure=False):
         return None
 
 
-def extract_text_with_superscript_subscript(range_obj):
+def extract_text_with_superscript_subscript(range_obj, use_xml=True):
     """
     提取WPS/Word范围中的文本，保留上标和下标格式
     
@@ -251,21 +251,19 @@ def extract_text_with_superscript_subscript(range_obj):
     Returns:
         str: 提取的文本，上标/下标字符已转换为Unicode上标/下标字符
     """
-    # 策略1: 优先尝试通过 WordOpenXML 提取
-    try:
-        xml_content = None
+    if use_xml:
         try:
-            # 尝试获取 XML，如果 COM 不支持会报错
-            xml_content = range_obj.WordOpenXML
-        except:
-            pass
-            
-        if xml_content and isinstance(xml_content, str) and len(xml_content) > 0:
-            xml_text = extract_text_from_xml(xml_content)
-            if xml_text is not None:
-                return xml_text
-    except Exception as e:
-        print(f"    WordOpenXML 提取异常，回退到逐字符遍历: {e}")
+            xml_content = None
+            try:
+                xml_content = range_obj.WordOpenXML
+            except:
+                pass
+            if xml_content and isinstance(xml_content, str) and len(xml_content) > 0:
+                xml_text = extract_text_from_xml(xml_content)
+                if xml_text is not None:
+                    return xml_text
+        except Exception as e:
+            print(f"    WordOpenXML 提取异常，回退到逐字符遍历: {e}")
 
     # 策略2: 回退到逐字符遍历 (增强版，支持位置偏移检测)
     try:
@@ -362,20 +360,18 @@ def extract_table_as_text(table):
         if rows_count == 0 or cols_count == 0:
             return table.Range.Text
         
-        # 提取所有单元格内容
         table_data = []
         for row_idx in range(1, rows_count + 1):
             row_data = []
             for col_idx in range(1, cols_count + 1):
                 try:
                     cell = table.Cell(row_idx, col_idx)
-                    # 使用上标/下标提取函数保留科学计数法等格式
-                    cell_text = extract_text_with_superscript_subscript(cell.Range)
-                    # 清理单元格文本：移除末尾的特殊字符（\r\x07）并清理空白
-                    cell_text = cell_text.rstrip('\r\x07\n').strip()
-                    # 将换行符替换为空格，避免破坏Markdown表格格式
-                    cell_text = cell_text.replace('\r', ' ').replace('\n', ' ')
-                    # 转义管道符号，避免破坏表格结构
+                    cell_text = extract_text_with_superscript_subscript(cell.Range, use_xml=False)
+                    cell_text = cell_text.rstrip('\r\x07\n')
+                    cell_text = cell_text.replace('\r\n', '\n').replace('\r', '\n')
+                    cell_text = cell_text.replace('\x07', '')
+                    cell_text = cell_text.strip()
+                    cell_text = cell_text.replace('\n', '\\n')
                     cell_text = cell_text.replace('|', '\\|')
                     row_data.append(cell_text)
                 except Exception as cell_e:
@@ -384,7 +380,7 @@ def extract_table_as_text(table):
             table_data.append(row_data)
         
         if not table_data:
-            return extract_text_with_superscript_subscript(table.Range)
+            return extract_text_with_superscript_subscript(table.Range, use_xml=False)
         
         # 构建Markdown表格
         markdown_lines = []
