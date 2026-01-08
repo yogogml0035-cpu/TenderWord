@@ -34,6 +34,7 @@ def prepare_template(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
     # 创建工作路径（使用 project_number-project_name-初稿 格式）
     template_dir = os.path.dirname(template_path)
     _, ext = os.path.splitext(template_path)
+    ext = ext.lower()
     
     # 从 state 中获取项目编号和项目名称
     project_number = state.get("project_number", "")
@@ -42,15 +43,15 @@ def prepare_template(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
     # 构建文件名：project_number-project_name-初稿-YYYYMMDD-HHMMSS.doc
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
     if project_number and project_name:
-        filename = f"{project_number}-{project_name}-初稿-{timestamp}.docx"
+        filename = f"{project_number}-{project_name}-初稿-{timestamp}{ext}"
     elif project_number:
-        filename = f"{project_number}-初稿-{timestamp}.docx"
+        filename = f"{project_number}-初稿-{timestamp}{ext}"
     elif project_name:
-        filename = f"{project_name}-初稿-{timestamp}.docx"
+        filename = f"{project_name}-初稿-{timestamp}{ext}"
     else:
         # 如果没有项目信息，使用原来的命名方式
         root, _ = os.path.splitext(os.path.basename(template_path))
-        filename = f"{root}_processed-{timestamp}.docx"
+        filename = f"{root}_processed-{timestamp}{ext}"
     
     working_path = os.path.join(template_dir, filename)
 
@@ -136,7 +137,6 @@ def prepare_template(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
         {
             "origin_tender_path": template_path,
             "prepared_doc_path": working_path,
-            "insertion_log": ", ".join(f"{k}x{v}" for k, v in stats.items()) if stats else "无替换",
         }
     )
     new_state = XjcgTenderGraphState(**new_state_dict)

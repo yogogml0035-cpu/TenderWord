@@ -7,11 +7,11 @@ Word COM 环境诊断脚本
 
 import sys
 import pathlib
-
+import os
 # 添加项目根目录到路径
-ROOT = pathlib.Path(__file__).resolve().parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
 from util.word_diagnostics import (
     diagnose_word_com_environment,
