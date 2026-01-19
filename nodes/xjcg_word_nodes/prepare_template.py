@@ -20,6 +20,15 @@ from util.word_application_util import (
 
 def prepare_template(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     start_time = time.time()
+    
+    
+    log_dir = os.path.join(ROOT, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, "task_execution.log")
+    current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(f"{current_time}：开始生成，当前进入prepare_template\n")
+    
     print(f"[prepare_template] 开始执行...")
     
     template_path = state.get("origin_tender_path")

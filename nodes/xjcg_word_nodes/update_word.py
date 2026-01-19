@@ -33,6 +33,16 @@ from util.word_constants import (
 
 def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     start_time = time.perf_counter()
+    
+
+    import os
+    log_dir = os.path.join(ROOT, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, "task_execution.log")
+    current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(f"{current_time}：结束生成，当前进入update_word\n")
+    
     print("[update_word] 开始执行...")
     
     """在指定锚点位置将润色后的文本插入到 Word 文档中。"""

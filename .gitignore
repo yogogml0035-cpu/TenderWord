@@ -1,5 +1,5 @@
 # 日志
-logs/tender_agent.log
+logs/
 prompts
 
 # Python 缓存文件
@@ -28,11 +28,5 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# 测试文件
-test_env_vars.py
-test_concurrent.py
-
 docs
-Claude.md
-.gitignore
-test_doc/
+
