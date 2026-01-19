@@ -59,11 +59,11 @@ def fetch_tender_data(tender_no: str) -> Dict:
             "project_zbr_xbr": data.get("project_zbr_xbr", ""),
             "zbr_xbr_tel": data.get("zbr_xbr_tel", ""),
             "zbr_pinyin": data.get("zbr_pinyin", ""),
-            "shell_start_date": data.get("shell_start_date", ""),
-            "shell_end_date": data.get("shell_end_date", ""),
+            "shell_start_date": f"{data.get('shell_start_date', '')}起" if data.get('shell_start_date', '') else "",
+            "shell_end_date": f"{data.get('shell_end_date', '')}止" if data.get('shell_end_date', '') else "",
             "submit_date": data.get("submit_date", ""),
             "platform": data.get("platform", ""),
-            "service_fee": data.get("service_fee", ""),
+            "service_fee": "", # data.get("service_fee", ""), 
         }
         
         return tender_data

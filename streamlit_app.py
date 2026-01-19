@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
 
 from graph import build_graph
 from task.task_queue_manager import get_task_queue, TaskStatus, NODE_DISPLAY_NAMES, NodeName
-from nodes.xjcg_word_nodes.fetch_tender_data import fetch_tender_data
+from util.fetch_tender_data import fetch_tender_data
 
 GRAPH = build_graph()
 TASK_QUEUE = get_task_queue()
@@ -299,14 +299,19 @@ with tab:
         shell_start_date = tender_data.get("shell_start_date", "")
         shell_end_date = tender_data.get("shell_end_date", "")
         submit_date = tender_data.get("submit_date", "")
+        platform = tender_data.get("platform", "")
+        service_fee = tender_data.get("service_fee", "")
+
         if shell_start_date:
             st.markdown(f"- 售标开始时间替换为：{shell_start_date}")
         if shell_end_date:
             st.markdown(f"- 售标结束时间替换为：{shell_end_date}")
         if submit_date:
             st.markdown(f"- 递交文件截止时间替换为：{submit_date}")
-        st.markdown(f"- 发布平台替换为：{tender_data.get("platform")}")
-        st.markdown(f"- 服务费规则替换为：{tender_data.get("service_fee")}")
+        if platform:
+            st.markdown(f"- 发布平台替换为：{tender_data.get("platform")}")
+        if service_fee:
+            st.markdown(f"- 服务费规则替换为：{tender_data.get("service_fee")}")
 
     with st.form("tender_doc_form"):
         uploaded_file = st.file_uploader(
@@ -489,6 +494,12 @@ with tab:
             "project_zbr_xbr": tender_data["project_zbr_xbr"],
             "zbr_xbr_tel": tender_data["zbr_xbr_tel"],
             "zbr_pinyin": tender_data["zbr_pinyin"],
+             # 新增字段
+            "shell_start_date": tender_data.get("shell_start_date", ""),
+            "shell_end_date": tender_data.get("shell_end_date", ""),
+            "submit_date": tender_data.get("submit_date", ""),
+            "platform": tender_data.get("platform", ""),
+            "service_fee": tender_data.get("service_fee", ""),
         }
 
         # 检查是否已有正在运行的任务
