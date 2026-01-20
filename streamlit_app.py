@@ -126,6 +126,10 @@ if "tender_data" not in st.session_state:
 if "cancel_requested" not in st.session_state:
     st.session_state.cancel_requested = False
 
+# 初始化URL参数处理标志
+if "url_params_processed" not in st.session_state:
+    st.session_state.url_params_processed = False
+
 # 检查是否需要禁用下载按钮
 if st.session_state.get("should_disable_downloads", False):
     # 注入JavaScript来禁用下载按钮
@@ -230,12 +234,39 @@ with tab:
         "4. 点击\"开始生成\"后等待完成提示，再到对应路径查看 Word 结果或直接下载\n\n"
     )
     
+    # 处理URL参数（只在首次加载时处理）
+    if not st.session_state.url_params_processed:
+        query_params = st.query_params
+        tender_no_from_url = query_params.get("tenderno", "")
+        
+        if tender_no_from_url:
+            # 自动获取招标数据
+            try:
+                tender_data = fetch_tender_data(tender_no_from_url)
+                st.session_state.tender_data = tender_data
+                st.session_state.auto_fetched_tender_no = tender_no_from_url
+                # 清除URL参数
+                st.query_params.clear()
+                st.session_state.url_params_processed = True
+                # 重新运行以更新UI
+                st.rerun()
+            except Exception as e:
+                st.error(f"自动获取数据失败：{str(e)}")
+                st.session_state.auto_fetched_tender_no = ""
+                # 即使失败也清除URL参数
+                st.query_params.clear()
+                st.session_state.url_params_processed = True
+        else:
+            st.session_state.url_params_processed = True
+    
     # 招标编号输入和获取按钮
     col1, col2 = st.columns([8, 1])
     with col1:
+        # 如果URL中有tenderno参数，使用它作为默认值
+        default_tender_no = st.session_state.get("auto_fetched_tender_no", "")
         tender_no_input = st.text_input(
             "招标编号",
-            value="",
+            value=default_tender_no,
             placeholder="请输入招标编号",
             key="tender_no_input"
         )
