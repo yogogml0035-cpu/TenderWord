@@ -97,6 +97,39 @@ st.markdown(
     <style>
     /* 适当缩小顶部内边距，避免过大空白又不遮挡 tabs */
     div.block-container {padding-top: 2rem;}
+    
+    /* 修复搜狗浏览器等浏览器的滚动条显示问题 */
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
+        overflow: auto !important;
+        overflow-y: auto !important;
+        height: auto !important;
+        min-height: 100vh !important;
+    }
+    
+    /* 确保主容器可以滚动 */
+    .main {
+        overflow-y: auto !important;
+        height: auto !important;
+    }
+    
+    /* 强制显示滚动条（兼容性更好） */
+    ::-webkit-scrollbar {
+        width: 12px;
+        height: 12px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: #f1f1f1;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 6px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: #555;
+    }
     </style>
     """,
     unsafe_allow_html=True,
