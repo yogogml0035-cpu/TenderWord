@@ -145,7 +145,9 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
 
 async def stream_llm_completion(
     model_provider: str,
-    prompt: str,
+    prompt: Optional[str] = None,
+    system_prompt: Optional[str] = None,
+    user_prompt: Optional[str] = None,
     callbacks: Optional[StreamCallbacks] = None,
     timeout_seconds: int = 10,
     check_interval: float = 3.0,
@@ -155,7 +157,9 @@ async def stream_llm_completion(
     
     Args:
         model_provider: 模型提供商，支持 "doubao", "qwen", "deepseek"
-        prompt: 用户提示词
+        prompt: 用户提示词（兼容旧版本，如果提供则忽略 system_prompt 和 user_prompt）
+        system_prompt: 系统提示词（可选）
+        user_prompt: 用户提示词（可选）
         callbacks: 回调函数集合
         timeout_seconds: 超时时间（秒），默认 10 秒
         check_interval: 心跳检查间隔（秒），默认 3 秒
@@ -186,7 +190,14 @@ async def stream_llm_completion(
     
     try:
         heartbeat.start()
-        content = await _stream_openai_compatible(prompt, config, heartbeat, _on_chunk_received)
+        content = await _stream_openai_compatible(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            config=config,
+            heartbeat=heartbeat,
+            on_chunk=_on_chunk_received
+        )
         print()  # 换行
         return content
         
@@ -200,10 +211,12 @@ async def stream_llm_completion(
 
 
 async def _stream_openai_compatible(
-    prompt: str,
     config: ModelConfig,
     heartbeat: HeartbeatMonitor,
     on_chunk: Callable[[str], None],
+    prompt: Optional[str] = None,
+    system_prompt: Optional[str] = None,
+    user_prompt: Optional[str] = None,
 ) -> str:
     """OpenAI 兼容接口的通用流式调用实现"""
     from openai import AsyncOpenAI
@@ -217,10 +230,27 @@ async def _stream_openai_compatible(
         base_url=os.getenv(config.base_url_env),
     )
     
+    # 构建消息列表
+    messages = []
+    
+    # 如果提供了 prompt，则只使用 prompt 作为 user 消息
+    if prompt:
+        messages.append({'role': 'user', 'content': prompt})
+    else:
+        # 分别处理 system_prompt 和 user_prompt
+        if system_prompt:
+            messages.append({'role': 'system', 'content': system_prompt})
+        if user_prompt:
+            messages.append({'role': 'user', 'content': user_prompt})
+        
+        # 如果两者都没有提供，抛出错误
+        if not messages:
+            raise ValueError("必须提供 prompt 或者 system_prompt/user_prompt 中的至少一个")
+    
     # 构建请求参数
     create_params: dict[str, Any] = {
         "model": os.getenv(config.model_env),
-        "messages": [{'role': 'user', 'content': prompt}],
+        "messages": messages,
         "stream": True,
         **config.extra_params,  # max_tokens, temperature 等
     }

@@ -43,8 +43,11 @@ async def generate_polished_text(state: XjcgTenderGraphState, config) -> XjcgTen
     model_provider = configurable.get("model_provider", "deepseek")
     print(f"[generate_polished_text] 使用模型: {model_provider}")
 
-    from .xjcg_prompt import POLISH_PROMPT
-    prompt = POLISH_PROMPT.format(
+    from .xjcg_prompt import POLISH_SYSTEM_PROMPT, POLISH_USER_PROMPT
+    
+    # 构建 system prompt 和 user prompt
+    system_prompt = POLISH_SYSTEM_PROMPT
+    user_prompt = POLISH_USER_PROMPT.format(
         tender_params=tender_params,
         origin_tender_params=origin_tender_params,
     )
@@ -99,10 +102,11 @@ async def generate_polished_text(state: XjcgTenderGraphState, config) -> XjcgTen
         on_update=_push_stream_update,
     )
     
-    # 调用统一的流式 LLM 接口
+    # 调用统一的流式 LLM 接口，使用 system_prompt 和 user_prompt
     content = await stream_llm_completion(
         model_provider=model_provider,
-        prompt=prompt,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
         callbacks=callbacks,
         timeout_seconds=TIMEOUT_SECONDS,
         check_interval=CHECK_INTERVAL,
