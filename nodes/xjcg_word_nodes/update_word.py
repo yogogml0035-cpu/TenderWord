@@ -31,6 +31,56 @@ from util.word_constants import (
 )
 
 
+def split_polished_text_into_blocks(polished_text: str):
+    polished_text_norm = polished_text.replace("\r\n", "\n").replace("\r", "\n")
+    raw_lines = polished_text_norm.split("\n")
+    content_list = [line.rstrip() for line in raw_lines if line.strip() != ""]
+
+    def parse_keyword_line(line: Optional[str], keyword: str):
+        if not line or keyword not in line:
+            return "", None
+        m = re.search(rf"^(?P<prefix>.*?){re.escape(keyword)}\s*([：:])(?P<value>.*)$", line)
+        if m:
+            return m.group("prefix"), m.group("value")
+        idx = line.find(keyword)
+        prefix = line[:idx]
+        rest = line[idx + len(keyword):]
+        rest = rest.lstrip()
+        if rest.startswith("：") or rest.startswith(":"):
+            rest = rest[1:]
+        return prefix, rest
+
+    delivery_date_idx = next((i for i, line in enumerate(content_list) if "交付日期" in line), None)
+    payment_method_idx = next((i for i, line in enumerate(content_list) if "付款方式" in line), None)
+
+    delivery_date_line = content_list[delivery_date_idx] if delivery_date_idx is not None else None
+    payment_method_line = content_list[payment_method_idx] if payment_method_idx is not None else None
+
+    delivery_prefix, delivery_value = parse_keyword_line(delivery_date_line, "交付日期")
+    payment_prefix, payment_value = parse_keyword_line(payment_method_line, "付款方式")
+
+    block1 = content_list[:delivery_date_idx] if delivery_date_idx is not None else (content_list[:] if content_list else [])
+    block2 = (
+        content_list[delivery_date_idx + 1:payment_method_idx]
+        if delivery_date_idx is not None and payment_method_idx is not None
+        else (content_list[delivery_date_idx + 1:] if delivery_date_idx is not None else [])
+    )
+    block3 = content_list[payment_method_idx + 1:] if payment_method_idx is not None else []
+
+    return {
+        "content_list": content_list,
+        "delivery_date_line": delivery_date_line,
+        "payment_method_line": payment_method_line,
+        "delivery_prefix": delivery_prefix,
+        "delivery_value": delivery_value,
+        "payment_prefix": payment_prefix,
+        "payment_value": payment_value,
+        "block1": block1,
+        "block2": block2,
+        "block3": block3,
+    }
+
+
 def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     start_time = time.perf_counter()
     
@@ -53,8 +103,8 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     if not insertion_before_text or not insertion_after_text:
         raise ValueError("insertion_before_text 和 insertion_after_text 必须提供，用于定位插入范围")
     
-    # 将 polished_text 拆分为内容列表（按行）
-    content_list = [line.strip() for line in polished_text.split("\n") if line.strip()]
+    split_result = split_polished_text_into_blocks(polished_text)
+    content_list = split_result["content_list"]
     
     insertion_log_parts = []
     word = None
@@ -184,30 +234,23 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                 # 步骤2：根据受保护字段将内容列表拆分为块
                 insertion_log_parts.append("步骤2：按字段拆分内容块...")
                 
-                # Find indices of protected fields in content_list (找最先出现的)
-                delivery_date_idx = None
-                payment_method_idx = None
-                
-                for i, line in enumerate(content_list):
-                    if delivery_date_idx is None and "交付日期" in line:
-                        delivery_date_idx = i
-                    if payment_method_idx is None and "付款方式" in line:
-                        payment_method_idx = i
-                    # 如果两个都找到了，提前退出循环
-                    if delivery_date_idx is not None and payment_method_idx is not None:
-                        break
-                
-                # Split into three blocks
-                block1 = content_list[:delivery_date_idx] if delivery_date_idx is not None else []
-                block2 = content_list[delivery_date_idx:payment_method_idx] if payment_method_idx is not None else content_list[delivery_date_idx:] if delivery_date_idx is not None else []
-                block3 = content_list[payment_method_idx+1:] if payment_method_idx is not None else []
-                
-                delivery_date_line = content_list[delivery_date_idx] if delivery_date_idx is not None else None
-                payment_method_line = content_list[payment_method_idx] if payment_method_idx is not None else None
+                delivery_date_line = split_result["delivery_date_line"]
+                payment_method_line = split_result["payment_method_line"]
+                delivery_prefix = split_result["delivery_prefix"]
+                delivery_value = split_result["delivery_value"]
+                payment_prefix = split_result["payment_prefix"]
+                payment_value = split_result["payment_value"]
+                block1 = split_result["block1"]
+                block2 = split_result["block2"]
+                block3 = split_result["block3"]
                 
                 insertion_log_parts.append(f"  块1: {len(block1)} 条（交付日期之前）")
                 insertion_log_parts.append(f"  块2: {len(block2)} 条（交付日期区段）")
                 insertion_log_parts.append(f"  块3: {len(block3)} 条（付款方式之后）")
+                if delivery_prefix.strip():
+                    insertion_log_parts.append(f"  交付日期前缀: {delivery_prefix.strip()}")
+                if payment_prefix.strip():
+                    insertion_log_parts.append(f"  付款方式前缀: {payment_prefix.strip()}")
                 
                 # 步骤3：删除所有可编辑内容
                 insertion_log_parts.append(f"步骤3：删除第 {target_page} 页可编辑内容...")
@@ -255,6 +298,113 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                 selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
                 page_end_after = selection.Start if selection.Information(wdActiveEndPageNumber) == next_page else doc.Content.End
                 page_rng_after = doc.Range(page_start_after, page_end_after)
+
+                def refind_protected_paragraph(keyword: str):
+                    search_rng = doc.Range(page_start_after, doc.Content.End)
+                    finder = search_rng.Find
+                    finder.ClearFormatting()
+                    finder.Text = keyword
+                    finder.Forward = True
+                    finder.Wrap = wdFindStop
+                    finder.MatchCase = False
+                    finder.MatchWholeWord = False
+                    if finder.Execute():
+                        return doc.Range(search_rng.Start, search_rng.Start).Paragraphs(1).Range
+                    return None
+
+                protected_fields = {}
+                for keyword in protected_keywords:
+                    try:
+                        para_rng = refind_protected_paragraph(keyword)
+                        if para_rng is not None:
+                            protected_fields[keyword] = para_rng
+                    except Exception:
+                        pass
+
+                def is_range_locked(rng) -> bool:
+                    try:
+                        if hasattr(rng, "Locked") and rng.Locked:
+                            return True
+                    except Exception:
+                        pass
+                    try:
+                        fields = rng.Fields
+                        count = fields.Count
+                        for i in range(1, count + 1):
+                            try:
+                                field = fields(i)
+                                if hasattr(field, "Locked") and field.Locked:
+                                    return True
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
+                    try:
+                        marker = "\u200B"
+                        test_pos = rng.End
+                        probe_rng = doc.Range(test_pos, test_pos)
+                        probe_rng.InsertAfter(marker)
+                        inserted = doc.Range(test_pos, test_pos + 1)
+                        if inserted.Text == marker:
+                            inserted.Delete()
+                            return False
+                        return True
+                    except Exception as probe_e:
+                        err = str(probe_e).lower()
+                        if "锁定" in err or "locked" in err or "-2146823683" in err:
+                            return True
+                        return True
+
+                def find_editable_insertion_pos(start_pos: int, max_lookahead: int = 400) -> int:
+                    doc_end = doc.Content.End
+                    pos = min(max(0, start_pos), doc_end)
+                    for _ in range(max_lookahead + 1):
+                        try:
+                            probe = doc.Range(pos, pos)
+                            if not is_range_locked(probe):
+                                return pos
+                        except Exception:
+                            pass
+                        if pos >= doc_end:
+                            break
+                        pos += 1
+                    return min(max(0, start_pos), doc_end)
+
+                def find_next_editable_pos(after_pos: int, max_paragraphs: int = 250) -> int:
+                    doc_end = doc.Content.End
+                    start = min(max(0, after_pos), doc_end)
+                    try:
+                        scan_rng = doc.Range(start, doc_end)
+                        paras = scan_rng.Paragraphs
+                        count = paras.Count
+                        for i in range(1, min(count, max_paragraphs) + 1):
+                            try:
+                                p_rng = paras(i).Range
+                                p_start = int(p_rng.Start)
+                                if not is_range_locked(doc.Range(p_start, p_start)):
+                                    return p_start
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
+                    return find_editable_insertion_pos(start, max_lookahead=20000)
+
+                def is_locked_exception(e: Exception) -> bool:
+                    err = str(e).lower()
+                    return ("锁定" in err) or ("locked" in err) or ("-2146823683" in err)
+
+                def ensure_editable_insert_range(insert_range) -> None:
+                    try:
+                        pos = int(insert_range.Start)
+                    except Exception:
+                        pos = 0
+                    try:
+                        if is_range_locked(doc.Range(pos, pos)):
+                            pos2 = find_next_editable_pos(pos + 1)
+                            insert_range.SetRange(pos2, pos2)
+                            insert_range.Collapse(wdCollapseStart)
+                    except Exception:
+                        pass
                 
                 # 格式设置
                 insert_font_name = "宋体"
@@ -313,6 +463,7 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                 
                 # 辅助函数：插入带格式的内容
                 def insert_content_with_formatting(insert_range, line):
+                    ensure_editable_insert_range(insert_range)
                     start_pos = insert_range.End
                     insert_range.InsertAfter(line + "\r")
                     end_pos = insert_range.End
@@ -389,33 +540,67 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                     return table
                     
                 # 辅助函数：更新受保护字段的值
-                def update_protected_field(keyword, new_value):
+                def insert_prefix_before_keyword(keyword: str, prefix: str):
+                    if not prefix or not prefix.strip():
+                        return True
                     if keyword not in protected_fields:
                         return False
-                    
-                    para_rng = protected_fields[keyword]
-                    para_text = para_rng.Text.strip()
-                    
-                    if "：" in para_text:
-                        colon_pos = para_text.find("：")
+                    try:
+                        para_rng = protected_fields[keyword]
+                        para_text = para_rng.Text
+                        idx = para_text.find(keyword)
+                        if idx < 0:
+                            return False
+                        before = para_text[:idx].replace("\r", "").replace("\a", "")
+                        prefix_clean = prefix.replace("\r", "").replace("\n", "")
+                        if before.endswith(prefix_clean):
+                            return True
+                        insert_pos = para_rng.Start + idx
+                        doc.Range(insert_pos, insert_pos).InsertBefore(prefix_clean)
+                        return True
+                    except Exception as e:
+                        insertion_log_parts.append(f"  警告: 插入前缀失败 '{keyword}': {e}")
+                        return False
+
+                def update_protected_field(keyword: str, new_value: Optional[str]):
+                    if keyword not in protected_fields:
+                        return False
+                    if new_value is None:
+                        return True
+                    try:
+                        para_rng = protected_fields[keyword]
+                        para_text = para_rng.Text
+                        idx_kw = para_text.find(keyword)
+                        if idx_kw < 0:
+                            return False
+
+                        colon_pos = para_text.find("：", idx_kw + len(keyword))
+                        if colon_pos < 0:
+                            colon_pos = para_text.find(":", idx_kw + len(keyword))
+
                         if colon_pos >= 0:
-                            try:
-                                value_start = para_rng.Start + colon_pos + 1
-                                value_end = para_rng.End - 1  # 排除段落标记
-                                value_rng = doc.Range(value_start, value_end)
-                                
-                                # 从值中移除换行符
-                                new_value_clean = new_value.replace("\r", "").replace("\n", "").strip()
-                                value_rng.Text = new_value_clean
-                                value_rng.Font.Name = insert_font_name
-                                value_rng.Font.Size = insert_font_size
-                                
-                                insertion_log_parts.append(f"  已更新受保护字段 '{keyword}': {new_value_clean[:50]}...")
-                                return True
-                            except Exception as e:
-                                insertion_log_parts.append(f"  警告: 无法更新 '{keyword}': {e}")
-                                return False
-                    return False
+                            value_start = para_rng.Start + colon_pos + 1
+                        else:
+                            value_start = para_rng.Start + idx_kw + len(keyword)
+
+                        trim = 0
+                        while para_text.endswith("\r") or para_text.endswith("\a"):
+                            para_text = para_text[:-1]
+                            trim += 1
+                        value_end = para_rng.End - trim
+                        if value_end < value_start:
+                            value_end = value_start
+
+                        value_rng = doc.Range(value_start, value_end)
+                        new_value_clean = new_value.replace("\r", "").replace("\n", "")
+                        value_rng.Text = new_value_clean
+                        value_rng.Font.Name = insert_font_name
+                        value_rng.Font.Size = insert_font_size
+                        insertion_log_parts.append(f"  已更新受保护字段 '{keyword}': {new_value_clean[:50]}...")
+                        return True
+                    except Exception as e:
+                        insertion_log_parts.append(f"  警告: 无法更新 '{keyword}': {e}")
+                        return False
                     
                 # 插入块1（在交付日期之前）
                 insertion_log_parts.append("  正在插入块1...")
@@ -442,16 +627,16 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                     except Exception as e:
                         insertion_log_parts.append(f"    插入项出错: {e}")
                 
-                # Update 交付日期 field value
-                if delivery_date_line and "交付日期" in protected_fields:
-                    if "：" in delivery_date_line:
-                        new_value = delivery_date_line.split("：", 1)[1]
-                        update_protected_field("交付日期", new_value)
+                if "交付日期" in protected_fields:
+                    insert_prefix_before_keyword("交付日期", delivery_prefix)
+                    protected_fields["交付日期"] = refind_protected_paragraph("交付日期") or protected_fields["交付日期"]
+                    update_protected_field("交付日期", delivery_value)
                     
                     # 插入块2（在交付日期和付款方式之间）
                     insertion_log_parts.append("  插入块2...")
                     if "交付日期" in protected_fields and "付款方式" in protected_fields:
                         delivery_date_rng = protected_fields["交付日期"]
+                        protected_fields["付款方式"] = refind_protected_paragraph("付款方式") or protected_fields["付款方式"]
                         payment_method_rng = protected_fields["付款方式"]
                         
                         # 在交付日期字段之后、付款方式字段之前插入
@@ -459,8 +644,7 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                         insert_rng.End = payment_method_rng.Start
                         insert_rng.Collapse(wdCollapseStart)
                         
-                        # 插入块2内容（排除交付日期行本身）
-                        block2_items = convert_lines_to_items(block2[1:])  # 跳过第一行（交付日期行）
+                        block2_items = convert_lines_to_items(block2)
                         for item in block2_items:
                             try:
                                 if item["type"] == "text":
@@ -478,7 +662,7 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                         insert_rng.End = delivery_date_rng.End
                         insert_rng.Collapse(wdCollapseStart)
                         
-                        block2_items = convert_lines_to_items(block2[1:])
+                        block2_items = convert_lines_to_items(block2)
                         for item in block2_items:
                             try:
                                 if item["type"] == "text":
@@ -490,11 +674,10 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                             except Exception as e:
                                 insertion_log_parts.append(f"    插入项出错: {e}")
                     
-                    # Update 付款方式 field value
-                    if payment_method_line and "付款方式" in protected_fields:
-                        if "：" in payment_method_line:
-                            new_value = payment_method_line.split("：", 1)[1]
-                            update_protected_field("付款方式", new_value)
+                    if "付款方式" in protected_fields:
+                        insert_prefix_before_keyword("付款方式", payment_prefix)
+                        protected_fields["付款方式"] = refind_protected_paragraph("付款方式") or protected_fields["付款方式"]
+                        update_protected_field("付款方式", payment_value)
                     
                     # 插入块3（在付款方式之后）
                     block3_items = convert_lines_to_items(block3)
@@ -508,9 +691,11 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                         )
                     
                     if "付款方式" in protected_fields:
+                        protected_fields["付款方式"] = refind_protected_paragraph("付款方式") or protected_fields["付款方式"]
                         payment_method_rng = protected_fields["付款方式"]
-                        insert_rng.Start = payment_method_rng.End
-                        insert_rng.End = payment_method_rng.End
+                        safe_pos = find_next_editable_pos(int(payment_method_rng.End))
+                        insert_rng.Start = min(max(0, safe_pos), doc.Content.End)
+                        insert_rng.End = insert_rng.Start
                         insert_rng.Collapse(wdCollapseStart)
                         insertion_log_parts.append(f"    在付款方式字段后插入，位置 {insert_rng.Start}")
                     else:
@@ -522,17 +707,40 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                     
                     inserted_count = 0
                     for item in block3_items:
-                        try:
-                            if item["type"] == "text":
-                                inserted_rng = insert_content_with_formatting(insert_rng, item["line"])
-                                inserted_count += 1
-                                insertion_log_parts.append(f"    [{inserted_count}/{len(block3_items)}] 已插入: {item['line'][:50]}...")
-                            elif item["type"] == "table":
-                                insert_table_with_formatting(insert_rng, item["rows"])
-                                inserted_count += 1
-                                insertion_log_parts.append(f"    [{inserted_count}/{len(block3_items)}] 已插入表格，行数 {len(item['rows'])}。")
-                        except Exception as e:
-                            insertion_log_parts.append(f"    插入项出错: {e}")
+                        attempts = 0
+                        while attempts < 80:
+                            attempts += 1
+                            try:
+                                ensure_editable_insert_range(insert_rng)
+                                if item["type"] == "text":
+                                    inserted_rng = insert_content_with_formatting(insert_rng, item["line"])
+                                    inserted_count += 1
+                                    insertion_log_parts.append(f"    [{inserted_count}/{len(block3_items)}] 已插入: {item['line'][:50]}...")
+                                    break
+                                elif item["type"] == "table":
+                                    insert_table_with_formatting(insert_rng, item["rows"])
+                                    inserted_count += 1
+                                    insertion_log_parts.append(f"    [{inserted_count}/{len(block3_items)}] 已插入表格，行数 {len(item['rows'])}。")
+                                    break
+                            except Exception as e:
+                                if is_locked_exception(e):
+                                    try:
+                                        cur = int(insert_rng.Start)
+                                    except Exception:
+                                        cur = 0
+                                    nxt = find_next_editable_pos(cur + 1)
+                                    if nxt == cur:
+                                        insertion_log_parts.append(f"    插入项出错: {e}")
+                                        break
+                                    try:
+                                        insert_rng.SetRange(nxt, nxt)
+                                        insert_rng.Collapse(wdCollapseStart)
+                                        continue
+                                    except Exception:
+                                        insertion_log_parts.append(f"    插入项出错: {e}")
+                                        break
+                                insertion_log_parts.append(f"    插入项出错: {e}")
+                                break
                     
                     insertion_log_parts.append(f"  块3插入完成: {inserted_count}/{len(block3_items)} 条。")
                     
@@ -763,6 +971,13 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     new_state_dict["insertion_log"] = insertion_log
     new_state = XjcgTenderGraphState(**new_state_dict)
     
+    try:
+        print("[update_word] 插入日志:")
+        for line in insertion_log_parts:
+            print(f"[update_word] {line}")
+    except Exception:
+        pass
+
     duration = time.perf_counter() - start_time
     duration_ms = duration * 1000
     print(f"[update_word] 执行完成，耗时: {duration:.2f} 秒 ({duration_ms:.0f} 毫秒)")

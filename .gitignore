@@ -29,5 +29,7 @@ ENV/
 Thumbs.db
 
 docs
-
+test_word/
+test_py/
 用户使用手册.md
+

@@ -519,6 +519,46 @@ def delete_tender_param(state: XjcgTenderGraphState, config) -> XjcgTenderGraphS
                                 print(f"已在位置 {insert_pos} 插入回车换行（回退方案）")
                         except Exception as newline_e:
                             print(f"警告: 插入回车换行处理失败: {newline_e}")
+
+                        try:
+                            anchor_pos_pm = find_anchor_after(anchor_search_start, ["付款方式：", "付款方式:"])
+                            if anchor_pos_pm is not None:
+                                try:
+                                    para_pm = doc.Range(anchor_pos_pm, anchor_pos_pm).Paragraphs(1)
+                                    pm_end = int(para_pm.Range.End)
+                                    doc_end = int(doc.Content.End)
+
+                                    need_insert = True
+                                    if pm_end < doc_end:
+                                        try:
+                                            next_char = doc.Range(pm_end, min(pm_end + 1, doc_end)).Text
+                                            if next_char == "\r":
+                                                need_insert = False
+                                        except Exception:
+                                            pass
+
+                                    if need_insert:
+                                        inserted_pm = False
+                                        for off in range(0, 4001):
+                                            pos = min(pm_end + off, doc_end)
+                                            try:
+                                                probe = doc.Range(pos, pos)
+                                                if is_range_locked(probe):
+                                                    continue
+                                                doc.Range(pos, pos).InsertBefore("\r")
+                                                print(f'已在位置 {pos} 为"付款方式"后补齐回车换行')
+                                                inserted_pm = True
+                                                break
+                                            except Exception:
+                                                continue
+                                        if not inserted_pm:
+                                            print('警告: 未能为"付款方式"后补齐回车换行（可能全部区域受保护）')
+                                except Exception as pm_e:
+                                    print(f'警告: 为"付款方式"后补齐回车换行失败: {pm_e}')
+                            else:
+                                print('提示: 未找到"付款方式"锚点，跳过补齐回车换行')
+                        except Exception as pm_outer_e:
+                            print(f'警告: 处理"付款方式"补齐回车换行时出错: {pm_outer_e}')
         
                         # 保存清理后的文档
                         try:
