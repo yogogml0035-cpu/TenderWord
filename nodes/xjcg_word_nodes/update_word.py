@@ -136,6 +136,29 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
             if unprotect_document(doc, node_name="update_word"):
                 insertion_log_parts.append("已取消文档保护")
 
+            def _find_anchor_pos(anchor_text: str, start_pos: int = 0):
+                search_rng = doc.Content.Duplicate
+                search_rng.Start = max(0, int(start_pos))
+                search_rng.End = doc.Content.End
+                finder = search_rng.Find
+                finder.ClearFormatting()
+                finder.Text = anchor_text
+                finder.Forward = True
+                finder.Wrap = wdFindStop
+                finder.MatchCase = False
+                finder.MatchWholeWord = False
+                while finder.Execute():
+                    font_name = search_rng.Font.Name
+                    font_size = search_rng.Font.Size
+                    is_font = font_name in ("宋体", "SimSun")
+                    is_size = abs(font_size - 18.0) < 0.5
+                    if is_font and is_size:
+                        page = search_rng.Information(wdActiveEndPageNumber)
+                        return int(search_rng.Start), int(search_rng.End), int(page)
+                    search_rng.Collapse(wdCollapseEnd)
+                    search_rng.End = doc.Content.End
+                return None
+
             # 优先使用 extract_tender_params 已计算好的页范围，避免重复查找
             start_page = state.get("start_page")
             end_page = state.get("end_page")
@@ -182,6 +205,51 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                 raise ValueError("无法确定插入页范围")
             if end_page < start_page:
                 raise ValueError(f"插入页范围非法: {start_page} - {end_page}")
+
+            before_anchor = _find_anchor_pos(insertion_before_text, 0)
+            if before_anchor is None:
+                raise ValueError("未找到前置锚点（需宋体/SimSun 且 18pt）")
+            before_anchor_start, before_anchor_end, before_anchor_page = before_anchor
+
+            selection = word.Selection
+            try:
+                selection.GoTo(wdGoToPage, wdGoToAbsolute, before_anchor_page + 1)
+                insertion_bound_start = int(selection.Start)
+                if insertion_bound_start < before_anchor_end:
+                    insertion_bound_start = before_anchor_end
+            except Exception:
+                insertion_bound_start = before_anchor_end
+
+            after_anchor = _find_anchor_pos(insertion_after_text, insertion_bound_start)
+            if after_anchor is None:
+                raise ValueError("未找到后置锚点（需宋体/SimSun 且 18pt）")
+            after_anchor_start, after_anchor_end, after_anchor_page = after_anchor
+            insertion_bound_end = after_anchor_start
+
+            if insertion_bound_end <= insertion_bound_start:
+                raise ValueError(
+                    f"锚点范围非法: start={insertion_bound_start}, end={insertion_bound_end}"
+                )
+
+            after_anchor_marker = doc.Range(int(after_anchor_start), int(after_anchor_start))
+
+            def get_insertion_bound_end() -> int:
+                try:
+                    return int(after_anchor_marker.Start)
+                except Exception:
+                    return int(insertion_bound_end)
+
+            insertion_log_parts.append(
+                f"锚点范围(字符位置): {insertion_bound_start} - {insertion_bound_end}；后置锚点页码: {after_anchor_page}"
+            )
+
+            try:
+                region_text = doc.Range(insertion_bound_start, insertion_bound_end).Text
+                if re.search(r"第[一二三四五六七八九十0-9]+章", region_text):
+                    raise ValueError("锚点之间检测到章节标题，停止插入以避免侵入其他章节")
+            except Exception as _region_e:
+                if isinstance(_region_e, ValueError):
+                    raise
 
             selection = word.Selection
 
@@ -296,11 +364,17 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                 selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
                 page_start_after = selection.Start
                 selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
-                page_end_after = selection.Start if selection.Information(wdActiveEndPageNumber) == next_page else doc.Content.End
+                page_end_after = (
+                    selection.Start if selection.Information(wdActiveEndPageNumber) == next_page else doc.Content.End
+                )
+                bound_end_for_search = int(get_insertion_bound_end())
+                if int(page_end_after) < bound_end_for_search:
+                    page_end_after = bound_end_for_search
                 page_rng_after = doc.Range(page_start_after, page_end_after)
 
                 def refind_protected_paragraph(keyword: str):
-                    search_rng = doc.Range(page_start_after, doc.Content.End)
+                    bound_end = int(get_insertion_bound_end())
+                    search_rng = doc.Range(int(insertion_bound_start), bound_end)
                     finder = search_rng.Find
                     finder.ClearFormatting()
                     finder.Text = keyword
@@ -308,8 +382,17 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                     finder.Wrap = wdFindStop
                     finder.MatchCase = False
                     finder.MatchWholeWord = False
-                    if finder.Execute():
-                        return doc.Range(search_rng.Start, search_rng.Start).Paragraphs(1).Range
+                    while finder.Execute():
+                        try:
+                            pos = int(search_rng.Start)
+                        except Exception:
+                            pos = search_rng.Start
+                        if int(insertion_bound_start) <= pos <= bound_end:
+                            para_rng = doc.Range(pos, pos).Paragraphs(1).Range
+                            para_text = para_rng.Text.strip()
+                            if keyword in para_text and ("：" in para_text or ":" in para_text):
+                                return para_rng
+                        search_rng.Collapse(wdCollapseEnd)
                     return None
 
                 protected_fields = {}
@@ -356,8 +439,13 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                         return True
 
                 def find_editable_insertion_pos(start_pos: int, max_lookahead: int = 400) -> int:
-                    doc_end = doc.Content.End
-                    pos = min(max(0, start_pos), doc_end)
+                    bound_end = int(get_insertion_bound_end())
+                    bound_start = int(insertion_bound_start)
+                    doc_end = int(doc.Content.End)
+                    scan_end = min(doc_end, bound_end)
+                    pos = min(max(0, int(start_pos)), scan_end)
+                    if pos < bound_start:
+                        pos = bound_start
                     for _ in range(max_lookahead + 1):
                         try:
                             probe = doc.Range(pos, pos)
@@ -365,29 +453,70 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                                 return pos
                         except Exception:
                             pass
-                        if pos >= doc_end:
+                        if pos >= scan_end:
                             break
                         pos += 1
-                    return min(max(0, start_pos), doc_end)
+                    return min(max(0, int(start_pos)), scan_end)
 
                 def find_next_editable_pos(after_pos: int, max_paragraphs: int = 250) -> int:
-                    doc_end = doc.Content.End
-                    start = min(max(0, after_pos), doc_end)
+                    bound_end = int(get_insertion_bound_end())
+                    bound_start = int(insertion_bound_start)
+                    doc_end = int(doc.Content.End)
+                    scan_end = min(doc_end, bound_end)
+                    start = min(max(0, int(after_pos)), scan_end)
+                    if start < bound_start:
+                        start = bound_start
                     try:
-                        scan_rng = doc.Range(start, doc_end)
+                        scan_rng = doc.Range(start, scan_end)
                         paras = scan_rng.Paragraphs
                         count = paras.Count
                         for i in range(1, min(count, max_paragraphs) + 1):
                             try:
                                 p_rng = paras(i).Range
                                 p_start = int(p_rng.Start)
-                                if not is_range_locked(doc.Range(p_start, p_start)):
-                                    return p_start
+                                candidate = max(p_start, start)
+                                if candidate > scan_end:
+                                    candidate = scan_end
+                                if not is_range_locked(doc.Range(candidate, candidate)):
+                                    return candidate
                             except Exception:
                                 continue
                     except Exception:
                         pass
                     return find_editable_insertion_pos(start, max_lookahead=20000)
+
+                def find_next_editable_pos_bounded(start_pos: int, bound_end: int, max_lookahead: int = 4000) -> Optional[int]:
+                    doc_end = int(doc.Content.End)
+                    start = int(min(max(0, start_pos), doc_end))
+                    end = int(min(max(0, bound_end), doc_end))
+                    if end < start:
+                        return None
+                    pos = start
+                    look = min(max_lookahead, end - start)
+                    for _ in range(look + 1):
+                        try:
+                            if not is_range_locked(doc.Range(pos, pos)):
+                                return pos
+                        except Exception:
+                            pass
+                        pos += 1
+                        if pos > end:
+                            break
+                    return None
+
+                def find_prev_editable_pos(before_pos: int, max_lookback: int = 4000) -> Optional[int]:
+                    doc_end = int(doc.Content.End)
+                    pos = int(min(max(0, before_pos), doc_end))
+                    for _ in range(max_lookback + 1):
+                        try:
+                            if not is_range_locked(doc.Range(pos, pos)):
+                                return pos
+                        except Exception:
+                            pass
+                        if pos <= 0:
+                            break
+                        pos -= 1
+                    return None
 
                 def is_locked_exception(e: Exception) -> bool:
                     err = str(e).lower()
@@ -395,14 +524,29 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
 
                 def ensure_editable_insert_range(insert_range) -> None:
                     try:
+                        insert_range.Collapse(wdCollapseStart)
+                    except Exception:
+                        pass
+                    try:
                         pos = int(insert_range.Start)
                     except Exception:
                         pos = 0
                     try:
-                        if is_range_locked(doc.Range(pos, pos)):
-                            pos2 = find_next_editable_pos(pos + 1)
-                            insert_range.SetRange(pos2, pos2)
+                        bound_end = int(get_insertion_bound_end())
+                        bound_start = int(insertion_bound_start)
+                        if pos < bound_start:
+                            pos = bound_start
+                            insert_range.SetRange(pos, pos)
                             insert_range.Collapse(wdCollapseStart)
+                        if pos > bound_end:
+                            pos = bound_end
+                            insert_range.SetRange(pos, pos)
+                            insert_range.Collapse(wdCollapseStart)
+                        if is_range_locked(doc.Range(pos, pos)):
+                            pos2 = find_next_editable_pos_bounded(pos + 1, bound_end, max_lookahead=20000)
+                            if pos2 is not None and pos2 > pos:
+                                insert_range.SetRange(pos2, pos2)
+                                insert_range.Collapse(wdCollapseStart)
                     except Exception:
                         pass
                 
@@ -602,6 +746,57 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                         insertion_log_parts.append(f"  警告: 无法更新 '{keyword}': {e}")
                         return False
                     
+                def insert_items_inline_at_end_of_paragraph(para_rng, items) -> int:
+                    try:
+                        t = para_rng.Text
+                        trim = 0
+                        while t.endswith("\r") or t.endswith("\a"):
+                            t = t[:-1]
+                            trim += 1
+                        pos = int(para_rng.End) - trim
+                    except Exception:
+                        pos = int(getattr(para_rng, "End", 0))
+                    try:
+                        if pos < int(para_rng.Start):
+                            pos = int(para_rng.End) - 1
+                    except Exception:
+                        pass
+                    pos = max(0, pos)
+                    rng = doc.Range(pos, pos)
+                    rng.Collapse(wdCollapseStart)
+                    inserted = 0
+                    for item in items:
+                        if item["type"] == "text":
+                            s = chr(11) + item["line"]
+                            st = int(rng.Start)
+                            rng.InsertAfter(s)
+                            ed = int(rng.End)
+                            try:
+                                ins = doc.Range(st, ed)
+                                ins.Font.Name = insert_font_name
+                                ins.Font.Size = insert_font_size
+                                ins.Font.Bold = False
+                            except Exception:
+                                pass
+                            rng.Collapse(wdCollapseEnd)
+                            inserted += 1
+                        elif item["type"] == "table":
+                            for row in item["rows"]:
+                                s = chr(11) + " | ".join(row)
+                                st = int(rng.Start)
+                                rng.InsertAfter(s)
+                                ed = int(rng.End)
+                                try:
+                                    ins = doc.Range(st, ed)
+                                    ins.Font.Name = insert_font_name
+                                    ins.Font.Size = insert_font_size
+                                    ins.Font.Bold = False
+                                except Exception:
+                                    pass
+                                rng.Collapse(wdCollapseEnd)
+                                inserted += 1
+                    return inserted
+
                 # 插入块1（在交付日期之前）
                 insertion_log_parts.append("  正在插入块1...")
                 selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
@@ -611,8 +806,11 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                 # 如果交付日期字段存在，在其之前插入
                 if "交付日期" in protected_fields:
                     delivery_date_rng = protected_fields["交付日期"]
-                    insert_rng.Start = delivery_date_rng.Start
-                    insert_rng.End = delivery_date_rng.Start
+                    before_pos = int(delivery_date_rng.Start)
+                    safe_before = find_prev_editable_pos(before_pos, max_lookback=20000)
+                    if safe_before is None:
+                        safe_before = find_editable_insertion_pos(int(page_start_after), max_lookahead=20000)
+                    insert_rng.SetRange(safe_before, safe_before)
                     insert_rng.Collapse(wdCollapseStart)
                 
                 block1_items = convert_lines_to_items(block1)
@@ -640,8 +838,12 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                         payment_method_rng = protected_fields["付款方式"]
                         
                         # 在交付日期字段之后、付款方式字段之前插入
-                        insert_rng.Start = delivery_date_rng.End
-                        insert_rng.End = payment_method_rng.Start
+                        start_between = int(delivery_date_rng.End)
+                        end_between = int(payment_method_rng.Start)
+                        safe_between = find_next_editable_pos_bounded(start_between, end_between, max_lookahead=20000)
+                        if safe_between is None:
+                            safe_between = find_next_editable_pos(start_between)
+                        insert_rng.SetRange(safe_between, safe_between)
                         insert_rng.Collapse(wdCollapseStart)
                         
                         block2_items = convert_lines_to_items(block2)
@@ -658,8 +860,9 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                     elif "交付日期" in protected_fields:
                         # 仅存在交付日期，在其后插入
                         delivery_date_rng = protected_fields["交付日期"]
-                        insert_rng.Start = delivery_date_rng.End
-                        insert_rng.End = delivery_date_rng.End
+                        start_after = int(delivery_date_rng.End)
+                        safe_after = find_next_editable_pos(start_after)
+                        insert_rng.SetRange(safe_after, safe_after)
                         insert_rng.Collapse(wdCollapseStart)
                         
                         block2_items = convert_lines_to_items(block2)
@@ -693,54 +896,81 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                     if "付款方式" in protected_fields:
                         protected_fields["付款方式"] = refind_protected_paragraph("付款方式") or protected_fields["付款方式"]
                         payment_method_rng = protected_fields["付款方式"]
-                        safe_pos = find_next_editable_pos(int(payment_method_rng.End))
+                        bound_end_now = int(get_insertion_bound_end())
+                        if int(payment_method_rng.End) > bound_end_now:
+                            raise ValueError("付款方式字段位置超出插入边界，停止以避免侵入后置章节")
+                        payment_end = int(payment_method_rng.End)
+                        start_after_payment = min(payment_end + 1, bound_end_now)
+                        safe_pos = None
+                        if start_after_payment < bound_end_now:
+                            safe_pos = find_next_editable_pos_bounded(
+                                start_after_payment, bound_end_now, max_lookahead=20000
+                            )
+                        if safe_pos is None or safe_pos >= bound_end_now:
+                            if bound_end_now > payment_end:
+                                back = find_prev_editable_pos(bound_end_now - 1, max_lookback=20000)
+                                if back is not None and back >= payment_end:
+                                    safe_pos = back
+                        if safe_pos is None:
+                            safe_pos = start_after_payment
                         insert_rng.Start = min(max(0, safe_pos), doc.Content.End)
                         insert_rng.End = insert_rng.Start
                         insert_rng.Collapse(wdCollapseStart)
                         insertion_log_parts.append(f"    在付款方式字段后插入，位置 {insert_rng.Start}")
                     else:
-                        # 如果付款方式不存在，在页面末尾插入
-                        selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                        insert_rng = selection.Range
-                        insert_rng.Collapse(wdCollapseEnd)
-                        insertion_log_parts.append(f"    未找到付款方式字段，插入到页面末尾，位置 {insert_rng.Start}")
-                    
+                        safe_pos = int(get_insertion_bound_end())
+                        insert_rng.SetRange(safe_pos, safe_pos)
+                        insert_rng.Collapse(wdCollapseStart)
+                        insertion_log_parts.append(f"    未找到付款方式字段，插入到后置锚点前，位置 {insert_rng.Start}")
+
+                    use_inline = False
+                    try:
+                        if is_range_locked(doc.Range(int(insert_rng.Start), int(insert_rng.Start))):
+                            use_inline = True
+                    except Exception:
+                        pass
+
                     inserted_count = 0
-                    for item in block3_items:
-                        attempts = 0
-                        while attempts < 80:
-                            attempts += 1
-                            try:
-                                ensure_editable_insert_range(insert_rng)
-                                if item["type"] == "text":
-                                    inserted_rng = insert_content_with_formatting(insert_rng, item["line"])
-                                    inserted_count += 1
-                                    insertion_log_parts.append(f"    [{inserted_count}/{len(block3_items)}] 已插入: {item['line'][:50]}...")
-                                    break
-                                elif item["type"] == "table":
-                                    insert_table_with_formatting(insert_rng, item["rows"])
-                                    inserted_count += 1
-                                    insertion_log_parts.append(f"    [{inserted_count}/{len(block3_items)}] 已插入表格，行数 {len(item['rows'])}。")
-                                    break
-                            except Exception as e:
-                                if is_locked_exception(e):
-                                    try:
-                                        cur = int(insert_rng.Start)
-                                    except Exception:
-                                        cur = 0
-                                    nxt = find_next_editable_pos(cur + 1)
-                                    if nxt == cur:
-                                        insertion_log_parts.append(f"    插入项出错: {e}")
+                    if use_inline and "付款方式" in protected_fields:
+                        insertion_log_parts.append("    块3将以内联换行追加到付款方式段落末尾")
+                        inserted_count = insert_items_inline_at_end_of_paragraph(protected_fields["付款方式"], block3_items)
+                    else:
+                        for item in block3_items:
+                            attempts = 0
+                            while attempts < 80:
+                                attempts += 1
+                                try:
+                                    ensure_editable_insert_range(insert_rng)
+                                    if item["type"] == "text":
+                                        inserted_rng = insert_content_with_formatting(insert_rng, item["line"])
+                                        inserted_count += 1
+                                        insertion_log_parts.append(f"    [{inserted_count}/{len(block3_items)}] 已插入: {item['line'][:50]}...")
                                         break
-                                    try:
-                                        insert_rng.SetRange(nxt, nxt)
-                                        insert_rng.Collapse(wdCollapseStart)
-                                        continue
-                                    except Exception:
-                                        insertion_log_parts.append(f"    插入项出错: {e}")
+                                    elif item["type"] == "table":
+                                        insert_table_with_formatting(insert_rng, item["rows"])
+                                        inserted_count += 1
+                                        insertion_log_parts.append(f"    [{inserted_count}/{len(block3_items)}] 已插入表格，行数 {len(item['rows'])}。")
                                         break
-                                insertion_log_parts.append(f"    插入项出错: {e}")
-                                break
+                                except Exception as e:
+                                    if is_locked_exception(e):
+                                        try:
+                                            cur = int(insert_rng.Start)
+                                        except Exception:
+                                            cur = 0
+                                        bound_end_retry = int(get_insertion_bound_end())
+                                        nxt = find_next_editable_pos_bounded(cur + 1, bound_end_retry, max_lookahead=20000)
+                                        if nxt is None or nxt <= cur:
+                                            insertion_log_parts.append(f"    插入项出错: {e}")
+                                            break
+                                        try:
+                                            insert_rng.SetRange(nxt, nxt)
+                                            insert_rng.Collapse(wdCollapseStart)
+                                            continue
+                                        except Exception:
+                                            insertion_log_parts.append(f"    插入项出错: {e}")
+                                            break
+                                    insertion_log_parts.append(f"    插入项出错: {e}")
+                                    break
                     
                     insertion_log_parts.append(f"  块3插入完成: {inserted_count}/{len(block3_items)} 条。")
                     
