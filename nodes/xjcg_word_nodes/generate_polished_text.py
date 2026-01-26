@@ -33,7 +33,7 @@ async def generate_polished_text(state: XjcgTenderGraphState, config) -> XjcgTen
     # 优先使用文件路径，如果没有则使用文本内容
     origin_tender_path = state.get("origin_tender_path")
     origin_tender_params = state.get("origin_tender_params")
-    tender_param_path = state.get("tender_param_path")
+    tender_param_paths = state.get("tender_param_paths") or []
     
     tender_params = state.get("tender_params")
     
@@ -124,12 +124,12 @@ async def generate_polished_text(state: XjcgTenderGraphState, config) -> XjcgTen
     try:
         if origin_tender_path:
             output_dir = pathlib.Path(origin_tender_path).resolve().parent
-        elif tender_param_path:
-            output_dir = pathlib.Path(tender_param_path).resolve().parent
+        elif tender_param_paths:
+            output_dir = pathlib.Path(tender_param_paths[0]).resolve().parent
     except Exception:
         output_dir = None
-    if not output_dir:
-        output_dir = prompts_dir
+    # if not output_dir:
+    #     output_dir = prompts_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     polished_txt_path = output_dir / filename

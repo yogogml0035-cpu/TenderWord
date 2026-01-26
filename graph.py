@@ -486,7 +486,7 @@ if __name__ == "__main__":
     begin_ts = time.time()
     initial_state = {
         # 文件路径配置
-        "tender_param_path": "TenderFile/技术参数.docx",
+        "tender_param_paths": ["TenderFile/技术参数.docx"],
         "origin_tender_path": "TenderFile/252699-原位杂交仪-询价文件-初稿1.doc",
         "insertion_before_text": "第三章  采购需求",  # 插入位置的前置文本
         "insertion_after_text": "第四章  响应文件有关格式",  # 插入位置的后置文本

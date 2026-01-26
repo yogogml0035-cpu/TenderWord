@@ -383,10 +383,11 @@ with tab:
             type=["doc", "docx"],
             help="请上传作为参考的 Word 文件（.doc 或 .docx）",
         )
-        origin_text_file = st.file_uploader(
-            "技术参数文件（tender_param_path）",
+        origin_text_files = st.file_uploader(
+            "技术参数文件（tender_param_paths）",
             type=["doc", "docx"],
-            help="请上传包含原始技术参数的 Word 文件（.doc 或 .docx）",
+            help="请上传包含原始技术参数的 Word 文件（.doc 或 .docx），支持多文件",
+            accept_multiple_files=True,
         )
         
         # 添加模型选择
@@ -422,7 +423,7 @@ with tab:
     if submitted and not st.session_state.is_generating:
         if not uploaded_file:
             st.error("请上传 Word 模板文件")
-        elif not origin_text_file:
+        elif not origin_text_files:
             st.error("请上传原始技术参数文件")
         elif st.session_state.tender_data is None:
             st.error("请先点击\"获取\"按钮获取招标数据")
@@ -441,28 +442,29 @@ with tab:
             with open(saved_reference_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
             
-            # 保存原始技术参数文件到指定目录
-            origin_extension = pathlib.Path(origin_text_file.name).suffix
-            saved_param_path = UPLOAD_DIR / origin_text_file.name
+            saved_param_paths: list[str] = []
+            for origin_text_file in origin_text_files:
+                origin_extension = pathlib.Path(origin_text_file.name).suffix
+                saved_param_path = UPLOAD_DIR / origin_text_file.name
+                
+                if saved_param_path.exists():
+                    timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+                    name_without_ext = saved_param_path.stem
+                    unique_suffix = uuid.uuid4().hex[:8]
+                    saved_param_path = UPLOAD_DIR / f"{name_without_ext}_{timestamp}_{unique_suffix}{origin_extension}"
+                
+                with open(saved_param_path, "wb") as f:
+                    f.write(origin_text_file.getbuffer())
+                
+                saved_param_paths.append(str(saved_param_path.resolve()))
             
-            # 如果文件已存在，添加时间戳（精确到时分秒）避免覆盖
-            if saved_param_path.exists():
-                timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
-                name_without_ext = saved_param_path.stem
-                saved_param_path = UPLOAD_DIR / f"{name_without_ext}_{timestamp}{origin_extension}"
-            
-            # 保存原始技术参数文件
-            with open(saved_param_path, "wb") as f:
-                f.write(origin_text_file.getbuffer())
-            
-            # 使用保存后的文件路径
             origin_tender_path = str(saved_reference_path.resolve())
-            tender_param_path = str(saved_param_path.resolve())
+            tender_param_paths = saved_param_paths
             
             # 存储生成参数到 session_state
             st.session_state.generation_params = {
                 "origin_tender_path": origin_tender_path,
-                "tender_param_path": tender_param_path,
+                "tender_param_paths": tender_param_paths,
                 "model_option": model_option,
                 "tender_data": st.session_state.tender_data  # 显式保存一份，防止意外
             }
@@ -540,13 +542,13 @@ with tab:
         tender_data = params["tender_data"]
         model_option = params["model_option"]
         origin_tender_path = params["origin_tender_path"]
-        tender_param_path = params["tender_param_path"]
+        tender_param_paths = params.get("tender_param_paths") or []
 
         # 准备 initial_state
         initial_state = {
             # 上传文件路径
             "origin_tender_path": origin_tender_path,
-            "tender_param_path": tender_param_path,
+            "tender_param_paths": tender_param_paths,
             # 固定参数（与 graph.py 中保持一致）
             "insertion_before_text": "第三章  采购需求",
             "insertion_after_text": "第四章  响应文件有关格式",

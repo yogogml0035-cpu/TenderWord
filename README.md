@@ -43,7 +43,7 @@ streamlit run streamlit_app.py --server.address 192.168.1.100 --server.port 8080
 
 ## 使用说明（界面操作）
 1) 上传参考 Word 文件 → 对应 `origin_tender_path`  
-2) 上传技术参数文件 → 对应 `tender_param_path`  
+2) 上传技术参数文件 → 对应 `tender_param_paths`  
 3) 点击“开始生成”，等待完成提示。
 
 说明：

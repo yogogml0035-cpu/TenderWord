@@ -10,7 +10,7 @@ class CommentInstruction(TypedDict):
 
 class XjcgTenderGraphState(TypedDict, total=False):
     origin_tender_path: str  # 技术需求草稿文件路径
-    tender_param_path: str  # 参考内容（从参考文档中提取的参数）文件路径
+    tender_param_paths: List[str]  # 技术参数文件路径列表
     origin_tender_params: str  # 上一次项目文档参考的技术参数内容
     tender_params: str  # 技术参数内容
     replacements: List[Tuple[str, str]]  # Word 模板替换对列表

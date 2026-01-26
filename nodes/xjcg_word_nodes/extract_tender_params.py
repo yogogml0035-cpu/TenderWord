@@ -241,18 +241,28 @@ def extract_tender_params(state: XjcgTenderGraphState, config) -> XjcgTenderGrap
     new_state_dict["start_page"] = locals().get("start_page")
     new_state_dict["end_page"] = locals().get("end_page")
     
-    # 如果提供了 tender_param_path，从文件中提取 tender_params 并更新状态
-    tender_param_path = state.get("tender_param_path")
-    if tender_param_path:
-        print(f"[extract_tender_params] 检测到 tender_param_path，开始提取技术参数...")
-        file_path_obj = pathlib.Path(tender_param_path)
-        if not file_path_obj.exists():
-            raise ValueError(f"tender_param_path 不存在: {tender_param_path}")
-        if not file_path_obj.is_file():
-            raise ValueError(f"tender_param_path 不是文件: {tender_param_path}")
+    tender_param_paths = state.get("tender_param_paths")
+    if tender_param_paths and not isinstance(tender_param_paths, (list, tuple)):
+        tender_param_paths = [tender_param_paths]
+    
+    if tender_param_paths:
+        print(f"[extract_tender_params] 检测到技术参数文件路径，开始提取技术参数...")
+        tender_params_parts: list[str] = []
+        for tender_param_file_path in tender_param_paths:
+            if not tender_param_file_path:
+                continue
+            
+            file_path_obj = pathlib.Path(str(tender_param_file_path))
+            if not file_path_obj.exists():
+                raise ValueError(f"tender_param_paths 中的路径不存在: {file_path_obj}")
+            if not file_path_obj.is_file():
+                raise ValueError(f"tender_param_paths 中的路径不是文件: {file_path_obj}")
+            
+            file_text = extract_text_from_word_file(str(file_path_obj))
+            print(f"[extract_tender_params] 从文件提取技术参数完成: {file_path_obj.name}，长度: {len(file_text)}")
+            tender_params_parts.append(file_text)
         
-        tender_params = extract_text_from_word_file(str(file_path_obj))
-        print(f"[extract_tender_params] 从文件提取技术参数完成，长度: {len(tender_params)}")
+        tender_params = "\n\n".join([p for p in tender_params_parts if p]).strip()
         new_state_dict["tender_params"] = tender_params
     
     new_state = XjcgTenderGraphState(**new_state_dict)
