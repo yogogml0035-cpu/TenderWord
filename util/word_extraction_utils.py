@@ -44,12 +44,27 @@ def extract_text_from_xml(xml_content, preserve_structure=False):
         str: 提取的文本，上标/下标字符已转换为Unicode上标/下标字符
     """
     try:
+        try:
+            xml_content = re.sub(r'<w:comments\b[^>]*>.*?</w:comments>', '', xml_content, flags=re.DOTALL)
+            xml_content = re.sub(r'<w:comment\b[^>]*>.*?</w:comment>', '', xml_content, flags=re.DOTALL)
+            xml_content = re.sub(r'<w:annotation\b[^>]*>.*?</w:annotation>', '', xml_content, flags=re.DOTALL)
+        except Exception:
+            pass
+
         # 简单的 XML 实体解码
         def _xml_unescape(text):
             return text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"').replace("&apos;", "'")
         
         def _process_run(run_content, align_pattern, position_pattern, text_pattern):
             """处理单个 run，返回处理后的文本"""
+            if (
+                '<w:commentReference' in run_content
+                or '<w:commentRangeStart' in run_content
+                or '<w:commentRangeEnd' in run_content
+                or '<w:annotationRef' in run_content
+            ):
+                return ""
+
             # --- 判别上标/下标 ---
             is_superscript = False
             is_subscript = False
@@ -277,6 +292,14 @@ def extract_text_with_superscript_subscript(range_obj, use_xml=True):
                 char = characters(i)
                 char_text = char.Text
                 font = char.Font
+
+                try:
+                    if char_text and len(char_text) == 1:
+                        code = ord(char_text)
+                        if code < 32 and char_text not in ('\r', '\n', '\t'):
+                            continue
+                except Exception:
+                    pass
                 
                 # 检查是否是上标
                 is_superscript = False
