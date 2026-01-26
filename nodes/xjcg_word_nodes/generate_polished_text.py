@@ -10,6 +10,7 @@ import time
 # 直接运行时使用绝对导入
 import sys
 
+
 from state import XjcgTenderGraphState
 from util.llm_stream_utils import (
     LLMTimeoutError,
@@ -23,7 +24,11 @@ def _sanitize_filename(name: str) -> str:
 
 
 from dotenv import load_dotenv
-load_dotenv()
+_DOTENV_PATH = pathlib.Path(__file__).resolve().parents[2] / ".env"
+if _DOTENV_PATH.exists():
+    load_dotenv(dotenv_path=_DOTENV_PATH)
+else:
+    load_dotenv()
 
 
 async def generate_polished_text(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:

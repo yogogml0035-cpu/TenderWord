@@ -14,10 +14,15 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
+import pathlib
 
 from dotenv import load_dotenv
 
-load_dotenv()
+_DOTENV_PATH = pathlib.Path(__file__).resolve().parents[1] / ".env"
+if _DOTENV_PATH.exists():
+    load_dotenv(dotenv_path=_DOTENV_PATH)
+else:
+    load_dotenv()
 
 
 class LLMTimeoutError(Exception):
