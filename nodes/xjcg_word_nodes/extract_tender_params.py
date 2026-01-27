@@ -10,7 +10,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from state import XjcgTenderGraphState
+from states import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
@@ -288,7 +288,7 @@ if __name__ == "__main__":
     
     
     # 重新导入必要的模块（从项目根目录直接导入）
-    from state import XjcgTenderGraphState
+    from states import XjcgTenderGraphState
     
     # 测试文档路径列表
     test_doc_paths = [

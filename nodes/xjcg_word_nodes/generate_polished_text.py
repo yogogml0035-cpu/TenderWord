@@ -11,7 +11,7 @@ import time
 import sys
 
 
-from state import XjcgTenderGraphState
+from states import XjcgTenderGraphState
 from util.llm_stream_utils import (
     LLMTimeoutError,
     StreamCallbacks,
@@ -171,7 +171,7 @@ if __name__ == "__main__":
         sys.path.insert(0, str(ROOT))
     
     # 重新导入必要的模块（从项目根目录直接导入）
-    from state import XjcgTenderGraphState
+    from states import XjcgTenderGraphState
     from nodes.xjcg_word_nodes.extract_tender_params import extract_tender_params
     from util.word_extraction_utils import extract_text_from_word_file
     

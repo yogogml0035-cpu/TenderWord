@@ -11,7 +11,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from state import XjcgTenderGraphState
+from states import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
@@ -22,7 +22,7 @@ def prepare_template(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
     start_time = time.time()
     
     
-    from logging_utils import log_task_start
+    from util.logging_utils import log_task_start
     log_task_start(state, "prepare_template")
     
     print(f"[prepare_template] 开始执行...")

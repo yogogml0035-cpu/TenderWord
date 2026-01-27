@@ -3,7 +3,8 @@ import logging
 import os
 from typing import Mapping, Any
 
-LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
+# 修改路径：从 util 目录向上一级到达项目根目录，然后进入 logs 目录
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 TASK_EXECUTION_LOG_FILE = os.path.join(LOG_DIR, "task_execution.log")
 

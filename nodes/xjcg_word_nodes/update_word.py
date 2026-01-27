@@ -11,7 +11,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from state import XjcgTenderGraphState
+from states import XjcgTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
@@ -85,7 +85,7 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     start_time = time.perf_counter()
     
 
-    from logging_utils import log_task_end
+    from util.logging_utils import log_task_end
     log_task_end(state, "update_word")
     
     print("[update_word] 开始执行...")

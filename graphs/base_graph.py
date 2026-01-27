@@ -1,32 +1,37 @@
+"""
+基础 Graph 类模块
+
+提供通用的 graph 构建逻辑、执行逻辑、锁机制和进度追踪功能。
+所有具体的 graph 类都应该继承 BaseGraph 并实现抽象方法。
+
+主要组件：
+1. CrossProcessFileLock - 跨进程文件锁，确保 Word COM 操作的并发安全
+2. BaseGraph - 基础 Graph 抽象类
+3. wrap_node_with_progress - 节点进度追踪包装器
+4. invoke_with_timing - 同步执行方法（带计时）
+5. invoke_with_timing_async - 异步执行方法（带计时）
+"""
+
 from __future__ import annotations
-from langgraph.graph import END, START, StateGraph
+from abc import ABC, abstractmethod
+from langgraph.graph import StateGraph
 import contextlib
 import time
 import pathlib
-import sys
-import asyncio
-import threading
 import os
 import tempfile
+import asyncio
+import threading
 from functools import wraps
-from typing import Callable, Any, Optional, TextIO
+from typing import Callable, Any, Optional, TextIO, Type, TypedDict
 
 
-ROOT = pathlib.Path(__file__).resolve().parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from nodes.xjcg_word_nodes import (
-    generate_polished_text,
-    update_word,
-    prepare_template,
-    replace_content,
-    get_replacements,
-    extract_tender_params,
-    delete_tender_param
-)
-from state import XjcgTenderGraphState, TextFormatState
-from task.task_queue_manager import get_task_queue
+# ============================================================================
+# 任务取消异常
+# ============================================================================
+class TaskCancelledException(Exception):
+    """任务被用户取消时抛出的异常"""
+    pass
 
 
 # ============================================================================
@@ -184,36 +189,43 @@ class CrossProcessFileLock:
         return False
 
 
-# 创建全局文件锁实例
-_graph_execution_lock = CrossProcessFileLock()
-
-
 # ============================================================================
-# 任务取消异常
-# ============================================================================
-class TaskCancelledException(Exception):
-    """任务被用户取消时抛出的异常"""
-    pass
-
-
-# ============================================================================
-# 进度追踪：包装节点函数以报告进度
+# 进度追踪辅助函数
 # ============================================================================
 def _check_cancellation(config: dict):
-    """检查任务是否被取消，如果被取消则抛出异常"""
+    """
+    检查任务是否被取消，如果被取消则抛出异常
+    
+    Args:
+        config: graph 配置字典，包含 task_id
+        
+    Raises:
+        TaskCancelledException: 如果任务已被取消
+    """
     if config and "configurable" in config:
         task_id = config["configurable"].get("task_id")
         if task_id:
+            # 延迟导入，避免循环依赖
+            from task.task_queue_manager import get_task_queue
             queue = get_task_queue()
             if queue.is_task_cancelled(task_id):
                 raise TaskCancelledException(f"任务 {task_id} 已被用户取消")
 
 
 def _update_node_progress(node_name: str, config: dict, completed: bool = True):
-    """更新节点进度"""
+    """
+    更新节点进度
+    
+    Args:
+        node_name: 节点名称
+        config: graph 配置字典，包含 task_id
+        completed: 节点是否已完成
+    """
     if config and "configurable" in config:
         task_id = config["configurable"].get("task_id")
         if task_id:
+            # 延迟导入，避免循环依赖
+            from task.task_queue_manager import get_task_queue
             queue = get_task_queue()
             queue.update_progress(task_id, node_name, completed=completed)
 
@@ -252,105 +264,141 @@ def wrap_node_with_progress(node_func: Callable, node_name: str) -> Callable:
 
 
 # ============================================================================
-# 子图：Word 操作流程
+# 基础 Graph 类
 # ============================================================================
-def build_word_operations_subgraph():
-    """
-    构建 Word 操作子图。
-    
-    子图流程：
-    START → delete_tender_param → get_replacements → replace_content → END
-    
-    子图使用与主图相同的状态类型 XjcgTenderGraphState，
-    这样可以直接共享状态，无需状态转换。
-    """
-    subgraph_builder = StateGraph(XjcgTenderGraphState)
-    
-    # 添加子图节点（使用进度追踪包装）
-    subgraph_builder.add_node("delete_tender_param", 
-                              wrap_node_with_progress(delete_tender_param, "delete_tender_param"))
-    subgraph_builder.add_node("get_replacements", 
-                              wrap_node_with_progress(get_replacements, "get_replacements"))
-    subgraph_builder.add_node("replace_content", 
-                              wrap_node_with_progress(replace_content, "replace_content"))
-    
-    # 子图边：串行执行
-    subgraph_builder.add_edge(START, "delete_tender_param")
-    subgraph_builder.add_edge("delete_tender_param", "get_replacements")
-    subgraph_builder.add_edge("get_replacements", "replace_content")
-    subgraph_builder.add_edge("replace_content", END)
-    
-    return subgraph_builder.compile()
 
-
-# 编译子图（作为一个可调用的节点）
-word_operations_subgraph = build_word_operations_subgraph()
+class BaseGraph(ABC):
+    """
+    基础 Graph 类，提供通用功能
+    
+    功能：
+    1. 跨进程文件锁（CrossProcessFileLock）
+    2. 节点进度追踪（wrap_node_with_progress）
+    3. 任务取消检查（_check_cancellation）
+    4. 同步/异步执行方法
+    
+    子类必须实现：
+    - build_graph(): 构建 graph 结构
+    - get_state_class(): 返回使用的 state 类
+    
+    使用示例：
+        class MyGraph(BaseGraph):
+            def build_graph(self):
+                builder = StateGraph(MyState)
+                # 添加节点和边
+                return builder
+            
+            def get_state_class(self):
+                return MyState
+        
+        # 使用
+        graph = MyGraph()
+        result, elapsed = graph.invoke(initial_state)
+    """
+    
+    def __init__(self):
+        """初始化 BaseGraph"""
+        self._graph = None
+        self._lock = CrossProcessFileLock()
+    
+    @abstractmethod
+    def build_graph(self) -> StateGraph:
+        """
+        构建 graph 结构（子类必须实现）
+        
+        Returns:
+            StateGraph: 未编译的 StateGraph 实例
+        """
+        raise NotImplementedError("子类必须实现 build_graph() 方法")
+    
+    @abstractmethod
+    def get_state_class(self) -> Type[TypedDict]:
+        """
+        返回使用的 state 类（子类必须实现）
+        
+        Returns:
+            Type[TypedDict]: State 类型
+        """
+        raise NotImplementedError("子类必须实现 get_state_class() 方法")
+    
+    def compile(self):
+        """
+        编译 graph
+        
+        延迟编译：graph 在首次调用 compile() 时才编译，提高启动速度
+        
+        Returns:
+            CompiledGraph: 编译后的 graph 实例
+        """
+        if self._graph is None:
+            self._graph = self.build_graph().compile()
+        return self._graph
+    
+    def invoke(self, initial_state: dict, config=None, verbose: bool = True):
+        """
+        同步执行 graph（带锁和计时）
+        
+        Args:
+            initial_state: 初始状态字典
+            config: 透传给 graph.invoke 的配置（如流式回调）
+            verbose: 是否打印时间信息
+        
+        Returns:
+            tuple: (执行结果, 执行时间(秒))
+        """
+        return invoke_with_timing(
+            self.compile(), 
+            initial_state, 
+            verbose=verbose, 
+            config=config,
+            lock=self._lock
+        )
+    
+    async def ainvoke(self, initial_state: dict, config=None, verbose: bool = True):
+        """
+        异步执行 graph（带锁和计时）
+        
+        Args:
+            initial_state: 初始状态字典
+            config: 透传给 graph.ainvoke 的配置（如流式回调）
+            verbose: 是否打印时间信息
+        
+        Returns:
+            tuple: (执行结果, 执行时间(秒))
+        """
+        return await invoke_with_timing_async(
+            self.compile(), 
+            initial_state, 
+            verbose=verbose, 
+            config=config,
+            lock=self._lock
+        )
+    
+    def wrap_node(self, node_name: str, node_func: Callable) -> Callable:
+        """
+        包装节点函数，添加进度追踪
+        
+        Args:
+            node_name: 节点名称
+            node_func: 原始节点函数
+        
+        Returns:
+            Callable: 包装后的节点函数
+        """
+        return wrap_node_with_progress(node_func, node_name)
 
 
 # ============================================================================
-# 主图
+# Graph 执行函数（带锁和计时）
 # ============================================================================
-def build_graph():
-    """
-    构建主图。
-    
-    主图流程：
-    
-                        extract_tender_params
-                              /          \\
-                             /            \\
-                            ▼              ▼
-              word_operations_subgraph    generate_polished_text
-              (子图: delete→get→replace)        (LLM 调用)
-                            \\              /
-                             \\            /
-                              ▼          ▼
-                              update_word
-                                   │
-                                  END
-    
-    两个分支并行执行：
-    - 左分支：word_operations_subgraph（子图，内部串行执行 3 个节点）
-    - 右分支：generate_polished_text（单个异步节点）
-    
-    最后在 update_word 汇合。
-    """
-    builder = StateGraph(XjcgTenderGraphState)
-    
-    # 添加主图节点（使用进度追踪包装）
-    builder.add_node("prepare_template", 
-                     wrap_node_with_progress(prepare_template, "prepare_template"))
-    builder.add_node("extract_tender_params", 
-                     wrap_node_with_progress(extract_tender_params, "extract_tender_params"))
-    # 子图作为一个节点（子图内部已经有进度追踪）
-    builder.add_node("word_operations_subgraph", word_operations_subgraph)
-    builder.add_node("generate_polished_text", 
-                     wrap_node_with_progress(generate_polished_text, "generate_polished_text"))
-    builder.add_node("update_word", 
-                     wrap_node_with_progress(update_word, "update_word"))
-    
-    # 主图边
-    builder.add_edge(START, "prepare_template")
-    builder.add_edge("prepare_template", "extract_tender_params")
-    
-    # 从 extract_tender_params 扇出到两个并行分支
-    builder.add_edge("extract_tender_params", "word_operations_subgraph")
-    builder.add_edge("extract_tender_params", "generate_polished_text")
-    
-    # 两个分支都汇入 update_word（扇入）
-    builder.add_edge("word_operations_subgraph", "update_word")
-    builder.add_edge("generate_polished_text", "update_word")
-    
-    builder.add_edge("update_word", END)
 
-    return builder.compile()
-
-
-
-graph = build_graph()
-
-
-def invoke_with_timing(graph_instance, initial_state: dict, verbose: bool = True, config=None):
+def invoke_with_timing(
+    graph_instance, 
+    initial_state: dict, 
+    verbose: bool = True, 
+    config=None,
+    lock: CrossProcessFileLock = None
+):
     """
     执行 graph 并统计时间（带全局锁，确保并发安全）
     
@@ -359,17 +407,19 @@ def invoke_with_timing(graph_instance, initial_state: dict, verbose: bool = True
         initial_state: 初始状态字典
         verbose: 是否打印时间信息
         config: 透传给 graph.invoke 的配置（如流式回调）
+        lock: 跨进程文件锁实例（如果为 None，则创建新实例）
     
     Returns:
         tuple: (执行结果, 执行时间(秒))
     """
-    # 获取全局锁，确保同一时间只有一个 graph 在执行
-    # 这是解决多用户并发 COM 冲突的关键
+    if lock is None:
+        lock = CrossProcessFileLock()
+    
     thread_name = threading.current_thread().name
     
     print(f"[Graph] 线程 {thread_name} 正在等待执行锁...")
     
-    with _graph_execution_lock:
+    with lock:
         print(f"[Graph] 线程 {thread_name} 获取到执行锁，开始执行...")
         
         begin_ts = time.time()
@@ -392,7 +442,13 @@ def invoke_with_timing(graph_instance, initial_state: dict, verbose: bool = True
         return result, elapsed
 
 
-async def invoke_with_timing_async(graph_instance, initial_state: dict, verbose: bool = True, config=None):
+async def invoke_with_timing_async(
+    graph_instance, 
+    initial_state: dict, 
+    verbose: bool = True, 
+    config=None,
+    lock: CrossProcessFileLock = None
+):
     """
     异步执行 graph 并统计时间（带公平锁 + 文件锁，确保并发安全且按队列顺序执行）
     
@@ -402,14 +458,27 @@ async def invoke_with_timing_async(graph_instance, initial_state: dict, verbose:
     3. 执行 graph
     4. 释放锁并通知下一个任务
     
-    Config 参数说明：
-        - task_id: 任务ID，用于进度追踪
-        - llm_stream_callback: LLM流式输出回调
-        - suppress_llm_stdout: 是否抑制LLM输出到stdout
-        - model_provider: 模型提供商
-        - stdout_writer: stdout 重定向目标（可选）
-        - stderr_writer: stderr 重定向目标（可选）
+    Args:
+        graph_instance: 编译后的 graph 实例
+        initial_state: 初始状态字典
+        verbose: 是否打印时间信息
+        config: 透传给 graph.ainvoke 的配置
+            - task_id: 任务ID，用于进度追踪
+            - llm_stream_callback: LLM流式输出回调
+            - suppress_llm_stdout: 是否抑制LLM输出到stdout
+            - model_provider: 模型提供商
+            - stdout_writer: stdout 重定向目标（可选）
+            - stderr_writer: stderr 重定向目标（可选）
+        lock: 跨进程文件锁实例（如果为 None，则创建新实例）
+    
+    Returns:
+        tuple: (执行结果, 执行时间(秒))
     """
+    if lock is None:
+        lock = CrossProcessFileLock()
+    
+    # 延迟导入，避免循环依赖
+    from task.task_queue_manager import get_task_queue
     queue = get_task_queue()
     
     # 获取配置参数
@@ -441,7 +510,7 @@ async def invoke_with_timing_async(graph_instance, initial_state: dict, verbose:
     # ============================================================================
     # 使用文件锁（因为 COM 操作必须串行，且需要跨进程保护）
     # 重要：stdout/stderr 重定向必须在获取锁之后才设置，否则多线程会互相覆盖
-    with _graph_execution_lock:
+    with lock:
         # 在锁内设置 stdout/stderr 重定向，确保只有正在执行的任务会重定向输出
         stdout_ctx = contextlib.redirect_stdout(stdout_writer) if stdout_writer else contextlib.nullcontext()
         stderr_ctx = contextlib.redirect_stderr(stderr_writer) if stderr_writer else contextlib.nullcontext()
@@ -480,29 +549,3 @@ async def invoke_with_timing_async(graph_instance, initial_state: dict, verbose:
                 print("=" * 60)
             
             return result, elapsed
-
-
-if __name__ == "__main__":
-    begin_ts = time.time()
-    initial_state = {
-        # 文件路径配置
-        "tender_param_paths": ["TenderFile/技术参数.docx"],
-        "origin_tender_path": "TenderFile/252699-原位杂交仪-询价文件-初稿1.doc",
-        "insertion_before_text": "第三章  采购需求",  # 插入位置的前置文本
-        "insertion_after_text": "第四章  响应文件有关格式",  # 插入位置的后置文本
-        "project_name": "测试项目名称",
-        "project_number": "测试项目编号",
-        "project_content": """第1包：恒温暖柜               贰台
-                              第2包：数字化手术吸引系统      壹套
-                              第3包：止血带系统             壹套""",
-        "bzj_rule": """第1包：人民币4000元整；
-                       第2包：人民币16000元整；
-                       第3包：人民币2000元整""",
-        "buyer_name": "上海市中医医院",
-        "project_zbr_xbr": "徐旭东、任彧晟",
-        "zbr_xbr_tel": "8605、8625",
-        "zbr_pinyin": "xuxudong"
-    }
-    result = graph.invoke(initial_state)
-    elapsed = time.time() - begin_ts
-    print(f"Graph run finished in {elapsed:.2f}s ({elapsed*1000:.0f} ms)")
