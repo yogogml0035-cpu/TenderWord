@@ -16,12 +16,17 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from graphs import XjcgTenderGraph, invoke_with_timing_async
+from graphs import XjcgTenderGraph, GngkTenderGraph, invoke_with_timing_async
 from task.task_queue_manager import get_task_queue, TaskStatus, NODE_DISPLAY_NAMES, NodeName
 from config.form_config import match_form_by_url_params, FORM_REGISTRY
 from forms import create_form
 
-GRAPH = XjcgTenderGraph()
+# 图注册表：根据 graph_name 映射到对应的图类
+GRAPH_REGISTRY = {
+    "xjcg_tender_graph": XjcgTenderGraph,
+    "gngk_tender_graph": GngkTenderGraph,
+}
+
 TASK_QUEUE = get_task_queue()
 
 # 定义上传目录
@@ -448,13 +453,24 @@ with tab:
                 try:
                     from graphs import invoke_with_timing_async
 
+                    # 根据表单配置动态获取对应的图类
+                    graph_name = params.get("form_config").graph_name
+                    graph_class = GRAPH_REGISTRY.get(graph_name)
+                    
+                    if not graph_class:
+                        raise ValueError(f"未找到图类: {graph_name}")
+                    
+                    # 实例化图并编译
+                    graph_instance = graph_class()
+                    compiled_graph = graph_instance.compile()
+
                     # 创建新的事件循环
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                     try:
                         result_state, elapsed_time = loop.run_until_complete(
                             invoke_with_timing_async(
-                                GRAPH.compile(),
+                                compiled_graph,
                                 initial_state,
                                 verbose=True,
                                 config={

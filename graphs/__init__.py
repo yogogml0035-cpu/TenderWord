@@ -25,6 +25,7 @@ from .base_graph import (
     invoke_with_timing_async,
 )
 from .xjcg_tender_graph import XjcgTenderGraph
+from .gngk_tender_graph import GngkTenderGraph
 
 __all__ = [
     "BaseGraph",
@@ -34,4 +35,5 @@ __all__ = [
     "invoke_with_timing",
     "invoke_with_timing_async",
     "XjcgTenderGraph",
+    "GngkTenderGraph",
 ]

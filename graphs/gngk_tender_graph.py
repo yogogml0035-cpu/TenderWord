@@ -1,7 +1,7 @@
 """
-询价采购文档生成 Graph 模块
+国内公开招标文档生成 Graph 模块
 
-本模块定义了 XjcgTenderGraph 类，用于构建和执行询价采购文档生成的工作流。
+本模块定义了 GngkTenderGraph 类，用于构建和执行国内公开招标文档生成的工作流。
 
 主要功能：
 1. 准备 Word 模板
@@ -33,10 +33,10 @@
 - 需求 3.3: Graph 定义迁移
 
 使用示例：
-    from graphs import XjcgTenderGraph
+    from graphs import GngkTenderGraph
     
     # 创建 graph 实例
-    graph = XjcgTenderGraph()
+    graph = GngkTenderGraph()
     
     # 准备初始状态
     initial_state = {
@@ -63,8 +63,8 @@ from langgraph.graph import END, START, StateGraph
 from typing import Type, TypedDict
 
 from graphs.base_graph import BaseGraph
-from states import XjcgTenderGraphState
-from nodes.xjcg_word_nodes import (
+from states import GngkTenderGraphState
+from nodes.gngk_word_nodes import (
     generate_polished_text,
     update_word,
     prepare_template,
@@ -75,9 +75,9 @@ from nodes.xjcg_word_nodes import (
 )
 
 
-class XjcgTenderGraph(BaseGraph):
+class GngkTenderGraph(BaseGraph):
     """
-    询价采购文档生成 Graph
+    国内公开招标文档生成 Graph
     
     继承自 BaseGraph，自动获得以下功能：
     - 跨进程文件锁（保护 Word COM 操作）
@@ -89,8 +89,8 @@ class XjcgTenderGraph(BaseGraph):
         无额外属性
     
     方法：
-        get_state_class(): 返回 XjcgTenderGraphState 类型
-        build_graph(): 构建询价采购文档生成的工作流
+        get_state_class(): 返回 GngkTenderGraphState 类型
+        build_graph(): 构建国内公开招标文档生成的工作流
         _build_word_operations_subgraph(): 构建 Word 操作子图（私有方法）
     """
     
@@ -99,13 +99,13 @@ class XjcgTenderGraph(BaseGraph):
         返回使用的 state 类
         
         Returns:
-            Type[TypedDict]: XjcgTenderGraphState 类型
+            Type[TypedDict]: GngkTenderGraphState 类型
         """
-        return XjcgTenderGraphState
+        return GngkTenderGraphState
     
     def build_graph(self) -> StateGraph:
         """
-        构建询价采购文档生成的工作流
+        构建国内公开招标文档生成的工作流
         
         工作流包含以下节点：
         1. prepare_template: 准备 Word 模板
@@ -124,7 +124,7 @@ class XjcgTenderGraph(BaseGraph):
         Returns:
             StateGraph: 未编译的 StateGraph 实例
         """
-        builder = StateGraph(XjcgTenderGraphState)
+        builder = StateGraph(GngkTenderGraphState)
         
         # 添加主图节点（使用进度追踪包装）
         builder.add_node("prepare_template", 
@@ -161,13 +161,13 @@ class XjcgTenderGraph(BaseGraph):
         子图流程：
         START → delete_tender_param → get_replacements → replace_content → END
         
-        子图使用与主图相同的状态类型 XjcgTenderGraphState，
+        子图使用与主图相同的状态类型 GngkTenderGraphState，
         这样可以直接共享状态，无需状态转换。
         
         Returns:
             CompiledGraph: 编译后的子图实例
         """
-        subgraph_builder = StateGraph(XjcgTenderGraphState)
+        subgraph_builder = StateGraph(GngkTenderGraphState)
         
         # 添加子图节点（使用进度追踪包装）
         subgraph_builder.add_node("delete_tender_param", 

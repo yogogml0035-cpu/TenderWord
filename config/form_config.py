@@ -58,11 +58,11 @@ FORM_REGISTRY: Dict[str, FormConfig] = {
         url_params={"tender_lx": 0, "purchase_method": 5, "fund_lx": 0},
         description="生成询价采购文件（现有功能）"
     ),
-    "domestic_public_tender": FormConfig(
-        form_id="domestic_public_tender",
+    "gngk_tender": FormConfig(
+        form_id="gngk_tender",
         tab_name="生成国内公开招标文件",
-        graph_name="xjcg_tender_graph",  # 暂时复用现有 graph
-        state_name="XjcgTenderGraphState",  # 暂时复用现有 state
+        graph_name="gngk_tender_graph",
+        state_name="GngkTenderGraphState",
         url_params={"tender_lx": 1, "purchase_method": 1, "fund_lx": 0},
         description="生成国内公开招标采购文件"
     ),

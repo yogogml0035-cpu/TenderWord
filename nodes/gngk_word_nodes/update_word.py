@@ -136,85 +136,86 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
             if unprotect_document(doc, node_name="update_word"):
                 insertion_log_parts.append("已取消文档保护")
 
-            def _find_anchor_pos(anchor_text: str, start_pos: int = 0):
-                search_rng = doc.Content.Duplicate
-                search_rng.Start = max(0, int(start_pos))
-                search_rng.End = doc.Content.End
-                finder = search_rng.Find
-                finder.ClearFormatting()
-                finder.Text = anchor_text
-                finder.Forward = True
-                finder.Wrap = wdFindStop
-                finder.MatchCase = False
-                finder.MatchWholeWord = False
-                while finder.Execute():
-                    font_name = search_rng.Font.Name
-                    font_size = search_rng.Font.Size
-                    is_font = font_name in ("宋体", "SimSun")
-                    # xjcg 模块固定使用 18.0
-                    target_size = 18.0
-                    is_size = abs(font_size - target_size) < 0.5
-                    if is_font and is_size:
-                        page = search_rng.Information(wdActiveEndPageNumber)
-                        return int(search_rng.Start), int(search_rng.End), int(page)
-                    search_rng.Collapse(wdCollapseEnd)
-                    search_rng.End = doc.Content.End
-                return None
-
-            # 优先使用 extract_tender_params 已计算好的页范围，避免重复查找
-            start_page = state.get("start_page")
-            end_page = state.get("end_page")
-
-            if start_page is None or end_page is None:
-                # 回退到自身查找
-                def _find_anchor_page(anchor_text: str) -> Optional[int]:
-                    search_rng = doc.Content.Duplicate
-                    find = search_rng.Find
-                    find.ClearFormatting()
-                    find.Text = anchor_text
-                    find.Forward = True
-                    find.Wrap = wdFindStop
-                    find.MatchCase = False
-                    find.MatchWholeWord = False
-                    while find.Execute():
-                        font_name = search_rng.Font.Name
-                        font_size = search_rng.Font.Size
+            def _norm(s: str) -> str:
+                """归一化文本：去掉首尾空白、把多空格/全角空格归一"""
+                if s is None:
+                    return ""
+                s = s.replace("\u3000", " ")  # 全角空格
+                s = re.sub(r"\s+", " ", s)    # 多空白 -> 单空格
+                return s.strip()
+            
+            def _iter_paragraph_hits(doc, text: str, target_size: float):
+                """扫描所有段落，找到文本匹配且字号/字体符合的候选。"""
+                want = _norm(text)
+                hits = []
+                for para in doc.Paragraphs:
+                    try:
+                        raw = para.Range.Text
+                        stripped = _norm(raw.replace("\r", "").replace("\a", ""))
+                        if stripped != want:
+                            continue
+                        
+                        font_name = str(para.Range.Font.Name)
+                        font_size = float(para.Range.Font.Size)
                         is_font = font_name in ("宋体", "SimSun")
-                        # xjcg 模块固定使用 18.0
-                        target_size = 18.0
-                        is_size = abs(font_size - target_size) < 0.5
-                        if is_font and is_size:
-                            return search_rng.Information(wdActiveEndPageNumber)
-                        search_rng.Collapse(wdCollapseEnd)
-                        search_rng.End = doc.Content.End
+                        is_size = abs(font_size - float(target_size)) < 0.5
+                        
+                        # 页码信息只在命中时取一次，避免频繁触发重分页
+                        page = int(para.Range.Information(wdActiveEndPageNumber))
+                        
+                        hits.append({
+                            "page": page,
+                            "start": int(para.Range.Start),
+                            "end": int(para.Range.End),
+                            "font": font_name,
+                            "size": font_size,
+                            "is_font": is_font,
+                            "is_size": is_size,
+                        })
+                    except Exception:
+                        continue
+                return hits
+            
+            def _pick_before_anchor(hits):
+                """
+                选前置锚点：默认选"页码最大"的（避开目录/前言重复标题）。
+                """
+                if not hits:
                     return None
+                strict = [h for h in hits if h["is_font"] and h["is_size"]]
+                pool = strict if strict else hits
+                pool.sort(key=lambda x: (x["page"], x["start"]))
+                return pool[-1]
+            
+            def _pick_after_anchor(hits, min_start: int):
+                """
+                选后置锚点：取"在 min_start 之后最早出现"的那一个。
+                """
+                if not hits:
+                    return None
+                hits2 = [h for h in hits if h["start"] >= int(min_start)]
+                if not hits2:
+                    return None
+                strict = [h for h in hits2 if h["is_font"] and h["is_size"]]
+                pool = strict if strict else hits2
+                pool.sort(key=lambda x: (x["start"], x["page"]))
+                return pool[0]
 
-                before_page = _find_anchor_page(insertion_before_text)
-                after_page = _find_anchor_page(insertion_after_text)
-                insertion_log_parts.append(f"前置锚点 '{insertion_before_text}' 所在页: {before_page}")
-                insertion_log_parts.append(f"后置锚点 '{insertion_after_text}' 所在页: {after_page}")
-
-                if before_page is None or after_page is None:
-                    raise ValueError("未找到前后锚点（需宋体/SimSun 且 18pt）")
-                if after_page <= before_page:
-                    raise ValueError(f"后置锚点页码({after_page}) 不大于前置锚点页码({before_page})")
-
-                start_page = before_page + 1
-                end_page = after_page - 1
-                insertion_log_parts.append(f"回退计算页范围: {start_page} - {end_page}")
-            else:
-                insertion_log_parts.append(f"使用预计算页范围: {start_page} - {end_page}")
-
-            if start_page is None or end_page is None:
-                raise ValueError("无法确定插入页范围")
-            if end_page < start_page:
-                raise ValueError(f"插入页范围非法: {start_page} - {end_page}")
-
-            before_anchor = _find_anchor_pos(insertion_before_text, 0)
-            if before_anchor is None:
-                raise ValueError("未找到前置锚点（需宋体/SimSun 且 18pt）")
-            before_anchor_start, before_anchor_end, before_anchor_page = before_anchor
-
+            # gngk 模块固定使用 22.0（二号）
+            target_size = 22.0
+            
+            # 一次扫描拿到候选（非常稳）
+            before_hits = _iter_paragraph_hits(doc, insertion_before_text, target_size)
+            after_hits  = _iter_paragraph_hits(doc, insertion_after_text, target_size)
+            
+            if not before_hits:
+                raise ValueError(f"未找到前置锚点段落: {insertion_before_text}")
+            before_hit = _pick_before_anchor(before_hits)
+            before_anchor_start = before_hit["start"]
+            before_anchor_end   = before_hit["end"]
+            before_anchor_page  = before_hit["page"]
+            
+            # 对齐到下一页起始（可选，跟原来逻辑一致）
             selection = word.Selection
             try:
                 selection.GoTo(wdGoToPage, wdGoToAbsolute, before_anchor_page + 1)
@@ -223,29 +224,56 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                     insertion_bound_start = before_anchor_end
             except Exception:
                 insertion_bound_start = before_anchor_end
-
-            after_anchor = _find_anchor_pos(insertion_after_text, insertion_bound_start)
-            if after_anchor is None:
-                raise ValueError("未找到后置锚点（需宋体/SimSun 且 18pt）")
-            after_anchor_start, after_anchor_end, after_anchor_page = after_anchor
+            
+            after_hit = _pick_after_anchor(after_hits, insertion_bound_start)
+            if not after_hit:
+                raise ValueError(f"未找到后置锚点段落: {insertion_after_text}")
+            
+            after_anchor_start = after_hit["start"]
+            after_anchor_end   = after_hit["end"]
+            after_anchor_page  = after_hit["page"]
             insertion_bound_end = after_anchor_start
-
+            
             if insertion_bound_end <= insertion_bound_start:
                 raise ValueError(
                     f"锚点范围非法: start={insertion_bound_start}, end={insertion_bound_end}"
                 )
-
+            
+            # 这个 marker 继续保留（后面 get_insertion_bound_end 会用）
             after_anchor_marker = doc.Range(int(after_anchor_start), int(after_anchor_start))
-
+            
             def get_insertion_bound_end() -> int:
                 try:
                     return int(after_anchor_marker.Start)
                 except Exception:
                     return int(insertion_bound_end)
-
+            
             insertion_log_parts.append(
-                f"锚点范围(字符位置): {insertion_bound_start} - {insertion_bound_end}；后置锚点页码: {after_anchor_page}"
+                f"✅ 前置锚点: 页={before_anchor_page}, {before_anchor_start}-{before_anchor_end}, 字体={before_hit['font']}, 字号={before_hit['size']}"
             )
+            insertion_log_parts.append(
+                f"✅ 后置锚点: 页={after_anchor_page}, {after_anchor_start}-{after_anchor_end}, 字体={after_hit['font']}, 字号={after_hit['size']}"
+            )
+            insertion_log_parts.append(
+                f"锚点范围(字符位置): {insertion_bound_start} - {insertion_bound_end}"
+            )
+            
+            # 优先使用 extract_tender_params 已计算好的页范围，避免重复查找
+            start_page = state.get("start_page")
+            end_page = state.get("end_page")
+
+            if start_page is None or end_page is None:
+                # 回退到自身计算
+                start_page = before_anchor_page + 1
+                end_page = after_anchor_page - 1
+                insertion_log_parts.append(f"回退计算页范围: {start_page} - {end_page}")
+            else:
+                insertion_log_parts.append(f"使用预计算页范围: {start_page} - {end_page}")
+
+            if start_page is None or end_page is None:
+                raise ValueError("无法确定插入页范围")
+            if end_page < start_page:
+                raise ValueError(f"插入页范围非法: {start_page} - {end_page}")
 
             try:
                 region_text = doc.Range(insertion_bound_start, insertion_bound_end).Text

@@ -18,6 +18,7 @@ class BaseState(TypedDict, total=False):
     字段说明：
         task_id: 任务ID，用于进度追踪和取消
         user_session_id: 用户会话ID，用于多用户隔离
+        tender_type: 招标类型标识符（"xjcg"、"gngk" 等）
     
     使用示例：
         class MyGraphState(BaseState):
@@ -28,3 +29,4 @@ class BaseState(TypedDict, total=False):
     # 任务标识
     task_id: str                    # 任务ID，用于进度追踪和取消
     user_session_id: str            # 用户会话ID，用于多用户隔离
+    tender_type: str                # 招标类型标识符（"xjcg"、"gngk" 等）

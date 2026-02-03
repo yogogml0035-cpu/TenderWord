@@ -151,8 +151,8 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                     font_name = search_rng.Font.Name
                     font_size = search_rng.Font.Size
                     is_font = font_name in ("宋体", "SimSun")
-                    # xjcg 模块固定使用 18.0
-                    target_size = 18.0
+                    # 根据tender_type判断字体大小：xjcg是18.0，gngk是22.0（二号）
+                    target_size = 18.0 if state.get("tender_type") == "xjcg" else 22.0
                     is_size = abs(font_size - target_size) < 0.5
                     if is_font and is_size:
                         page = search_rng.Information(wdActiveEndPageNumber)
@@ -180,8 +180,8 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                         font_name = search_rng.Font.Name
                         font_size = search_rng.Font.Size
                         is_font = font_name in ("宋体", "SimSun")
-                        # xjcg 模块固定使用 18.0
-                        target_size = 18.0
+                        # 根据tender_type判断字体大小：xjcg是18.0，gngk是22.0（二号）
+                        target_size = 18.0 if state.get("tender_type") == "xjcg" else 22.0
                         is_size = abs(font_size - target_size) < 0.5
                         if is_font and is_size:
                             return search_rng.Information(wdActiveEndPageNumber)
@@ -558,27 +558,9 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                 insert_font_name = "宋体"
                 insert_font_size = 12
 
-                # 检测 Markdown 风格的表格（支持两种格式）
-                # 1) 标准：行以 '|' 开头，第二行为 | --- | --- |；2) 简写：多行用 | 分隔列，无分隔符行
+                # 检测 Markdown 风格的表格（以 '|' 开头，后跟分隔符行）
                 def is_table_separator_line(line: str) -> bool:
                     return bool(re.match(r"^\s*\|\s*:?-{3,}.*\|\s*$", line))
-
-                def _parse_table_row(line: str):
-                    """按 '|' 分割一行得到单元格列表，去除首尾空串。"""
-                    cells = [cell.strip() for cell in line.split("|")]
-                    if cells and cells[0] == "":
-                        cells = cells[1:]
-                    if cells and cells[-1] == "":
-                        cells = cells[:-1]
-                    return cells
-
-                def looks_like_table_row(line: str) -> bool:
-                    """是否像表格行：包含 | 且能解析出至少 2 列。"""
-                    s = (line or "").strip()
-                    if "|" not in s:
-                        return False
-                    cells = _parse_table_row(s)
-                    return len(cells) >= 2
 
                 def parse_table_block(lines, start_idx):
                     """解析连续的 Markdown 表格行为行，并返回行和下一个索引。"""
@@ -588,25 +570,29 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                         table_lines.append(lines[i].strip())
                         i += 1
 
-                    # 标准 Markdown 表格：至少 2 行且第二行为分隔符
-                    if len(table_lines) >= 2 and is_table_separator_line(table_lines[1]):
-                        header = table_lines[0]
-                        data_lines = table_lines[2:] if len(table_lines) > 2 else []
-                        all_lines = [header] + data_lines
-                        rows = [_parse_table_row(ln) for ln in all_lines]
-                        return rows, i
+                    if len(table_lines) < 2:
+                        return None, start_idx
 
-                    # 否则尝试“简写表格”：从 start_idx 起连续多行均为 | 分隔的多列（可不以 | 开头）
-                    table_lines_alt = []
-                    j = start_idx
-                    while j < len(lines) and looks_like_table_row(lines[j]):
-                        table_lines_alt.append(lines[j].strip())
-                        j += 1
-                    if len(table_lines_alt) >= 2:
-                        rows = [_parse_table_row(ln) for ln in table_lines_alt]
-                        return rows, j
+                    header = table_lines[0]
+                    separator = table_lines[1]
 
-                    return None, start_idx
+                    if not is_table_separator_line(separator):
+                        return None, start_idx
+
+                    data_lines = table_lines[2:] if len(table_lines) > 2 else []
+                    all_lines = [header] + data_lines
+
+                    rows = []
+                    for line in all_lines:
+                        # 按 '|' 分割并去除空边缘
+                        cells = [cell.strip() for cell in line.split("|")]
+                        if cells and cells[0] == "":
+                            cells = cells[1:]
+                        if cells and cells[-1] == "":
+                            cells = cells[:-1]
+                        rows.append(cells)
+
+                    return rows, i
 
                 def convert_lines_to_items(lines):
                     """将普通行转换为项目列表（文本或表格）。"""
@@ -799,17 +785,20 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                             rng.Collapse(wdCollapseEnd)
                             inserted += 1
                         elif item["type"] == "table":
-                            try:
-                                insert_table_with_formatting(rng, item["rows"])
+                            for row in item["rows"]:
+                                s = chr(11) + " | ".join(row)
+                                st = int(rng.Start)
+                                rng.InsertAfter(s)
+                                ed = int(rng.End)
+                                try:
+                                    ins = doc.Range(st, ed)
+                                    ins.Font.Name = insert_font_name
+                                    ins.Font.Size = insert_font_size
+                                    ins.Font.Bold = False
+                                except Exception:
+                                    pass
+                                rng.Collapse(wdCollapseEnd)
                                 inserted += 1
-                            except Exception as e:
-                                insertion_log_parts.append(f"    警告: 内联插入表格失败，改为文本: {e}")
-                                for row in item["rows"]:
-                                    s = chr(11) + " | ".join(row)
-                                    st = int(rng.Start)
-                                    rng.InsertAfter(s)
-                                    rng.Collapse(wdCollapseEnd)
-                                    inserted += 1
                     return inserted
 
                 # 插入块1（在交付日期之前）

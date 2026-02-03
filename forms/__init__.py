@@ -10,11 +10,13 @@ Forms are responsible for:
 Exports:
 - BaseForm: Base class for all forms
 - XjcgTenderForm: Form for inquiry procurement document generation
+- GngkTenderForm: Form for domestic public tender document generation
 - create_form: Factory function to create form instances
 """
 
 from .base_form import BaseForm
 from .xjcg_tender_form import XjcgTenderForm
+from .gngk_tender_form import GngkTenderForm
 
 
 def create_form(form_config):
@@ -49,6 +51,7 @@ def create_form(form_config):
     form_map = {
         "xjcg_tender": XjcgTenderForm,
         "domestic_public_tender": XjcgTenderForm,  # 暂时复用现有表单类
+        "gngk_tender": GngkTenderForm,  # 国内公开招标表单
     }
     
     # 获取表单类
@@ -60,4 +63,4 @@ def create_form(form_config):
     return form_class(form_config)
 
 
-__all__ = ["BaseForm", "XjcgTenderForm", "create_form"]
+__all__ = ["BaseForm", "XjcgTenderForm", "GngkTenderForm", "create_form"]

@@ -1,7 +1,7 @@
 """
-询价采购表单模块
+国内公开招标表单模块
 
-实现询价采购文档生成的表单界面，包括：
+实现国内公开招标文档生成的表单界面，包括：
 - 招标编号输入和数据获取
 - Word 文件上传
 - 模型选择
@@ -28,11 +28,11 @@ UPLOAD_DIR = pathlib.Path("D:/UploadFiles")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-class XjcgTenderForm(BaseForm):
+class GngkTenderForm(BaseForm):
     """
-    询价采购表单类
+    国内公开招标表单类
     
-    继承自 BaseForm，实现询价采购文档生成的表单界面。
+    继承自 BaseForm，实现国内公开招标文档生成的表单界面。
     
     功能：
     - 招标编号输入和自动获取（支持 URL 参数）
@@ -64,7 +64,7 @@ class XjcgTenderForm(BaseForm):
         """
         st.markdown(
             "1. 输入完整的招标编号（包含招标编号前缀），点击\"获取项目信息\"获取项目信息\n"
-            "2. 上传作为参考的询价采购 Word 文件（清洁稿）注意：如果是从.doc转换.docx的文件，请注意勾选保留与WPS文字早期版本的兼容性或勾选保留与Word早期版本的兼容性！否则生成内容会出错\n"
+            "2. 上传作为参考的国内公开招标 Word 文件（清洁稿）注意：如果是从.doc转换.docx的文件，请注意勾选保留与WPS文字早期版本的兼容性或勾选保留与Word早期版本的兼容性！否则生成内容会出错\n"
             "3. 上传包含采购需求参数的 Word 文件\n"
             "4. 点击\"开始生成\"后等待完成提示，再到对应路径查看 Word 结果或直接下载\n\n"
         )
@@ -322,13 +322,13 @@ class XjcgTenderForm(BaseForm):
         # 准备初始状态
         initial_state = {
             # 招标类型标识符
-            "tender_type": "xjcg",
+            "tender_type": "gngk",
             # 上传文件路径
             "origin_tender_path": origin_tender_path,
             "tender_param_paths": tender_param_paths,
             # 固定参数（与 graph.py 中保持一致）
-            "insertion_before_text": "第三章  采购需求",
-            "insertion_after_text": "第四章  响应文件有关格式",
+            "insertion_before_text": "第三章 招标内容及要求",
+            "insertion_after_text": "第四章 投标文件有关格式",
             "project_name": tender_data["project_name"],
             "project_number": tender_data["project_number"],
             "project_content": tender_data["project_content"],
@@ -377,4 +377,3 @@ class XjcgTenderForm(BaseForm):
             
             # 5. 触发生成流程
             self.start_generation(initial_state)
-
