@@ -203,7 +203,8 @@ if __name__ == "__main__":
     
     # 重新导入必要的模块（从项目根目录直接导入）
     from states import XjcgTenderGraphState
-    from nodes.xjcg_word_nodes.extract_tender_params import extract_tender_params
+    # xjcg 的提取节点已更名为 xjcg_extract_tender_params.py，并在包 __init__ 中对外导出
+    from nodes.xjcg_word_nodes import extract_tender_params
     from util.word_extraction_utils import extract_text_from_word_file
     
     # 测试配置：参考文档路径和技术参数路径

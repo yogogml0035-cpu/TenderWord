@@ -1,12 +1,17 @@
-# GNGK 模块只保留 prompt 定义
-# generate_polished_text 在 common_word_nodes 中统一实现
-from nodes.gngk_word_nodes.prepare_template import prepare_template
-from nodes.gngk_word_nodes.delete_tender_param import delete_tender_param
-from nodes.gngk_word_nodes.get_replacements import get_replacements
-from nodes.gngk_word_nodes.replace_content import replace_content
-from nodes.gngk_word_nodes.update_word import update_word
-from nodes.gngk_word_nodes.extract_tender_params import extract_tender_params
-from nodes.gngk_word_nodes.generate_polished_text import generate_polished_text
+# GNGK 目录仅保留“带前缀”的差异化节点（gngk_*）与 prompt。
+# 通用节点统一放在 nodes/common_word_nodes 中实现，并在此处 re-export，
+# 以保持外部导入路径 `from nodes.gngk_word_nodes import ...` 不变。
+
+from nodes.common_word_nodes import (
+    generate_polished_text,
+    prepare_template,
+    replace_content,
+)
+
+from nodes.gngk_word_nodes.gngk_get_replacements import get_replacements
+from nodes.gngk_word_nodes.gngk_delete_tender_param import delete_tender_param
+from nodes.gngk_word_nodes.gngk_extract_tender_params import extract_tender_params
+from nodes.gngk_word_nodes.gngk_update_word import update_word
 
 __all__ = [
     "prepare_template",

@@ -64,14 +64,14 @@ from typing import Type, TypedDict
 
 from graphs.base_graph import BaseGraph
 from states import GngkTenderGraphState
+# 为避免 Streamlit 热重载/历史 sys.modules 导致的“同名模块覆盖函数”问题，
+# 这里对 generate_polished_text 使用“从模块导入函数”的方式，确保一定拿到 callable。
+from nodes.common_word_nodes import prepare_template, generate_polished_text, replace_content
 from nodes.gngk_word_nodes import (
-    generate_polished_text,
-    update_word,
-    prepare_template,
-    replace_content,
     get_replacements,
+    update_word,
     delete_tender_param,
-    extract_tender_params
+    extract_tender_params,
 )
 
 

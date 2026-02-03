@@ -100,7 +100,6 @@ class XjcgTenderGraphState(BaseState):
     
     # 批注
     comment_plan: List[CommentInstruction]
-    comments_summary: str
     
     # 日志
     insertion_log: str

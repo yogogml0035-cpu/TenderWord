@@ -64,14 +64,12 @@ from typing import Type, TypedDict
 
 from graphs.base_graph import BaseGraph
 from states import XjcgTenderGraphState
+from nodes.common_word_nodes import prepare_template, generate_polished_text, replace_content
 from nodes.xjcg_word_nodes import (
-    generate_polished_text,
-    update_word,
-    prepare_template,
-    replace_content,
     get_replacements,
+    update_word,
     delete_tender_param,
-    extract_tender_params
+    extract_tender_params,
 )
 
 
