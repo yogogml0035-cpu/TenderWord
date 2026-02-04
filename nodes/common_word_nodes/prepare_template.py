@@ -121,6 +121,7 @@ def prepare_template(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
         # 如果成功打开，立即关闭（不保存）
         # 这样可以验证文件是否可以被 Word 正常打开，并修复一些格式问题
         doc.Close(SaveChanges=False)
+        doc = None  # 避免将已关闭的 doc 传给 close_word_application 导致 RPC_E_DISCONNECTED
     except Exception as e:
         # 如果打开失败，记录错误但不抛出异常
         # 因为可能是文档本身的问题，后续节点会处理

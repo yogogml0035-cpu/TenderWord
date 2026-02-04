@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    test_file_path = r"D:\PythonProject\TenderWord\253505-细胞电转仪-询价文件-初稿1.doc"
+    test_file_path = r"D:\CompanyProject\TenderWord\test_word\253505-细胞电转仪-询价文件-初稿1.doc"
 
     if not os.path.exists(test_file_path):
         print(f"[错误] 测试文件不存在: {test_file_path}")

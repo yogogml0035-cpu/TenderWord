@@ -10,11 +10,8 @@ Word 文档内容检测工具
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from typing import Optional
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -87,6 +84,27 @@ class WordDocumentInspector:
             pass
         return 0
 
+    def _get_comment_full_content(self, range_obj: any) -> str:
+        """
+        获取批注气泡的完整文本（含多段落）。
+        Word COM 中 comment.Range.Text 在多段落时可能只返回最后一段，故按段落拼接。
+        """
+        try:
+            if not hasattr(range_obj, "Paragraphs"):
+                return (range_obj.Text or "").replace("\r\n", "\n").replace("\r", "\n")
+            parts = []
+            paras = range_obj.Paragraphs
+            for j in range(1, paras.Count + 1):
+                try:
+                    para = paras.Item(j)
+                    parts.append(para.Range.Text or "")
+                except Exception:
+                    continue
+            text = "".join(parts)
+            return text.replace("\r\n", "\n").replace("\r", "\n")
+        except Exception:
+            return (range_obj.Text or "").replace("\r\n", "\n").replace("\r", "\n")
+
     def check_protection(self) -> tuple[bool, int]:
         """
         检查文档保护状态
@@ -99,13 +117,13 @@ class WordDocumentInspector:
         log_prefix = self._get_log_prefix()
         try:
             protection_type = self.doc.ProtectionType
-            logger.debug(f"{log_prefix}文档保护类型: {protection_type} (-1 表示无保护)")
+            print(f"{log_prefix}文档保护类型: {protection_type} (-1 表示无保护)")
 
             if protection_type == -1:
                 return False, protection_type
             return True, protection_type
         except Exception as e:
-            logger.warning(f"{log_prefix}检查文档保护时出错: {e}")
+            print(f"{log_prefix}检查文档保护时出错: {e}")
             return False, -1
 
     def get_color_name(self, color_value: int) -> str:
@@ -205,7 +223,7 @@ class WordDocumentInspector:
         try:
             comments_collection = self.doc.Comments
             comment_count = comments_collection.Count
-            logger.debug(f"{log_prefix}检测到 {comment_count} 个批注")
+            print(f"{log_prefix}检测到 {comment_count} 个批注")
 
             for i in range(1, comment_count + 1):
                 try:
@@ -215,26 +233,32 @@ class WordDocumentInspector:
                     scope_obj = comment.Scope
                     scope_text = scope_obj.Text if scope_obj else ""
 
+                    # 用按段落拼接的方式取批注气泡全文，避免多段落批注只得到最后一段
+                    comment_content = self._get_comment_full_content(range_obj)
+
                     comment_info = CommentInfo(
                         author=comment.Author or "",
                         date=str(comment.Date) if comment.Date else "",
-                        content=range_obj.Text or "",
+                        content=comment_content,
                         scope_text=scope_text or "",
-                        range_text=range_obj.Text or "",
+                        range_text=comment_content,
                         page_number=self._get_page_number(range_obj)
                     )
                     comments.append(comment_info)
 
-                    logger.debug(f"{log_prefix}批注 {i}: 作者='{comment_info.author}', "
-                               f"日期='{comment_info.date}', 批注内容='{comment_info.content}', "
-                               f"批注范围='{comment_info.scope_text}'")
+                    # 分块分行打印，避免批注内容/范围中的换行导致与下一项混在一起
+                    print(f"{log_prefix}---------- 批注 {i} ----------")
+                    print(f"{log_prefix}  作者: {comment_info.author}")
+                    print(f"{log_prefix}  日期: {comment_info.date}")
+                    print(f"{log_prefix}  批注内容:\n{comment_info.content}")
+                    print(f"{log_prefix}  批注范围:\n{comment_info.scope_text}")
 
                 except Exception as e:
-                    logger.warning(f"{log_prefix}读取批注 {i} 时出错: {e}")
+                    print(f"{log_prefix}读取批注 {i} 时出错: {e}")
                     continue
 
         except Exception as e:
-            logger.warning(f"{log_prefix}获取批注集合时出错: {e}")
+            print(f"{log_prefix}获取批注集合时出错: {e}")
 
         return comments
 
@@ -251,7 +275,7 @@ class WordDocumentInspector:
         try:
             paragraphs = self.doc.Paragraphs
             total_paragraphs = paragraphs.Count
-            logger.debug(f"{log_prefix}开始检测 {total_paragraphs} 个段落")
+            print(f"{log_prefix}开始检测 {total_paragraphs} 个段落")
 
             for i in range(1, total_paragraphs + 1):
                 try:
@@ -292,14 +316,14 @@ class WordDocumentInspector:
                                 page_number=self._get_page_number(range_obj)
                             )
                             strikethroughs.append(strikethrough_info)
-                            logger.debug(f"{log_prefix}删除线段落 {len(strikethroughs)}: '{paragraph_text}', 删除线内容: '{strikethrough_text}'")
+                            print(f"{log_prefix}删除线段落 {len(strikethroughs)}: '{paragraph_text}', 删除线内容: '{strikethrough_text}'")
 
                 except Exception as e:
-                    logger.warning(f"{log_prefix}检测段落 {i} 的删除线时出错: {e}")
+                    print(f"{log_prefix}检测段落 {i} 的删除线时出错: {e}")
                     continue
 
         except Exception as e:
-            logger.warning(f"{log_prefix}获取段落集合时出错: {e}")
+            print(f"{log_prefix}获取段落集合时出错: {e}")
 
         return strikethroughs
 
@@ -316,7 +340,7 @@ class WordDocumentInspector:
         try:
             paragraphs = self.doc.Paragraphs
             total_paragraphs = paragraphs.Count
-            logger.debug(f"{log_prefix}开始检测 {total_paragraphs} 个段落的字体颜色")
+            print(f"{log_prefix}开始检测 {total_paragraphs} 个段落的字体颜色")
 
             for i in range(1, total_paragraphs + 1):
                 try:
@@ -379,15 +403,15 @@ class WordDocumentInspector:
                                     page_number=self._get_page_number(range_obj)
                                 )
                                 non_black_fonts.append(font_info)
-                                logger.debug(f"{log_prefix}非黑色字体段落 {len(non_black_fonts)}: "
-                                           f"颜色='{font_info.color_name}', 文字='{font_text}'")
+                                print(f"{log_prefix}非黑色字体段落 {len(non_black_fonts)}: "
+                                      f"颜色='{font_info.color_name}', 文字='{font_text}'")
 
                 except Exception as e:
-                    logger.warning(f"{log_prefix}检测段落 {i} 的字体颜色时出错: {e}")
+                    print(f"{log_prefix}检测段落 {i} 的字体颜色时出错: {e}")
                     continue
 
         except Exception as e:
-            logger.warning(f"{log_prefix}获取段落集合时出错: {e}")
+            print(f"{log_prefix}获取段落集合时出错: {e}")
 
         return non_black_fonts
 
@@ -434,14 +458,14 @@ class WordDocumentInspector:
                                         non_black_fonts.append(font_info)
 
                         except Exception as e:
-                            logger.debug(f"{log_prefix}检测 {story_name} 句子 {j} 时出错: {e}")
+                            print(f"{log_prefix}检测 {story_name} 句子 {j} 时出错: {e}")
                             continue
 
                 except Exception as e:
-                    logger.debug(f"{log_prefix}获取 {story_name} 句子集合时出错: {e}")
+                    print(f"{log_prefix}获取 {story_name} 句子集合时出错: {e}")
 
         except Exception as e:
-            logger.warning(f"{log_prefix}检测非黑色字体时出错: {e}")
+            print(f"{log_prefix}检测非黑色字体时出错: {e}")
 
         return non_black_fonts
 
@@ -453,7 +477,7 @@ class WordDocumentInspector:
             DocumentAnalysisResult: 文档分析结果
         """
         log_prefix = self._get_log_prefix()
-        logger.info(f"{log_prefix}开始综合分析文档...")
+        print(f"{log_prefix}开始综合分析文档...")
 
         result = DocumentAnalysisResult()
 
@@ -461,24 +485,24 @@ class WordDocumentInspector:
         result.is_protected = is_protected
         result.protection_type = protection_type
 
-        logger.info(f"{log_prefix}文档保护状态: {'受保护' if is_protected else '无保护'}")
+        print(f"{log_prefix}文档保护状态: {'受保护' if is_protected else '无保护'}")
 
         comments = self.inspect_comments()
         result.comments = comments
         result.total_comments = len(comments)
-        logger.info(f"{log_prefix}批注数量: {result.total_comments}")
+        print(f"{log_prefix}批注数量: {result.total_comments}")
 
         strikethroughs = self.inspect_strikethroughs()
         result.strikethroughs = strikethroughs
         result.total_strikethroughs = len(strikethroughs)
-        logger.info(f"{log_prefix}删除线段落数量: {result.total_strikethroughs}")
+        print(f"{log_prefix}删除线段落数量: {result.total_strikethroughs}")
 
         non_black_fonts = self.inspect_non_black_fonts()
         result.non_black_fonts = non_black_fonts
         result.total_non_black_fonts = len(non_black_fonts)
-        logger.info(f"{log_prefix}非黑色字体段落数量: {result.total_non_black_fonts}")
+        print(f"{log_prefix}非黑色字体段落数量: {result.total_non_black_fonts}")
 
-        logger.info(f"{log_prefix}文档分析完成")
+        print(f"{log_prefix}文档分析完成")
         return result
 
     def format_analysis_report(self, result: DocumentAnalysisResult) -> str:

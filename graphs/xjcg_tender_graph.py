@@ -15,6 +15,8 @@
       ↓
     prepare_template
       ↓
+    get_comments
+      ↓
     extract_tender_params
       ↓         ↓
       ↓         ↓
@@ -64,7 +66,7 @@ from typing import Type, TypedDict
 
 from graphs.base_graph import BaseGraph
 from states import XjcgTenderGraphState
-from nodes.common_word_nodes import prepare_template, generate_polished_text, replace_content
+from nodes.common_word_nodes import prepare_template, generate_polished_text, replace_content, get_comments
 from nodes.xjcg_word_nodes import (
     get_replacements,
     update_word,
@@ -107,13 +109,14 @@ class XjcgTenderGraph(BaseGraph):
         
         工作流包含以下节点：
         1. prepare_template: 准备 Word 模板
-        2. extract_tender_params: 提取招标参数
-        3. word_operations_subgraph: Word 操作子图（子图内部包含 3 个节点）
+        2. get_comments: 从送审稿文件提取批注
+        3. extract_tender_params: 提取招标参数
+        4. word_operations_subgraph: Word 操作子图（子图内部包含 3 个节点）
            - delete_tender_param: 删除招标参数
            - get_replacements: 获取替换内容
            - replace_content: 替换内容
-        4. generate_polished_text: 生成润色文本（LLM 调用）
-        5. update_word: 更新 Word 文档
+        5. generate_polished_text: 生成润色文本（LLM 调用）
+        6. update_word: 更新 Word 文档
         
         并行执行：
         - extract_tender_params 之后，word_operations_subgraph 和 generate_polished_text 并行执行
@@ -127,6 +130,8 @@ class XjcgTenderGraph(BaseGraph):
         # 添加主图节点（使用进度追踪包装）
         builder.add_node("prepare_template", 
                         self.wrap_node("prepare_template", prepare_template))
+        builder.add_node("get_comments", 
+                        self.wrap_node("get_comments", get_comments))
         builder.add_node("extract_tender_params", 
                         self.wrap_node("extract_tender_params", extract_tender_params))
         # 子图作为一个节点（子图内部已经有进度追踪）
@@ -138,7 +143,8 @@ class XjcgTenderGraph(BaseGraph):
         
         # 主图边
         builder.add_edge(START, "prepare_template")
-        builder.add_edge("prepare_template", "extract_tender_params")
+        builder.add_edge("prepare_template", "get_comments")
+        builder.add_edge("get_comments", "extract_tender_params")
         
         # 从 extract_tender_params 扇出到两个并行分支
         builder.add_edge("extract_tender_params", "word_operations_subgraph")

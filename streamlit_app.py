@@ -18,7 +18,8 @@ if str(ROOT) not in sys.path:
 
 from graphs import XjcgTenderGraph, GngkTenderGraph, invoke_with_timing_async
 from task.task_queue_manager import get_task_queue, TaskStatus, NODE_DISPLAY_NAMES, NodeName
-from config.form_config import match_form_by_url_params, FORM_REGISTRY
+from config.form_config import match_form_by_type, FORM_REGISTRY
+from util.fetch_tender_data import fetch_tender_data
 from forms import create_form
 
 # 图注册表：根据 graph_name 映射到对应的图类
@@ -275,17 +276,32 @@ if st.session_state.get("should_enable_downloads", False):
     st.session_state.should_enable_downloads = False
 
 # === 表单路由系统 ===
-# 解析 URL 参数
+# 仅通过 URL 的 tenderno 触发一次拉数，用接口返回的 type 决定表单（不再用 URL 传 tender_lx/purchase_method/fund_lx）
 query_params = st.query_params
-tender_lx = query_params.get("tender_lx")
-purchase_method = query_params.get("purchase_method")
-fund_lx = query_params.get("fund_lx")
+tender_no_from_url = query_params.get("tenderno", "")
+url_params_processed = st.session_state.get("url_params_processed", False)
 
-# 匹配表单配置
-active_form_config = match_form_by_url_params(tender_lx, purchase_method, fund_lx)
+if tender_no_from_url and not url_params_processed:
+    # 首次带 tenderno 进入：调接口一次，用 type 匹配表单并写入 session，避免表单内重复请求
+    try:
+        result = fetch_tender_data(tender_no_from_url)
+        st.session_state.tender_data = result["data"]
+        st.session_state.auto_fetched_tender_no = tender_no_from_url
+        matched = match_form_by_type(result.get("type"))
+        st.session_state.pre_selected_form_id = matched.form_id if matched else "xjcg_tender"
+    except Exception as e:
+        st.session_state.auto_fetched_tender_no = ""
+        st.session_state.pre_selected_form_id = "xjcg_tender"
+        st.error(f"自动获取数据失败：{str(e)}")
+    st.session_state.url_params_processed = True
+    st.rerun()
 
-# 如果没有匹配，使用默认表单（询价采购）
-if not active_form_config:
+# 确定当前表单：优先使用“带 tenderno 进入时”根据 type 选中的表单
+pre_selected = st.session_state.get("pre_selected_form_id")
+if pre_selected and pre_selected in FORM_REGISTRY:
+    active_form_config = FORM_REGISTRY[pre_selected]
+    # 仅在本轮由 tenderno 选定表单时保留，避免切 tab 后仍被锁定（若后续有 tab 切换可在此重置 pre_selected）
+else:
     active_form_config = FORM_REGISTRY["xjcg_tender"]
 
 # 渲染表单

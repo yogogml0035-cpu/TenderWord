@@ -15,7 +15,8 @@ from __future__ import annotations
 import pathlib
 import time
 import uuid
-from typing import Dict, Any, Tuple
+from datetime import datetime
+from typing import Dict, Any, Tuple, Optional
 
 import streamlit as st
 
@@ -26,6 +27,67 @@ from util.fetch_tender_data import fetch_tender_data
 # 定义上传目录
 UPLOAD_DIR = pathlib.Path("D:/UploadFiles")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def render_review_draft_upload() -> Optional[str]:
+    """
+    渲染送审稿文件上传组件
+    
+    创建一个文件上传组件，允许用户上传包含审阅批注的 Word 文档。
+    系统将自动提取文档中的批注内容用于后续处理。
+    
+    功能：
+    - 仅接受 .doc 和 .docx 格式的文件
+    - 文件上传为可选（非必填）
+    - 提供帮助文本说明功能
+    - 验证文件扩展名并显示错误消息
+    - 保存文件到 D:/UploadFiles 目录
+    - 生成带时间戳的唯一文件名
+    
+    Returns:
+        Optional[str]: 如果用户上传了文件并成功保存，返回保存的文件路径；
+                      如果未上传文件或保存失败，返回 None
+    
+    需求: 1.3, 1.4, 1.5, 5.1
+    """
+    uploaded_file = st.file_uploader(
+        "上传送审稿 Word 文档（可选）",
+        type=["doc", "docx"],
+        help="上传包含审阅批注的 Word 文档，系统将自动提取批注内容",
+        key="review_draft_file"
+    )
+    
+    # 验证文件扩展名（需求 1.3, 1.4）
+    if uploaded_file is not None:
+        # 提取文件扩展名
+        file_extension = uploaded_file.name.split('.')[-1].lower() if '.' in uploaded_file.name else ''
+        
+        # 验证扩展名是否为 .doc 或 .docx
+        if file_extension not in ['doc', 'docx']:
+            st.error("仅支持 .doc 和 .docx 格式的文件")
+            return None
+        
+        # 确保上传目录存在（需求 1.5, 5.1）
+        upload_dir = pathlib.Path("D:/UploadFiles")
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 生成带时间戳的唯一文件名（需求 1.5）
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_filename = f"{timestamp}_{uploaded_file.name}"
+        file_path = upload_dir / safe_filename
+        
+        # 保存文件到目标目录（需求 1.5）
+        try:
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            st.success(f"文件已上传: {safe_filename}")
+            return str(file_path)
+        except Exception as e:
+            # 处理保存异常并显示错误消息（需求 5.1）
+            st.error(f"文件保存失败: {str(e)}")
+            return None
+    
+    return None
 
 
 class XjcgTenderForm(BaseForm):
@@ -69,28 +131,9 @@ class XjcgTenderForm(BaseForm):
             "4. 点击\"开始生成\"后等待完成提示，再到对应路径查看 Word 结果或直接下载\n\n"
         )
         
-        # 处理 URL 参数（只在首次加载时处理）
+        # URL 带 tenderno 时由应用层已拉取数据并写入 session，此处仅标记已处理，避免重复请求
         if not st.session_state.get("url_params_processed", False):
-            query_params = st.query_params
-            tender_no_from_url = query_params.get("tenderno", "")
-            
-            if tender_no_from_url:
-                # 自动获取招标数据
-                try:
-                    tender_data = fetch_tender_data(tender_no_from_url)
-                    st.session_state.tender_data = tender_data
-                    st.session_state.auto_fetched_tender_no = tender_no_from_url
-                    # 保留所有 URL 参数，不清除任何参数
-                    st.session_state.url_params_processed = True
-                    # 重新运行以更新 UI
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"自动获取数据失败：{str(e)}")
-                    st.session_state.auto_fetched_tender_no = ""
-                    # 即使失败也保留所有 URL 参数
-                    st.session_state.url_params_processed = True
-            else:
-                st.session_state.url_params_processed = True
+            st.session_state.url_params_processed = True
         
         # 招标编号输入和获取按钮
         col1, col2 = st.columns([8, 1])
@@ -120,9 +163,8 @@ class XjcgTenderForm(BaseForm):
             else:
                 try:
                     with st.spinner("正在获取招标数据..."):
-                        tender_data = fetch_tender_data(tender_no_input.strip())
-                        # 更新 session_state
-                        st.session_state.tender_data = tender_data
+                        result = fetch_tender_data(tender_no_input.strip())
+                        st.session_state.tender_data = result["data"]
                         st.success("数据获取成功！")
                 except Exception as e:
                     st.error(f"获取数据失败：{str(e)}")
@@ -131,8 +173,11 @@ class XjcgTenderForm(BaseForm):
         if st.session_state.get("tender_data") is not None:
             self._render_tender_data_display()
         
+        
         # 文件上传表单
         with st.form("tender_doc_form"):
+
+
             uploaded_file = st.file_uploader(
                 "参考 Word 文件（origin_tender_path）",
                 type=["doc", "docx"],
@@ -144,6 +189,8 @@ class XjcgTenderForm(BaseForm):
                 help="请上传包含原始技术参数的 Word 文件（.doc 或 .docx），支持多文件",
                 accept_multiple_files=True,
             )
+            # 送审稿文件上传（在表单外部，需求 1.6）
+            review_draft_path = render_review_draft_upload()
             
             # 添加模型选择
             model_option = st.selectbox(
@@ -165,7 +212,8 @@ class XjcgTenderForm(BaseForm):
             "uploaded_file": uploaded_file,
             "origin_text_files": origin_text_files,
             "model_option": model_option,
-            "submitted": submitted
+            "submitted": submitted,
+            "review_draft_path": review_draft_path  # 需求 1.6
         }
     
     def _render_tender_data_display(self):
@@ -283,6 +331,7 @@ class XjcgTenderForm(BaseForm):
         uploaded_file = form_data["uploaded_file"]
         origin_text_files = form_data["origin_text_files"]
         model_option = form_data["model_option"]
+        review_draft_path = form_data.get("review_draft_path")  # 需求 1.6
         tender_data = st.session_state.tender_data
         
         # 保存上传的模板文件到指定目录
@@ -326,6 +375,8 @@ class XjcgTenderForm(BaseForm):
             # 上传文件路径
             "origin_tender_path": origin_tender_path,
             "tender_param_paths": tender_param_paths,
+            # 送审稿文件路径（需求 1.6）
+            "review_draft_path": review_draft_path,
             # 固定参数（与 graph.py 中保持一致）
             "insertion_before_text": "第三章  采购需求",
             "insertion_after_text": "第四章  响应文件有关格式",

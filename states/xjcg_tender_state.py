@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple, TypedDict
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 from .base_state import BaseState
 
@@ -56,7 +56,11 @@ class XjcgTenderGraphState(BaseState):
         insertion_after_text: 插入位置的后置文本
     
     批注相关字段：
-        comment_plan: 批注指令列表
+        review_draft_path: 送审稿文件路径（可选）
+        comment_plan: 从送审稿文档提取的批注内容文本列表（兼容旧逻辑）
+        comment_plan_detail: 批注详情列表（作者、日期、内容、范围、页码）
+        strikethrough_plan: 删除线段落列表（段落原文、删除线内容、页码）
+        non_black_font_plan: 非黑色字体列表（段落原文、非黑字内容、颜色名、页码）
         comments_summary: 批注添加结果摘要
     
     日志相关字段：
@@ -99,7 +103,11 @@ class XjcgTenderGraphState(BaseState):
     insertion_after_text: str
     
     # 批注
-    comment_plan: List[CommentInstruction]
+    review_draft_path: Optional[str]  # 送审稿文件路径
+    comment_plan: List[str]  # 从送审稿文档提取的批注内容文本列表（兼容旧逻辑）
+    comment_plan_detail: List[Dict[str, Any]]  # 批注详情（author, date, content, scope_text, page_number）
+    strikethrough_plan: List[Dict[str, Any]]  # 删除线段落（paragraph_text, strikethrough_text, page_number）
+    non_black_font_plan: List[Dict[str, Any]]  # 非黑色字体（paragraph_text, font_text, color_name, page_number）
     
     # 日志
     insertion_log: str

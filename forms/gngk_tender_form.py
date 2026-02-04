@@ -69,28 +69,9 @@ class GngkTenderForm(BaseForm):
             "4. 点击\"开始生成\"后等待完成提示，再到对应路径查看 Word 结果或直接下载\n\n"
         )
         
-        # 处理 URL 参数（只在首次加载时处理）
+        # URL 带 tenderno 时由应用层已拉取数据并写入 session，此处仅标记已处理，避免重复请求
         if not st.session_state.get("url_params_processed", False):
-            query_params = st.query_params
-            tender_no_from_url = query_params.get("tenderno", "")
-            
-            if tender_no_from_url:
-                # 自动获取招标数据
-                try:
-                    tender_data = fetch_tender_data(tender_no_from_url)
-                    st.session_state.tender_data = tender_data
-                    st.session_state.auto_fetched_tender_no = tender_no_from_url
-                    # 保留所有 URL 参数，不清除任何参数
-                    st.session_state.url_params_processed = True
-                    # 重新运行以更新 UI
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"自动获取数据失败：{str(e)}")
-                    st.session_state.auto_fetched_tender_no = ""
-                    # 即使失败也保留所有 URL 参数
-                    st.session_state.url_params_processed = True
-            else:
-                st.session_state.url_params_processed = True
+            st.session_state.url_params_processed = True
         
         # 招标编号输入和获取按钮
         col1, col2 = st.columns([8, 1])
@@ -120,9 +101,8 @@ class GngkTenderForm(BaseForm):
             else:
                 try:
                     with st.spinner("正在获取招标数据..."):
-                        tender_data = fetch_tender_data(tender_no_input.strip())
-                        # 更新 session_state
-                        st.session_state.tender_data = tender_data
+                        result = fetch_tender_data(tender_no_input.strip())
+                        st.session_state.tender_data = result["data"]
                         st.success("数据获取成功！")
                 except Exception as e:
                     st.error(f"获取数据失败：{str(e)}")
