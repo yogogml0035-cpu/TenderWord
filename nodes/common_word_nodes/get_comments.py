@@ -49,30 +49,15 @@ def _result_to_state_updates(result: DocumentAnalysisResult) -> dict:
     """将 DocumentAnalysisResult 转为可写入 state 的字典"""
     comment_plan = [c.content for c in result.comments]
     comment_plan_detail = [
-        {
-            "author": c.author,
-            "date": c.date,
-            "content": c.content,
-            "scope_text": c.scope_text,
-            "page_number": getattr(c, "page_number", 0),
-        }
+        {"content": c.content, "scope_text": c.scope_text}
         for c in result.comments
     ]
     strikethrough_plan = [
-        {
-            "paragraph_text": s.paragraph_text,
-            "strikethrough_text": s.strikethrough_text,
-            "page_number": getattr(s, "page_number", 0),
-        }
+        {"paragraph_text": s.paragraph_text, "strikethrough_text": s.strikethrough_text}
         for s in result.strikethroughs
     ]
     non_black_font_plan = [
-        {
-            "paragraph_text": f.paragraph_text,
-            "font_text": f.font_text,
-            "color_name": f.color_name,
-            "page_number": getattr(f, "page_number", 0),
-        }
+        {"paragraph_text": f.paragraph_text, "font_text": f.font_text}
         for f in result.non_black_fonts
     ]
     return {

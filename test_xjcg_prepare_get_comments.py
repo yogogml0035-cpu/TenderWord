@@ -11,6 +11,7 @@
 
 import pathlib
 import sys
+from pprint import pprint
 from pathlib import Path
 from langgraph.graph import StateGraph, START, END
 
@@ -140,7 +141,7 @@ def test_prepare_template_and_get_comments():
     
     try:
         for event in test_graph.stream(initial_state):
-            # event 是一个字典，key 是节点名称，value 是节点执行后的状态
+            # event 是一个字典，key 是节点名称，value 是节点执行后的状态（或增量）
             for node_name, state_update in event.items():
                 nodes_executed.append(node_name)
                 print(f"\n[节点执行] {node_name}")
@@ -152,11 +153,13 @@ def test_prepare_template_and_get_comments():
                     comment_plan_detail = state_update.get("comment_plan_detail", [])
                     strikethrough_plan = state_update.get("strikethrough_plan", [])
                     non_black_font_plan = state_update.get("non_black_font_plan", [])
-                    print(f"批注数量: {len(comment_plan)}")
+                    # 批注数量以 comment_plan_detail 为准（stream 默认 updates 模式下可能不含 comment_plan）
+                    comment_count = len(comment_plan_detail) if comment_plan_detail else len(comment_plan)
+                    print(f"批注数量: {comment_count}")
                     if comment_plan_detail:
                         print("批注详情:")
                         for i, c in enumerate(comment_plan_detail[:5], 1):
-                            print(f"  [{i}] 作者={c.get('author','')}, 内容={(c.get('content') or '')[:80]}...")
+                            print(f"  [{i}] content={(c.get('content') or '')[:80]}... scope_text={(c.get('scope_text') or '')[:60]}...")
                     elif comment_plan:
                         for i, comment in enumerate(comment_plan[:5], 1):
                             display_comment = comment[:200] + "..." if len(comment) > 200 else comment
@@ -170,7 +173,15 @@ def test_prepare_template_and_get_comments():
                     print(f"非黑色字体数量: {len(non_black_font_plan)}")
                     if non_black_font_plan:
                         for i, f in enumerate(non_black_font_plan[:3], 1):
-                            print(f"  [{i}] 颜色={f.get('color_name','')}, 文字: {(f.get('font_text') or '')[:40]}")
+                            print(f"  [{i}] paragraph_text={(f.get('paragraph_text') or '')[:40]}... font_text={(f.get('font_text') or '')[:40]}")
+                    # 打印 get_comments 节点后的状态（仅 comment_plan_detail / strikethrough_plan / non_black_font_plan）
+                    print("\n[get_comments 节点后的状态 - 仅 107-109 字段]")
+                    print("comment_plan_detail:")
+                    pprint(comment_plan_detail)
+                    print("strikethrough_plan:")
+                    pprint(strikethrough_plan)
+                    print("non_black_font_plan:")
+                    pprint(non_black_font_plan)
                 
                 # 如果是 prepare_template 节点，显示准备结果
                 elif node_name == "prepare_template":
@@ -202,9 +213,11 @@ def test_prepare_template_and_get_comments():
             print("[成功] get_comments 节点已成功执行")
             if final_state:
                 comment_plan = final_state.get("comment_plan", [])
+                comment_plan_detail = final_state.get("comment_plan_detail", [])
                 strikethrough_plan = final_state.get("strikethrough_plan", [])
                 non_black_font_plan = final_state.get("non_black_font_plan", [])
-                print(f"  - 批注: {len(comment_plan)} 条")
+                comment_count = len(comment_plan_detail) if comment_plan_detail else len(comment_plan)
+                print(f"  - 批注: {comment_count} 条")
                 print(f"  - 删除线段落: {len(strikethrough_plan)} 条")
                 print(f"  - 非黑色字体: {len(non_black_font_plan)} 条")
         else:
