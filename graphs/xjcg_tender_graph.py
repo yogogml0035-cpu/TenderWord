@@ -14,21 +14,19 @@
     START
       ↓
     prepare_template
-      ↓
-    get_comments
-      ↓
-    extract_tender_params
-      ↓         ↓
-      ↓         ↓
-      ↓    generate_polished_text (LLM)
-      ↓         ↓
-    word_operations_subgraph
-    (delete → get → replace)
-      ↓         ↓
-      ↓         ↓
-      └─────→ update_word
-                ↓
-               END
+      ↓           ↓
+    get_comments  extract_tender_params
+      ↓           ↓
+      └───────────┴───────────┐
+                              ↓         ↓
+                  word_operations_subgraph   generate_polished_text (LLM)
+                              ↓         ↓
+                              ↓    (若上传送审稿)
+                              ↓   generate_comments (LLM)
+                              ↓         ↓ (否则跳过)
+                              └─────────┴──→ update_word
+                                            ↓
+                                           END
 
 需求引用：
 - 需求 2.1: 作为开发者，我希望能够轻松创建新的 Graph
@@ -66,7 +64,13 @@ from typing import Type, TypedDict
 
 from graphs.base_graph import BaseGraph
 from states import XjcgTenderGraphState
-from nodes.common_word_nodes import prepare_template, generate_polished_text, replace_content, get_comments
+from nodes.common_word_nodes import (
+    prepare_template,
+    generate_polished_text,
+    replace_content,
+    get_comments,
+    generate_comments,
+)
 from nodes.xjcg_word_nodes import (
     get_replacements,
     update_word,
@@ -115,13 +119,17 @@ class XjcgTenderGraph(BaseGraph):
            - delete_tender_param: 删除招标参数
            - get_replacements: 获取替换内容
            - replace_content: 替换内容
-        5. generate_polished_text: 生成润色文本（LLM 调用）
-        6. update_word: 更新 Word 文档
-        
+        5. generate_polished_text: 生成润色文本（LLM 调用）；其后若上传送审稿则进入 generate_comments
+        6. generate_comments: 基于润色文本与计划生成批注指令（LLM 调用，仅在上传送审稿时执行）
+        7. update_word: 更新 Word 文档
+
         并行执行：
-        - extract_tender_params 之后，word_operations_subgraph 和 generate_polished_text 并行执行
-        - 两个分支在 update_word 汇合
-        
+        - prepare_template 之后，同时执行 get_comments 与 extract_tender_params
+        - 两者完成后，再并行执行：
+          - word_operations_subgraph
+          - generate_polished_text →（若上传送审稿）generate_comments
+        - 各路在 update_word 汇合；generate_comments 仅在上传送审稿时执行
+
         Returns:
             StateGraph: 未编译的 StateGraph 实例
         """
@@ -140,20 +148,36 @@ class XjcgTenderGraph(BaseGraph):
                         self.wrap_node("generate_polished_text", generate_polished_text))
         builder.add_node("update_word", 
                         self.wrap_node("update_word", update_word))
+        builder.add_node("generate_comments",
+                        self.wrap_node("generate_comments", generate_comments))
         
-        # 主图边
+        # 主图边（根据是否上传送审稿进行条件跳转）
         builder.add_edge(START, "prepare_template")
+        # prepare_template 之后并行执行 get_comments 和 extract_tender_params
         builder.add_edge("prepare_template", "get_comments")
-        builder.add_edge("get_comments", "extract_tender_params")
+        builder.add_edge("prepare_template", "extract_tender_params")
+
+        # get_comments 和 extract_tender_params 子图完成后，再并行进入
+        # word_operations_subgraph 与 generate_polished_text
+        builder.add_edge(["get_comments", "extract_tender_params"], "word_operations_subgraph")
+        builder.add_edge(["get_comments", "extract_tender_params"], "generate_polished_text")
         
-        # 从 extract_tender_params 扇出到两个并行分支
-        builder.add_edge("extract_tender_params", "word_operations_subgraph")
-        builder.add_edge("extract_tender_params", "generate_polished_text")
+        # generate_polished_text 后按是否上传送审稿：有则 generate_comments，无则直接到 update_word
+        def _has_origin_for_comments(state: XjcgTenderGraphState) -> str:
+            path = state.get("origin_tender_path")
+            return "generate_comments" if (path and str(path).strip()) else "update_word"
+        builder.add_conditional_edges(
+            "generate_polished_text",
+            _has_origin_for_comments,
+            {
+                "generate_comments": "generate_comments",
+                "update_word": "update_word",
+            },
+        )
+        builder.add_edge("generate_comments", "update_word")
         
-        # 两个分支都汇入 update_word（扇入）
+        # 两路汇入 update_word 后结束
         builder.add_edge("word_operations_subgraph", "update_word")
-        builder.add_edge("generate_polished_text", "update_word")
-        
         builder.add_edge("update_word", END)
         
         return builder

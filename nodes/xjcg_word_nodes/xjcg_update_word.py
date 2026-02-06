@@ -302,6 +302,25 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                             if keyword not in protected_fields:
                                 protected_fields[keyword] = para.Range
                                 insertion_log_parts.append(f"  找到受保护字段: {keyword}")
+
+                def _range_overlaps(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+                    return not (a_end <= b_start or b_end <= a_start)
+
+                def is_protected_range(rng) -> bool:
+                    try:
+                        s = int(rng.Start)
+                        e = int(rng.End)
+                    except Exception:
+                        return False
+                    for pr in protected_fields.values():
+                        try:
+                            ps = int(pr.Start)
+                            pe = int(pr.End)
+                        except Exception:
+                            continue
+                        if _range_overlaps(s, e, ps, pe):
+                            return True
+                    return False
                 
                 # 步骤2：根据受保护字段将内容列表拆分为块
                 insertion_log_parts.append("步骤2：按字段拆分内容块...")
@@ -325,41 +344,51 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                     insertion_log_parts.append(f"  付款方式前缀: {payment_prefix.strip()}")
                 
                 # 步骤3：删除所有可编辑内容
-                insertion_log_parts.append(f"步骤3：删除第 {target_page} 页可编辑内容...")
-                
-                paras = list(page_rng.Paragraphs)
-                deleted_count = 0
-                
-                # 从末尾向起始位置迭代
+                bound_start_for_delete = int(insertion_bound_start)
+                bound_end_for_delete = int(get_insertion_bound_end())
+                deletion_rng = doc.Range(bound_start_for_delete, bound_end_for_delete)
+                insertion_log_parts.append(
+                    f"步骤3：清理插入区间可编辑内容（{bound_start_for_delete} - {bound_end_for_delete}）..."
+                )
+
+                # 先删除插入区间内不包含受保护关键字的表格（避免多次运行导致表格重复叠加）
+                deleted_tables = 0
+                try:
+                    tables = deletion_rng.Tables
+                    for t_idx in range(tables.Count, 0, -1):
+                        try:
+                            tbl = tables(t_idx)
+                            if is_protected_range(tbl.Range):
+                                continue
+                            tbl.Range.Delete()
+                            deleted_tables += 1
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+
+                # 再删除插入区间内不受保护的段落内容
+                paras = list(deletion_rng.Paragraphs)
+                deleted_paras = 0
                 for i in range(len(paras) - 1, -1, -1):
                     try:
                         para = paras[i]
                         para_text = para.Range.Text.strip()
-                        
-                        # 跳过空段落
                         if not para_text or para_text == "\r" or para_text == "\n" or len(para_text) == 0:
                             continue
-                        
-                        # 检查段落是否包含受保护关键字
-                        is_protected = False
-                        for keyword in protected_keywords:
-                            if keyword in para_text:
-                                is_protected = True
-                                break
-                        
-                        # 如果未受保护，尝试删除
-                        if not is_protected:
-                            try:
-                                para_rng = para.Range
-                                para_rng.Delete()
-                                deleted_count += 1
-                                insertion_log_parts.append(f"  已删除可编辑段落: {para_text[:50]}...")
-                            except Exception as e:
-                                insertion_log_parts.append(f"  跳过（受保护或不可编辑）: {para_text[:50]}... (错误: {e})")
-                    except Exception as e:
-                        insertion_log_parts.append(f"  处理第 {i} 段出错: {e}")
-                
-                insertion_log_parts.append(f"步骤3完成：已删除 {deleted_count} 个可编辑段落。")
+                        if is_protected_range(para.Range):
+                            continue
+                        try:
+                            para.Range.Delete()
+                            deleted_paras += 1
+                        except Exception:
+                            continue
+                    except Exception:
+                        continue
+
+                insertion_log_parts.append(
+                    f"步骤3完成：已删除表格 {deleted_tables} 个，删除段落 {deleted_paras} 个。"
+                )
                 
                 # 步骤4：按块插入内容
                 insertion_log_parts.append("步骤4：按块插入内容...")
@@ -375,6 +404,33 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                 if int(page_end_after) < bound_end_for_search:
                     page_end_after = bound_end_for_search
                 page_rng_after = doc.Range(page_start_after, page_end_after)
+
+                # 步骤3附加：删除页面中完全空白、且不包含受保护关键字的表格
+                try:
+                    deleted_tables = 0
+                    tables = page_rng_after.Tables
+                    for t_idx in range(tables.Count, 0, -1):
+                        try:
+                            tbl = tables(t_idx)
+                            tbl_text = tbl.Range.Text
+                            if is_protected_range(tbl.Range):
+                                continue
+                            cleaned = (
+                                tbl_text.replace("\r", "")
+                                .replace("\n", "")
+                                .replace("\x07", "")
+                                .replace(" ", "")
+                                .replace("\t", "")
+                            ).strip()
+                            if not cleaned:
+                                tbl.Range.Delete()
+                                deleted_tables += 1
+                        except Exception:
+                            continue
+                    if deleted_tables > 0:
+                        insertion_log_parts.append(f"步骤3附加：删除空白表格 {deleted_tables} 个。")
+                except Exception:
+                    pass
 
                 def refind_protected_paragraph(keyword: str):
                     bound_end = int(get_insertion_bound_end())
@@ -647,6 +703,20 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                     """在当前范围插入一个 Markdown 解析的表格。"""
                     if not rows:
                         return None
+
+                    try:
+                        if insert_range.Information(wdWithInTable):
+                            parent_tables = insert_range.Tables
+                            if parent_tables.Count > 0:
+                                host_table = parent_tables(1)
+                                end_pos = int(host_table.Range.End)
+                                bound_end = int(get_insertion_bound_end())
+                                if end_pos > bound_end:
+                                    end_pos = bound_end
+                                insert_range.SetRange(end_pos, end_pos)
+                                insert_range.Collapse(wdCollapseStart)
+                    except Exception:
+                        pass
 
                     cols = max(len(r) for r in rows)
                     start_pos = insert_range.End
@@ -1020,12 +1090,7 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                                 
                                 para_text = para.Range.Text.strip()
                                 
-                                # Check if paragraph is protected
-                                is_protected = False
-                                for keyword in protected_keywords:
-                                    if keyword in para_text:
-                                        is_protected = True
-                                        break
+                                is_protected = is_protected_range(para.Range)
                                 
                                 # Only process editable paragraphs
                                 if not is_protected:
@@ -1082,12 +1147,7 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                         if not para_text or para_text == "\r" or para_text == "\n":
                             continue
                         
-                        # 检查段落是否受保护
-                        is_protected = False
-                        for keyword in protected_keywords:
-                            if keyword in para_text:
-                                is_protected = True
-                                break
+                        is_protected = is_protected_range(para.Range)
                         
                         # 从可编辑段落中移除换行符
                         if not is_protected:
@@ -1159,12 +1219,7 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
 
                             para_text = para.Range.Text.strip()
                             
-                            # Check if paragraph is protected
-                            is_protected = False
-                            for keyword in protected_keywords:
-                                if keyword in para_text:
-                                    is_protected = True
-                                    break
+                            is_protected = is_protected_range(para.Range)
                             
                             if not is_protected:
                                 raw_text = para.Range.Text
@@ -1184,9 +1239,153 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                         insertion_log_parts.append(f"  步骤5.3完成：删除剩余空段 {final_empty_deleted} 个。")
                     else:
                         insertion_log_parts.append("  步骤5.3完成：未发现剩余空段。")
+
+                    # 步骤5.4：清理插入区间内表格尾部的空白行（模板常见预留空行会导致大量空白单元格）
+                    try:
+                        def _visible_text(s: str) -> str:
+                            if not s:
+                                return ""
+                            return (
+                                s.replace("\r", "")
+                                .replace("\n", "")
+                                .replace("\x07", "")
+                                .replace("\x0b", "")
+                                .replace("\x0c", "")
+                                .replace("\a", "")
+                                .replace(" ", "")
+                                .replace("\t", "")
+                                .replace("\u00A0", "")
+                                .replace("\u3000", "")
+                                .replace("\u2000", "")
+                                .replace("\u2001", "")
+                                .replace("\u2002", "")
+                                .replace("\u2003", "")
+                                .replace("\u2004", "")
+                                .replace("\u2005", "")
+                                .replace("\u2006", "")
+                                .replace("\u2007", "")
+                                .replace("\u2008", "")
+                                .replace("\u2009", "")
+                                .replace("\u200A", "")
+                                .replace("\u200B", "")
+                                .replace("\ufeff", "")
+                                .strip()
+                            )
+
+                        def _row_is_empty(row) -> bool:
+                            try:
+                                cells = row.Cells
+                                for c in range(1, cells.Count + 1):
+                                    try:
+                                        txt = cells(c).Range.Text
+                                    except Exception:
+                                        txt = ""
+                                    if _visible_text(txt):
+                                        return False
+                                return True
+                            except Exception:
+                                return False
+
+                        def _trim_table_trailing_empty_rows(tbl) -> int:
+                            removed = 0
+                            try:
+                                for r in range(tbl.Rows.Count, 0, -1):
+                                    try:
+                                        row = tbl.Rows(r)
+                                        if _row_is_empty(row):
+                                            row.Delete()
+                                            removed += 1
+                                        else:
+                                            break
+                                    except Exception:
+                                        break
+                            except Exception:
+                                return removed
+                            return removed
+
+                        bound_start = int(insertion_bound_start)
+                        bound_end = int(get_insertion_bound_end())
+                        tbl_rng = doc.Range(bound_start, bound_end)
+                        tables = tbl_rng.Tables
+                        trimmed_tables = 0
+                        trimmed_rows_total = 0
+                        deleted_empty_tables = 0
+
+                        for t_idx in range(tables.Count, 0, -1):
+                            try:
+                                tbl = tables(t_idx)
+                                removed_rows = _trim_table_trailing_empty_rows(tbl)
+                                if removed_rows > 0:
+                                    trimmed_tables += 1
+                                    trimmed_rows_total += removed_rows
+
+                                try:
+                                    cleaned_tbl_text = _visible_text(tbl.Range.Text)
+                                except Exception:
+                                    cleaned_tbl_text = "x"
+                                if not cleaned_tbl_text:
+                                    tbl.Range.Delete()
+                                    deleted_empty_tables += 1
+                            except Exception:
+                                continue
+
+                        if trimmed_tables > 0 or deleted_empty_tables > 0:
+                            insertion_log_parts.append(
+                                f"  步骤5.4完成：修剪表格 {trimmed_tables} 个，删除尾部空行 {trimmed_rows_total} 行，删除空表格 {deleted_empty_tables} 个。"
+                            )
+                    except Exception:
+                        pass
                     
                     insertion_log_parts.append("步骤5完成：已清理可编辑内容中的空段落与多余换行。")
                     insertion_log_parts.append("内容处理成功。")
+
+                    # 步骤6：根据 polished_comments 插入批注
+                    polished_comments = state.get("polished_comments") or []
+                    if polished_comments:
+                        insertion_log_parts.append("步骤6：根据 polished_comments 插入批注...")
+                        bound_start = int(insertion_bound_start)
+                        bound_end = int(get_insertion_bound_end())
+                        comment_search_rng = doc.Range(bound_start, bound_end)
+                        comments_added = 0
+                        for idx, instr in enumerate(polished_comments):
+                            ref_text = (instr.get("reference_text") or "").strip()
+                            comment_text = (instr.get("comment_text") or "").strip()
+                            if not ref_text or not comment_text:
+                                continue
+                            # 先按原样查找；若未找到则尝试将 \n 换为 \r（与文档中换行一致）
+                            search_texts = [ref_text]
+                            if "\n" in ref_text:
+                                search_texts.append(ref_text.replace("\n", "\r"))
+                            found = False
+                            for find_text in search_texts:
+                                find_rng = comment_search_rng.Duplicate
+                                find_rng.Find.ClearFormatting()
+                                find_rng.Find.Text = find_text
+                                find_rng.Find.Forward = True
+                                find_rng.Find.Wrap = wdFindStop
+                                find_rng.Find.MatchCase = False
+                                find_rng.Find.MatchWholeWord = False
+                                if find_rng.Find.Execute():
+                                    found = True
+                                    break
+                            if found:
+                                try:
+                                    doc.Comments.Add(Range=find_rng.Duplicate, Text=comment_text)
+                                    comments_added += 1
+                                    insertion_log_parts.append(
+                                        f"  批注 [{idx + 1}] 已添加: reference_text={ref_text[:40]}... -> comment_text={comment_text[:40]}..."
+                                    )
+                                except Exception as comment_e:
+                                    insertion_log_parts.append(
+                                        f"  批注 [{idx + 1}] 添加失败 (reference_text={ref_text[:40]}...): {comment_e}"
+                                    )
+                            else:
+                                insertion_log_parts.append(
+                                    f"  批注 [{idx + 1}] 未找到引用文本: {ref_text[:50]}..."
+                                )
+                        insertion_log_parts.append(f"步骤6完成：成功添加 {comments_added}/{len(polished_comments)} 条批注。")
+                    else:
+                        insertion_log_parts.append("步骤6：无 polished_comments，跳过批注插入。")
             
             doc.Save()
             insertion_log_parts.append("文档已保存。")

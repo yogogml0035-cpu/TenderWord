@@ -31,14 +31,14 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 def render_review_draft_upload() -> Optional[str]:
     """
-    渲染送审稿文件上传组件
+    渲染清洁稿文件上传组件
     
-    创建一个文件上传组件，允许用户上传包含审阅批注的 Word 文档。
-    系统将自动提取文档中的批注内容用于后续处理。
+    创建一个文件上传组件，允许用户上传清洁稿 Word 文档。
+    系统将自动提取清洁稿内容用于后续处理。
     
     功能：
     - 仅接受 .doc 和 .docx 格式的文件
-    - 文件上传为可选（非必填）
+    - 清洁稿上传为必填，未上传则无法生成文件
     - 提供帮助文本说明功能
     - 验证文件扩展名并显示错误消息
     - 保存文件到 D:/UploadFiles 目录
@@ -48,13 +48,12 @@ def render_review_draft_upload() -> Optional[str]:
         Optional[str]: 如果用户上传了文件并成功保存，返回保存的文件路径；
                       如果未上传文件或保存失败，返回 None
     
-    需求: 1.3, 1.4, 1.5, 5.1
     """
     uploaded_file = st.file_uploader(
-        "上传送审稿 Word 文档（可选）",
+        "上传送清洁稿 Word 文档",
         type=["doc", "docx"],
-        help="上传包含审阅批注的 Word 文档，系统将自动提取批注内容",
-        key="review_draft_file"
+        help="上传清洁稿件 Word 文档",
+        key="clean_draft_file"
     )
     
     # 验证文件扩展名（需求 1.3, 1.4）
@@ -126,9 +125,11 @@ class XjcgTenderForm(BaseForm):
         """
         st.markdown(
             "1. 输入完整的招标编号（包含招标编号前缀），点击\"获取项目信息\"获取项目信息\n"
-            "2. 上传作为参考的询价采购 Word 文件（清洁稿）注意：如果是从.doc转换.docx的文件，请注意勾选保留与WPS文字早期版本的兼容性或勾选保留与Word早期版本的兼容性！否则生成内容会出错\n"
+            "2. （可选）上传作为参考的询价采购送审稿 Word 文件（带批注），系统将提取批注等内容作为参考\n"
             "3. 上传包含采购需求参数的 Word 文件\n"
-            "4. 点击\"开始生成\"后等待完成提示，再到对应路径查看 Word 结果或直接下载\n\n"
+            "4. 上传清洁稿 Word 文档（必传），系统将提取内容作为参考，用于后续生成内容\n"
+            "5. 点击\"开始生成\"后等待完成提示，再到对应路径查看 Word 结果或直接下载\n"
+            "注意：如果是从.doc转换.docx的文件，请注意勾选保留与WPS文字早期版本的兼容性或勾选保留与Word早期版本的兼容性！否则生成内容会出错\n\n"
         )
         
         # URL 带 tenderno 时由应用层已拉取数据并写入 session，此处仅标记已处理，避免重复请求
@@ -177,11 +178,11 @@ class XjcgTenderForm(BaseForm):
         # 文件上传表单
         with st.form("tender_doc_form"):
 
-
+            clean_draft_path = render_review_draft_upload()
             uploaded_file = st.file_uploader(
-                "参考 Word 文件（origin_tender_path）",
+                "送审稿 Word 文档（origin_tender_path，可选）",
                 type=["doc", "docx"],
-                help="请上传作为参考的 Word 文件（.doc 或 .docx）",
+                help="若需要生成内容带批注，请上传送审稿 Word 文档（.doc 或 .docx），系统将提取批注内容作为参考",
             )
             origin_text_files = st.file_uploader(
                 "技术参数文件（tender_param_paths）",
@@ -189,8 +190,6 @@ class XjcgTenderForm(BaseForm):
                 help="请上传包含原始技术参数的 Word 文件（.doc 或 .docx），支持多文件",
                 accept_multiple_files=True,
             )
-            # 送审稿文件上传（在表单外部，需求 1.6）
-            review_draft_path = render_review_draft_upload()
             
             # 添加模型选择
             model_option = st.selectbox(
@@ -213,7 +212,7 @@ class XjcgTenderForm(BaseForm):
             "origin_text_files": origin_text_files,
             "model_option": model_option,
             "submitted": submitted,
-            "review_draft_path": review_draft_path  # 需求 1.6
+            "clean_draft_path": clean_draft_path  # 需求 1.6
         }
     
     def _render_tender_data_display(self):
@@ -288,7 +287,8 @@ class XjcgTenderForm(BaseForm):
         验证规则：
         1. 必须上传 Word 模板文件
         2. 必须上传技术参数文件
-        3. 必须先获取招标数据
+        3. 必须上传送审稿 Word 文档
+        4. 必须先获取招标数据
         
         Args:
             form_data: 表单数据字典
@@ -300,11 +300,11 @@ class XjcgTenderForm(BaseForm):
         if not form_data.get("submitted"):
             return True, ""
         
-        if not form_data["uploaded_file"]:
-            return False, "请上传 Word 模板文件"
-        
         if not form_data["origin_text_files"]:
             return False, "请上传原始技术参数文件"
+        
+        if not form_data.get("clean_draft_path"):
+            return False, "请上传清洁稿 Word 文档"
         
         if st.session_state.get("tender_data") is None:
             return False, "请先点击\"获取\"按钮获取招标数据"
@@ -331,22 +331,25 @@ class XjcgTenderForm(BaseForm):
         uploaded_file = form_data["uploaded_file"]
         origin_text_files = form_data["origin_text_files"]
         model_option = form_data["model_option"]
-        review_draft_path = form_data.get("review_draft_path")  # 需求 1.6
+        clean_draft_path = form_data.get("clean_draft_path")  # 需求 1.6
         tender_data = st.session_state.tender_data
         
-        # 保存上传的模板文件到指定目录
-        template_extension = pathlib.Path(uploaded_file.name).suffix
-        saved_reference_path = UPLOAD_DIR / uploaded_file.name
-        
-        # 如果文件已存在，添加时间戳（精确到时分秒）避免覆盖
-        if saved_reference_path.exists():
-            timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
-            name_without_ext = saved_reference_path.stem
-            saved_reference_path = UPLOAD_DIR / f"{name_without_ext}_{timestamp}{template_extension}"
-        
-        # 保存模板文件
-        with open(saved_reference_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+        # 保存上传的模板文件到指定目录（送审稿为可选）
+        origin_tender_path: str = ""
+        if uploaded_file:
+            template_extension = pathlib.Path(uploaded_file.name).suffix
+            saved_reference_path = UPLOAD_DIR / uploaded_file.name
+            
+            # 如果文件已存在，添加时间戳（精确到时分秒）避免覆盖
+            if saved_reference_path.exists():
+                timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+                name_without_ext = saved_reference_path.stem
+                saved_reference_path = UPLOAD_DIR / f"{name_without_ext}_{timestamp}{template_extension}"
+            
+            # 保存模板文件
+            with open(saved_reference_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            origin_tender_path = str(saved_reference_path.resolve())
         
         # 保存技术参数文件
         saved_param_paths: list[str] = []
@@ -365,7 +368,6 @@ class XjcgTenderForm(BaseForm):
             
             saved_param_paths.append(str(saved_param_path.resolve()))
         
-        origin_tender_path = str(saved_reference_path.resolve())
         tender_param_paths = saved_param_paths
         
         # 准备初始状态
@@ -375,8 +377,8 @@ class XjcgTenderForm(BaseForm):
             # 上传文件路径
             "origin_tender_path": origin_tender_path,
             "tender_param_paths": tender_param_paths,
-            # 送审稿文件路径（需求 1.6）
-            "review_draft_path": review_draft_path,
+            # 清洁稿文件路径（需求 1.6）
+            "clean_draft_path": clean_draft_path,
             # 固定参数（与 graph.py 中保持一致）
             "insertion_before_text": "第三章  采购需求",
             "insertion_after_text": "第四章  响应文件有关格式",
@@ -428,4 +430,3 @@ class XjcgTenderForm(BaseForm):
             
             # 5. 触发生成流程
             self.start_generation(initial_state)
-

@@ -494,7 +494,7 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
     在 Word 文档中查找需要替换的占位符，并根据 state 中的字段建立映射关系。
     
     这个节点会：
-    1. 打开 origin_tender_path 的 Word 文档
+    1. 打开 prepared_doc_path 的 Word 文档
     2. 读取文档内容，查找所有可能的占位符
     3. 根据 state 中的字段（project_name, project_number, project_content, bzj_rule, 
        buyer_name, project_zbr_xbr, zbr_xbr_tel, zbr_pinyin）查找对应的占位符
@@ -503,10 +503,10 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
     start_time = time.time()
     print(f"[get_replacements] 开始执行...")
     
-    template_path = state.get("origin_tender_path")
+    template_path = state.get("prepared_doc_path")
     
     if not template_path:
-        raise ValueError("需要 origin_tender_path 来获取替换内容")
+        raise ValueError("需要 prepared_doc_path 来获取替换内容")
     
     # 确保路径是绝对路径（Word COM 对象需要绝对路径）
     import os

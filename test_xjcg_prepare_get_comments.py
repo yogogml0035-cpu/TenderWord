@@ -3,10 +3,14 @@
 
 测试目标：
 - 验证 prepare_template 节点能正确准备 Word 模板
-- 验证 get_comments 节点能正确从送审稿文件中提取批注
+- 验证 get_comments 节点能正确从送审稿文件中提取批注（支持按 insertion_before_text /
+  insertion_after_text 锚点范围只抽取该范围内的批注）
 
 注意：本脚本创建一个只包含 prepare_template 和 get_comments 两个节点的测试子图，
 只执行这两个节点，不执行后续节点。
+
+运行方式（在项目根目录执行）：
+    python test_xjcg_prepare_get_comments.py
 """
 
 import pathlib
@@ -49,13 +53,13 @@ def test_prepare_template_and_get_comments():
     
     测试文件：
     - origin_tender_path: test_word\253505-细胞电转仪-询价文件-初稿1.doc
-    - review_draft_path: test_word\253505-细胞电转仪-询价文件-初稿1.doc
+    - clean_draft_path: test_word\253505-细胞电转仪-询价文件-初稿1.doc
     - tender_param_paths: test_word\市中医-细胞电转仪招标参数.docx
     """
     # 构建测试文件路径（相对于项目根目录）
     test_word_dir = ROOT / "test_word"
     origin_tender_path = test_word_dir / "253505-细胞电转仪-询价文件-初稿1.doc"
-    review_draft_path = test_word_dir / "253505-细胞电转仪-询价文件-初稿1.doc"
+    clean_draft_path = test_word_dir / "253505-细胞电转仪-询价文件-初稿1.doc"
     tender_param_path = test_word_dir / "市中医-细胞电转仪招标参数.docx"
     
     # 验证文件是否存在
@@ -64,8 +68,8 @@ def test_prepare_template_and_get_comments():
     print("=" * 80)
     print(f"origin_tender_path: {origin_tender_path}")
     print(f"  存在: {origin_tender_path.exists()}")
-    print(f"review_draft_path: {review_draft_path}")
-    print(f"  存在: {review_draft_path.exists()}")
+    print(f"clean_draft_path: {clean_draft_path}")
+    print(f"  存在: {clean_draft_path.exists()}")
     print(f"tender_param_path: {tender_param_path}")
     print(f"  存在: {tender_param_path.exists()}")
     print()
@@ -74,8 +78,8 @@ def test_prepare_template_and_get_comments():
         print(f"错误: 文件不存在: {origin_tender_path}")
         return
     
-    if not review_draft_path.exists():
-        print(f"错误: 文件不存在: {review_draft_path}")
+    if not clean_draft_path.exists():
+        print(f"错误: 文件不存在: {clean_draft_path}")
         return
     
     if not tender_param_path.exists():
@@ -89,8 +93,8 @@ def test_prepare_template_and_get_comments():
         # 上传文件路径
         "origin_tender_path": str(origin_tender_path.resolve()),
         "tender_param_paths": [str(tender_param_path.resolve())],
-        # 送审稿文件路径
-        "review_draft_path": str(review_draft_path.resolve()),
+        # 清洁稿文件路径
+        "clean_draft_path": str(clean_draft_path.resolve()),
         # 固定参数（与 graph.py 中保持一致）
         "insertion_before_text": "第三章  采购需求",
         "insertion_after_text": "第四章  响应文件有关格式",
@@ -131,97 +135,77 @@ def test_prepare_template_and_get_comments():
     print("测试子图创建成功")
     print()
     
-    # 使用流式执行
+    # 使用 invoke 执行，得到完整合并后的最终状态
     print("=" * 80)
-    print("开始执行测试子图")
+    print("开始执行测试子图 (prepare_template -> get_comments)")
     print("=" * 80)
-    
-    nodes_executed = []
-    final_state = None
+    print("锚点范围（仅抽取该范围内的批注）:")
+    print(f"  insertion_before_text: {initial_state['insertion_before_text']}")
+    print(f"  insertion_after_text:  {initial_state['insertion_after_text']}")
+    print()
     
     try:
-        for event in test_graph.stream(initial_state):
-            # event 是一个字典，key 是节点名称，value 是节点执行后的状态（或增量）
-            for node_name, state_update in event.items():
-                nodes_executed.append(node_name)
-                print(f"\n[节点执行] {node_name}")
-                print("-" * 80)
-                
-                # 如果是 get_comments 节点，显示批注/删除线/非黑字提取结果
-                if node_name == "get_comments":
-                    comment_plan = state_update.get("comment_plan", [])
-                    comment_plan_detail = state_update.get("comment_plan_detail", [])
-                    strikethrough_plan = state_update.get("strikethrough_plan", [])
-                    non_black_font_plan = state_update.get("non_black_font_plan", [])
-                    # 批注数量以 comment_plan_detail 为准（stream 默认 updates 模式下可能不含 comment_plan）
-                    comment_count = len(comment_plan_detail) if comment_plan_detail else len(comment_plan)
-                    print(f"批注数量: {comment_count}")
-                    if comment_plan_detail:
-                        print("批注详情:")
-                        for i, c in enumerate(comment_plan_detail[:5], 1):
-                            print(f"  [{i}] content={(c.get('content') or '')[:80]}... scope_text={(c.get('scope_text') or '')[:60]}...")
-                    elif comment_plan:
-                        for i, comment in enumerate(comment_plan[:5], 1):
-                            display_comment = comment[:200] + "..." if len(comment) > 200 else comment
-                            print(f"  {i}. {display_comment}")
-                    else:
-                        print("  无批注")
-                    print(f"删除线段落数量: {len(strikethrough_plan)}")
-                    if strikethrough_plan:
-                        for i, s in enumerate(strikethrough_plan[:3], 1):
-                            print(f"  [{i}] 段落: {(s.get('paragraph_text') or '')[:60]}... 删除线: {(s.get('strikethrough_text') or '')[:40]}")
-                    print(f"非黑色字体数量: {len(non_black_font_plan)}")
-                    if non_black_font_plan:
-                        for i, f in enumerate(non_black_font_plan[:3], 1):
-                            print(f"  [{i}] paragraph_text={(f.get('paragraph_text') or '')[:40]}... font_text={(f.get('font_text') or '')[:40]}")
-                    # 打印 get_comments 节点后的状态（仅 comment_plan_detail / strikethrough_plan / non_black_font_plan）
-                    print("\n[get_comments 节点后的状态 - 仅 107-109 字段]")
-                    print("comment_plan_detail:")
-                    pprint(comment_plan_detail)
-                    print("strikethrough_plan:")
-                    pprint(strikethrough_plan)
-                    print("non_black_font_plan:")
-                    pprint(non_black_font_plan)
-                
-                # 如果是 prepare_template 节点，显示准备结果
-                elif node_name == "prepare_template":
-                    prepared_doc_path = state_update.get("prepared_doc_path")
-                    if prepared_doc_path:
-                        print(f"准备的文档路径: {prepared_doc_path}")
-                        print(f"文档是否存在: {Path(prepared_doc_path).exists()}")
-                
-                # 保存最终状态
-                final_state = state_update
-                
-        print("\n" + "=" * 80)
-        print("执行完成")
+        final_state = test_graph.invoke(initial_state)
+        
         print("=" * 80)
-        print(f"执行的节点顺序: {' -> '.join(nodes_executed)}")
-        print()
+        print("执行完成 - 最终状态摘要")
+        print("=" * 80)
         
-        # 验证节点执行情况
-        if "prepare_template" in nodes_executed:
-            print("[成功] prepare_template 节点已成功执行")
-            if final_state:
-                prepared_doc_path = final_state.get("prepared_doc_path")
-                if prepared_doc_path:
-                    print(f"  - 准备的文档路径: {prepared_doc_path}")
+        prepared_doc_path = final_state.get("prepared_doc_path")
+        if prepared_doc_path:
+            print(f"[prepare_template] 准备的文档路径: {prepared_doc_path}")
+            print(f"  存在: {Path(prepared_doc_path).exists()}")
         else:
-            print("[失败] prepare_template 节点未执行")
+            print("[prepare_template] 未得到 prepared_doc_path")
         
-        if "get_comments" in nodes_executed:
-            print("[成功] get_comments 节点已成功执行")
-            if final_state:
-                comment_plan = final_state.get("comment_plan", [])
-                comment_plan_detail = final_state.get("comment_plan_detail", [])
-                strikethrough_plan = final_state.get("strikethrough_plan", [])
-                non_black_font_plan = final_state.get("non_black_font_plan", [])
-                comment_count = len(comment_plan_detail) if comment_plan_detail else len(comment_plan)
-                print(f"  - 批注: {comment_count} 条")
-                print(f"  - 删除线段落: {len(strikethrough_plan)} 条")
-                print(f"  - 非黑色字体: {len(non_black_font_plan)} 条")
+        comment_plan = final_state.get("comment_plan", [])
+        comment_plan_detail = final_state.get("comment_plan_detail", [])
+        strikethrough_plan = final_state.get("strikethrough_plan", [])
+        non_black_font_plan = final_state.get("non_black_font_plan", [])
+        comment_count = len(comment_plan_detail) if comment_plan_detail else len(comment_plan)
+        
+        print(f"\n[get_comments] 批注数量（锚点范围内）: {comment_count}")
+        if comment_plan_detail:
+            print("批注详情 (前 5 条):")
+            for i, c in enumerate(comment_plan_detail[:5], 1):
+                content = (c.get("content") or "")[:80]
+                scope = (c.get("scope_text") or "")[:60]
+                print(f"  [{i}] content={content}... scope_text={scope}...")
+        elif comment_plan:
+            for i, comment in enumerate(comment_plan[:5], 1):
+                display_comment = comment[:200] + "..." if len(comment) > 200 else comment
+                print(f"  {i}. {display_comment}")
         else:
-            print("[失败] get_comments 节点未执行")
+            print("  无批注（或范围内无批注）")
+        
+        print(f"\n[get_comments] 删除线段落数量: {len(strikethrough_plan)}")
+        if strikethrough_plan:
+            for i, s in enumerate(strikethrough_plan[:3], 1):
+                para = (s.get("paragraph_text") or "")[:60]
+                strike = (s.get("strikethrough_text") or "")[:40]
+                print(f"  [{i}] 段落: {para}... 删除线: {strike}")
+        
+        print(f"\n[get_comments] 非黑色字体数量: {len(non_black_font_plan)}")
+        if non_black_font_plan:
+            for i, f in enumerate(non_black_font_plan[:3], 1):
+                para = (f.get("paragraph_text") or "")[:40]
+                font = (f.get("font_text") or "")[:40]
+                print(f"  [{i}] paragraph_text={para}... font_text={font}")
+        
+        print("\n" + "-" * 80)
+        print("完整字段 (comment_plan_detail / strikethrough_plan / non_black_font_plan):")
+        print("comment_plan_detail:")
+        pprint(comment_plan_detail)
+        print("strikethrough_plan:")
+        pprint(strikethrough_plan)
+        print("non_black_font_plan:")
+        pprint(non_black_font_plan)
+        
+        print("\n" + "=" * 80)
+        print("测试结果")
+        print("=" * 80)
+        print("[成功] prepare_template 节点已执行" + (f" -> {prepared_doc_path}" if prepared_doc_path else ""))
+        print(f"[成功] get_comments 节点已执行 -> 批注 {comment_count} 条, 删除线 {len(strikethrough_plan)} 条, 非黑字 {len(non_black_font_plan)} 条")
         
     except Exception as e:
         print("\n" + "=" * 80)

@@ -38,39 +38,43 @@ def extract_tender_params(state: XjcgTenderGraphState, config) -> XjcgTenderGrap
     从 state 中读取：
     - insertion_before_text: 插入位置的前置文本
     - insertion_after_text: 插入位置的后置文本
-    - prepared_doc_path: WPS/Word 文档路径
+    - clean_draft_path: WPS/Word 文档路径
     
     提取的内容将存储到 state 的 tender_params 字段中。
     """
     start_time = time.time()
     print(f"[extract_tender_params] 开始执行...")
     
-    prepared_doc_path = state.get("prepared_doc_path")
+    origin_tender_path = state.get("origin_tender_path")
+    clean_draft_path = state.get("clean_draft_path")
+    extract_source_path = (
+        origin_tender_path
+        if (origin_tender_path and str(origin_tender_path).strip())
+        else clean_draft_path
+    )
     before_text = state.get("insertion_before_text")
     after_text = state.get("insertion_after_text")
     
-    if not prepared_doc_path:
-        raise ValueError("需要 prepared_doc_path 来提取 WPS/Word 文档中的内容")
+    if not extract_source_path or (isinstance(extract_source_path, str) and extract_source_path.strip() == ""):
+        raise ValueError("需要 origin_tender_path 或 clean_draft_path 来提取 WPS/Word 文档中的内容")
     
     if not before_text or not after_text:
         # 如果没有提供前后文本，返回空内容
         print(f"[extract_tender_params] 警告: 未提供 insertion_before_text 或 insertion_after_text，跳过提取")
-        new_state_dict = dict(state)
-        new_state_dict["tender_params"] = ""
-        new_state = XjcgTenderGraphState(**new_state_dict)
-        return new_state
+        # 仅返回由本节点维护的字段，避免与并行节点产生状态冲突
+        return XjcgTenderGraphState(tender_params="")
     
     # 确保路径是绝对路径（WPS/Word COM 对象需要绝对路径）
-    if not os.path.isabs(prepared_doc_path):
-        prepared_doc_path = os.path.abspath(prepared_doc_path)
+    if not os.path.isabs(extract_source_path):
+        extract_source_path = os.path.abspath(extract_source_path)
     
     # 检查文件是否存在
-    if not os.path.exists(prepared_doc_path):
-        raise FileNotFoundError(f"未找到准备好的文档: {prepared_doc_path}")
+    if not os.path.exists(extract_source_path):
+        raise FileNotFoundError(f"未找到待提取文档: {extract_source_path}")
     
     # 检查文件是否可读
-    if not os.access(prepared_doc_path, os.R_OK):
-        raise PermissionError(f"无法读取准备好的文档: {prepared_doc_path}")
+    if not os.access(extract_source_path, os.R_OK):
+        raise PermissionError(f"无法读取待提取文档: {extract_source_path}")
     
     extracted_content = ""
     wps = None
@@ -91,7 +95,7 @@ def extract_tender_params(state: XjcgTenderGraphState, config) -> XjcgTenderGrap
         # 使用统一的工具函数打开文档（带重试机制）
         doc = open_document_with_retry(
             word_app=wps,
-            file_path=prepared_doc_path,
+            file_path=extract_source_path,
             read_only=True,  # 只读模式，只需要提取内容
             node_name="extract_tender_params"
         )
@@ -234,12 +238,14 @@ def extract_tender_params(state: XjcgTenderGraphState, config) -> XjcgTenderGrap
             node_name="extract_tender_params"
         )
     
-    # 更新状态
-    new_state_dict = dict(state)
-    new_state_dict["origin_tender_params"] = extracted_content
-    # 保存页码范围供后续节点复用
-    new_state_dict["start_page"] = locals().get("start_page")
-    new_state_dict["end_page"] = locals().get("end_page")
+    # 更新状态：仅返回本节点实际新增/修改的字段，避免并行节点产生状态冲突
+    updates = {}
+    updates["origin_tender_params"] = extracted_content
+    # 保存页码范围供后续节点复用（仅在计算出的情况下写入）
+    if "start_page" in locals():
+        updates["start_page"] = locals().get("start_page")
+    if "end_page" in locals():
+        updates["end_page"] = locals().get("end_page")
     
     tender_param_paths = state.get("tender_param_paths")
     if tender_param_paths and not isinstance(tender_param_paths, (list, tuple)):
@@ -263,9 +269,9 @@ def extract_tender_params(state: XjcgTenderGraphState, config) -> XjcgTenderGrap
             tender_params_parts.append(file_text)
         
         tender_params = "\n\n".join([p for p in tender_params_parts if p]).strip()
-        new_state_dict["tender_params"] = tender_params
+        updates["tender_params"] = tender_params
     
-    new_state = XjcgTenderGraphState(**new_state_dict)
+    new_state = XjcgTenderGraphState(**updates)
     
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -320,7 +326,7 @@ if __name__ == "__main__":
         
         # 创建测试状态
         test_state: XjcgTenderGraphState = {
-            "prepared_doc_path": str(test_doc_path),
+            "clean_draft_path": str(test_doc_path),
             "insertion_before_text": "第三章  采购需求",
             "insertion_after_text": "第四章  响应文件有关格式",
         }

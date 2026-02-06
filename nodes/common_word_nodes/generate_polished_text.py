@@ -81,19 +81,19 @@ def generate_polished_text(state: XjcgTenderGraphState, config) -> XjcgTenderGra
     )
     
     # 保存提示词到文件
-    # prompts_dir = pathlib.Path(__file__).resolve().parents[2] / "prompts"
-    # prompts_dir.mkdir(exist_ok=True)
-    # project_number = str(state.get("project_number", "") or "").strip()
-    # project_name = str(state.get("project_name", "") or "").strip()
-    # filename_parts = [_sanitize_filename(part) for part in (project_number, project_name) if part]
-    # timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
-    # prompt_file = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
-    # prompt_file = prompts_dir / f"prompt_{prompt_file}_{timestamp}.txt"
-    # try:
-    #     with open(prompt_file, "w", encoding="utf-8") as f:
-    #         f.write(prompt)
-    # except Exception as e:
-    #     print(f"警告: 保存提示词文件失败: {e}")
+    prompts_dir = pathlib.Path(__file__).resolve().parents[2] / "prompts"
+    prompts_dir.mkdir(exist_ok=True)
+    project_number = str(state.get("project_number", "") or "").strip()
+    project_name = str(state.get("project_name", "") or "").strip()
+    filename_parts = [_sanitize_filename(part) for part in (project_number, project_name) if part]
+    timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    prompt_file = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
+    prompt_file = prompts_dir / f"prompt_{prompt_file}_{timestamp}.txt"
+    try:
+        with open(prompt_file, "w", encoding="utf-8") as f:
+            f.write(system_prompt + "\n" + user_prompt)
+    except Exception as e:
+        print(f"警告: 保存提示词文件失败: {e}")
     
     stream_callback: Optional[Callable[[str], None]] = None
     suppress_llm_stdout = False

@@ -28,11 +28,13 @@ def prepare_template(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
     print(f"[Start] 当前类型：{tender_type}")
     print(f"[prepare_template] 开始执行...")
     
-    template_path = state.get("origin_tender_path")
-
-    template_path = os.path.abspath(
-        template_path
-    )
+    origin_tender_path = state.get("origin_tender_path")
+    clean_draft_path = state.get("clean_draft_path")
+    template_path = origin_tender_path if (origin_tender_path and str(origin_tender_path).strip()) else clean_draft_path
+    if not template_path or (isinstance(template_path, str) and template_path.strip() == ""):
+        raise ValueError("未提供可用的模板路径：需要 origin_tender_path 或 clean_draft_path")
+    
+    template_path = os.path.abspath(template_path)
 
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"未找到模板: {template_path}")
@@ -142,7 +144,6 @@ def prepare_template(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
     new_state_dict = dict(state)
     new_state_dict.update(
         {
-            "origin_tender_path": template_path,
             "prepared_doc_path": working_path,
         }
     )

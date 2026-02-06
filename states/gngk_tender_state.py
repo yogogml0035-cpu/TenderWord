@@ -99,8 +99,8 @@ class GngkTenderGraphState(BaseState):
     insertion_before_text: str
     insertion_after_text: str
     
-    # 批注
-    comment_plan: List[CommentInstruction]
+    # 要插入的批注
+    polished_comments: List[CommentInstruction]
     
     # 日志
     insertion_log: str

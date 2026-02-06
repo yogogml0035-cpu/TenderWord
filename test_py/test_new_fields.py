@@ -20,8 +20,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from state import XjcgTenderGraphState
-from nodes.xjcg_word_nodes.get_replacements import get_replacements
+from states.xjcg_tender_state import XjcgTenderGraphState
+from nodes.xjcg_word_nodes.xjcg_get_replacements import get_replacements
 
 
 def main():

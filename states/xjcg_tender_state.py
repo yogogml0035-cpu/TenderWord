@@ -56,11 +56,11 @@ class XjcgTenderGraphState(BaseState):
         insertion_after_text: 插入位置的后置文本
     
     批注相关字段：
-        review_draft_path: 送审稿文件路径（可选）
+        clean_draft_path: 清洁稿文件路径（可选）
         comment_plan: 从送审稿文档提取的批注内容文本列表（兼容旧逻辑）
-        comment_plan_detail: 批注详情列表（content、scope_text）
-        strikethrough_plan: 删除线段落列表（paragraph_text、strikethrough_text）
-        non_black_font_plan: 非黑色字体列表（paragraph_text、font_text）
+        comment_plan_detail: 批注详情列表（content、scope_text、reference_text）
+        strikethrough_plan: 删除线段落列表（paragraph_text、strikethrough_text、reference_text）
+        non_black_font_plan: 非黑色字体列表（paragraph_text、font_text、reference_text）
         comments_summary: 批注添加结果摘要
     
     日志相关字段：
@@ -90,6 +90,7 @@ class XjcgTenderGraphState(BaseState):
     origin_tender_path: str
     tender_param_paths: List[str]
     prepared_doc_path: str
+    clean_draft_path: Optional[str]  # 清洁稿文件路径
     
     # 内容
     origin_tender_params: str
@@ -102,11 +103,11 @@ class XjcgTenderGraphState(BaseState):
     insertion_before_text: str
     insertion_after_text: str
     
-    # 批注
-    review_draft_path: Optional[str]  # 送审稿文件路径
-    comment_plan_detail: List[Dict[str, Any]]  # 批注详情（content, scope_text）
-    strikethrough_plan: List[Dict[str, Any]]  # 删除线段落（paragraph_text, strikethrough_text）
-    non_black_font_plan: List[Dict[str, Any]]  # 非黑色字体（paragraph_text, font_text）
+     # 要插入的批注
+    polished_comments: List[CommentInstruction]
+    comment_plan_detail: List[Dict[str, Any]]  # 批注详情（content, scope_text, reference_text）
+    strikethrough_plan: List[Dict[str, Any]]  # 删除线段落（paragraph_text, strikethrough_text, reference_text）
+    non_black_font_plan: List[Dict[str, Any]]  # 非黑色字体（paragraph_text, font_text, reference_text）
     
     # 日志
     insertion_log: str
