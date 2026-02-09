@@ -37,6 +37,27 @@ def _get_page_number(rng) -> int:
         return -1
 
 
+def _normalize_find_text(text: str) -> str:
+    if text is None:
+        return ""
+    text = str(text)
+    text = text.replace("\x07", "")
+    if "\r" in text or "\n" in text:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        text = text.replace("\n", "^p")
+    return text
+
+
+def _normalize_replace_text(text: str) -> str:
+    if text is None:
+        return ""
+    text = str(text)
+    text = text.replace("\x07", "")
+    if "\n" in text and "\r" not in text:
+        text = text.replace("\n", "\r")
+    return text
+
+
 def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     """
     在 Word 文档中替换指定的内容，包括页眉页脚等所有部分。
@@ -78,6 +99,8 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
     
     # 获取替换列表
     replacements = state.get("replacements")
+    tender_type = state.get("tender_type", "xjcg")
+    enable_erp_comments = tender_type == "gngk"
     
     # 如果没有需要替换的内容，直接返回
     if not replacements:
@@ -97,10 +120,13 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
         "total_found": 0,
         "total_replaced": 0,
         "total_error": 0,
+        "total_comment_added": 0,
+        "total_comment_error": 0,
     }
     
     # 记录失败的替换详情
     failed_replacements = []
+    found_any_replacements = {}
     
     try:
         # 使用统一的工具函数创建 Word 应用程序
@@ -131,11 +157,12 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
         # 通过 placeholder_mapping 来判断
         placeholder_mapping = state.get("placeholder_mapping", {})
         project_content_placeholder = placeholder_mapping.get("project_content")
+        project_content_v1_placeholder = placeholder_mapping.get("project_content_v1")
         project_number_placeholder = placeholder_mapping.get("project_number")
         project_name_placeholder = placeholder_mapping.get("project_name")
         
         # 将替换对分为三类：
-        # 1. project_content_replacements - 项目内容（最先处理，只在正文中）
+        # 1. project_content_replacements - 项目内容（含 project_content 与 project_content_v1，最先处理，只在正文中）
         # 2. header_replacements - 项目名称和项目编号（在页眉和正文中）
         # 3. body_replacements - 其他内容（只在正文中）
         project_content_replacements = []  # 项目内容替换（最先处理）
@@ -143,12 +170,17 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
         body_replacements = []    # 只需要遍历正文的替换
         
         for search_text, replace_text in replacements:
-            if search_text == project_content_placeholder:
+            if search_text == project_content_placeholder or search_text == project_content_v1_placeholder:
                 project_content_replacements.append((search_text, replace_text))
             elif search_text == project_number_placeholder or search_text == project_name_placeholder:
                 header_replacements.append((search_text, replace_text))
             else:
                 body_replacements.append((search_text, replace_text))
+
+        for search_text, _replace_text in replacements:
+            normalized_search_text = _normalize_find_text(search_text)
+            if normalized_search_text not in found_any_replacements:
+                found_any_replacements[normalized_search_text] = False
         
         story_type_names = {
             1: "正文",
@@ -165,18 +197,19 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
         header_story_types = {1, 6, 7, 10}  # 正文和所有页眉
         body_story_types = {1}  # 只处理正文
         
-        def process_replacements_in_range(rng, replacements_to_process, story_type_name, doc):
+        def process_replacements_in_range(rng, replacements_to_process, story_type_name, allow_comments: bool):
             """在指定的 Range 中处理替换"""
-            comment_text = "ERP系统数据"  # 统一的批注内容
             
             for rep_idx, (search_text, replace_text) in enumerate(replacements_to_process, 1):
-                print(f"  [{rep_idx}/{len(replacements_to_process)}] 正在在 [{story_type_name}] 中搜索 '{search_text}'...")
+                normalized_search_text = _normalize_find_text(search_text)
+                normalized_replace_text = _normalize_replace_text(replace_text)
+                print(f"  [{rep_idx}/{len(replacements_to_process)}] 正在在 [{story_type_name}] 中搜索 {repr(normalized_search_text)}...")
                 
                 # 创建搜索范围的副本，避免丢失原始引用
                 search_rng = rng.Duplicate
                 find = search_rng.Find
                 find.ClearFormatting()
-                find.Text = search_text
+                find.Text = normalized_search_text
                 find.Forward = True
                 find.Wrap = wdFindStop
                 find.MatchCase = False
@@ -187,35 +220,34 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
                 while find.Execute():
                     count += 1
                     total_stats["total_found"] += 1
+                    found_any_replacements[normalized_search_text] = True
                     
                     # 获取页数
                     page_num = _get_page_number(search_rng)
                     page_info = f"第 {page_num} 页" if page_num > 0 else "未知页码"
                     
                     try:
-                        search_rng.Text = replace_text
+                        search_rng.Text = normalized_replace_text
                         total_stats["total_replaced"] += 1
-                        print(f"    [已替换] '{search_text}' -> '{replace_text}' 在 {page_info}")
-                        
-                        # 在替换后的文本上添加批注
-                        try:
-                            # 获取替换后的文本范围（search_rng 现在包含替换后的文本）
-                            comment_range = search_rng.Duplicate
-                            doc.Comments.Add(Range=comment_range, Text=comment_text)
-                            print(f"    [批注] 已为替换后的文本添加批注 '{comment_text}'")
-                        except Exception as comment_e:
-                            # 如果添加批注失败，记录但不影响替换操作
-                            print(f"    [警告] 添加批注失败: {comment_e}")
+                        print(f"    [已替换] {repr(normalized_search_text)} -> {repr(normalized_replace_text)} 在 {page_info}")
+
+                        if allow_comments and normalized_replace_text is not None and str(normalized_replace_text).strip() != "":
+                            try:
+                                doc.Comments.Add(Range=search_rng.Duplicate, Text=str("ERP数据"))
+                                total_stats["total_comment_added"] += 1
+                            except Exception as e:
+                                total_stats["total_comment_error"] += 1
+                                failed_replacements.append((normalized_search_text, page_num, f"添加批注失败: {e}"))
                         
                         search_rng.Collapse(wdCollapseEnd)
                     except Exception as e:
                         total_stats["total_error"] += 1
-                        failed_replacements.append((search_text, page_num, str(e)))
-                        print(f"    [错误] 在 {page_info} 找到 '{search_text}' 但编辑失败: {e}")
+                        failed_replacements.append((normalized_search_text, page_num, str(e)))
+                        print(f"    [错误] 在 {page_info} 找到 {repr(normalized_search_text)} 但编辑失败: {e}")
                         search_rng.Collapse(wdCollapseEnd)
                 
                 if count > 0:
-                    print(f"  摘要: 在 [{story_type_name}] 中将 '{search_text}' 替换为 '{replace_text}' 共 {count} 处")
+                    print(f"  摘要: 在 [{story_type_name}] 中将 {repr(normalized_search_text)} 替换为 {repr(normalized_replace_text)} 共 {count} 处")
         
         # 一次遍历处理所有替换，按优先级顺序：project_content -> header -> body
         if project_content_replacements:
@@ -236,14 +268,14 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
                 # 1. 优先处理项目内容（只在正文中）
                 if project_content_replacements and story_type in project_content_story_types:
                     print(f"正在处理 [{story_type_name}]...")
-                    process_replacements_in_range(rng, project_content_replacements, story_type_name, doc)
+                    process_replacements_in_range(rng, project_content_replacements, story_type_name, allow_comments=(enable_erp_comments and story_type == 1))
                 
                 # 2. 处理项目名称和项目编号（在正文和页眉中）
                 if header_replacements and story_type in header_story_types:
                     # 如果已经在处理 project_content 时打印过，这里不再重复打印
                     if not (project_content_replacements and story_type in project_content_story_types):
                         print(f"正在处理 [{story_type_name}]...")
-                    process_replacements_in_range(rng, header_replacements, story_type_name, doc)
+                    process_replacements_in_range(rng, header_replacements, story_type_name, allow_comments=(enable_erp_comments and story_type == 1))
                 
                 # 3. 处理其他内容（只在正文中）
                 if body_replacements and story_type in body_story_types:
@@ -251,7 +283,7 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
                     if not (project_content_replacements and story_type in project_content_story_types) and \
                        not (header_replacements and story_type in header_story_types):
                         print(f"正在处理 [{story_type_name}]...")
-                    process_replacements_in_range(rng, body_replacements, story_type_name, doc)
+                    process_replacements_in_range(rng, body_replacements, story_type_name, allow_comments=(enable_erp_comments and story_type == 1))
                 
                 try:
                     rng = rng.NextStoryRange
@@ -264,6 +296,9 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
         replacement_log_parts.append(f"  总计找到: {total_stats['total_found']}")
         replacement_log_parts.append(f"  成功替换: {total_stats['total_replaced']}")
         replacement_log_parts.append(f"  失败 (错误): {total_stats['total_error']}")
+        if enable_erp_comments:
+            replacement_log_parts.append(f"  已添加批注: {total_stats['total_comment_added']}")
+            replacement_log_parts.append(f"  批注失败: {total_stats['total_comment_error']}")
         
         if failed_replacements:
             replacement_log_parts.append("")
@@ -271,6 +306,12 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
             for search_text, page_num, reason in failed_replacements:
                 page_info = f"第 {page_num} 页" if page_num > 0 else "未知页码"
                 replacement_log_parts.append(f"  - '{search_text}' 在 {page_info}: {reason}")
+        not_found_replacements = [k for k, v in found_any_replacements.items() if not v]
+        if not_found_replacements:
+            replacement_log_parts.append("")
+            replacement_log_parts.append("未找到的替换:")
+            for search_text in not_found_replacements:
+                replacement_log_parts.append(f"  - {repr(search_text)}")
         
         replacement_log_parts.append("=" * 60)
         replacement_log_parts.append("内容替换完成。")
@@ -302,4 +343,3 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
     print(f"[replace_content] 执行完成，耗时: {elapsed_time:.2f} 秒 ({elapsed_time*1000:.0f} 毫秒)")
     
     return new_state
-

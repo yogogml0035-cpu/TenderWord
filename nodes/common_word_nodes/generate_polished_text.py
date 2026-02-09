@@ -88,7 +88,7 @@ def generate_polished_text(state: XjcgTenderGraphState, config) -> XjcgTenderGra
     filename_parts = [_sanitize_filename(part) for part in (project_number, project_name) if part]
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
     prompt_file = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
-    prompt_file = prompts_dir / f"prompt_{prompt_file}_{timestamp}.txt"
+    prompt_file = prompts_dir / f"prompt_{prompt_file}_polish_prompt_{timestamp}.txt"
     try:
         with open(prompt_file, "w", encoding="utf-8") as f:
             f.write(system_prompt + "\n" + user_prompt)
@@ -147,6 +147,14 @@ def generate_polished_text(state: XjcgTenderGraphState, config) -> XjcgTenderGra
         timeout_seconds=TIMEOUT_SECONDS,
         check_interval=CHECK_INTERVAL,
     ))
+
+    try:
+        output_file_base = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
+        polished_output_file = prompts_dir / f"prompt_{output_file_base}_polished_text_{timestamp}.txt"
+        with open(polished_output_file, "w", encoding="utf-8") as f:
+            f.write(str(content))
+    except Exception as e:
+        print(f"警告: 保存润色结果到 prompts 失败: {e}")
 
     # 将大模型生成的内容写入 txt 文件，命名：项目编号-项目名称-初稿.txt
     project_number = str(state.get("project_number", "") or "").strip()

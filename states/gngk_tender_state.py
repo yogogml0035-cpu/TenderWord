@@ -68,6 +68,7 @@ class GngkTenderGraphState(BaseState):
         project_name: 项目名称
         project_number: 项目编号
         project_content: 项目名称及数量
+        project_content_v1: 项目内容（第二章 项目名称下一段至招标人前）
         bzj_rule: 保证金规则
         buyer_name: 采购人名称
         project_zbr_xbr: 项目负责人和项目协助人
@@ -110,6 +111,7 @@ class GngkTenderGraphState(BaseState):
     project_name: str
     project_number: str
     project_content: str
+    project_content_v1: str
     bzj_rule: str
     buyer_name: str
     project_zbr_xbr: str

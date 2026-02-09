@@ -447,6 +447,14 @@ with tab:
             task = TASK_QUEUE.create_task(st.session_state.user_session_id)
             task_id = task.task_id
             st.session_state.current_task_id = task_id
+
+            graph_name = params.get("form_config").graph_name
+            graph_class = GRAPH_REGISTRY.get(graph_name)
+            if graph_class:
+                graph_instance = graph_class()
+                estimate_func = getattr(graph_instance, "estimate_total_nodes", None)
+                if callable(estimate_func):
+                    TASK_QUEUE.set_total_nodes(task_id, estimate_func(initial_state))
             
             # 辅助对象
             log_writer = ThreadSafeLogWriter(log_queue)
@@ -560,14 +568,16 @@ with tab:
                 progress_placeholder.info("📊 等待执行...")
         else:
             queue_status_placeholder.info("🚀 任务即将开始执行...")
-            progress_placeholder.info("📊 文件生成进度：0/7")
+            task = TASK_QUEUE.get_task(task_id)
+            total_nodes = task.progress.total_nodes if task else 7
+            progress_placeholder.info(f"📊 文件生成进度：0/{total_nodes}")
 
         col_log, col_llm = st.columns(2)
         with col_log:
             st.markdown("**运行日志**")
             log_placeholder = st.empty()
         with col_llm:
-            st.markdown(f"**AI生成采购需求（当前模型: {model_option}）**")
+            st.markdown(f"**AI生成预览（当前模型: {model_option}）**")
             llm_placeholder = st.empty()
 
         # 主线程循环消费队列，实时更新 UI
@@ -645,7 +655,9 @@ with tab:
                             progress_placeholder.info("📊 等待执行...")
                     else:
                         queue_status_placeholder.info("🚀 任务即将开始执行...")
-                        progress_placeholder.info("📊 文件生成进度：0/7")
+                        task = TASK_QUEUE.get_task(task_id)
+                        total_nodes = task.progress.total_nodes if task else 7
+                        progress_placeholder.info(f"📊 文件生成进度：0/{total_nodes}")
                 continue
 
         # 等待线程完全结束 (如果是当前会话持有的线程)

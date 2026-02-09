@@ -45,18 +45,13 @@ def extract_tender_params(state: XjcgTenderGraphState, config) -> XjcgTenderGrap
     start_time = time.time()
     print(f"[extract_tender_params] 开始执行...")
     
-    origin_tender_path = state.get("origin_tender_path")
     clean_draft_path = state.get("clean_draft_path")
-    extract_source_path = (
-        origin_tender_path
-        if (origin_tender_path and str(origin_tender_path).strip())
-        else clean_draft_path
-    )
+    extract_source_path = clean_draft_path
     before_text = state.get("insertion_before_text")
     after_text = state.get("insertion_after_text")
     
     if not extract_source_path or (isinstance(extract_source_path, str) and extract_source_path.strip() == ""):
-        raise ValueError("需要 origin_tender_path 或 clean_draft_path 来提取 WPS/Word 文档中的内容")
+        raise ValueError("需要 clean_draft_path（清洁稿）来提取 WPS/Word 文档中的内容")
     
     if not before_text or not after_text:
         # 如果没有提供前后文本，返回空内容

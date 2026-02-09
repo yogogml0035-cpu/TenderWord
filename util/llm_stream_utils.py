@@ -154,6 +154,8 @@ async def stream_llm_completion(
     system_prompt: Optional[str] = None,
     user_prompt: Optional[str] = None,
     callbacks: Optional[StreamCallbacks] = None,
+    model_override: Optional[str] = None,
+    extra_params_override: Optional[dict[str, Any]] = None,
     timeout_seconds: int = 10,
     check_interval: float = 3.0,
 ) -> str:
@@ -181,7 +183,10 @@ async def stream_llm_completion(
     config = MODEL_CONFIGS.get(model_provider, MODEL_CONFIGS["deepseek"])
     
     callbacks = callbacks or StreamCallbacks()
-    heartbeat = HeartbeatMonitor(config.display_name, timeout_seconds=timeout_seconds, check_interval=check_interval)
+    display_name = config.display_name
+    if model_override:
+        display_name = f"{display_name} ({model_override})"
+    heartbeat = HeartbeatMonitor(display_name, timeout_seconds=timeout_seconds, check_interval=check_interval)
     
     content_parts: list[str] = []
     
@@ -200,6 +205,8 @@ async def stream_llm_completion(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             config=config,
+            model_override=model_override,
+            extra_params_override=extra_params_override,
             heartbeat=heartbeat,
             on_chunk=_on_chunk_received
         )
@@ -217,6 +224,8 @@ async def stream_llm_completion(
 
 async def _stream_openai_compatible(
     config: ModelConfig,
+    model_override: Optional[str],
+    extra_params_override: Optional[dict[str, Any]],
     heartbeat: HeartbeatMonitor,
     on_chunk: Callable[[str], None],
     prompt: Optional[str] = None,
@@ -254,11 +263,13 @@ async def _stream_openai_compatible(
     
     # 构建请求参数
     create_params: dict[str, Any] = {
-        "model": os.getenv(config.model_env),
+        "model": model_override or os.getenv(config.model_env),
         "messages": messages,
         "stream": True,
         **config.extra_params,  # max_tokens, temperature 等
     }
+    if extra_params_override:
+        create_params.update(extra_params_override)
     
     # 添加可选参数
     if config.stream_options:

@@ -306,12 +306,14 @@ class GngkTenderForm(BaseForm):
             # 上传文件路径
             "origin_tender_path": origin_tender_path,
             "tender_param_paths": tender_param_paths,
+            "clean_draft_path": origin_tender_path,
             # 固定参数（与 graph.py 中保持一致）
             "insertion_before_text": "第三章 招标内容及要求",
             "insertion_after_text": "第四章 投标文件有关格式",
             "project_name": tender_data["project_name"],
             "project_number": tender_data["project_number"],
             "project_content": tender_data["project_content"],
+            "project_content_v1": tender_data["project_content"],  # 使用 project_content 的值
             "bzj_rule": tender_data["bzj_rule"],
             "buyer_name": tender_data["buyer_name"],
             "project_zbr_xbr": tender_data["project_zbr_xbr"],

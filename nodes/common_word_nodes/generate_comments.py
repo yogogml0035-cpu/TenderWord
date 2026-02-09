@@ -24,6 +24,7 @@ from util.llm_stream_utils import (
     StreamCallbacks,
     stream_llm_completion,
 )
+from nodes.common_word_nodes.generate_polished_text import _sanitize_filename
 
 # 导入不同招标类型的批注生成 Prompt
 from nodes.xjcg_word_nodes.xjcg_comment_prompt import (
@@ -116,6 +117,30 @@ def generate_comments(
         strikethrough_plan=json.dumps(strikethrough_plan, ensure_ascii=False, indent=2),
         non_black_font_plan=json.dumps(non_black_font_plan, ensure_ascii=False, indent=2)
     )
+
+    # 准备 prompts 输出路径：保存大模型生成的批注内容，使用 new_comments 后缀区分
+    new_comments_file = None
+    comments_prompt_file = None
+    try:
+        prompts_dir = pathlib.Path(__file__).resolve().parents[2] / "prompts"
+        prompts_dir.mkdir(exist_ok=True)
+
+        project_number = str(state.get("project_number", "") or "").strip()
+        project_name = str(state.get("project_name", "") or "").strip()
+        filename_parts = [
+            _sanitize_filename(part)
+            for part in (project_number, project_name)
+            if part
+        ]
+        timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+        prompt_base = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
+        comments_prompt_file = prompts_dir / f"prompt_{prompt_base}_comments_prompt_{timestamp}.txt"
+        new_comments_file = prompts_dir / f"prompt_{prompt_base}_new_comments_{timestamp}.txt"
+
+        with open(comments_prompt_file, "w", encoding="utf-8") as f:
+            f.write(system_prompt + "\n" + formatted_user_prompt)
+    except Exception as e:
+        print(f"[generate_comments] 警告: 准备批注输出文件路径失败: {e}")
     
     # 实现配置提取和回调设置
     # 需求引用：4.2, 4.4, 8.3
@@ -124,8 +149,15 @@ def generate_comments(
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     model_provider = configurable.get("model_provider", "deepseek")
     
-    # 记录正在使用的 model_provider
-    print(f"[generate_comments] 使用模型: {model_provider}")
+    llm_model_override = None
+    llm_extra_params_override = None
+    effective_model_display = model_provider
+    if model_provider == "deepseek":
+        llm_model_override = "deepseek-chat"
+        llm_extra_params_override = {"temperature": 1.3}
+        effective_model_display = llm_model_override
+
+    print(f"[generate_comments] 使用模型: {effective_model_display}")
     
     # 从 config 提取 llm_stream_callback（如果可用）
     stream_callback: Optional[Callable[[str], None]] = None
@@ -186,6 +218,8 @@ def generate_comments(
                 system_prompt=system_prompt,
                 user_prompt=formatted_user_prompt,
                 callbacks=callbacks,
+                model_override=llm_model_override,
+                extra_params_override=llm_extra_params_override,
                 timeout_seconds=TIMEOUT_SECONDS,
                 check_interval=CHECK_INTERVAL,
             )
@@ -253,6 +287,13 @@ def generate_comments(
         import traceback
         traceback.print_exc()
         polished_comments = []
+
+    try:
+        if new_comments_file:
+            with open(new_comments_file, "w", encoding="utf-8") as f:
+                f.write(json.dumps(polished_comments, ensure_ascii=False, indent=2))
+    except Exception as e:
+        print(f"[generate_comments] 警告: 保存批注内容到文件失败: {e}")
     
     # 计算执行持续时间
     duration = time.time() - start_time

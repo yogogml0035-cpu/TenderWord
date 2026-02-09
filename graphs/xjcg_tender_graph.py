@@ -14,10 +14,10 @@
     START
       ↓
     prepare_template
-      ↓           ↓
-    get_comments  extract_tender_params
-      ↓           ↓
-      └───────────┴───────────┐
+      ↓           ↓                  ↓
+    get_comments  extract_tender_params  copy_comments
+      ↓           ↓                  ↓
+      └───────────┴──────────────────┴───────────┐
                               ↓         ↓
                   word_operations_subgraph   generate_polished_text (LLM)
                               ↓         ↓
@@ -69,6 +69,7 @@ from nodes.common_word_nodes import (
     generate_polished_text,
     replace_content,
     get_comments,
+    copy_comments,
     generate_comments,
 )
 from nodes.xjcg_word_nodes import (
@@ -106,6 +107,11 @@ class XjcgTenderGraph(BaseGraph):
             Type[TypedDict]: XjcgTenderGraphState 类型
         """
         return XjcgTenderGraphState
+
+    def estimate_total_nodes(self, initial_state: dict) -> int:
+        origin_tender_path = initial_state.get("origin_tender_path")
+        has_origin_for_comments = bool(origin_tender_path and str(origin_tender_path).strip())
+        return 11 if has_origin_for_comments else 10
     
     def build_graph(self) -> StateGraph:
         """
@@ -114,18 +120,19 @@ class XjcgTenderGraph(BaseGraph):
         工作流包含以下节点：
         1. prepare_template: 准备 Word 模板
         2. get_comments: 从送审稿文件提取批注
-        3. extract_tender_params: 提取招标参数
-        4. word_operations_subgraph: Word 操作子图（子图内部包含 3 个节点）
+        3. copy_comments: 从送审稿复制锚点范围外的批注到模板
+        4. extract_tender_params: 提取招标参数
+        5. word_operations_subgraph: Word 操作子图（子图内部包含 3 个节点）
            - delete_tender_param: 删除招标参数
            - get_replacements: 获取替换内容
            - replace_content: 替换内容
-        5. generate_polished_text: 生成润色文本（LLM 调用）；其后若上传送审稿则进入 generate_comments
-        6. generate_comments: 基于润色文本与计划生成批注指令（LLM 调用，仅在上传送审稿时执行）
-        7. update_word: 更新 Word 文档
+        6. generate_polished_text: 生成润色文本（LLM 调用）；其后若上传送审稿则进入 generate_comments
+        7. generate_comments: 基于润色文本与计划生成批注指令（LLM 调用，仅在上传送审稿时执行）
+        8. update_word: 更新 Word 文档
 
         并行执行：
-        - prepare_template 之后，同时执行 get_comments 与 extract_tender_params
-        - 两者完成后，再并行执行：
+        - prepare_template 之后，同时执行 get_comments、extract_tender_params、copy_comments
+        - 三者完成后，再并行执行：
           - word_operations_subgraph
           - generate_polished_text →（若上传送审稿）generate_comments
         - 各路在 update_word 汇合；generate_comments 仅在上传送审稿时执行
@@ -140,6 +147,8 @@ class XjcgTenderGraph(BaseGraph):
                         self.wrap_node("prepare_template", prepare_template))
         builder.add_node("get_comments", 
                         self.wrap_node("get_comments", get_comments))
+        builder.add_node("copy_comments",
+                        self.wrap_node("copy_comments", copy_comments))
         builder.add_node("extract_tender_params", 
                         self.wrap_node("extract_tender_params", extract_tender_params))
         # 子图作为一个节点（子图内部已经有进度追踪）
@@ -153,14 +162,15 @@ class XjcgTenderGraph(BaseGraph):
         
         # 主图边（根据是否上传送审稿进行条件跳转）
         builder.add_edge(START, "prepare_template")
-        # prepare_template 之后并行执行 get_comments 和 extract_tender_params
+        # prepare_template 之后并行执行 get_comments、extract_tender_params、copy_comments
         builder.add_edge("prepare_template", "get_comments")
         builder.add_edge("prepare_template", "extract_tender_params")
+        builder.add_edge("prepare_template", "copy_comments")
 
-        # get_comments 和 extract_tender_params 子图完成后，再并行进入
+        # 三者完成后，再并行进入
         # word_operations_subgraph 与 generate_polished_text
-        builder.add_edge(["get_comments", "extract_tender_params"], "word_operations_subgraph")
-        builder.add_edge(["get_comments", "extract_tender_params"], "generate_polished_text")
+        builder.add_edge(["get_comments", "extract_tender_params", "copy_comments"], "word_operations_subgraph")
+        builder.add_edge(["get_comments", "extract_tender_params", "copy_comments"], "generate_polished_text")
         
         # generate_polished_text 后按是否上传送审稿：有则 generate_comments，无则直接到 update_word
         def _has_origin_for_comments(state: XjcgTenderGraphState) -> str:

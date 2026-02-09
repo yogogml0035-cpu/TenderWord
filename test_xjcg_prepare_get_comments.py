@@ -58,8 +58,8 @@ def test_prepare_template_and_get_comments():
     """
     # 构建测试文件路径（相对于项目根目录）
     test_word_dir = ROOT / "test_word"
-    origin_tender_path = test_word_dir / "253505-细胞电转仪-询价文件-初稿1.doc"
-    clean_draft_path = test_word_dir / "253505-细胞电转仪-询价文件-初稿1.doc"
+    origin_tender_path = test_word_dir / "260251-脑电图仪等设备-初稿1 - 审2.docx"
+    clean_draft_path = test_word_dir / "260251-脑电图仪等设备-初稿1 - 审2.docx"
     tender_param_path = test_word_dir / "市中医-细胞电转仪招标参数.docx"
     
     # 验证文件是否存在

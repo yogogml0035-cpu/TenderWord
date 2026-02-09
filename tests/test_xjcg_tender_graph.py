@@ -33,11 +33,17 @@ def test_graph_has_get_comments_node():
     assert "get_comments" in builder.nodes
 
 
+def test_graph_has_copy_comments_node():
+    graph = XjcgTenderGraph()
+    builder = graph.build_graph()
+    assert "copy_comments" in builder.nodes
+
+
 def test_graph_node_order():
     """
     测试图的节点执行顺序
     
-    验证 prepare_template → get_comments → extract_tender_params 的顺序
+    验证 prepare_template → (get_comments/extract_tender_params/copy_comments 并行) 的结构
     
     验证需求: 3.2, 3.3
     """

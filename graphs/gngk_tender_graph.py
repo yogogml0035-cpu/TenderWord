@@ -102,6 +102,9 @@ class GngkTenderGraph(BaseGraph):
             Type[TypedDict]: GngkTenderGraphState 类型
         """
         return GngkTenderGraphState
+
+    def estimate_total_nodes(self, initial_state: dict) -> int:
+        return 8
     
     def build_graph(self) -> StateGraph:
         """

@@ -28,7 +28,7 @@ def extract_project_number(doc_content: str, first_page_header: str, state: Xjcg
     if not first_page_header or not state.get("project_number"):
         return None
     
-    project_number_pattern = r'项目编号[:：]\s*([^；;]+)'
+    project_number_pattern = r'招标编号[:：]\s*([^；;]+)'
     match = re.search(project_number_pattern, first_page_header)
     if match:
         number_text = match.group(1).strip()
@@ -67,30 +67,30 @@ def extract_buyer_name(doc_content: str, state: XjcgTenderGraphState, log_parts:
         return None
     
     first_page_content = doc_content[:5000] if len(doc_content) > 5000 else doc_content
-    buyer_pos = doc_content.find("采购人")
+    buyer_pos = doc_content.find("招标人")
     if buyer_pos != -1:
         search_start = max(0, buyer_pos - 100)
         search_end = min(len(doc_content), buyer_pos + 2000)
         first_page_content = doc_content[search_start:search_end]
-        log_parts.append(f"在位置 {buyer_pos} 找到 '采购人'，在范围 [{search_start}, {search_end}] 中搜索")
+        log_parts.append(f"在位置 {buyer_pos} 找到 '招标人'，在范围 [{search_start}, {search_end}] 中搜索")
     else:
-        log_parts.append("在文档中未找到 '采购人'，在前 5000 个字符中搜索")
+        log_parts.append("在文档中未找到 'vv'，在前 5000 个字符中搜索")
     
-    buyer_name_pattern = r'采购人[:：]\s*([^\n\r]+?)(?:\s*\n\s*采购代理机构|采购代理机构)'
+    buyer_name_pattern = r'招标人[:：]\s*([^\n\r]+?)(?:\s*\n\s*招标代理机构|招标代理机构)'
     match = re.search(buyer_name_pattern, first_page_content, re.DOTALL)
     if match:
         extracted_buyer_name = match.group(1).strip()
-        log_parts.append(f"从首页提取采购人名称: {extracted_buyer_name}")
+        log_parts.append(f"从首页提取招标人名称: {extracted_buyer_name}")
         return extracted_buyer_name
     else:
-        buyer_name_pattern2 = r'采购人[:：]\s*([^采购]+?)(?=\s*采购代理机构)'
+        buyer_name_pattern2 = r'招标人[:：]\s*([^招标]+?)(?=\s*招标代理机构)'
         match2 = re.search(buyer_name_pattern2, first_page_content, re.DOTALL)
         if match2:
             extracted_buyer_name = match2.group(1).strip()
-            log_parts.append(f"提取采购人名称 (备用模式): {extracted_buyer_name}")
+            log_parts.append(f"提取招标人名称 (备用模式): {extracted_buyer_name}")
             return extracted_buyer_name
         else:
-            log_parts.append(f"在首页内容中未找到 '采购人' 模式")
+            log_parts.append(f"在首页内容中未找到 '招标人' 模式")
     return None
 
 
@@ -108,7 +108,7 @@ def extract_project_content(doc_content: str, state: XjcgTenderGraphState, log_p
     
     log_parts.append(f"在位置 {start_pos1} 找到起始标记1 '{start_marker1}'")
     
-    start_marker2_pattern = r'的委托[，,]\s*现以询价采购的方式就下列\s*货物和相关服务进行采购[。.]'
+    start_marker2_pattern = r'的委托[，,]\s*现以公开招标方式邀请合格的投标人就下列货物或服务前来投标[。.]'
     search_after_marker1 = start_pos1 + len(start_marker1)
     match = re.search(start_marker2_pattern, doc_content[search_after_marker1:], re.DOTALL)
     
@@ -117,7 +117,7 @@ def extract_project_content(doc_content: str, state: XjcgTenderGraphState, log_p
         return None
     
     front_end_pos = search_after_marker1 + match.end()
-    end_marker1 = "3、合格供应商资格条件"
+    end_marker1 = "3、合格投标人资格条件"
     end_pos1 = doc_content.find(end_marker1, front_end_pos)
     
     if end_pos1 == -1:
@@ -185,41 +185,110 @@ def extract_project_content(doc_content: str, state: XjcgTenderGraphState, log_p
     return None
 
 
+def extract_project_content_v1(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+    """从正文中提取 project_content（v1）：起始标记为「第二章 投标人须知」，
+    内容从「项目名称：」所在段落的下一段开始，到「招标人：」所在行之前结束。
+    例如提取「设备名称及数量：电子支气管镜系统/壹套」等。"""
+    if not doc_content:
+        return None
+    if not state.get("project_content") and not state.get("project_content_v1"):
+        return None
+
+    chapter_match = re.search(r"第二章\s*投标人须知", doc_content)
+    if not chapter_match:
+        log_parts.append("未找到起始章节标记「第二章 投标人须知」")
+        return None
+    chapter_pos = chapter_match.start()
+    log_parts.append(f"在位置 {chapter_pos} 找到章节标记「第二章 投标人须知」")
+
+    search_after_chapter = chapter_match.end()
+    # 支持全角、半角冒号
+    project_name_marker = re.compile(r"项目名称\s*[：:]")
+    match_pn = project_name_marker.search(doc_content[search_after_chapter:])
+    if not match_pn:
+        log_parts.append("在章节之后未找到「项目名称：」")
+        return None
+
+    pn_pos = search_after_chapter + match_pn.start()
+    log_parts.append(f"在位置 {pn_pos} 找到「项目名称：」")
+
+    # 「项目名称：」所在段落：从该行行首到行尾（含换行）
+    pn_line_start = pn_pos
+    while pn_line_start > 0 and doc_content[pn_line_start - 1] not in ("\n", "\r"):
+        pn_line_start -= 1
+    pn_line_end = pn_pos
+    while pn_line_end < len(doc_content) and doc_content[pn_line_end] not in ("\n", "\r"):
+        pn_line_end += 1
+    while pn_line_end < len(doc_content) and doc_content[pn_line_end] in ("\n", "\r"):
+        pn_line_end += 1
+    content_start = pn_line_end
+    log_parts.append(f"「项目名称：」下一段起始位置: {content_start}")
+
+    device_marker = re.compile(r"设备名称及数量\s*[：:]")
+    match_device = device_marker.search(doc_content[content_start:])
+    if not match_device:
+        log_parts.append("在内容起始之后未找到「设备名称及数量：」")
+        return None
+
+    device_pos = content_start + match_device.start()
+    log_parts.append(f"在位置 {device_pos} 找到「设备名称及数量：」")
+
+    candidates = []
+    for ch in ("\x07", "\r", "\n"):
+        idx = doc_content.find(ch, device_pos)
+        if idx != -1:
+            candidates.append(idx)
+    end_pos = min(candidates) if candidates else len(doc_content)
+
+    raw_extracted = doc_content[device_pos:end_pos]
+    extracted_content = raw_extracted.replace("\x07", "").strip()
+
+    if extracted_content:
+        log_parts.append(f"成功提取 project_content_v1，长度: {len(extracted_content)} 字符")
+        log_parts.append(f"提取内容: {repr(extracted_content)}")
+        return extracted_content
+    log_parts.append("提取区间为空")
+    return None
+
+
 def extract_bzj_rule(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从正文中提取 bzj_rule"""
     if not doc_content or not state.get("bzj_rule"):
         return None
     
-    section_marker = "18、保证金"
-    section_pos = doc_content.find(section_marker)
-    
-    if section_pos == -1:
-        log_parts.append(f"未找到节标记 '{section_marker}'")
+    start_marker = "投标保证金数额："
+    end_marker = "户名："
+
+    start_pos = doc_content.find(start_marker)
+    if start_pos == -1:
+        log_parts.append(f"未找到起始标记 '{start_marker}'")
         return None
-    
-    log_parts.append(f"在位置 {section_pos} 找到节标记 '{section_marker}'")
-    
-    search_start = section_pos + len(section_marker)
-    search_end = min(len(doc_content), section_pos + 2000)
-    search_range = doc_content[search_start:search_end]
-    
-    bzj_pattern = r'18\.1\s*保证金金额[:：]\s*([^。]+?)(?:[。]|$)'
-    match = re.search(bzj_pattern, search_range, re.DOTALL)
-    
-    if match:
-        extracted_bzj = match.group(1).strip()
+
+    log_parts.append(f"在位置 {start_pos} 找到起始标记 '{start_marker}'")
+
+    search_after = start_pos + len(start_marker)
+    end_pos = doc_content.find(end_marker, search_after)
+
+    if end_pos == -1:
+        log_parts.append(f"未找到结束标记 '{end_marker}'")
+        return None
+
+    log_parts.append(f"在位置 {end_pos} 找到结束标记 '{end_marker}'")
+
+    search_range = doc_content[search_after:end_pos]
+    log_parts.append(f"在 '投标保证金数额：' 和 '户名：' 之间搜索保证金规则，范围长度: {len(search_range)} 个字符")
+
+    extracted_bzj = search_range.strip()
+    # 有些模板中金额后面带有句号（例如“人民币29,000.00元整。”），
+    # 为了避免 Find.Execute 替换时跨越受保护边界，这里去掉末尾的中文句号。
+    extracted_bzj = extracted_bzj.rstrip("。").strip()
+
+    if extracted_bzj:
         log_parts.append(f"提取保证金规则: {extracted_bzj}")
         return extracted_bzj
     else:
-        bzj_pattern2 = r'18\.1\s*保证金金额[:：]\s*([^。\n]+?)(?:[。]\n\s*户名|$)'
-        match2 = re.search(bzj_pattern2, search_range, re.DOTALL)
-        if match2:
-            extracted_bzj = match2.group(1).strip()
-            log_parts.append(f"提取保证金规则 (备用模式): {extracted_bzj}")
-            return extracted_bzj
-        else:
-            log_parts.append(f"在 '{section_marker}' 之后未找到 '18.1保证金金额：' 模式")
-    return None
+        log_parts.append("在指定范围内未提取到保证金规则")
+        return None
 
 
 def extract_shell_dates(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Tuple[Optional[str], Optional[str]]:
@@ -577,6 +646,15 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
                 except Exception as e:
                     log_parts.append(f"提取项目内容时出错: {e}")
 
+            # 提取 project_content_v1（第二章 项目名称下一段的「设备名称及数量：...」）
+            if state.get("project_content") or state.get("project_content_v1"):
+                try:
+                    result = extract_project_content_v1(doc_content, state, log_parts)
+                    if result is not None:
+                        found_placeholders["project_content_v1"] = result
+                except Exception as e:
+                    log_parts.append(f"提取项目内容(v1)时出错: {e}")
+
             # 提取 project_number
             if state.get("project_number"):
                 try:
@@ -724,6 +802,7 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
         # 定义字段名列表（对应 state 中的字段）
         field_names = [
             "project_content",
+            "project_content_v1",
             "project_number",
             "project_name",
             "bzj_rule",
@@ -747,6 +826,11 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
             
             # 获取该字段的新值（从 state 中获取）
             new_value = state.get(field_name)
+            if field_name == "project_content_v1" and not new_value:
+                fallback = state.get("project_content")
+                if fallback:
+                    new_value = fallback
+                    log_parts.append("字段 'project_content_v1' 未提供新值，使用 'project_content' 的值作为替换内容")
             if not new_value:
                 log_parts.append(f"字段 '{field_name}' 有占位符 '{old_value}' 但 state 中没有新值，跳过")
                 continue
@@ -792,6 +876,7 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
     
     end_time = time.time()
     elapsed_time = end_time - start_time
+    print(f"[get_replacements]: 执行日志:{replacement_log}")
     print(f"[get_replacements] 执行完成，耗时: {elapsed_time:.2f} 秒 ({elapsed_time*1000:.0f} 毫秒)")
     
     return new_state
@@ -814,12 +899,7 @@ if __name__ == "__main__":
     
     # 测试文档路径列表
     test_doc_paths = [
-        "test_doc/251918-询价文件-发售稿.doc",
-        "test_doc/252699-原位杂交仪-询价文件-发售稿.doc",
-        "test_doc/252700-荧光细胞计数仪、超低温冰箱、PCR仪-询价文件-初稿1.doc",
-        "test_doc/253000-细胞自动计数仪-询价文件-发售稿.doc",
-        "test_doc/253392-询价文件-初稿.doc",
-        "test_doc/253505-细胞电转仪-询价文件-初稿1.doc",
+        "test_word/252030-招标文件-清洁稿【基因测序仪】.doc",
     ]
     
     # 循环测试每个文件
@@ -845,6 +925,7 @@ if __name__ == "__main__":
             "project_number": "253505",  
             "project_name": "细胞电转仪", 
             "project_content": "项目名称及数量：细胞电转仪   壹套",
+            "project_content_v1": "设备名称及数量：细胞电转仪/壹套",
             "bzj_rule": "项目预算的2%",
             "buyer_name": "复旦大学附属中山医院",
             "project_zbr_xbr": "徐旭东、任彧晟",
@@ -886,4 +967,3 @@ if __name__ == "__main__":
             print(f"\n继续测试下一个文件...")
             print()
             continue
-

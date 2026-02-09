@@ -361,6 +361,21 @@ class TaskQueueManager:
                 self._queue.remove(task_id)
             
             return True
+
+    def set_total_nodes(self, task_id: str, total_nodes: int) -> bool:
+        with self._data_lock:
+            task = self._tasks.get(task_id)
+            if not task:
+                return False
+            safe_total = max(1, int(total_nodes))
+            task.progress.total_nodes = safe_total
+            callback = self._progress_callbacks.get(task_id)
+            if callback:
+                try:
+                    callback(task.progress)
+                except Exception:
+                    pass
+            return True
     
     def update_progress(self, task_id: str, node_name: str, completed: bool = True):
         """
@@ -387,6 +402,10 @@ class TaskQueueManager:
                 # 节点开始：加入运行列表
                 if node_name not in task.progress.running_nodes:
                     task.progress.running_nodes.append(node_name)
+
+            observed_total = len(task.progress.completed_nodes) + len(task.progress.running_nodes)
+            if observed_total > task.progress.total_nodes:
+                task.progress.total_nodes = observed_total
             
             # 调用进度回调
             callback = self._progress_callbacks.get(task_id)

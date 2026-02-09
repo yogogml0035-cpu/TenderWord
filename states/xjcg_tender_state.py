@@ -61,6 +61,9 @@ class XjcgTenderGraphState(BaseState):
         comment_plan_detail: 批注详情列表（content、scope_text、reference_text）
         strikethrough_plan: 删除线段落列表（paragraph_text、strikethrough_text、reference_text）
         non_black_font_plan: 非黑色字体列表（paragraph_text、font_text、reference_text）
+        copy_comments_log: 复制送审稿批注到模板的结果摘要
+        copy_comments_added: 成功复制的批注条数
+        copy_comments_unmatched: 未能定位的批注列表（供人工确认）
         comments_summary: 批注添加结果摘要
     
     日志相关字段：
@@ -112,6 +115,9 @@ class XjcgTenderGraphState(BaseState):
     # 日志
     insertion_log: str
     replacement_log: str
+    copy_comments_log: str
+    copy_comments_added: int
+    copy_comments_unmatched: List[Dict[str, Any]]
     
     # 项目信息
     project_name: str

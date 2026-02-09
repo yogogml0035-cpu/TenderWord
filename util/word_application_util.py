@@ -11,11 +11,15 @@ import logging
 import os
 import shutil
 import time
-import pythoncom
 from typing import Optional, Tuple
 
 # 获取 logger
 logger = logging.getLogger(__name__)
+
+try:
+    import pythoncom
+except ImportError:
+    pythoncom = None
 
 try:
     import win32com.client as win32
@@ -174,8 +178,9 @@ def _create_word_application_internal(
     
     调用此函数前应该已经获取了全局锁。
     """
-    if win32 is None:
-        error_msg = "无法导入 win32com.client，请确保已安装 pywin32\n"
+    if pythoncom is None or win32 is None:
+        error_msg = "缺少 Word COM 依赖（pywin32/pythoncom），无法执行 Word 自动化。\n"
+        error_msg += "请确保使用已安装 pywin32 的 Python 解释器运行。\n"
         error_msg += "安装命令: pip install pywin32\n"
         if DIAGNOSTICS_AVAILABLE:
             try:
