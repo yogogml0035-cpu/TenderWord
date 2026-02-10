@@ -84,9 +84,9 @@ def split_polished_text_into_blocks(polished_text: str):
 def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     start_time = time.perf_counter()
     
-
-    from util.logging_utils import log_task_end
-    log_task_end(state, "update_word")
+    from util.logging_utils import log_task_start, log_task_end
+    logged_end = False
+    log_task_start(state, "update_word")
     
     print("[update_word] 开始执行...")
     
@@ -1476,10 +1476,16 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                 wait_time=0.0,  # 不需要额外等待
                 node_name="update_word"
             )
+            if not logged_end:
+                log_task_end(state, "update_word")
+                logged_end = True
     
     except Exception as e:
         error_msg = f"初始化 Word COM 时出错: {e}"
         insertion_log_parts.append(error_msg)
+        if not logged_end:
+            log_task_end(state, "update_word")
+            logged_end = True
         raise
     
     # 使用插入日志更新状态

@@ -170,8 +170,8 @@ class TaskQueueManager:
         self._execution_condition = threading.Condition(self._data_lock)
         
         # 心跳超时配置（秒）
-        self._heartbeat_timeout = 3  # 配置时间内未收到心跳则认为用户已离开
-        self._cleanup_interval = 1  # 每次检查一次超时任务的时间
+        self._heartbeat_timeout = 5  # 配置时间内未收到心跳则认为用户已离开
+        self._cleanup_interval = 5  # 每次检查一次超时任务的时间
         
         # 启动后台清理线程
         self._cleanup_thread_stop = threading.Event()

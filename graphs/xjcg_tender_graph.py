@@ -111,7 +111,7 @@ class XjcgTenderGraph(BaseGraph):
     def estimate_total_nodes(self, initial_state: dict) -> int:
         origin_tender_path = initial_state.get("origin_tender_path")
         has_origin_for_comments = bool(origin_tender_path and str(origin_tender_path).strip())
-        return 11 if has_origin_for_comments else 10
+        return 12 if has_origin_for_comments else 11
     
     def build_graph(self) -> StateGraph:
         """
@@ -141,6 +141,9 @@ class XjcgTenderGraph(BaseGraph):
             StateGraph: 未编译的 StateGraph 实例
         """
         builder = StateGraph(XjcgTenderGraphState)
+
+        def comments_branch_done(state: XjcgTenderGraphState, config):
+            return state
         
         # 添加主图节点（使用进度追踪包装）
         builder.add_node("prepare_template", 
@@ -155,6 +158,8 @@ class XjcgTenderGraph(BaseGraph):
         builder.add_node("word_operations_subgraph", self._build_word_operations_subgraph())
         builder.add_node("generate_polished_text", 
                         self.wrap_node("generate_polished_text", generate_polished_text))
+        builder.add_node("comments_branch_done",
+                        self.wrap_node("comments_branch_done", comments_branch_done))
         builder.add_node("update_word", 
                         self.wrap_node("update_word", update_word))
         builder.add_node("generate_comments",
@@ -175,19 +180,19 @@ class XjcgTenderGraph(BaseGraph):
         # generate_polished_text 后按是否上传送审稿：有则 generate_comments，无则直接到 update_word
         def _has_origin_for_comments(state: XjcgTenderGraphState) -> str:
             path = state.get("origin_tender_path")
-            return "generate_comments" if (path and str(path).strip()) else "update_word"
+            return "generate_comments" if (path and str(path).strip()) else "comments_branch_done"
         builder.add_conditional_edges(
             "generate_polished_text",
             _has_origin_for_comments,
             {
                 "generate_comments": "generate_comments",
-                "update_word": "update_word",
+                "comments_branch_done": "comments_branch_done",
             },
         )
-        builder.add_edge("generate_comments", "update_word")
+        builder.add_edge("generate_comments", "comments_branch_done")
         
         # 两路汇入 update_word 后结束
-        builder.add_edge("word_operations_subgraph", "update_word")
+        builder.add_edge(["word_operations_subgraph", "comments_branch_done"], "update_word")
         builder.add_edge("update_word", END)
         
         return builder

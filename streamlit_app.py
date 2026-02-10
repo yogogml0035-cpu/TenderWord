@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import pathlib
 import queue
 import sys
@@ -11,6 +12,18 @@ import traceback
 import uuid
 
 import streamlit as st
+
+
+class _SuppressAsyncioDestroyedTask(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:  # type: ignore[override]
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        return "Task was destroyed but it is pending!" not in msg
+
+
+logging.getLogger("asyncio").addFilter(_SuppressAsyncioDestroyedTask())
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -511,6 +524,24 @@ with tab:
                         )
                         result_holder["result"] = (result_state, elapsed_time)
                     finally:
+                        try:
+                            try:
+                                pending = asyncio.all_tasks(loop=loop)
+                            except TypeError:
+                                pending = asyncio.all_tasks()
+
+                            for task in pending:
+                                task.cancel()
+
+                            if pending:
+                                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+
+                            if hasattr(loop, "shutdown_asyncgens"):
+                                loop.run_until_complete(loop.shutdown_asyncgens())
+                            if hasattr(loop, "shutdown_default_executor"):
+                                loop.run_until_complete(loop.shutdown_default_executor())
+                        finally:
+                            asyncio.set_event_loop(None)
                         loop.close()
                 except Exception as exc:
                     result_holder["error"] = (exc, traceback.format_exc())
@@ -585,7 +616,7 @@ with tab:
         current_llm = ""
         current_progress_count = 0
         last_heartbeat_time = time.time()
-        heartbeat_interval = 1.5  # 发送一次心跳的间隔
+        heartbeat_interval = 5.0  # 发送一次心跳的间隔
         
         while not result_holder["done"] or not log_queue.empty():
             try:

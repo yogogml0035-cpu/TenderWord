@@ -150,8 +150,7 @@ class GngkTenderGraph(BaseGraph):
         builder.add_edge("extract_tender_params", "generate_polished_text")
         
         # 两个分支都汇入 update_word（扇入）
-        builder.add_edge("word_operations_subgraph", "update_word")
-        builder.add_edge("generate_polished_text", "update_word")
+        builder.add_edge(["word_operations_subgraph", "generate_polished_text"], "update_word")
         
         builder.add_edge("update_word", END)
         

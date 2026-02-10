@@ -589,8 +589,7 @@ def unprotect_document(
     尝试多种方法取消文档保护，包括：
     1. 检查保护类型
     2. 使用空密码取消保护
-    3. 强制设置保护类型
-    4. 禁用内容保护
+    3. 禁用内容保护
     
     参数:
         doc: Word.Document 对象
@@ -611,27 +610,25 @@ def unprotect_document(
         
         # 尝试使用空密码取消保护
         try:
+            try:
+                doc.Unprotect()
+                logger.info(f"{log_prefix}已取消文档保护")
+                return True
+            except Exception:
+                pass
             doc.Unprotect("")
             logger.info(f"{log_prefix}已取消文档保护")
             return True
         except Exception as unprotect_e:
-            logger.warning(f"{log_prefix}使用空密码取消保护失败: {unprotect_e}")
-            
-            # 尝试强制设置保护类型为无保护
-            try:
-                doc.ProtectionType = -1
-                logger.info(f"{log_prefix}已强制设置文档为无保护状态")
-                return True
-            except Exception as force_e:
-                logger.warning(f"{log_prefix}强制设置保护类型失败: {force_e}")
+            logger.debug(f"{log_prefix}使用空密码取消保护失败: {unprotect_e}")
                 
     except Exception as prot_e:
-        logger.warning(f"{log_prefix}检查文档保护时出错: {prot_e}")
+        logger.debug(f"{log_prefix}检查文档保护时出错: {prot_e}")
     
     # 尝试禁用内容保护
     try:
         if hasattr(doc, 'ProtectContent') and doc.ProtectContent:
-            logger.warning(f"{log_prefix}文档内容仍受保护，尝试强制取消...")
+            logger.debug(f"{log_prefix}文档内容仍受保护，尝试强制取消...")
             doc.ProtectContent = False
             return True
     except Exception:
