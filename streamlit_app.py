@@ -615,8 +615,9 @@ with tab:
         current_log = ""
         current_llm = ""
         current_progress_count = 0
+        TASK_QUEUE.update_heartbeat(task_id)
         last_heartbeat_time = time.time()
-        heartbeat_interval = 5.0  # 发送一次心跳的间隔
+        heartbeat_interval = 2.0  # 发送一次心跳的间隔
         
         while not result_holder["done"] or not log_queue.empty():
             try:
