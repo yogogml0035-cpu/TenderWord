@@ -79,6 +79,7 @@ class GngkTenderGraphState(BaseState):
         submit_date: 提交日期
         platform: 平台信息
         service_fee: 服务费
+        similar_project_performance_date: 类似项目业绩日期（自xxxx年xx月xx日至今）
     
     执行状态字段：
         generate_polished_done: generate_polished_text 节点是否完成
@@ -122,6 +123,7 @@ class GngkTenderGraphState(BaseState):
     submit_date: str
     platform: str
     service_fee: str
+    similar_project_performance_date: str
     
     # 执行状态（使用 Annotated 和 or_ reducer 处理并行节点的并发更新）
     generate_polished_done: Annotated[bool, or_]

@@ -4,6 +4,7 @@ import os
 import re
 import time
 from typing import Dict, List, Optional, Tuple
+from datetime import datetime
 import pathlib
 import sys
 
@@ -409,12 +410,23 @@ def extract_platform(doc_content: str, state: XjcgTenderGraphState, log_parts: L
     if not doc_content or not state.get("platform"):
         return None
     
-    start_marker = "采购人、采购代理机构均将通过"
+    start_markers = [
+        "招标人、招标代理机构均将通过",
+        "采购人、采购代理机构均将通过",
+    ]
     end_marker = "公开发布"
     
-    start_pos = doc_content.find(start_marker)
-    if start_pos == -1:
-        log_parts.append("未找到起始标记 '采购人、采购代理机构均将通过'")
+    start_pos = -1
+    start_marker = None
+    for marker in start_markers:
+        pos = doc_content.find(marker)
+        if pos != -1:
+            start_pos = pos
+            start_marker = marker
+            break
+
+    if start_pos == -1 or not start_marker:
+        log_parts.append("未找到起始标记 '招标人、招标代理机构均将通过' 或 '采购人、采购代理机构均将通过'")
         return None
     
     log_parts.append(f"在位置 {start_pos} 找到起始标记 '{start_marker}'")
@@ -429,7 +441,7 @@ def extract_platform(doc_content: str, state: XjcgTenderGraphState, log_parts: L
     log_parts.append(f"在位置 {end_pos} 找到结束标记 '{end_marker}'")
     
     search_range = doc_content[search_after:end_pos]
-    log_parts.append(f"在 '采购人、采购代理机构均将通过' 和 '公开发布' 之间搜索发布平台，范围长度: {len(search_range)} 个字符")
+    log_parts.append(f"在 '{start_marker}' 和 '公开发布' 之间搜索发布平台，范围长度: {len(search_range)} 个字符")
     
     platform_pattern = r'\s*([^（(]+)\s*[（(]([^）)]+)[）)]'
     match = re.search(platform_pattern, search_range, re.DOTALL)
@@ -490,6 +502,31 @@ def extract_service_fee(doc_content: str, state: XjcgTenderGraphState, log_parts
     return None
 
 
+def extract_similar_project_performance_date(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+    if not doc_content:
+        return None
+
+    marker = "2、类似项目业绩"
+    marker_pos = doc_content.find(marker)
+    if marker_pos == -1:
+        log_parts.append("未找到标记 '2、类似项目业绩'")
+        return None
+
+    next_item_pos = doc_content.find("3、", marker_pos + len(marker))
+    search_end = next_item_pos if next_item_pos != -1 else min(len(doc_content), marker_pos + 8000)
+    search_range = doc_content[marker_pos:search_end]
+
+    pattern = r"(自\d{4}年\d{1,2}月\d{1,2}日至今)"
+    match = re.search(pattern, search_range)
+    if match:
+        extracted = match.group(1).strip()
+        log_parts.append(f"在“2、类似项目业绩”条目中提取日期: {extracted}")
+        return extracted
+
+    log_parts.append("在“2、类似项目业绩”条目范围内未找到日期模式 '自xxxx年xx月xx日至今'")
+    return None
+
+
 def extract_contact_fields(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """从正文中提取 project_zbr_xbr, zbr_xbr_tel, zbr_pinyin"""
     if not doc_content:
@@ -499,18 +536,24 @@ def extract_contact_fields(doc_content: str, state: XjcgTenderGraphState, log_pa
     agency_pos = doc_content.find(agency_marker)
     
     if agency_pos == -1:
-        log_parts.append(f"在文档中未找到 '采购代理机构名称：' 标记")
-        return None, None, None
+        log_parts.append("在文档中未找到 '采购代理机构名称：' 标记，尝试在全文中按锚点提取联系字段")
+        search_start = 0
+        search_end = len(doc_content)
+    else:
+        log_parts.append(f"在位置 {agency_pos} 找到 '采购代理机构名称：' 标记")
+        search_start = agency_pos
+        search_end = min(len(doc_content), agency_pos + 4000)
     
-    log_parts.append(f"在位置 {agency_pos} 找到 '采购代理机构名称：' 标记")
-    
+    anchor_range = doc_content[search_start:search_end]
+
     zipcode_marker = "邮编："
-    zipcode_pos = doc_content.find(zipcode_marker, agency_pos)
+    zipcode_pos = doc_content.find(zipcode_marker, search_start)
     
     if zipcode_pos == -1:
         log_parts.append(f"在 '采购代理机构名称：' 之后未找到 '邮编：' 标记")
-        search_start = agency_pos + len(agency_marker)
-        search_end = min(len(doc_content), agency_pos + 2000)
+        if agency_pos != -1:
+            search_start = agency_pos + len(agency_marker)
+            search_end = min(len(doc_content), agency_pos + 2000)
     else:
         log_parts.append(f"在位置 {zipcode_pos} 找到 '邮编：' 标记")
         zipcode_line_end = zipcode_pos
@@ -527,33 +570,72 @@ def extract_contact_fields(doc_content: str, state: XjcgTenderGraphState, log_pa
     project_zbr_xbr = None
     zbr_xbr_tel = None
     zbr_pinyin = None
+
+    def _strip_wrappers(value: str) -> str:
+        cleaned = value.strip()
+        wrapper_pairs = [("[", "]"), ("［", "］"), ("【", "】"), ("(", ")"), ("（", "）")]
+        for left, right in wrapper_pairs:
+            if cleaned.startswith(left) and cleaned.endswith(right) and len(cleaned) >= 2:
+                cleaned = cleaned[1:-1].strip()
+        cleaned = re.sub(r"[ \t\r\n]+", " ", cleaned).strip()
+        return cleaned
+
+    def _extract_with_pattern(pattern: str, text: str, flags: int = 0) -> Optional[str]:
+        match = re.search(pattern, text, flags)
+        if not match:
+            return None
+        if match.lastindex:
+            return match.group(1)
+        if "value" in match.groupdict():
+            return match.group("value")
+        return None
     
     if state.get("project_zbr_xbr"):
-        contact_pattern = r'联系人[:：]\s*([^\n\r]+)'
-        match = re.search(contact_pattern, search_range)
-        if match:
-            project_zbr_xbr = match.group(1).strip()
-            log_parts.append(f"提取项目负责人/项目经办人: {project_zbr_xbr}")
+        anchor_pattern = (
+            r"邮编[:：]\s*200002\s*(?:\r?\n\s*)*联系人[:：]\s*(.*?)\s*电话[:：]\s*021-63230480\s*转"
+        )
+        extracted = _extract_with_pattern(anchor_pattern, anchor_range, re.DOTALL)
+        if extracted:
+            project_zbr_xbr = _strip_wrappers(extracted)
+            log_parts.append(f"按锚点提取项目负责人/项目经办人: {project_zbr_xbr}")
         else:
-            log_parts.append("在 '采购代理机构名称：' 部分之后未找到 '联系人' 模式")
+            contact_pattern = r"联系人[:：]\s*([^\n\r]+)"
+            extracted = _extract_with_pattern(contact_pattern, search_range)
+            if extracted:
+                project_zbr_xbr = _strip_wrappers(extracted)
+                log_parts.append(f"提取项目负责人/项目经办人: {project_zbr_xbr}")
+            else:
+                log_parts.append("未找到项目负责人/项目经办人可提取内容")
     
     if state.get("zbr_xbr_tel"):
-        tel_pattern = r'电话[:：]\s*[^\n\r]*转\s*([^\n\r]+)'
-        match = re.search(tel_pattern, search_range)
-        if match:
-            zbr_xbr_tel = match.group(1).strip()
-            log_parts.append(f"提取负责人/经办人电话: {zbr_xbr_tel}")
+        anchor_pattern = r"电话[:：]\s*021-63230480\s*转\s*(.*?)\s*传真[:：]"
+        extracted = _extract_with_pattern(anchor_pattern, anchor_range, re.DOTALL)
+        if extracted:
+            zbr_xbr_tel = _strip_wrappers(re.sub(r"\s+", "", extracted))
+            log_parts.append(f"按锚点提取负责人/经办人电话: {zbr_xbr_tel}")
         else:
-            log_parts.append("在 '采购代理机构名称：' 部分之后未找到 '电话...转' 模式")
+            tel_pattern = r"电话[:：]\s*[^\n\r]*转\s*([^\n\r]+)"
+            extracted = _extract_with_pattern(tel_pattern, search_range)
+            if extracted:
+                zbr_xbr_tel = _strip_wrappers(re.sub(r"\s+", "", extracted))
+                log_parts.append(f"提取负责人/经办人电话: {zbr_xbr_tel}")
+            else:
+                log_parts.append("未找到负责人/经办人电话可提取内容")
     
     if state.get("zbr_pinyin"):
-        email_pattern = r'电子邮箱[:：]\s*([^@\n\r]+)@'
-        match = re.search(email_pattern, search_range)
-        if match:
-            zbr_pinyin = match.group(1).strip()
-            log_parts.append(f"提取负责人拼音: {zbr_pinyin}")
+        anchor_pattern = r"电子邮箱[:：]\s*([^\s@\n\r]+)\s*@dongsong-cn\.com"
+        extracted = _extract_with_pattern(anchor_pattern, anchor_range, re.IGNORECASE)
+        if extracted:
+            zbr_pinyin = _strip_wrappers(extracted)
+            log_parts.append(f"按锚点提取负责人拼音: {zbr_pinyin}")
         else:
-            log_parts.append("在 '采购代理机构名称：' 部分之后未找到 '电子邮箱' 模式")
+            email_pattern = r"电子邮箱[:：]\s*([^@\n\r]+)@"
+            extracted = _extract_with_pattern(email_pattern, search_range)
+            if extracted:
+                zbr_pinyin = _strip_wrappers(extracted)
+                log_parts.append(f"提取负责人拼音: {zbr_pinyin}")
+            else:
+                log_parts.append("未找到负责人拼音可提取内容")
     
     return project_zbr_xbr, zbr_xbr_tel, zbr_pinyin
 
@@ -740,6 +822,13 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
                         found_placeholders["service_fee"] = result
                 except Exception as e:
                     log_parts.append(f"提取服务费时出错: {e}")
+
+            try:
+                result = extract_similar_project_performance_date(doc_content, state, log_parts)
+                if result is not None:
+                    found_placeholders["similar_project_performance_date"] = result
+            except Exception as e:
+                log_parts.append(f"提取类似项目业绩日期时出错: {e}")
             
             # 记录查找结果
             if found_placeholders:
@@ -815,6 +904,7 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
             "submit_date",
             "platform",
             "service_fee",
+            "similar_project_performance_date",
         ]
         
         # 根据 placeholder_mapping 生成替换列表
@@ -831,6 +921,10 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
                 if fallback:
                     new_value = fallback
                     log_parts.append("字段 'project_content_v1' 未提供新值，使用 'project_content' 的值作为替换内容")
+            if field_name == "similar_project_performance_date" and not new_value:
+                now = datetime.now()
+                new_value = f"自{now.year}年{now.month:02d}月01日至今"
+                log_parts.append(f"字段 'similar_project_performance_date' 未提供新值，使用默认值: {new_value}")
             if not new_value:
                 log_parts.append(f"字段 '{field_name}' 有占位符 '{old_value}' 但 state 中没有新值，跳过")
                 continue
@@ -899,7 +993,7 @@ if __name__ == "__main__":
     
     # 测试文档路径列表
     test_doc_paths = [
-        "test_word/252030-招标文件-清洁稿【基因测序仪】.doc",
+        "test_word/252030-招标文件-清洁稿【基因测序仪】 - 副本.doc",
     ]
     
     # 循环测试每个文件
@@ -936,6 +1030,7 @@ if __name__ == "__main__":
             "submit_date": "2025年12月12日11:00",
             "platform": "中国采购与招标网（https://www.chinabidding.cn/）",
             "service_fee": "百分之壹伍（1.5%）",
+            "similar_project_performance_date": "自2022年09月01日至今",
         }
         
         try:
