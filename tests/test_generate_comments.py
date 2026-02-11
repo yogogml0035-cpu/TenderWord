@@ -115,7 +115,7 @@ class TestPromptFormatting:
     def test_prompt_formatting_includes_all_parameters(self):
         """测试格式化的提示词包含所有四个参数"""
         import json
-        from nodes.xjcg_word_nodes.xjcg_comment_prompt import COMMENT_USER_PROMPT
+        from nodes.common_word_nodes.comment_prompt import COMMENT_USER_PROMPT
         
         # 准备测试数据
         test_polished_text = "这是润色后的文本内容"
@@ -140,7 +140,7 @@ class TestPromptFormatting:
     def test_prompt_formatting_with_empty_lists(self):
         """测试空列表的提示词格式化"""
         import json
-        from nodes.xjcg_word_nodes.xjcg_comment_prompt import COMMENT_USER_PROMPT
+        from nodes.common_word_nodes.comment_prompt import COMMENT_USER_PROMPT
         
         # 直接测试格式化逻辑
         formatted_prompt = COMMENT_USER_PROMPT.format(
@@ -158,7 +158,7 @@ class TestPromptFormatting:
     def test_prompt_formatting_preserves_chinese_characters(self):
         """测试提示词格式化保留中文字符"""
         import json
-        from nodes.xjcg_word_nodes.xjcg_comment_prompt import COMMENT_USER_PROMPT
+        from nodes.common_word_nodes.comment_prompt import COMMENT_USER_PROMPT
         
         chinese_text = "这是包含中文字符的测试文本：技术参数、招标要求"
         
@@ -178,7 +178,7 @@ class TestPromptFormatting:
     def test_prompt_formatting_with_gngk_tender_type(self):
         """测试 GNGK 招标类型的提示词格式化"""
         import json
-        from nodes.gngk_word_nodes.gngk_comment_prompt import COMMENT_USER_PROMPT
+        from nodes.common_word_nodes.comment_prompt import COMMENT_USER_PROMPT
         
         test_polished_text = "GNGK 招标文本"
         test_comment_plan = [{"content": "GNGK 批注", "scope_text": "GNGK 范围"}]
@@ -592,4 +592,3 @@ class TestStateReturnAndLogging:
                 assert "毫秒" in output
             finally:
                 sys.stdout = sys.__stdout__
-

@@ -18,20 +18,15 @@ from util.llm_stream_utils import (
     stream_llm_completion,
 )
 
-# 导入不同招标类型的 Prompt
-from nodes.xjcg_word_nodes.xjcg_prompt import (
-    POLISH_SYSTEM_PROMPT as XJCG_SYSTEM_PROMPT,
-    POLISH_USER_PROMPT as XJCG_USER_PROMPT
-)
-from nodes.gngk_word_nodes.gngk_prompt import (
-    POLISH_SYSTEM_PROMPT as GNGK_SYSTEM_PROMPT,
-    POLISH_USER_PROMPT as GNGK_USER_PROMPT
+from nodes.common_word_nodes.generate_prompt import (
+    POLISH_SYSTEM_PROMPT,
+    POLISH_USER_PROMPT,
 )
 
 # Prompt 注册表：根据 tender_type 选择对应的 prompt
 PROMPT_REGISTRY = {
-    "xjcg": (XJCG_SYSTEM_PROMPT, XJCG_USER_PROMPT),
-    "gngk": (GNGK_SYSTEM_PROMPT, GNGK_USER_PROMPT),
+    "xjcg": (POLISH_SYSTEM_PROMPT, POLISH_USER_PROMPT),
+    "gngk": (POLISH_SYSTEM_PROMPT, POLISH_USER_PROMPT),
 }
    
 

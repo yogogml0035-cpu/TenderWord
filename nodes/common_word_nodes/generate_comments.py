@@ -26,14 +26,9 @@ from util.llm_stream_utils import (
 )
 from nodes.common_word_nodes.generate_polished_text import _sanitize_filename
 
-# 导入不同招标类型的批注生成 Prompt
-from nodes.xjcg_word_nodes.xjcg_comment_prompt import (
-    COMMENT_SYSTEM_PROMPT as XJCG_COMMENT_SYSTEM_PROMPT,
-    COMMENT_USER_PROMPT as XJCG_COMMENT_USER_PROMPT,
-)
-from nodes.gngk_word_nodes.gngk_comment_prompt import (
-    COMMENT_SYSTEM_PROMPT as GNGK_COMMENT_SYSTEM_PROMPT,
-    COMMENT_USER_PROMPT as GNGK_COMMENT_USER_PROMPT,
+from nodes.common_word_nodes.comment_prompt import (
+    COMMENT_SYSTEM_PROMPT,
+    COMMENT_USER_PROMPT,
 )
 
 # 模块级常量
@@ -42,8 +37,8 @@ CHECK_INTERVAL = 3.0  # 心跳检查间隔（秒）
 
 # Prompt 注册表：根据 tender_type 选择对应的 prompt
 PROMPT_REGISTRY = {
-    "xjcg": (XJCG_COMMENT_SYSTEM_PROMPT, XJCG_COMMENT_USER_PROMPT),
-    "gngk": (GNGK_COMMENT_SYSTEM_PROMPT, GNGK_COMMENT_USER_PROMPT),
+    "xjcg": (COMMENT_SYSTEM_PROMPT, COMMENT_USER_PROMPT),
+    "gngk": (COMMENT_SYSTEM_PROMPT, COMMENT_USER_PROMPT),
 }
 
 
