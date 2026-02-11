@@ -4,7 +4,6 @@ import os
 import re
 import time
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime
 import pathlib
 import sys
 
@@ -823,13 +822,6 @@ def get_replacements(state: GngkTenderGraphState, config) -> GngkTenderGraphStat
                 except Exception as e:
                     log_parts.append(f"提取服务费时出错: {e}")
 
-            try:
-                result = extract_similar_project_performance_date(doc_content, state, log_parts)
-                if result is not None:
-                    found_placeholders["similar_project_performance_date"] = result
-            except Exception as e:
-                log_parts.append(f"提取类似项目业绩日期时出错: {e}")
-            
             # 记录查找结果
             if found_placeholders:
                 log_parts.append(f"在文档中找到 {len(found_placeholders)} 个占位符")
@@ -904,7 +896,6 @@ def get_replacements(state: GngkTenderGraphState, config) -> GngkTenderGraphStat
             "submit_date",
             "platform",
             "service_fee",
-            "similar_project_performance_date",
         ]
         
         # 根据 placeholder_mapping 生成替换列表
@@ -921,10 +912,6 @@ def get_replacements(state: GngkTenderGraphState, config) -> GngkTenderGraphStat
                 if fallback:
                     new_value = fallback
                     log_parts.append("字段 'project_content_v1' 未提供新值，使用 'project_content' 的值作为替换内容")
-            if field_name == "similar_project_performance_date" and not new_value:
-                now = datetime.now()
-                new_value = f"自{now.year}年{now.month:02d}月01日至今"
-                log_parts.append(f"字段 'similar_project_performance_date' 未提供新值，使用默认值: {new_value}")
             if not new_value:
                 log_parts.append(f"字段 '{field_name}' 有占位符 '{old_value}' 但 state 中没有新值，跳过")
                 continue
