@@ -28,6 +28,21 @@ UPLOAD_DIR = pathlib.Path("D:/UploadFiles")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _save_uploaded_file(uploaded_file) -> str:
+    file_extension = pathlib.Path(uploaded_file.name).suffix
+    saved_path = UPLOAD_DIR / uploaded_file.name
+    if saved_path.exists():
+        timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+        name_without_ext = saved_path.stem
+        unique_suffix = uuid.uuid4().hex[:8]
+        saved_path = UPLOAD_DIR / f"{name_without_ext}_{timestamp}_{unique_suffix}{file_extension}"
+
+    with open(saved_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+
+    return str(saved_path.resolve())
+
+
 class GngkTenderForm(BaseForm):
     """
     国内公开招标表单类
@@ -64,9 +79,11 @@ class GngkTenderForm(BaseForm):
         """
         st.markdown(
             "1. 输入完整的招标编号（包含招标编号前缀），点击\"获取项目信息\"获取项目信息\n"
-            "2. 上传作为参考的国内公开招标 Word 文件（清洁稿）注意：如果是从.doc转换.docx的文件，请注意勾选保留与WPS文字早期版本的兼容性或勾选保留与Word早期版本的兼容性！否则生成内容会出错\n"
-            "3. 上传包含采购需求参数的 Word 文件\n"
-            "4. 点击\"开始生成\"后等待完成提示，再到对应路径查看 Word 结果或直接下载\n\n"
+            "2. 上传国内公开招标清洁稿 Word 文件\n"
+            "3. （可选）上传国内公开招标送审稿 Word 文件（带批注），系统将提取批注等内容作为参考\n"
+            "4. 上传包含采购需求参数的 Word 文件\n"
+            "5. 点击\"开始生成\"后等待完成提示，再到对应路径查看 Word 结果或直接下载\n"
+            "注意：如果是从.doc转换.docx的文件，请注意勾选保留与WPS文字早期版本的兼容性或勾选保留与Word早期版本的兼容性！否则生成内容会出错\n\n"
         )
         
         # URL 带 tenderno 时由应用层已拉取数据并写入 session，此处仅标记已处理，避免重复请求
@@ -113,10 +130,17 @@ class GngkTenderForm(BaseForm):
         
         # 文件上传表单
         with st.form("tender_doc_form"):
-            uploaded_file = st.file_uploader(
-                "参考 Word 文件（origin_tender_path）",
+            clean_draft_file = st.file_uploader(
+                "清洁稿 Word 文档（clean_draft_path）",
                 type=["doc", "docx"],
-                help="请上传作为参考的 Word 文件（.doc 或 .docx）",
+                help="请上传清洁稿 Word 文件（.doc 或 .docx）",
+                key="gngk_clean_draft_file",
+            )
+            origin_tender_file = st.file_uploader(
+                "送审稿 Word 文档（origin_tender_path，可选）",
+                type=["doc", "docx"],
+                help="若需要生成内容带批注，请上传送审稿 Word 文档（.doc 或 .docx），系统将提取批注内容作为参考",
+                key="gngk_origin_tender_file",
             )
             origin_text_files = st.file_uploader(
                 "技术参数文件（tender_param_paths）",
@@ -142,7 +166,8 @@ class GngkTenderForm(BaseForm):
         # 返回表单数据
         return {
             "tender_no_input": tender_no_input,
-            "uploaded_file": uploaded_file,
+            "clean_draft_file": clean_draft_file,
+            "origin_tender_file": origin_tender_file,
             "origin_text_files": origin_text_files,
             "model_option": model_option,
             "submitted": submitted
@@ -232,8 +257,8 @@ class GngkTenderForm(BaseForm):
         if not form_data.get("submitted"):
             return True, ""
         
-        if not form_data["uploaded_file"]:
-            return False, "请上传 Word 模板文件"
+        if not form_data.get("clean_draft_file"):
+            return False, "请上传清洁稿 Word 文档"
         
         if not form_data["origin_text_files"]:
             return False, "请上传原始技术参数文件"
@@ -260,43 +285,22 @@ class GngkTenderForm(BaseForm):
         Returns:
             包含 graph 初始状态的字典
         """
-        uploaded_file = form_data["uploaded_file"]
+        clean_draft_file = form_data["clean_draft_file"]
+        origin_tender_file = form_data.get("origin_tender_file")
         origin_text_files = form_data["origin_text_files"]
         model_option = form_data["model_option"]
         tender_data = st.session_state.tender_data
         
-        # 保存上传的模板文件到指定目录
-        template_extension = pathlib.Path(uploaded_file.name).suffix
-        saved_reference_path = UPLOAD_DIR / uploaded_file.name
-        
-        # 如果文件已存在，添加时间戳（精确到时分秒）避免覆盖
-        if saved_reference_path.exists():
-            timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
-            name_without_ext = saved_reference_path.stem
-            saved_reference_path = UPLOAD_DIR / f"{name_without_ext}_{timestamp}{template_extension}"
-        
-        # 保存模板文件
-        with open(saved_reference_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+        clean_draft_path = _save_uploaded_file(clean_draft_file)
+        origin_tender_path: str = ""
+        if origin_tender_file:
+            origin_tender_path = _save_uploaded_file(origin_tender_file)
         
         # 保存技术参数文件
         saved_param_paths: list[str] = []
         for origin_text_file in origin_text_files:
-            origin_extension = pathlib.Path(origin_text_file.name).suffix
-            saved_param_path = UPLOAD_DIR / origin_text_file.name
-            
-            if saved_param_path.exists():
-                timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
-                name_without_ext = saved_param_path.stem
-                unique_suffix = uuid.uuid4().hex[:8]
-                saved_param_path = UPLOAD_DIR / f"{name_without_ext}_{timestamp}_{unique_suffix}{origin_extension}"
-            
-            with open(saved_param_path, "wb") as f:
-                f.write(origin_text_file.getbuffer())
-            
-            saved_param_paths.append(str(saved_param_path.resolve()))
+            saved_param_paths.append(_save_uploaded_file(origin_text_file))
         
-        origin_tender_path = str(saved_reference_path.resolve())
         tender_param_paths = saved_param_paths
         
         # 准备初始状态
@@ -306,7 +310,7 @@ class GngkTenderForm(BaseForm):
             # 上传文件路径
             "origin_tender_path": origin_tender_path,
             "tender_param_paths": tender_param_paths,
-            "clean_draft_path": origin_tender_path,
+            "clean_draft_path": clean_draft_path,
             # 固定参数（与 graph.py 中保持一致）
             "insertion_before_text": "第三章 招标内容及要求",
             "insertion_after_text": "第四章 投标文件有关格式",

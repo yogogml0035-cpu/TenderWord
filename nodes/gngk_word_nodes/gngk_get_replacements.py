@@ -13,7 +13,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from states import XjcgTenderGraphState
+from states import GngkTenderGraphState
 from util.word_application_util import (
     create_word_application,
     close_word_application,
@@ -24,7 +24,7 @@ from util.word_constants import wdFindStop
 
 
 # 提取函数：每个字段的查找逻辑
-def extract_project_number(doc_content: str, first_page_header: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_project_number(doc_content: str, first_page_header: str, state: GngkTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从页眉中提取 project_number"""
     if not first_page_header or not state.get("project_number"):
         return None
@@ -45,7 +45,7 @@ def extract_project_number(doc_content: str, first_page_header: str, state: Xjcg
     return None
 
 
-def extract_project_name(doc_content: str, first_page_header: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_project_name(doc_content: str, first_page_header: str, state: GngkTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从页眉中提取 project_name"""
     if not first_page_header or not state.get("project_name"):
         return None
@@ -62,7 +62,7 @@ def extract_project_name(doc_content: str, first_page_header: str, state: XjcgTe
     return None
 
 
-def extract_buyer_name(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_buyer_name(doc_content: str, state: GngkTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从首页正文中提取 buyer_name"""
     if not doc_content or not state.get("buyer_name"):
         return None
@@ -95,7 +95,7 @@ def extract_buyer_name(doc_content: str, state: XjcgTenderGraphState, log_parts:
     return None
 
 
-def extract_project_content(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_project_content(doc_content: str, state: GngkTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从正文中提取 project_content"""
     if not doc_content or not state.get("project_content"):
         return None
@@ -186,7 +186,7 @@ def extract_project_content(doc_content: str, state: XjcgTenderGraphState, log_p
     return None
 
 
-def extract_project_content_v1(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_project_content_v1(doc_content: str, state: GngkTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从正文中提取 project_content（v1）：起始标记为「第二章 投标人须知」，
     内容从「项目名称：」所在段落的下一段开始，到「招标人：」所在行之前结束。
     例如提取「设备名称及数量：电子支气管镜系统/壹套」等。"""
@@ -252,7 +252,7 @@ def extract_project_content_v1(doc_content: str, state: XjcgTenderGraphState, lo
     return None
 
 
-def extract_bzj_rule(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_bzj_rule(doc_content: str, state: GngkTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从正文中提取 bzj_rule"""
     if not doc_content or not state.get("bzj_rule"):
         return None
@@ -292,7 +292,7 @@ def extract_bzj_rule(doc_content: str, state: XjcgTenderGraphState, log_parts: L
         return None
 
 
-def extract_shell_dates(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Tuple[Optional[str], Optional[str]]:
+def extract_shell_dates(doc_content: str, state: GngkTenderGraphState, log_parts: List[str]) -> Tuple[Optional[str], Optional[str]]:
     if not doc_content or (not state.get("shell_start_date") and not state.get("shell_end_date")):
         return None, None
     
@@ -357,7 +357,7 @@ def extract_shell_dates(doc_content: str, state: XjcgTenderGraphState, log_parts
 
 
 
-def extract_submit_date(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_submit_date(doc_content: str, state: GngkTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从正文中提取 submit_date (递交文件时间)"""
     if not doc_content or not state.get("submit_date"):
         return None
@@ -405,7 +405,7 @@ def extract_submit_date(doc_content: str, state: XjcgTenderGraphState, log_parts
     return None
 
 
-def extract_platform(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_platform(doc_content: str, state: GngkTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从正文中提取 platform (发布平台)"""
     if not doc_content or not state.get("platform"):
         return None
@@ -457,7 +457,7 @@ def extract_platform(doc_content: str, state: XjcgTenderGraphState, log_parts: L
     return None
 
 
-def extract_service_fee(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_service_fee(doc_content: str, state: GngkTenderGraphState, log_parts: List[str]) -> Optional[str]:
     """从正文中提取 service_fee (服务费)"""
     if not doc_content or not state.get("service_fee"):
         return None
@@ -502,7 +502,7 @@ def extract_service_fee(doc_content: str, state: XjcgTenderGraphState, log_parts
     return None
 
 
-def extract_similar_project_performance_date(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Optional[str]:
+def extract_similar_project_performance_date(doc_content: str, state: GngkTenderGraphState, log_parts: List[str]) -> Optional[str]:
     if not doc_content:
         return None
 
@@ -527,7 +527,7 @@ def extract_similar_project_performance_date(doc_content: str, state: XjcgTender
     return None
 
 
-def extract_contact_fields(doc_content: str, state: XjcgTenderGraphState, log_parts: List[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def extract_contact_fields(doc_content: str, state: GngkTenderGraphState, log_parts: List[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """从正文中提取 project_zbr_xbr, zbr_xbr_tel, zbr_pinyin"""
     if not doc_content:
         return None, None, None
@@ -640,12 +640,12 @@ def extract_contact_fields(doc_content: str, state: XjcgTenderGraphState, log_pa
     return project_zbr_xbr, zbr_xbr_tel, zbr_pinyin
 
 
-def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
+def get_replacements(state: GngkTenderGraphState, config) -> GngkTenderGraphState:
     """
     在 Word 文档中查找需要替换的占位符，并根据 state 中的字段建立映射关系。
     
     这个节点会：
-    1. 打开 origin_tender_path 的 Word 文档
+    1. 打开 prepared_doc_path 的 Word 文档
     2. 读取文档内容，查找所有可能的占位符
     3. 根据 state 中的字段（project_name, project_number, project_content, bzj_rule, 
        buyer_name, project_zbr_xbr, zbr_xbr_tel, zbr_pinyin）查找对应的占位符
@@ -654,10 +654,10 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
     start_time = time.time()
     print(f"[get_replacements] 开始执行...")
     
-    template_path = state.get("origin_tender_path")
+    template_path = state.get("prepared_doc_path")
     
     if not template_path:
-        raise ValueError("需要 origin_tender_path 来获取替换内容")
+        raise ValueError("需要 prepared_doc_path 来获取替换内容")
     
     # 确保路径是绝对路径（Word COM 对象需要绝对路径）
     import os
@@ -955,7 +955,7 @@ def get_replacements(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
     # 只返回需要更新的键，避免并行执行时的状态冲突
     # 在 LangGraph 中，并行节点应该只返回部分状态更新
     replacement_log = "; ".join(log_parts)
-    new_state = XjcgTenderGraphState(
+    new_state = GngkTenderGraphState(
         placeholder_mapping=found_placeholders,
         replacements=replacements,
         replacement_log=replacement_log
@@ -989,7 +989,7 @@ if __name__ == "__main__":
         sys.path.insert(0, str(ROOT))
     
     # 重新导入必要的模块（从项目根目录直接导入）
-    from states import XjcgTenderGraphState
+    from states import GngkTenderGraphState
     
     # 测试文档路径列表
     test_doc_paths = [
@@ -1014,8 +1014,8 @@ if __name__ == "__main__":
             continue
         
         # 创建测试状态
-        test_state: XjcgTenderGraphState = {
-            "origin_tender_path": str(test_doc_path),
+        test_state: GngkTenderGraphState = {
+            "prepared_doc_path": str(test_doc_path),
             "project_number": "253505",  
             "project_name": "细胞电转仪", 
             "project_content": "项目名称及数量：细胞电转仪   壹套",

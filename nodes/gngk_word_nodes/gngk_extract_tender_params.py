@@ -41,12 +41,12 @@ def extract_tender_params(state, config):
     start_time = time.time()
     print(f"[extract_tender_params] 开始执行...")
     
-    prepared_doc_path = state.get("prepared_doc_path")
+    clean_draft_path = state.get("clean_draft_path")
     before_text = state.get("insertion_before_text")
     after_text = state.get("insertion_after_text")
     
-    if not prepared_doc_path:
-        raise ValueError("需要 prepared_doc_path 来提取 WPS/Word 文档中的内容")
+    if not clean_draft_path:
+        raise ValueError("需要 clean_draft_path（清洁稿）来提取 WPS/Word 文档中的内容")
     
     if not before_text or not after_text:
         # 如果没有提供前后文本，返回空内容
@@ -55,17 +55,17 @@ def extract_tender_params(state, config):
         new_state_dict["tender_params"] = ""
         return new_state_dict
     
-    # 确保路径是绝对路径（WPS/Word COM 对象需要绝对路径）
-    if not os.path.isabs(prepared_doc_path):
-        prepared_doc_path = os.path.abspath(prepared_doc_path)
+    extract_source_path = clean_draft_path
+    if not os.path.isabs(extract_source_path):
+        extract_source_path = os.path.abspath(extract_source_path)
     
     # 检查文件是否存在
-    if not os.path.exists(prepared_doc_path):
-        raise FileNotFoundError(f"未找到准备好的文档: {prepared_doc_path}")
+    if not os.path.exists(extract_source_path):
+        raise FileNotFoundError(f"未找到待提取文档: {extract_source_path}")
     
     # 检查文件是否可读
-    if not os.access(prepared_doc_path, os.R_OK):
-        raise PermissionError(f"无法读取准备好的文档: {prepared_doc_path}")
+    if not os.access(extract_source_path, os.R_OK):
+        raise PermissionError(f"无法读取待提取文档: {extract_source_path}")
     
     def _iter_paragraph_hits(doc, text: str, target_size: float):
         """遍历所有段落，返回所有匹配 text 且字号接近 target_size 的候选。"""
@@ -127,7 +127,7 @@ def extract_tender_params(state, config):
         # 使用统一的工具函数打开文档（带重试机制）
         doc = open_document_with_retry(
             word_app=wps,
-            file_path=prepared_doc_path,
+            file_path=extract_source_path,
             read_only=True,  # 只读模式，只需要提取内容
             node_name="extract_tender_params"
         )

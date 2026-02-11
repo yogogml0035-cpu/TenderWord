@@ -292,6 +292,51 @@ if st.session_state.get("should_enable_downloads", False):
 # 仅通过 URL 的 tenderno 触发一次拉数，用接口返回的 type 决定表单（不再用 URL 传 tender_lx/purchase_method/fund_lx）
 query_params = st.query_params
 tender_no_from_url = query_params.get("tenderno", "")
+if isinstance(tender_no_from_url, list):
+    tender_no_from_url = tender_no_from_url[0] if tender_no_from_url else ""
+
+
+def _query_int(query_params_obj, key: str):
+    raw = query_params_obj.get(key, "")
+    if isinstance(raw, list):
+        raw = raw[0] if raw else ""
+    if raw not in ("", None):
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    for k in query_params_obj.keys():
+        if not isinstance(k, str) or k == key:
+            continue
+        if not k.startswith(key):
+            continue
+        suffix = k[len(key) :]
+        if not suffix.isdigit():
+            continue
+        v = query_params_obj.get(k, "")
+        if isinstance(v, list):
+            v = v[0] if v else ""
+        if v in ("", None):
+            return int(suffix)
+    return None
+
+
+tender_lx_from_url = _query_int(query_params, "tender_lx")
+purchase_method_from_url = _query_int(query_params, "purchase_method")
+fund_lx_from_url = _query_int(query_params, "fund_lx")
+type_from_url = None
+if (
+    tender_lx_from_url is not None
+    and purchase_method_from_url is not None
+    and fund_lx_from_url is not None
+):
+    type_from_url = {
+        "tender_lx": tender_lx_from_url,
+        "purchase_method": purchase_method_from_url,
+        "fund_lx": fund_lx_from_url,
+    }
+matched_from_url_type = match_form_by_type(type_from_url) if type_from_url else None
 url_params_processed = st.session_state.get("url_params_processed", False)
 
 if tender_no_from_url and not url_params_processed:
@@ -304,7 +349,9 @@ if tender_no_from_url and not url_params_processed:
         st.session_state.pre_selected_form_id = matched.form_id if matched else "xjcg_tender"
     except Exception as e:
         st.session_state.auto_fetched_tender_no = ""
-        st.session_state.pre_selected_form_id = "xjcg_tender"
+        st.session_state.pre_selected_form_id = (
+            matched_from_url_type.form_id if matched_from_url_type else "xjcg_tender"
+        )
         st.error(f"自动获取数据失败：{str(e)}")
     st.session_state.url_params_processed = True
     st.rerun()
@@ -315,7 +362,7 @@ if pre_selected and pre_selected in FORM_REGISTRY:
     active_form_config = FORM_REGISTRY[pre_selected]
     # 仅在本轮由 tenderno 选定表单时保留，避免切 tab 后仍被锁定（若后续有 tab 切换可在此重置 pre_selected）
 else:
-    active_form_config = FORM_REGISTRY["xjcg_tender"]
+    active_form_config = matched_from_url_type or FORM_REGISTRY["xjcg_tender"]
 
 # 渲染表单
 tab, = st.tabs([active_form_config.tab_name])

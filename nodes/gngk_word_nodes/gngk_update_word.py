@@ -1215,6 +1215,117 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                     
                     insertion_log_parts.append("步骤5完成：已清理可编辑内容中的空段落与多余换行。")
                     insertion_log_parts.append("内容处理成功。")
+
+                    polished_comments = state.get("polished_comments") or []
+                    if polished_comments:
+                        insertion_log_parts.append("步骤6：根据 polished_comments 插入批注...")
+                        bound_start = int(insertion_bound_start)
+                        bound_end = int(get_insertion_bound_end())
+
+                        def _ranges_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+                            return not (a_end <= b_start or b_end <= a_start)
+
+                        def _has_comment_on_range(target_rng) -> bool:
+                            try:
+                                comments = doc.Comments
+                            except Exception:
+                                return False
+                            try:
+                                count = comments.Count
+                            except Exception:
+                                return False
+                            for i in range(1, count + 1):
+                                try:
+                                    c = comments(i)
+                                except Exception:
+                                    continue
+                                c_rng = None
+                                for attr in ("Scope", "Reference", "Range"):
+                                    try:
+                                        c_rng = getattr(c, attr)
+                                    except Exception:
+                                        c_rng = None
+                                    if c_rng is not None:
+                                        break
+                                if c_rng is None:
+                                    continue
+                                try:
+                                    cs = int(c_rng.Start)
+                                    ce = int(c_rng.End)
+                                    ts = int(target_rng.Start)
+                                    te = int(target_rng.End)
+                                except Exception:
+                                    continue
+                                if _ranges_overlap(cs, ce, ts, te):
+                                    return True
+                            return False
+
+                        last_used_end_by_ref = {}
+                        comments_added = 0
+
+                        for idx, instr in enumerate(polished_comments):
+                            ref_text = (instr.get("reference_text") or "").strip()
+                            comment_text = (instr.get("comment_text") or "").strip()
+                            if not ref_text or not comment_text:
+                                continue
+
+                            search_texts = [ref_text]
+                            if "\n" in ref_text:
+                                search_texts.append(ref_text.replace("\n", "\r"))
+
+                            inserted_here = False
+                            for find_text in search_texts:
+                                cur_start = int(last_used_end_by_ref.get(ref_text, bound_start))
+                                while cur_start < bound_end:
+                                    find_rng = doc.Range(cur_start, bound_end)
+                                    finder = find_rng.Find
+                                    finder.ClearFormatting()
+                                    finder.Text = find_text
+                                    finder.Forward = True
+                                    finder.Wrap = wdFindStop
+                                    finder.MatchCase = False
+                                    finder.MatchWholeWord = False
+
+                                    if not finder.Execute():
+                                        break
+
+                                    try:
+                                        match_end = int(find_rng.End)
+                                    except Exception:
+                                        break
+
+                                    if _has_comment_on_range(find_rng):
+                                        insertion_log_parts.append(
+                                            f"  批注 [{idx + 1}] 位置已存在批注，继续向后查找 reference_text={ref_text[:40]}..."
+                                        )
+                                        cur_start = max(match_end, cur_start + 1)
+                                        continue
+
+                                    try:
+                                        doc.Comments.Add(Range=find_rng.Duplicate, Text=comment_text)
+                                        comments_added += 1
+                                        last_used_end_by_ref[ref_text] = match_end
+                                        insertion_log_parts.append(
+                                            f"  批注 [{idx + 1}] 已添加: reference_text={ref_text[:40]}... -> comment_text={comment_text[:40]}..."
+                                        )
+                                        inserted_here = True
+                                    except Exception as comment_e:
+                                        insertion_log_parts.append(
+                                            f"  批注 [{idx + 1}] 添加失败 (reference_text={ref_text[:40]}...): {comment_e}"
+                                        )
+                                    break
+
+                                if inserted_here:
+                                    break
+
+                            if not inserted_here:
+                                insertion_log_parts.append(
+                                    f"  批注 [{idx + 1}] 未找到可插入的位置或未匹配到引用文本: {ref_text[:50]}..."
+                                )
+
+                        insertion_log_parts.append(f"步骤6完成：成功添加 {comments_added}/{len(polished_comments)} 条批注。")
+                    else:
+                        insertion_log_parts.append("步骤6：无 polished_comments，跳过批注插入。")
             
             doc.Save()
             insertion_log_parts.append("文档已保存。")

@@ -76,6 +76,7 @@ def generate_polished_text(state: XjcgTenderGraphState, config) -> XjcgTenderGra
     # 构建 system prompt 和 user prompt
     system_prompt = system_prompt_template
     user_prompt = user_prompt_template.format(
+        project_info = state.get("project_content", ""),
         tender_params=tender_params,
         origin_tender_params=origin_tender_params,
     )

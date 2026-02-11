@@ -88,6 +88,7 @@ class GngkTenderGraphState(BaseState):
     # 文件路径
     origin_tender_path: str
     tender_param_paths: List[str]
+    clean_draft_path: str
     prepared_doc_path: str
     
     # 内容
