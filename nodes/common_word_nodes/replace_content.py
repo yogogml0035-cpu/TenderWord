@@ -100,7 +100,7 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
     # 获取替换列表
     replacements = state.get("replacements")
     tender_type = state.get("tender_type", "xjcg")
-    enable_erp_comments = tender_type == "gngk"
+    enable_erp_comments = tender_type in ("gngk", "xjcg")
     
     # 如果没有需要替换的内容，直接返回
     if not replacements:
