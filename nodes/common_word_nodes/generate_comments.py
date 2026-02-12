@@ -26,7 +26,7 @@ from util.llm_stream_utils import (
 )
 from nodes.common_word_nodes.generate_polished_text import _sanitize_filename
 
-from nodes.common_word_nodes.comment_prompt import (
+from prompt.comment_prompt import (
     COMMENT_SYSTEM_PROMPT,
     COMMENT_USER_PROMPT,
 )

@@ -676,6 +676,8 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                     if not rows:
                         return None
 
+                    import re
+
                     cols = max(len(r) for r in rows)
                     start_pos = insert_range.End
                     table_range = doc.Range(start_pos, start_pos)
@@ -700,7 +702,9 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                                 
                                 # 在单元格开始位置插入文本
                                 cell_range = cell.Range
-                                cell_range.InsertBefore(val)
+                                cell_text = "" if val is None else str(val)
+                                cell_text = re.sub(r"(?i)<br\s*/?>", "\r", cell_text)
+                                cell_range.InsertBefore(cell_text)
                                 
                                 # 设置格式
                                 cell_range = cell.Range
@@ -711,8 +715,8 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                                 cell_range.ParagraphFormat.LeftIndent = 0
                                 cell_range.ParagraphFormat.FirstLineIndent = 0
                                 cell_range.ParagraphFormat.OutlineLevel = wdOutlineLevelBodyText
-                                # 设置单元格内容居中对齐
-                                cell_range.ParagraphFormat.Alignment = 1  # wdAlignParagraphCenter = 1
+                                # 设置单元格内容左对齐
+                                cell_range.ParagraphFormat.Alignment = 0  # wdAlignParagraphLeft = 0
                                 # 设置单元格垂直居中
                                 cell.VerticalAlignment = 1  # wdCellAlignVerticalCenter = 1
                             except Exception as cell_e:

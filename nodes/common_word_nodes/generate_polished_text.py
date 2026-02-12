@@ -18,7 +18,7 @@ from util.llm_stream_utils import (
     stream_llm_completion,
 )
 
-from nodes.common_word_nodes.generate_prompt import (
+from prompt.generate_prompt import (
     POLISH_SYSTEM_PROMPT,
     POLISH_USER_PROMPT,
 )

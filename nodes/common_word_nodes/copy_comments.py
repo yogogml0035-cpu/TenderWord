@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import bisect
 import pathlib
 import re
 import sys
@@ -120,6 +121,70 @@ def _overlaps(a_start: int, a_end: int, b_start: Optional[int], b_end: Optional[
     return int(a_end) > int(b_start) and int(a_start) < int(b_end)
 
 
+def _normalize_span(start: int, end: int) -> tuple[int, int]:
+    s = int(start)
+    e = int(end)
+    if e <= s:
+        e = s + 1
+    return s, e
+
+
+def _build_sorted_comment_spans(doc) -> tuple[list[tuple[int, int]], list[int], list[int]]:
+    spans: list[tuple[int, int]] = []
+    try:
+        for c in doc.Comments:
+            try:
+                scope = c.Scope
+                spans.append(_normalize_span(scope.Start, scope.End))
+            except Exception:
+                continue
+    except Exception:
+        spans = []
+
+    spans.sort(key=lambda x: (x[0], x[1]))
+    starts = [s for s, _ in spans]
+    max_ends: list[int] = []
+    running = -1
+    for _, e in spans:
+        running = max(running, int(e))
+        max_ends.append(running)
+    return spans, starts, max_ends
+
+
+def _comment_span_overlaps(starts: list[int], max_ends: list[int], query_start: int, query_end: int) -> bool:
+    if not starts:
+        return False
+    s, e = _normalize_span(query_start, query_end)
+    idx = bisect.bisect_left(starts, e) - 1
+    if idx < 0:
+        return False
+    return int(max_ends[idx]) > int(s)
+
+
+def _insert_comment_span(
+    spans: list[tuple[int, int]],
+    starts: list[int],
+    max_ends: list[int],
+    new_start: int,
+    new_end: int,
+) -> None:
+    s, e = _normalize_span(new_start, new_end)
+    i = bisect.bisect_left(starts, s)
+    spans.insert(i, (s, e))
+    starts.insert(i, s)
+    if i >= len(max_ends):
+        prev = max_ends[-1] if max_ends else -1
+        max_ends.append(max(prev, e))
+        return
+
+    max_ends.insert(i, 0)
+    prev = max_ends[i - 1] if i > 0 else -1
+    running = prev
+    for k in range(i, len(spans)):
+        running = max(running, spans[k][1])
+        max_ends[k] = running
+
+
 def _build_anchor_from_comment(doc, comment, context_chars: int) -> CommentAnchor:
     scope = comment.Scope.Duplicate
     scope_start = int(scope.Start)
@@ -169,6 +234,16 @@ def _find_best_scope_match(doc, search_range, anchor: CommentAnchor, context_cha
     best_rng = None
     best_score = 0.0
 
+    doc_start = int(doc.Content.Start)
+    doc_end = int(doc.Content.End)
+    window_start = int(search_range.Start)
+    try:
+        window_text = search_range.Text
+        window_len = len(window_text)
+    except Exception:
+        window_text = None
+        window_len = 0
+
     find_rng = search_range.Duplicate
     find_rng.Find.ClearFormatting()
     find_rng.Find.Text = needle
@@ -181,19 +256,30 @@ def _find_best_scope_match(doc, search_range, anchor: CommentAnchor, context_cha
     while find_rng.Find.Execute():
         tries += 1
         candidate = find_rng.Duplicate
-        doc_start = int(doc.Content.Start)
-        doc_end = int(doc.Content.End)
         c_start = int(candidate.Start)
         c_end = int(candidate.End)
 
-        prefix_start = max(doc_start, c_start - context_chars)
-        suffix_end = min(doc_end, c_end + context_chars)
-        cand_prefix = _clean_text(doc.Range(prefix_start, c_start).Text)
-        cand_suffix = _clean_text(doc.Range(c_end, suffix_end).Text)
-        score = (
-            _similarity_norm(anchor.norm_prefix_text, _norm_text(cand_prefix))
-            + _similarity_norm(anchor.norm_suffix_text, _norm_text(cand_suffix))
-        ) / 2.0
+        if window_text is not None:
+            rel_start = max(0, c_start - window_start)
+            rel_end = max(rel_start, c_end - window_start)
+            rel_start = min(rel_start, window_len)
+            rel_end = min(rel_end, window_len)
+
+            prefix_slice = window_text[max(0, rel_start - context_chars) : rel_start]
+            suffix_slice = window_text[rel_end : min(window_len, rel_end + context_chars)]
+            score = (
+                _similarity_norm(anchor.norm_prefix_text, _norm_text(prefix_slice))
+                + _similarity_norm(anchor.norm_suffix_text, _norm_text(suffix_slice))
+            ) / 2.0
+        else:
+            prefix_start = max(doc_start, c_start - context_chars)
+            suffix_end = min(doc_end, c_end + context_chars)
+            cand_prefix = _clean_text(doc.Range(prefix_start, c_start).Text)
+            cand_suffix = _clean_text(doc.Range(c_end, suffix_end).Text)
+            score = (
+                _similarity_norm(anchor.norm_prefix_text, _norm_text(cand_prefix))
+                + _similarity_norm(anchor.norm_suffix_text, _norm_text(cand_suffix))
+            ) / 2.0
         if score > best_score:
             best_score = score
             best_rng = candidate
@@ -407,6 +493,8 @@ def copy_comments(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                 dst_doc, dst_word, before_text, after_text, target_size
             )
 
+        spans, span_starts, span_max_ends = _build_sorted_comment_spans(dst_doc)
+
         for idx, anchor in enumerate(anchors, 1):
             try:
                 best_rng = None
@@ -456,7 +544,25 @@ def copy_comments(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                     )
                     continue
 
+                if _comment_span_overlaps(span_starts, span_max_ends, int(best_rng.Start), int(best_rng.End)):
+                    unmatched.append(
+                        {
+                            "index": idx,
+                            "scope_text": anchor.scope_text,
+                            "comment_text": anchor.comment_text,
+                            "reason": "目标位置已有批注，已跳过",
+                        }
+                    )
+                    continue
+
                 dst_doc.Comments.Add(Range=best_rng.Duplicate, Text=anchor.comment_text)
+                _insert_comment_span(
+                    spans,
+                    span_starts,
+                    span_max_ends,
+                    int(best_rng.Start),
+                    int(best_rng.End),
+                )
                 added += 1
             except Exception as e:
                 unmatched.append(

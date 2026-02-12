@@ -9,7 +9,9 @@ LLM 流式响应工具模块
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import random
 import threading
 import time
 from dataclasses import dataclass, field
@@ -207,6 +209,7 @@ async def stream_llm_completion(
             config=config,
             model_override=model_override,
             extra_params_override=extra_params_override,
+            timeout_seconds=timeout_seconds,
             heartbeat=heartbeat,
             on_chunk=_on_chunk_received
         )
@@ -226,6 +229,7 @@ async def _stream_openai_compatible(
     config: ModelConfig,
     model_override: Optional[str],
     extra_params_override: Optional[dict[str, Any]],
+    timeout_seconds: int,
     heartbeat: HeartbeatMonitor,
     on_chunk: Callable[[str], None],
     prompt: Optional[str] = None,
@@ -234,6 +238,8 @@ async def _stream_openai_compatible(
 ) -> str:
     """OpenAI 兼容接口的通用流式调用实现"""
     from openai import AsyncOpenAI
+    from openai import APIConnectionError, APITimeoutError, InternalServerError, RateLimitError
+    import httpx
     
     api_key = os.getenv(config.api_key_env)
     if not api_key:
@@ -242,6 +248,8 @@ async def _stream_openai_compatible(
     client = AsyncOpenAI(
         api_key=api_key,
         base_url=os.getenv(config.base_url_env),
+        timeout=httpx.Timeout(timeout_seconds, connect=10.0),
+        max_retries=0,
     )
     
     # 构建消息列表
@@ -277,21 +285,49 @@ async def _stream_openai_compatible(
     if config.extra_body:
         create_params["extra_body"] = config.extra_body
     
-    completion = await client.chat.completions.create(**create_params)
-    
-    parts = []
-    async for chunk in completion:
-        # 检查心跳监控器是否检测到超时
-        heartbeat.check_and_raise()
-        # 收到新 chunk，发送心跳
-        heartbeat.beat()
-        
-        if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
-            delta = chunk.choices[0].delta
-            if hasattr(delta, 'content') and delta.content:
-                chunk_text = delta.content
-                parts.append(chunk_text)
-                on_chunk(chunk_text)
-    
-    return "".join(parts)
+    max_attempts = 3
+    last_error: Exception | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        parts: list[str] = []
+        try:
+            completion = await client.chat.completions.create(**create_params)
+
+            async for chunk in completion:
+                heartbeat.check_and_raise()
+                heartbeat.beat()
+
+                if hasattr(chunk, "choices") and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if hasattr(delta, "content") and delta.content:
+                        chunk_text = delta.content
+                        parts.append(chunk_text)
+                        on_chunk(chunk_text)
+
+            return "".join(parts)
+
+        except (httpx.ReadTimeout, APITimeoutError) as e:
+            last_error = e
+            if attempt >= max_attempts:
+                raise LLMTimeoutError(heartbeat.model_name, timeout_seconds) from e
+        except (
+            httpx.RemoteProtocolError,
+            httpx.ReadError,
+            httpx.WriteError,
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            APIConnectionError,
+            InternalServerError,
+            RateLimitError,
+        ) as e:
+            last_error = e
+            if attempt >= max_attempts:
+                raise
+        except Exception as e:
+            last_error = e
+            raise
+
+        await asyncio.sleep(min(2 ** (attempt - 1), 8) + random.random() * 0.25)
+
+    raise last_error or RuntimeError("streaming failed")
 
