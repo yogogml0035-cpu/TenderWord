@@ -11,7 +11,7 @@ import time
 import sys
 
 
-from states import XjcgTenderGraphState
+from states import TenderGraphStateBase
 from util.llm_stream_utils import (
     LLMTimeoutError,
     StreamCallbacks,
@@ -42,7 +42,7 @@ else:
     load_dotenv()
 
 
-def generate_polished_text(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
+def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     start_time = time.perf_counter()
     print("[generate_polished_text] 开始执行...")
     
@@ -181,7 +181,7 @@ def generate_polished_text(state: XjcgTenderGraphState, config) -> XjcgTenderGra
 
     # 只返回需要更新的键，避免并行执行时的状态冲突
     # 在 LangGraph 中，并行节点应该只返回部分状态更新
-    new_state = XjcgTenderGraphState(polished_text=content, generate_polished_done=True)
+    new_state = TenderGraphStateBase(polished_text=content, generate_polished_done=True)
     # 为了日志记录，创建完整状态（仅用于日志）
     full_state_for_log = dict(state)
     full_state_for_log.update({"polished_text": content, "generate_polished_done": True})
@@ -206,7 +206,7 @@ if __name__ == "__main__":
         sys.path.insert(0, str(ROOT))
     
     # 重新导入必要的模块（从项目根目录直接导入）
-    from states import XjcgTenderGraphState
+    from states import TenderGraphStateBase
     # xjcg 的提取节点已更名为 xjcg_extract_tender_params.py，并在包 __init__ 中对外导出
     from nodes.xjcg_word_nodes import extract_tender_params
     from util.word_extraction_utils import extract_text_from_word_file
@@ -243,7 +243,7 @@ if __name__ == "__main__":
         print("第一步: 从参考文档中提取参数")
         print("-" * 80)
         
-        extract_state: XjcgTenderGraphState = {
+        extract_state: TenderGraphStateBase = {
             "prepared_doc_path": str(reference_doc_path),
             "insertion_before_text": "第三章  采购需求",
             "insertion_after_text": "第四章  响应文件有关格式",
@@ -272,7 +272,7 @@ if __name__ == "__main__":
         print("第三步: 生成润色后的文本")
         print("-" * 80)
         
-        polish_state: XjcgTenderGraphState = {
+        polish_state: TenderGraphStateBase = {
             "tender_params": tender_params,
             "origin_tender_params": origin_tender_params,
         }

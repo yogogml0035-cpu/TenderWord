@@ -14,9 +14,81 @@ specific steps through abstract methods.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Tuple
+import pathlib
+import time
+import uuid
+from typing import Any, Dict, Tuple
 
 import streamlit as st
+
+
+UPLOAD_DIR = pathlib.Path("D:/UploadFiles")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def save_uploaded_file(uploaded_file) -> str:
+    file_extension = pathlib.Path(uploaded_file.name).suffix
+    saved_path = UPLOAD_DIR / uploaded_file.name
+    if saved_path.exists():
+        timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+        name_without_ext = saved_path.stem
+        unique_suffix = uuid.uuid4().hex[:8]
+        saved_path = UPLOAD_DIR / f"{name_without_ext}_{timestamp}_{unique_suffix}{file_extension}"
+
+    with open(saved_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+
+    return str(saved_path.resolve())
+
+
+def render_tender_data_display(tender_data: dict):
+    st.markdown("**本次文件生成替换的内容：**")
+    st.markdown(f"- 项目名称替换为：{tender_data['project_name']}")
+    st.markdown(f"- 项目编号替换为：{tender_data['project_number']}")
+
+    project_content = tender_data["project_content"].strip()
+    st.markdown("- 项目内容替换为：")
+    if project_content:
+        if "\n" in project_content:
+            project_content_lines = project_content.split("\n")
+            for line in project_content_lines:
+                if line.strip():
+                    st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {line.strip()}", unsafe_allow_html=True)
+        else:
+            st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {project_content}", unsafe_allow_html=True)
+
+    bzj_rule = tender_data["bzj_rule"].strip()
+    st.markdown("- 保证金规则替换为：")
+    if bzj_rule:
+        if "\n" in bzj_rule:
+            bzj_rule_lines = bzj_rule.split("\n")
+            for line in bzj_rule_lines:
+                if line.strip():
+                    st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {line.strip()}", unsafe_allow_html=True)
+        else:
+            st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {bzj_rule}", unsafe_allow_html=True)
+
+    st.markdown(f"- 采购人名称替换为：{tender_data['buyer_name']}")
+    st.markdown(f"- 项目主办人/协办人替换为：{tender_data['project_zbr_xbr']}")
+    st.markdown(f"- 主办人/协办人电话替换为：{tender_data['zbr_xbr_tel']}")
+    st.markdown(f"- 主办人拼音替换为：{tender_data['zbr_pinyin']}")
+
+    shell_start_date = tender_data.get("shell_start_date", "")
+    shell_end_date = tender_data.get("shell_end_date", "")
+    submit_date = tender_data.get("submit_date", "")
+    platform = tender_data.get("platform", "")
+    service_fee = tender_data.get("service_fee", "")
+
+    if shell_start_date:
+        st.markdown(f"- 售标开始时间替换为：{shell_start_date}")
+    if shell_end_date:
+        st.markdown(f"- 售标结束时间替换为：{shell_end_date}")
+    if submit_date:
+        st.markdown(f"- 递交文件截止时间替换为：{submit_date}")
+    if platform:
+        st.markdown(f"- 发布平台替换为：{platform}")
+    if service_fee:
+        st.markdown(f"- 服务费规则替换为：{service_fee}")
 
 
 class BaseForm(ABC):

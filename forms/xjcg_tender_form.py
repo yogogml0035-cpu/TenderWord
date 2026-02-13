@@ -13,80 +13,13 @@
 from __future__ import annotations
 
 import pathlib
-import time
-import uuid
 from datetime import datetime
 from typing import Dict, Any, Tuple, Optional
 
 import streamlit as st
 
-from forms.base_form import BaseForm
+from forms.base_form import BaseForm, render_tender_data_display, save_uploaded_file
 from util.fetch_tender_data import fetch_tender_data
-
-
-# 定义上传目录
-UPLOAD_DIR = pathlib.Path("D:/UploadFiles")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def render_review_draft_upload() -> Optional[str]:
-    """
-    渲染清洁稿文件上传组件
-    
-    创建一个文件上传组件，允许用户上传清洁稿 Word 文档。
-    系统将自动提取清洁稿内容用于后续处理。
-    
-    功能：
-    - 仅接受 .doc 和 .docx 格式的文件
-    - 清洁稿上传为必填，未上传则无法生成文件
-    - 提供帮助文本说明功能
-    - 验证文件扩展名并显示错误消息
-    - 保存文件到 D:/UploadFiles 目录
-    - 生成带时间戳的唯一文件名
-    
-    Returns:
-        Optional[str]: 如果用户上传了文件并成功保存，返回保存的文件路径；
-                      如果未上传文件或保存失败，返回 None
-    
-    """
-    uploaded_file = st.file_uploader(
-        "上传送清洁稿 Word 文档",
-        type=["doc", "docx"],
-        help="上传清洁稿件 Word 文档",
-        key="clean_draft_file"
-    )
-    
-    # 验证文件扩展名（需求 1.3, 1.4）
-    if uploaded_file is not None:
-        # 提取文件扩展名
-        file_extension = uploaded_file.name.split('.')[-1].lower() if '.' in uploaded_file.name else ''
-        
-        # 验证扩展名是否为 .doc 或 .docx
-        if file_extension not in ['doc', 'docx']:
-            st.error("仅支持 .doc 和 .docx 格式的文件")
-            return None
-        
-        # 确保上传目录存在（需求 1.5, 5.1）
-        upload_dir = pathlib.Path("D:/UploadFiles")
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 生成带时间戳的唯一文件名（需求 1.5）
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_filename = f"{timestamp}_{uploaded_file.name}"
-        file_path = upload_dir / safe_filename
-        
-        # 保存文件到目标目录（需求 1.5）
-        try:
-            with open(file_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            st.success(f"文件已上传: {safe_filename}")
-            return str(file_path)
-        except Exception as e:
-            # 处理保存异常并显示错误消息（需求 5.1）
-            st.error(f"文件保存失败: {str(e)}")
-            return None
-    
-    return None
 
 
 class XjcgTenderForm(BaseForm):
@@ -125,9 +58,9 @@ class XjcgTenderForm(BaseForm):
         """
         st.markdown(
             "1. 输入完整的招标编号（包含招标编号前缀），点击\"获取项目信息\"获取项目信息\n"
-            "2. （可选）上传作为参考的询价采购送审稿 Word 文件（带批注），系统将提取批注等内容作为参考\n"
-            "3. 上传包含采购需求参数的 Word 文件\n"
-            "4. 上传清洁稿 Word 文档（必传），系统将提取内容作为参考，用于后续生成内容\n"
+            "2. 上传清洁稿或送审稿 Word 文档（至少上传 1 个）：两者都上传时优先以清洁稿为范本\n"
+            "3. 若上传了送审稿，系统将走批注链路（get_comments/copy_comments/generate_comments）\n"
+            "4. 上传包含采购需求参数的 Word 文件\n"
             "5. 点击\"开始生成\"后等待完成提示，再到对应路径查看 Word 结果或直接下载\n"
             "注意：如果是从.doc转换.docx的文件，请注意勾选保留与WPS文字早期版本的兼容性或勾选保留与Word早期版本的兼容性！否则生成内容会出错\n\n"
         )
@@ -145,14 +78,14 @@ class XjcgTenderForm(BaseForm):
                 "招标编号",
                 value=default_tender_no,
                 placeholder="请输入招标编号",
-                key="tender_no_input"
+                key="xjcg_tender_no_input"
             )
         with col2:
             st.write("")  # 占位，用于对齐按钮
             st.write("")  # 占位，用于对齐按钮
             fetch_button = st.button(
                 "获取信息",
-                key="fetch_tender_data",
+                key="xjcg_fetch_tender_data",
                 use_container_width=True,
                 disabled=st.session_state.get("is_generating", False)
             )
@@ -172,17 +105,22 @@ class XjcgTenderForm(BaseForm):
         
         # 显示当前使用的数据（只有获取到数据后才显示）
         if st.session_state.get("tender_data") is not None:
-            self._render_tender_data_display()
+            render_tender_data_display(st.session_state.tender_data)
         
         
         # 文件上传表单
-        with st.form("tender_doc_form"):
-
-            clean_draft_path = render_review_draft_upload()
-            uploaded_file = st.file_uploader(
-                "送审稿 Word 文档（origin_tender_path，可选）",
+        with st.form("xjcg_tender_doc_form"):
+            clean_draft_file = st.file_uploader(
+                "清洁稿 Word 文档（clean_draft_path）",
+                type=["doc", "docx"],
+                help="请上传清洁稿 Word 文件（.doc 或 .docx）",
+                key="xjcg_clean_draft_file",
+            )
+            origin_tender_file = st.file_uploader(
+                "送审稿 Word 文档（origin_tender_path）",
                 type=["doc", "docx"],
                 help="若需要生成内容带批注，请上传送审稿 Word 文档（.doc 或 .docx），系统将提取批注内容作为参考",
+                key="xjcg_origin_tender_file",
             )
             origin_text_files = st.file_uploader(
                 "技术参数文件（tender_param_paths）",
@@ -196,7 +134,7 @@ class XjcgTenderForm(BaseForm):
                 "选择生成模型",
                 ["深度求索(DeepSeek)", "通义千问(Qwen)", "豆包(Doubao)"],
                 index=0,
-                key="llm_model_select"
+                key="xjcg_llm_model_select"
             )
             
             submitted = st.form_submit_button(
@@ -208,78 +146,13 @@ class XjcgTenderForm(BaseForm):
         # 返回表单数据
         return {
             "tender_no_input": tender_no_input,
-            "uploaded_file": uploaded_file,
+            "clean_draft_file": clean_draft_file,
+            "origin_tender_file": origin_tender_file,
             "origin_text_files": origin_text_files,
             "model_option": model_option,
             "submitted": submitted,
-            "clean_draft_path": clean_draft_path  # 需求 1.6
         }
-    
-    def _render_tender_data_display(self):
-        """
-        渲染招标数据显示
-        
-        显示从接口获取的招标数据，包括：
-        - 项目名称、编号、内容
-        - 保证金规则
-        - 采购人信息
-        - 主办人/协办人信息
-        - 其他可选字段（售标时间、递交时间、平台、服务费等）
-        """
-        tender_data = st.session_state.tender_data
-        st.markdown("**本次文件生成替换的内容：**")
-        st.markdown(f"- 项目名称替换为：{tender_data['project_name']}")
-        st.markdown(f"- 项目编号替换为：{tender_data['project_number']}")
-        
-        # 格式化显示项目内容
-        project_content = tender_data['project_content'].strip()
-        st.markdown("- 项目内容替换为：")
-        if project_content:
-            # 如果有换行符，按行显示；否则直接显示
-            if '\n' in project_content:
-                project_content_lines = project_content.split('\n')
-                for line in project_content_lines:
-                    if line.strip():
-                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {line.strip()}", unsafe_allow_html=True)
-            else:
-                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {project_content}", unsafe_allow_html=True)
-        
-        # 格式化显示保证金规则
-        bzj_rule = tender_data['bzj_rule'].strip()
-        st.markdown("- 保证金规则替换为：")
-        if bzj_rule:
-            # 如果有换行符，按行显示；否则直接显示
-            if '\n' in bzj_rule:
-                bzj_rule_lines = bzj_rule.split('\n')
-                for line in bzj_rule_lines:
-                    if line.strip():
-                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {line.strip()}", unsafe_allow_html=True)
-            else:
-                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {bzj_rule}", unsafe_allow_html=True)
-        
-        st.markdown(f"- 采购人名称替换为：{tender_data['buyer_name']}")
-        st.markdown(f"- 项目主办人/协办人替换为：{tender_data['project_zbr_xbr']}")
-        st.markdown(f"- 主办人/协办人电话替换为：{tender_data['zbr_xbr_tel']}")
-        st.markdown(f"- 主办人拼音替换为：{tender_data['zbr_pinyin']}")
-        
-        # 显示可选字段
-        shell_start_date = tender_data.get("shell_start_date", "")
-        shell_end_date = tender_data.get("shell_end_date", "")
-        submit_date = tender_data.get("submit_date", "")
-        platform = tender_data.get("platform", "")
-        service_fee = tender_data.get("service_fee", "")
 
-        if shell_start_date:
-            st.markdown(f"- 售标开始时间替换为：{shell_start_date}")
-        if shell_end_date:
-            st.markdown(f"- 售标结束时间替换为：{shell_end_date}")
-        if submit_date:
-            st.markdown(f"- 递交文件截止时间替换为：{submit_date}")
-        if platform:
-            st.markdown(f"- 发布平台替换为：{platform}")
-        if service_fee:
-            st.markdown(f"- 服务费规则替换为：{service_fee}")
-    
     def validate_inputs(self, form_data: Dict[str, Any]) -> Tuple[bool, str]:
         """
         验证输入数据
@@ -296,21 +169,20 @@ class XjcgTenderForm(BaseForm):
         Returns:
             (是否有效, 错误信息) 元组
         """
-        # 只在表单提交时验证
         if not form_data.get("submitted"):
             return True, ""
         
         if not form_data["origin_text_files"]:
             return False, "请上传原始技术参数文件"
         
-        if not form_data.get("clean_draft_path"):
-            return False, "请上传清洁稿 Word 文档"
+        if not form_data.get("clean_draft_file") and not form_data.get("origin_tender_file"):
+            return False, "请至少上传清洁稿或送审稿 Word 文档"
         
         if st.session_state.get("tender_data") is None:
             return False, "请先点击\"获取\"按钮获取招标数据"
         
         return True, ""
-    
+
     def prepare_initial_state(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         准备 graph 的初始状态
@@ -328,58 +200,35 @@ class XjcgTenderForm(BaseForm):
         Returns:
             包含 graph 初始状态的字典
         """
-        uploaded_file = form_data["uploaded_file"]
+        clean_draft_file = form_data.get("clean_draft_file")
+        origin_tender_file = form_data.get("origin_tender_file")
         origin_text_files = form_data["origin_text_files"]
         model_option = form_data["model_option"]
-        clean_draft_path = form_data.get("clean_draft_path")  # 需求 1.6
         tender_data = st.session_state.tender_data
         
-        # 保存上传的模板文件到指定目录（送审稿为可选）
         origin_tender_path: str = ""
-        if uploaded_file:
-            template_extension = pathlib.Path(uploaded_file.name).suffix
-            saved_reference_path = UPLOAD_DIR / uploaded_file.name
-            
-            # 如果文件已存在，添加时间戳（精确到时分秒）避免覆盖
-            if saved_reference_path.exists():
-                timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
-                name_without_ext = saved_reference_path.stem
-                saved_reference_path = UPLOAD_DIR / f"{name_without_ext}_{timestamp}{template_extension}"
-            
-            # 保存模板文件
-            with open(saved_reference_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            origin_tender_path = str(saved_reference_path.resolve())
+        if origin_tender_file:
+            origin_tender_path = save_uploaded_file(origin_tender_file)
+
+        clean_draft_path: str = ""
+        if clean_draft_file:
+            clean_draft_path = save_uploaded_file(clean_draft_file)
         
-        # 保存技术参数文件
+        template_source_path = clean_draft_path or origin_tender_path
+        if not template_source_path:
+            raise ValueError("请至少上传清洁稿或送审稿 Word 文档")
+        
         saved_param_paths: list[str] = []
         for origin_text_file in origin_text_files:
-            origin_extension = pathlib.Path(origin_text_file.name).suffix
-            saved_param_path = UPLOAD_DIR / origin_text_file.name
-            
-            if saved_param_path.exists():
-                timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
-                name_without_ext = saved_param_path.stem
-                unique_suffix = uuid.uuid4().hex[:8]
-                saved_param_path = UPLOAD_DIR / f"{name_without_ext}_{timestamp}_{unique_suffix}{origin_extension}"
-            
-            with open(saved_param_path, "wb") as f:
-                f.write(origin_text_file.getbuffer())
-            
-            saved_param_paths.append(str(saved_param_path.resolve()))
+            saved_param_paths.append(save_uploaded_file(origin_text_file))
         
         tender_param_paths = saved_param_paths
         
-        # 准备初始状态
         initial_state = {
-            # 招标类型标识符
             "tender_type": "xjcg",
-            # 上传文件路径
             "origin_tender_path": origin_tender_path,
             "tender_param_paths": tender_param_paths,
-            # 清洁稿文件路径（需求 1.6）
-            "clean_draft_path": clean_draft_path,
-            # 固定参数（与 graph.py 中保持一致）
+            "clean_draft_path": template_source_path,
             "insertion_before_text": "第三章  采购需求",
             "insertion_after_text": "第四章  响应文件有关格式",
             "project_name": tender_data["project_name"],
@@ -390,7 +239,6 @@ class XjcgTenderForm(BaseForm):
             "project_zbr_xbr": tender_data["project_zbr_xbr"],
             "zbr_xbr_tel": tender_data["zbr_xbr_tel"],
             "zbr_pinyin": tender_data["zbr_pinyin"],
-            # 新增字段
             "shell_start_date": tender_data.get("shell_start_date", ""),
             "shell_end_date": tender_data.get("shell_end_date", ""),
             "submit_date": tender_data.get("submit_date", ""),
@@ -398,15 +246,14 @@ class XjcgTenderForm(BaseForm):
             "service_fee": tender_data.get("service_fee", ""),
         }
         
-        # 保存模型选项到 generation_params（用于后续显示）
         st.session_state.generation_params = {
             **st.session_state.get("generation_params", {}),
             "model_option": model_option,
-            "tender_data": tender_data  # 显式保存一份，防止意外
+            "tender_data": tender_data,
         }
         
         return initial_state
-    
+
     def render(self):
         """
         渲染完整表单
@@ -414,19 +261,46 @@ class XjcgTenderForm(BaseForm):
         覆盖基类的 render() 方法，因为此表单使用 st.form 包装，
         提交按钮在 render_input_fields() 中处理。
         """
-        # 1. 渲染输入字段（包含表单和提交按钮）
         form_data = self.render_input_fields()
         
-        # 2. 只在表单提交时处理
         if form_data.get("submitted") and not st.session_state.get("is_generating", False):
-            # 3. 验证输入
             is_valid, error_msg = self.validate_inputs(form_data)
             if not is_valid:
                 st.error(error_msg)
                 return
             
-            # 4. 准备初始状态
             initial_state = self.prepare_initial_state(form_data)
-            
-            # 5. 触发生成流程
             self.start_generation(initial_state)
+
+
+def render_review_draft_upload() -> Optional[str]:
+    uploaded_file = st.file_uploader(
+        "上传送清洁稿 Word 文档",
+        type=["doc", "docx"],
+        help="上传清洁稿件 Word 文档",
+        key="clean_draft_file",
+    )
+
+    if uploaded_file is None:
+        return None
+
+    file_extension = uploaded_file.name.split(".")[-1].lower() if "." in uploaded_file.name else ""
+    if file_extension not in ["doc", "docx"]:
+        st.error("仅支持 .doc 和 .docx 格式的文件")
+        return None
+
+    upload_dir = pathlib.Path("D:/UploadFiles")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_filename = f"{timestamp}_{uploaded_file.name}"
+    file_path = upload_dir / safe_filename
+
+    try:
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        st.success(f"文件已上传: {safe_filename}")
+        return str(file_path)
+    except Exception as e:
+        st.error(f"文件保存失败: {str(e)}")
+        return None

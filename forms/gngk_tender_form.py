@@ -12,35 +12,12 @@
 
 from __future__ import annotations
 
-import pathlib
-import time
-import uuid
 from typing import Dict, Any, Tuple
 
 import streamlit as st
 
-from forms.base_form import BaseForm
+from forms.base_form import BaseForm, render_tender_data_display, save_uploaded_file
 from util.fetch_tender_data import fetch_tender_data
-
-
-# 定义上传目录
-UPLOAD_DIR = pathlib.Path("D:/UploadFiles")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def _save_uploaded_file(uploaded_file) -> str:
-    file_extension = pathlib.Path(uploaded_file.name).suffix
-    saved_path = UPLOAD_DIR / uploaded_file.name
-    if saved_path.exists():
-        timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
-        name_without_ext = saved_path.stem
-        unique_suffix = uuid.uuid4().hex[:8]
-        saved_path = UPLOAD_DIR / f"{name_without_ext}_{timestamp}_{unique_suffix}{file_extension}"
-
-    with open(saved_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-
-    return str(saved_path.resolve())
 
 
 class GngkTenderForm(BaseForm):
@@ -79,8 +56,8 @@ class GngkTenderForm(BaseForm):
         """
         st.markdown(
             "1. 输入完整的招标编号（包含招标编号前缀），点击\"获取项目信息\"获取项目信息\n"
-            "2. 上传国内公开招标清洁稿 Word 文件\n"
-            "3. （可选）上传国内公开招标送审稿 Word 文件（带批注），系统将提取批注等内容作为参考\n"
+            "2. 上传清洁稿或送审稿 Word 文档（至少上传 1 个）：两者都上传时优先以清洁稿为范本\n"
+            "3. 若上传了送审稿，系统将走批注链路（get_comments/copy_comments/generate_comments）\n"
             "4. 上传包含采购需求参数的 Word 文件\n"
             "5. 点击\"开始生成\"后等待完成提示，再到对应路径查看 Word 结果或直接下载\n"
             "注意：如果是从.doc转换.docx的文件，请注意勾选保留与WPS文字早期版本的兼容性或勾选保留与Word早期版本的兼容性！否则生成内容会出错\n\n"
@@ -99,14 +76,14 @@ class GngkTenderForm(BaseForm):
                 "招标编号",
                 value=default_tender_no,
                 placeholder="请输入招标编号",
-                key="tender_no_input"
+                key="gngk_tender_no_input"
             )
         with col2:
             st.write("")  # 占位，用于对齐按钮
             st.write("")  # 占位，用于对齐按钮
             fetch_button = st.button(
                 "获取信息",
-                key="fetch_tender_data",
+                key="gngk_fetch_tender_data",
                 use_container_width=True,
                 disabled=st.session_state.get("is_generating", False)
             )
@@ -126,10 +103,10 @@ class GngkTenderForm(BaseForm):
         
         # 显示当前使用的数据（只有获取到数据后才显示）
         if st.session_state.get("tender_data") is not None:
-            self._render_tender_data_display()
+            render_tender_data_display(st.session_state.tender_data)
         
         # 文件上传表单
-        with st.form("tender_doc_form"):
+        with st.form("gngk_tender_doc_form"):
             clean_draft_file = st.file_uploader(
                 "清洁稿 Word 文档（clean_draft_path）",
                 type=["doc", "docx"],
@@ -137,7 +114,7 @@ class GngkTenderForm(BaseForm):
                 key="gngk_clean_draft_file",
             )
             origin_tender_file = st.file_uploader(
-                "送审稿 Word 文档（origin_tender_path，可选）",
+                "送审稿 Word 文档（origin_tender_path）",
                 type=["doc", "docx"],
                 help="若需要生成内容带批注，请上传送审稿 Word 文档（.doc 或 .docx），系统将提取批注内容作为参考",
                 key="gngk_origin_tender_file",
@@ -154,7 +131,7 @@ class GngkTenderForm(BaseForm):
                 "选择生成模型",
                 ["深度求索(DeepSeek)", "通义千问(Qwen)", "豆包(Doubao)"],
                 index=0,
-                key="llm_model_select"
+                key="gngk_llm_model_select"
             )
             
             submitted = st.form_submit_button(
@@ -172,71 +149,6 @@ class GngkTenderForm(BaseForm):
             "model_option": model_option,
             "submitted": submitted
         }
-    
-    def _render_tender_data_display(self):
-        """
-        渲染招标数据显示
-        
-        显示从接口获取的招标数据，包括：
-        - 项目名称、编号、内容
-        - 保证金规则
-        - 采购人信息
-        - 主办人/协办人信息
-        - 其他可选字段（售标时间、递交时间、平台、服务费等）
-        """
-        tender_data = st.session_state.tender_data
-        st.markdown("**本次文件生成替换的内容：**")
-        st.markdown(f"- 项目名称替换为：{tender_data['project_name']}")
-        st.markdown(f"- 项目编号替换为：{tender_data['project_number']}")
-        
-        # 格式化显示项目内容
-        project_content = tender_data['project_content'].strip()
-        st.markdown("- 项目内容替换为：")
-        if project_content:
-            # 如果有换行符，按行显示；否则直接显示
-            if '\n' in project_content:
-                project_content_lines = project_content.split('\n')
-                for line in project_content_lines:
-                    if line.strip():
-                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {line.strip()}", unsafe_allow_html=True)
-            else:
-                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {project_content}", unsafe_allow_html=True)
-        
-        # 格式化显示保证金规则
-        bzj_rule = tender_data['bzj_rule'].strip()
-        st.markdown("- 保证金规则替换为：")
-        if bzj_rule:
-            # 如果有换行符，按行显示；否则直接显示
-            if '\n' in bzj_rule:
-                bzj_rule_lines = bzj_rule.split('\n')
-                for line in bzj_rule_lines:
-                    if line.strip():
-                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {line.strip()}", unsafe_allow_html=True)
-            else:
-                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;- {bzj_rule}", unsafe_allow_html=True)
-        
-        st.markdown(f"- 采购人名称替换为：{tender_data['buyer_name']}")
-        st.markdown(f"- 项目主办人/协办人替换为：{tender_data['project_zbr_xbr']}")
-        st.markdown(f"- 主办人/协办人电话替换为：{tender_data['zbr_xbr_tel']}")
-        st.markdown(f"- 主办人拼音替换为：{tender_data['zbr_pinyin']}")
-        
-        # 显示可选字段
-        shell_start_date = tender_data.get("shell_start_date", "")
-        shell_end_date = tender_data.get("shell_end_date", "")
-        submit_date = tender_data.get("submit_date", "")
-        platform = tender_data.get("platform", "")
-        service_fee = tender_data.get("service_fee", "")
-
-        if shell_start_date:
-            st.markdown(f"- 售标开始时间替换为：{shell_start_date}")
-        if shell_end_date:
-            st.markdown(f"- 售标结束时间替换为：{shell_end_date}")
-        if submit_date:
-            st.markdown(f"- 递交文件截止时间替换为：{submit_date}")
-        if platform:
-            st.markdown(f"- 发布平台替换为：{platform}")
-        if service_fee:
-            st.markdown(f"- 服务费规则替换为：{service_fee}")
     
     def validate_inputs(self, form_data: Dict[str, Any]) -> Tuple[bool, str]:
         """
@@ -257,8 +169,8 @@ class GngkTenderForm(BaseForm):
         if not form_data.get("submitted"):
             return True, ""
         
-        if not form_data.get("clean_draft_file"):
-            return False, "请上传清洁稿 Word 文档"
+        if not form_data.get("clean_draft_file") and not form_data.get("origin_tender_file"):
+            return False, "请至少上传清洁稿或送审稿 Word 文档"
         
         if not form_data["origin_text_files"]:
             return False, "请上传原始技术参数文件"
@@ -285,21 +197,28 @@ class GngkTenderForm(BaseForm):
         Returns:
             包含 graph 初始状态的字典
         """
-        clean_draft_file = form_data["clean_draft_file"]
+        clean_draft_file = form_data.get("clean_draft_file")
         origin_tender_file = form_data.get("origin_tender_file")
         origin_text_files = form_data["origin_text_files"]
         model_option = form_data["model_option"]
         tender_data = st.session_state.tender_data
         
-        clean_draft_path = _save_uploaded_file(clean_draft_file)
         origin_tender_path: str = ""
         if origin_tender_file:
-            origin_tender_path = _save_uploaded_file(origin_tender_file)
+            origin_tender_path = save_uploaded_file(origin_tender_file)
+        
+        clean_draft_path: str = ""
+        if clean_draft_file:
+            clean_draft_path = save_uploaded_file(clean_draft_file)
+        
+        template_source_path = clean_draft_path or origin_tender_path
+        if not template_source_path:
+            raise ValueError("请至少上传清洁稿或送审稿 Word 文档")
         
         # 保存技术参数文件
         saved_param_paths: list[str] = []
         for origin_text_file in origin_text_files:
-            saved_param_paths.append(_save_uploaded_file(origin_text_file))
+            saved_param_paths.append(save_uploaded_file(origin_text_file))
         
         tender_param_paths = saved_param_paths
         
@@ -310,7 +229,7 @@ class GngkTenderForm(BaseForm):
             # 上传文件路径
             "origin_tender_path": origin_tender_path,
             "tender_param_paths": tender_param_paths,
-            "clean_draft_path": clean_draft_path,
+            "clean_draft_path": template_source_path,
             # 固定参数（与 graph.py 中保持一致）
             "insertion_before_text": "第三章 招标内容及要求",
             "insertion_after_text": "第四章 投标文件有关格式",

@@ -24,7 +24,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from states import XjcgTenderGraphState
+from states import TenderGraphStateBase
 from util.word_application_util import (
     create_word_application,
     close_word_application,
@@ -385,7 +385,7 @@ def _get_search_range_for_anchor(doc, anchor: CommentAnchor):
         return None
 
 
-def copy_comments(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
+def copy_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     start_time = time.perf_counter()
     print("[copy_comments] 开始执行...", flush=True)
 
@@ -395,16 +395,56 @@ def copy_comments(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     after_text = state.get("insertion_after_text")
 
     if not origin_tender_path or (isinstance(origin_tender_path, str) and origin_tender_path.strip() == ""):
-        return XjcgTenderGraphState(copy_comments_log="未上传送审稿，跳过复制批注", copy_comments_unmatched=[])
+        return TenderGraphStateBase(copy_comments_log="未上传送审稿，跳过复制批注", copy_comments_unmatched=[])
     if not prepared_doc_path:
         raise ValueError("copy_comments 需要 prepared_doc_path")
 
     origin_path = Path(origin_tender_path)
     if not origin_path.exists():
-        return XjcgTenderGraphState(copy_comments_log=f"送审稿不存在，跳过复制批注: {origin_tender_path}", copy_comments_unmatched=[])
+        return TenderGraphStateBase(copy_comments_log=f"送审稿不存在，跳过复制批注: {origin_tender_path}", copy_comments_unmatched=[])
 
     context_chars = int(state.get("copy_comments_context_chars") or DEFAULT_CONTEXT_CHARS)
     target_size = 18.0 if state.get("tender_type") == "xjcg" else 22.0
+
+    dst_check_word = None
+    dst_check_doc = None
+    dst_check_com_initialized = False
+    try:
+        dst_check_word, dst_check_com_initialized = create_word_application(
+            initial_delay=0.2,
+            post_init_delay=0.4,
+            use_existing=False,
+            node_name="copy_comments-check-dst",
+        )
+        dst_check_doc = open_document_with_retry(
+            word_app=dst_check_word,
+            file_path=str(Path(prepared_doc_path).resolve()),
+            read_only=True,
+            node_name="copy_comments-check-dst",
+        )
+        try:
+            existing_comment_count = int(dst_check_doc.Comments.Count)
+        except Exception:
+            try:
+                existing_comment_count = sum(1 for _ in dst_check_doc.Comments)
+            except Exception:
+                existing_comment_count = 0
+        if existing_comment_count > 0:
+            elapsed = time.perf_counter() - start_time
+            print(f"[copy_comments] 清洁稿已存在批注({existing_comment_count})，跳过复制批注，耗时 {elapsed:.2f}s")
+            return TenderGraphStateBase(
+                copy_comments_log=f"清洁稿已存在批注({existing_comment_count})，跳过复制批注，耗时 {elapsed:.2f}s",
+                copy_comments_unmatched=[],
+                copy_comments_added=0,
+            )
+    finally:
+        close_word_application(
+            word_app=dst_check_word,
+            doc=dst_check_doc,
+            com_initialized=dst_check_com_initialized,
+            wait_time=0.0,
+            node_name="copy_comments-check-dst",
+        )
 
     word_app = None
     src_doc = None
@@ -459,7 +499,7 @@ def copy_comments(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
 
     if not anchors:
         elapsed = time.perf_counter() - start_time
-        return XjcgTenderGraphState(
+        return TenderGraphStateBase(
             copy_comments_log=f"送审稿无可复制批注（锚点范围外=0），耗时 {elapsed:.2f}s",
             copy_comments_unmatched=[],
             copy_comments_added=0,
@@ -587,7 +627,7 @@ def copy_comments(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     elapsed = time.perf_counter() - start_time
     log = f"复制批注完成：候选={len(anchors)}，成功={added}，未匹配={len(unmatched)}，耗时 {elapsed:.2f}s"
     print(f"[copy_comments] {log}", flush=True)
-    return XjcgTenderGraphState(
+    return TenderGraphStateBase(
         copy_comments_log=log,
         copy_comments_added=added,
         copy_comments_unmatched=unmatched,

@@ -10,7 +10,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from states import XjcgTenderGraphState
+from states import TenderGraphStateBase
 from util.word_application_util import (
     create_word_application,
     close_word_application,
@@ -58,7 +58,7 @@ def _normalize_replace_text(text: str) -> str:
     return text
 
 
-def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
+def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     """
     在 Word 文档中替换指定的内容，包括页眉页脚等所有部分。
     
@@ -107,7 +107,7 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
         replacement_log = "未指定替换内容，跳过内容替换。"
         new_state_dict = dict(state)
         new_state_dict["replacement_log"] = replacement_log
-        new_state = XjcgTenderGraphState(**new_state_dict)
+        new_state = TenderGraphStateBase(**new_state_dict)
         return new_state
     
     replacement_log_parts = []
@@ -336,7 +336,7 @@ def replace_content(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState
     replacement_log = "\n".join(replacement_log_parts)
     new_state_dict["replacement_log"] = replacement_log
     new_state_dict["replace_content_done"] = True
-    new_state = XjcgTenderGraphState(**new_state_dict)
+    new_state = TenderGraphStateBase(**new_state_dict)
     
     end_time = time.time()
     elapsed_time = end_time - start_time

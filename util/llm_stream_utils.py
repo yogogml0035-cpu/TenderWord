@@ -149,6 +149,20 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
     ),
 }
 
+def ensure_llm_env(model_provider: str) -> None:
+    config = MODEL_CONFIGS.get(model_provider, MODEL_CONFIGS["deepseek"])
+    missing: list[str] = []
+    for env_name in (config.api_key_env, config.base_url_env, config.model_env):
+        value = os.getenv(env_name)
+        if not value or not str(value).strip():
+            missing.append(env_name)
+    if missing:
+        missing_text = ", ".join(missing)
+        raise ValueError(
+            f"{config.display_name} 配置缺失：{missing_text} 未设置。"
+            "请在系统环境变量或项目根目录的 .env 中补齐后重试（可参考 .env.example）。"
+        )
+
 
 async def stream_llm_completion(
     model_provider: str,
@@ -183,6 +197,7 @@ async def stream_llm_completion(
     """
     # 获取模型配置，默认使用 deepseek
     config = MODEL_CONFIGS.get(model_provider, MODEL_CONFIGS["deepseek"])
+    ensure_llm_env(model_provider)
     
     callbacks = callbacks or StreamCallbacks()
     display_name = config.display_name
@@ -242,8 +257,11 @@ async def _stream_openai_compatible(
     import httpx
     
     api_key = os.getenv(config.api_key_env)
-    if not api_key:
-        raise ValueError(f"{config.api_key_env} is not set")
+    if not api_key or not str(api_key).strip():
+        raise ValueError(
+            f"{config.display_name} 配置缺失：{config.api_key_env} 未设置。"
+            "请在系统环境变量或项目根目录的 .env 中补齐后重试（可参考 .env.example）。"
+        )
     
     client = AsyncOpenAI(
         api_key=api_key,
