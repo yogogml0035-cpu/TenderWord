@@ -13,27 +13,13 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Dict, List, Tuple, TypedDict
+from typing import Any, Annotated, Dict, List, Tuple, TypedDict
 from operator import or_
 
-from .base_state import BaseState
+from .base_state import TenderGraphStateBase, CommentInstruction
 
 
-class CommentInstruction(TypedDict):
-    """
-    批注指令类型定义
-    
-    用于描述需要在 Word 文档中添加的批注信息。
-    
-    Attributes:
-        reference_text: 批注引用的文本内容
-        comment_text: 批注的具体内容
-    """
-    reference_text: str
-    comment_text: str
-
-
-class GngkTenderGraphState(BaseState):
+class GngkTenderGraphState(TenderGraphStateBase, total=False):
     """
     国内公开招标文档生成 Graph 的状态定义
     
@@ -85,47 +71,6 @@ class GngkTenderGraphState(BaseState):
         generate_polished_done: generate_polished_text 节点是否完成
         replace_content_done: replace_content 节点是否完成
     """
-    # 文件路径
-    origin_tender_path: str
-    tender_param_paths: List[str]
+
     clean_draft_path: str
-    prepared_doc_path: str
-    
-    # 内容
-    origin_tender_params: str
-    tender_params: str
-    polished_text: str
-    
-    # 替换和插入
-    replacements: List[Tuple[str, str]]
-    placeholder_mapping: Dict[str, str]
-    insertion_before_text: str
-    insertion_after_text: str
-    
-    # 要插入的批注
-    polished_comments: List[CommentInstruction]
-    
-    # 日志
-    insertion_log: str
-    replacement_log: str
-    
-    # 项目信息
-    project_name: str
-    project_number: str
-    project_content: str
     project_content_v1: str
-    bzj_rule: str
-    buyer_name: str
-    project_zbr_xbr: str
-    zbr_xbr_tel: str
-    zbr_pinyin: str
-    shell_start_date: str
-    shell_end_date: str
-    submit_date: str
-    platform: str
-    service_fee: str
-    similar_project_performance_date: str
-    
-    # 执行状态（使用 Annotated 和 or_ reducer 处理并行节点的并发更新）
-    generate_polished_done: Annotated[bool, or_]
-    replace_content_done: Annotated[bool, or_]

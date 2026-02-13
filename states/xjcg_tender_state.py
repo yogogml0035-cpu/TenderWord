@@ -13,26 +13,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple, TypedDict
+from typing import Any, Dict, List
 
-from .base_state import BaseState
-
-
-class CommentInstruction(TypedDict):
-    """
-    批注指令类型定义
-    
-    用于描述需要在 Word 文档中添加的批注信息。
-    
-    Attributes:
-        reference_text: 批注引用的文本内容
-        comment_text: 批注的具体内容
-    """
-    reference_text: str
-    comment_text: str
+from .base_state import TenderGraphStateBase
 
 
-class XjcgTenderGraphState(BaseState):
+class XjcgTenderGraphState(TenderGraphStateBase, total=False):
     """
     询价采购文档生成 Graph 的状态定义
     
@@ -89,51 +75,3 @@ class XjcgTenderGraphState(BaseState):
         generate_polished_done: generate_polished_text 节点是否完成
         replace_content_done: replace_content 节点是否完成
     """
-    # 文件路径
-    origin_tender_path: str
-    tender_param_paths: List[str]
-    prepared_doc_path: str
-    clean_draft_path: Optional[str]  # 清洁稿文件路径
-    
-    # 内容
-    origin_tender_params: str
-    tender_params: str
-    polished_text: str
-    
-    # 替换和插入
-    replacements: List[Tuple[str, str]]
-    placeholder_mapping: Dict[str, str]
-    insertion_before_text: str
-    insertion_after_text: str
-    
-     # 要插入的批注
-    polished_comments: List[CommentInstruction]
-    comment_plan_detail: List[Dict[str, Any]]  # 批注详情（content, scope_text, reference_text）
-    strikethrough_plan: List[Dict[str, Any]]  # 删除线段落（paragraph_text, strikethrough_text, reference_text）
-    non_black_font_plan: List[Dict[str, Any]]  # 非黑色字体（paragraph_text, font_text, reference_text）
-    
-    # 日志
-    insertion_log: str
-    replacement_log: str
-    copy_comments_log: str
-    copy_comments_added: int
-    copy_comments_unmatched: List[Dict[str, Any]]
-    
-    # 项目信息
-    project_name: str
-    project_number: str
-    project_content: str
-    bzj_rule: str
-    buyer_name: str
-    project_zbr_xbr: str
-    zbr_xbr_tel: str
-    zbr_pinyin: str
-    shell_start_date: str
-    shell_end_date: str
-    submit_date: str
-    platform: str
-    service_fee: str
-    
-    # 执行状态
-    generate_polished_done: bool
-    replace_content_done: bool

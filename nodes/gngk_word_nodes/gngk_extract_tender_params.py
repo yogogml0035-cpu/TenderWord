@@ -42,11 +42,13 @@ def extract_tender_params(state, config):
     print(f"[extract_tender_params] 开始执行...")
     
     clean_draft_path = state.get("clean_draft_path")
+    origin_tender_path = state.get("origin_tender_path")
     before_text = state.get("insertion_before_text")
     after_text = state.get("insertion_after_text")
     
-    if not clean_draft_path:
-        raise ValueError("需要 clean_draft_path（清洁稿）来提取 WPS/Word 文档中的内容")
+    extract_source_path = clean_draft_path or origin_tender_path
+    if not extract_source_path or (isinstance(extract_source_path, str) and extract_source_path.strip() == ""):
+        raise ValueError("需要 clean_draft_path（清洁稿）或 origin_tender_path（送审稿）来提取 WPS/Word 文档中的内容")
     
     if not before_text or not after_text:
         # 如果没有提供前后文本，返回空内容
@@ -55,7 +57,6 @@ def extract_tender_params(state, config):
         new_state_dict["tender_params"] = ""
         return new_state_dict
     
-    extract_source_path = clean_draft_path
     if not os.path.isabs(extract_source_path):
         extract_source_path = os.path.abspath(extract_source_path)
     

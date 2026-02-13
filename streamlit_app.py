@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
 import pathlib
 import queue
 import sys
@@ -33,6 +34,7 @@ from graphs import XjcgTenderGraph, GngkTenderGraph, invoke_with_timing_async
 from task.task_queue_manager import get_task_queue, TaskStatus, NODE_DISPLAY_NAMES, NodeName
 from config.form_config import match_form_by_type, FORM_REGISTRY
 from util.fetch_tender_data import fetch_tender_data
+from util.llm_stream_utils import ensure_llm_env
 from forms import create_form
 
 # 图注册表：根据 graph_name 映射到对应的图类
@@ -528,6 +530,15 @@ with tab:
                 "通义千问(Qwen)": "qwen"
             }
             selected_model_id = model_map.get(model_option, "deepseek")
+            try:
+                ensure_llm_env(selected_model_id)
+            except Exception as exc:
+                TASK_QUEUE.complete_task(task_id, result=None, error=str(exc))
+                st.session_state.is_generating = False
+                st.session_state.should_enable_downloads = True
+                st.session_state.current_task_id = None
+                st.error(str(exc))
+                st.stop()
             
             # 注册进度回调
             TASK_QUEUE.register_progress_callback(task_id, progress_tracker.update)

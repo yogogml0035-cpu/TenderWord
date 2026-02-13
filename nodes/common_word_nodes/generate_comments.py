@@ -18,7 +18,7 @@ import time
 import pathlib
 from typing import Callable, Optional
 
-from states import XjcgTenderGraphState
+from states import TenderGraphStateBase
 from util.llm_stream_utils import (
     LLMTimeoutError,
     StreamCallbacks,
@@ -43,9 +43,9 @@ PROMPT_REGISTRY = {
 
 
 def generate_comments(
-    state: XjcgTenderGraphState, 
+    state: TenderGraphStateBase,
     config
-) -> XjcgTenderGraphState:
+) -> TenderGraphStateBase:
     """
     基于润色文本和计划使用 LLM 生成批注指令。
     
@@ -53,7 +53,7 @@ def generate_comments(
     使用 LLM 生成可插入 Word 文档的结构化批注指令。
     
     Args:
-        state (XjcgTenderGraphState): 包含输入字段的当前图状态
+        state (TenderGraphStateBase): 包含输入字段的当前图状态
             - polished_text: 来自 update_word 节点的精炼文本内容
             - comment_plan_detail: 批注详情，包含 content 和 scope_text
             - strikethrough_plan: 包含删除线文本的段落
@@ -65,7 +65,7 @@ def generate_comments(
             - suppress_llm_stdout: 是否抑制控制台输出
         
     Returns:
-        XjcgTenderGraphState: 仅包含 polished_comments 字段的状态字典
+        TenderGraphStateBase: 仅包含 polished_comments 字段的状态字典
             - polished_comments: 生成的批注指令列表，每个元素包含：
                 - reference_text: 文档中附加批注的文本内容
                 - comment_text: 批注的具体内容
@@ -222,13 +222,13 @@ def generate_comments(
     except LLMTimeoutError as e:
         # 捕获 LLMTimeoutError 并记录错误，返回空的 polished_comments 列表
         print(f"\n[generate_comments] LLM 超时错误: {e}")
-        return XjcgTenderGraphState(polished_comments=[])
+        return TenderGraphStateBase(polished_comments=[])
     except Exception as e:
         # 捕获一般异常，记录完整堆栈跟踪，返回空的 polished_comments 列表
         print(f"\n[generate_comments] 发生意外错误: {e}")
         import traceback
         traceback.print_exc()
-        return XjcgTenderGraphState(polished_comments=[])
+        return TenderGraphStateBase(polished_comments=[])
     
     # 实现带错误处理的 JSON 解析
     # 需求引用：4.5, 4.6, 7.3, 7.4, 7.5, 8.4
@@ -300,4 +300,4 @@ def generate_comments(
     # 创建仅包含 polished_comments 字段的新状态字典
     # 确保不修改输入状态对象（不可变性）
     # 需求引用：1.5, 3.1, 3.4, 7.5, 8.5, 8.6, 9.1, 9.2, 9.3, 9.4
-    return XjcgTenderGraphState(polished_comments=polished_comments)
+    return TenderGraphStateBase(polished_comments=polished_comments)

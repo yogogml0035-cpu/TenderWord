@@ -11,14 +11,14 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from states import XjcgTenderGraphState
+from states import TenderGraphStateBase
 from util.word_application_util import (
     create_word_application,
     close_word_application,
 )
 
 
-def prepare_template(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
+def prepare_template(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     start_time = time.time()
     
     
@@ -147,7 +147,7 @@ def prepare_template(state: XjcgTenderGraphState, config) -> XjcgTenderGraphStat
             "prepared_doc_path": working_path,
         }
     )
-    new_state = XjcgTenderGraphState(**new_state_dict)
+    new_state = TenderGraphStateBase(**new_state_dict)
     
     end_time = time.time()
     elapsed_time = end_time - start_time

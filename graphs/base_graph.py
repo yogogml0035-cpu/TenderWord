@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from langgraph.graph import StateGraph
+from langgraph.graph import END, START, StateGraph
 import contextlib
 import time
 import pathlib
@@ -386,6 +386,137 @@ class BaseGraph(ABC):
             Callable: 包装后的节点函数
         """
         return wrap_node_with_progress(node_func, node_name)
+
+
+class StandardTenderWorkflowGraph(BaseGraph):
+    STATE_CLS: Type[TypedDict]
+
+    NODE_PREPARE_TEMPLATE: Callable
+    NODE_GET_COMMENTS: Callable
+    NODE_COPY_COMMENTS: Callable
+    NODE_EXTRACT_TENDER_PARAMS: Callable
+    NODE_DELETE_TENDER_PARAM: Callable
+    NODE_GET_REPLACEMENTS: Callable
+    NODE_REPLACE_CONTENT: Callable
+    NODE_GENERATE_POLISHED_TEXT: Callable
+    NODE_GENERATE_COMMENTS: Callable
+    NODE_UPDATE_WORD: Callable
+
+    def get_state_class(self) -> Type[TypedDict]:
+        return self.STATE_CLS
+
+    def estimate_total_nodes(self, initial_state: dict) -> int:
+        origin_tender_path = initial_state.get("origin_tender_path")
+        has_origin_for_comments = bool(origin_tender_path and str(origin_tender_path).strip())
+        return 13 if has_origin_for_comments else 10
+
+    def build_graph(self) -> StateGraph:
+        state_cls = self.STATE_CLS
+        builder = StateGraph(state_cls)
+
+        node_prepare_template = getattr(type(self), "NODE_PREPARE_TEMPLATE")
+        node_get_comments = getattr(type(self), "NODE_GET_COMMENTS")
+        node_copy_comments = getattr(type(self), "NODE_COPY_COMMENTS")
+        node_extract_tender_params = getattr(type(self), "NODE_EXTRACT_TENDER_PARAMS")
+        node_generate_polished_text = getattr(type(self), "NODE_GENERATE_POLISHED_TEXT")
+        node_generate_comments = getattr(type(self), "NODE_GENERATE_COMMENTS")
+        node_update_word = getattr(type(self), "NODE_UPDATE_WORD")
+
+        def comments_branch_done(state, config):
+            return state
+
+        def comments_ready(state, config):
+            path = state.get("origin_tender_path")
+            has_origin = bool(path and str(path).strip())
+            if has_origin:
+                return {}
+            updates = {
+                "comment_plan_detail": [],
+                "strikethrough_plan": [],
+                "non_black_font_plan": [],
+                "copy_comments_log": "未上传送审稿，跳过批注提取与复制",
+                "copy_comments_added": 0,
+                "copy_comments_unmatched": [],
+            }
+            if "comment_plan" in getattr(state_cls, "__annotations__", {}):
+                updates["comment_plan"] = []
+            return updates
+
+        builder.add_node("prepare_template", self.wrap_node("prepare_template", node_prepare_template))
+        builder.add_node("get_comments", self.wrap_node("get_comments", node_get_comments))
+        builder.add_node("copy_comments", self.wrap_node("copy_comments", node_copy_comments))
+        builder.add_node("extract_tender_params", self.wrap_node("extract_tender_params", node_extract_tender_params))
+        builder.add_node("comments_ready", self.wrap_node("comments_ready", comments_ready))
+        builder.add_node("word_operations_subgraph", self._build_word_operations_subgraph())
+        builder.add_node("generate_polished_text", self.wrap_node("generate_polished_text", node_generate_polished_text))
+        builder.add_node("comments_branch_done", self.wrap_node("comments_branch_done", comments_branch_done))
+        builder.add_node("generate_comments", self.wrap_node("generate_comments", node_generate_comments))
+        builder.add_node("update_word", self.wrap_node("update_word", node_update_word))
+
+        builder.add_edge(START, "prepare_template")
+        builder.add_edge("prepare_template", "extract_tender_params")
+
+        def _has_origin_for_extract_comments(state) -> str:
+            path = state.get("origin_tender_path")
+            return "get_comments" if (path and str(path).strip()) else "comments_ready"
+
+        builder.add_conditional_edges(
+            "prepare_template",
+            _has_origin_for_extract_comments,
+            {
+                "get_comments": "get_comments",
+                "comments_ready": "comments_ready",
+            },
+        )
+        builder.add_edge("get_comments", "copy_comments")
+        builder.add_edge("copy_comments", "comments_ready")
+
+        builder.add_edge(["extract_tender_params", "comments_ready"], "word_operations_subgraph")
+        builder.add_edge(["extract_tender_params", "comments_ready"], "generate_polished_text")
+
+        def _has_origin_for_comments(state) -> str:
+            path = state.get("origin_tender_path")
+            return "generate_comments" if (path and str(path).strip()) else "comments_branch_done"
+
+        builder.add_conditional_edges(
+            "generate_polished_text",
+            _has_origin_for_comments,
+            {
+                "generate_comments": "generate_comments",
+                "comments_branch_done": "comments_branch_done",
+            },
+        )
+        builder.add_edge("generate_comments", "comments_branch_done")
+        builder.add_edge(["word_operations_subgraph", "comments_branch_done"], "update_word")
+        builder.add_edge("update_word", END)
+
+        return builder
+
+    def _build_word_operations_subgraph(self):
+        state_cls = self.STATE_CLS
+        subgraph_builder = StateGraph(state_cls)
+
+        node_delete_tender_param = getattr(type(self), "NODE_DELETE_TENDER_PARAM")
+        node_get_replacements = getattr(type(self), "NODE_GET_REPLACEMENTS")
+        node_replace_content = getattr(type(self), "NODE_REPLACE_CONTENT")
+
+        subgraph_builder.add_node(
+            "delete_tender_param",
+            self.wrap_node("delete_tender_param", node_delete_tender_param),
+        )
+        subgraph_builder.add_node(
+            "get_replacements",
+            self.wrap_node("get_replacements", node_get_replacements),
+        )
+        subgraph_builder.add_node(
+            "replace_content",
+            self.wrap_node("replace_content", node_replace_content),
+        )
+        subgraph_builder.add_edge(START, "delete_tender_param")
+        subgraph_builder.add_edge("delete_tender_param", "get_replacements")
+        subgraph_builder.add_edge("get_replacements", "replace_content")
+        subgraph_builder.add_edge("replace_content", END)
+        return subgraph_builder.compile()
 
 
 # ============================================================================

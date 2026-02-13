@@ -22,7 +22,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from states import XjcgTenderGraphState
+from states import TenderGraphStateBase
 from util.word_document_inspector import WordDocumentInspector, DocumentAnalysisResult
 from util.word_application_util import (
     create_word_application,
@@ -111,13 +111,13 @@ def _get_insertion_range(doc, word_app, before_text: str, after_text: str, targe
     return before_end_pos, after_start_pos
 
 
-def _empty_plan_state(state: XjcgTenderGraphState) -> XjcgTenderGraphState:
+def _empty_plan_state(state: TenderGraphStateBase) -> TenderGraphStateBase:
     """
     未上传送审稿或文件无效时返回的空计划状态。
     
     仅返回本节点负责维护的计划相关字段，避免与并行节点产生状态冲突。
     """
-    return XjcgTenderGraphState(
+    return TenderGraphStateBase(
         comment_plan=[],
         comment_plan_detail=[],
         strikethrough_plan=[],
@@ -156,7 +156,7 @@ def _result_to_state_updates(result: DocumentAnalysisResult) -> dict:
     }
 
 
-def get_comments(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
+def get_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     """
     从送审稿 Word 文档中提取批注、删除线、非黑色字体。
 
@@ -268,4 +268,4 @@ def get_comments(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
     )
     
     # 仅返回由本节点新增或更新的字段，避免在并行执行时覆写其他节点的状态
-    return XjcgTenderGraphState(**updates)
+    return TenderGraphStateBase(**updates)
