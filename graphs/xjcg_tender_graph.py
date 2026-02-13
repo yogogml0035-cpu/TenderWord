@@ -15,7 +15,7 @@
       ↓
     prepare_template
       ↓           ↓                  ↓
-    get_comments  extract_tender_params  copy_comments
+    get_comments (若上传送审稿)  extract_tender_params  copy_comments (若上传送审稿)
       ↓           ↓                  ↓
       └───────────┴──────────────────┴───────────┐
                               ↓         ↓
