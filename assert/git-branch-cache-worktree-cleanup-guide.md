@@ -8,6 +8,10 @@
 > 说明：下文以远端名 `origin`、分支名 `feat-wsq-c`、worktree 路径 `D:\PythonProject\TenderWord-worktrees\feat-wsq-c` 为例。按需替换。
 
 ---
+继续使用当前分支
+git fetch origin
+git merge origin/master
+
 
 ## 1) 清除“分支缓存”（远端跟踪分支/失效引用）
 
