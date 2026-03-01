@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 LLM 流式响应工具模块
 
@@ -7,10 +9,6 @@ LLM 流式响应工具模块
 - qwen (千问)
 - deepseek (深度求索)
 """
-
-from backend.util.log_util.progress_util import progress_logger
-
-from __future__ import annotations
 
 import asyncio
 import os
@@ -22,6 +20,7 @@ from typing import Any, Callable, Optional
 import pathlib
 
 from dotenv import load_dotenv
+from backend.util.log_util.progress_util import progress_logger
 
 _DOTENV_PATH = pathlib.Path(__file__).resolve().parents[2] / ".env"
 if _DOTENV_PATH.exists():

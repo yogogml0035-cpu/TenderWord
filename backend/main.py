@@ -6,27 +6,32 @@
 import json
 import logging
 import sys
-import pathlib
 from datetime import datetime
 from typing import Any, Dict
-
-# Add project root to sys.path for util imports
-PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.config.settings import get_settings, settings
 
+# 导入日志工具
+from backend.util.log_util.progress_util import (
+    progress_logger,
+    start_progress_log_listener,
+    stop_progress_log_listener,
+)
+from backend.util.log_util.log_cleanup import cleanup_logs
+from backend.util.log_util.sse_log_handler import init_sse_log_handler
+
+# 导入 SSE 管理器
+from backend.core.sse_manager import sse_manager
 # 导入 API 路由
 from backend.api.upload import router as upload_router
 from backend.api.tender import router as tender_router
 from backend.api.tasks import router as tasks_router
 from backend.api.stream import router as stream_router
 from backend.api.generate import router as generate_router
+from backend.api.download import router as download_router
 
 # ========================================
 # JSON 日志格式化器
@@ -150,6 +155,7 @@ def create_application() -> FastAPI:
     app.include_router(tasks_router, prefix="/api")
     app.include_router(stream_router, prefix="/api")
     app.include_router(generate_router, prefix="/api")
+    app.include_router(download_router, prefix="/api")
 
     return app
 
@@ -166,6 +172,22 @@ logger = logging.getLogger(__name__)
 async def startup_event() -> None:
     """应用启动时执行."""
     setup_logging()
+    
+    # 启动进度日志监听器
+    start_progress_log_listener()
+    
+    # 初始化 SSE 日志 handler 并添加到 progress_logger
+    sse_handler = init_sse_log_handler(sse_manager)
+    progress_logger.addHandler(sse_handler)
+
+    # 清理过期日志文件（保持总大小在 200MB 以下）
+    try:
+        deleted_count = cleanup_logs('backend/logs', max_total_mb=200)
+        if deleted_count > 0:
+            logger.info(f"Cleaned up {deleted_count} old log files")
+    except Exception as e:
+        logger.warning(f"Failed to cleanup logs: {e}")
+    
     logger.info(
         "Application startup",
         extra={
@@ -174,6 +196,7 @@ async def startup_event() -> None:
             "debug": settings.DEBUG,
             "host": settings.HOST,
             "port": settings.PORT,
+            "upload_dir": settings.UPLOAD_DIR,
         },
     )
 
@@ -181,6 +204,9 @@ async def startup_event() -> None:
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     """应用关闭时执行."""
+    # 停止进度日志监听器
+    stop_progress_log_listener()
+    
     logger.info("Application shutdown")
 
 
