@@ -1,406 +1,401 @@
-# TenderWord Web (Streamlit) 快速上手
+# TenderWord - 招标文档智能处理系统
 
-基于 LangGraph/Streamlit 的招标文档处理系统。采用分层架构设计，支持多表单路由和灵活扩展。
+基于 **Next.js + FastAPI + LangGraph** 的招标文档智能处理系统。采用前后端分离架构，支持多种招标类型文档的智能生成。
 
-## 目录
-- [环境准备](#环境准备)
-- [启动方式](#启动方式)
-- [使用说明](#使用说明界面操作)
-- [架构说明](#架构说明)
+## 🏗️ 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Frontend (Next.js)                     │
+│                     http://localhost:3000                   │
+├─────────────────────────────────────────────────────────────┤
+│  • React 19 + TypeScript                                    │
+│  • Tailwind CSS 4                                           │
+│  • App Router                                               │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            │ HTTP API
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Backend (FastAPI)                      │
+│                     http://localhost:8000                   │
+├─────────────────────────────────────────────────────────────┤
+│  • FastAPI + Uvicorn                                        │
+│  • LangGraph 工作流引擎                                     │
+│  • LLM 集成 (DeepSeek/Qwen/Doubao)                          │
+│  • Word COM 文档处理                                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 📋 目录
+
+- [系统要求](#系统要求)
+- [快速开始](#快速开始)
+- [项目结构](#项目结构)
+- [API 端点](#api-端点)
+- [环境变量配置](#环境变量配置)
+- [部署指南](#部署指南)
+- [使用说明](#使用说明)
 - [开发指南](#开发指南)
 - [常见问题](#常见问题)
 
-## 环境准备
-- Python 3.10+（建议 64 位）
-- Windows 建议在 PowerShell 中运行
-- **Microsoft Word 或 WPS Office**（必需，用于处理 Word 文档）
+## 💻 系统要求
+
+| 组件 | 版本要求 | 说明 |
+|------|---------|------|
+| Windows | 10/11 或 Server 2019+ | 必需，用于 Word COM |
+| Python | 3.10+ | 后端运行环境 |
+| Node.js | 18.x LTS | 前端构建和运行 |
+| Microsoft Word / WPS | 2016+ | 必需，用于处理 Word 文档 |
+
+### 端口分配
+
+| 服务 | 端口 | 用途 |
+|------|------|------|
+| 前端应用 | 3000 | Next.js 应用 |
+| 后端 API | 8000 | FastAPI 服务 |
+
+## 🚀 快速开始
+
+### 1. 克隆项目
 
 ```powershell
-cd D:\PythonProject
+cd D:\CompanyProject
+git clone <repository-url> feat-wsq-h
+cd feat-wsq-h
+```
+
+### 2. 后端部署
+
+```powershell
+cd backend
+
+# 创建虚拟环境
 python -m venv .venv
 .\.venv\Scripts\activate
-pip install -r TenderWord\requirements.txt
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 配置环境变量
+copy ..\.env.example ..\.env
+# 编辑 .env 文件填入配置
+
+# 启动后端服务
+python main.py
+# 或
+uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Word COM 环境检查
-如果换电脑后出现 Word COM 相关错误，请先运行诊断工具：
+### 3. 前端部署
 
 ```powershell
-python diagnose_word.py
+cd frontend
+
+# 安装依赖
+npm install
+
+# 配置环境变量
+copy .env.example .env.local
+# 编辑 .env.local 文件
+
+# 启动开发服务器
+npm run dev
 ```
 
-详细排查指南请参考：[Word COM 问题排查指南](docs/Word_COM_问题排查指南.md)
+### 4. 访问应用
 
-## 启动方式
+- 前端界面: http://localhost:3000
+- API 文档: http://localhost:8000/docs
+- 健康检查: http://localhost:8000/health
+
+## 📁 项目结构
+
+```
+feat-wsq-h/
+├── frontend/                 # Next.js 前端
+│   ├── app/                  # App Router 页面
+│   │   ├── layout.tsx
+│   │   ├── page.tsx          # 主页面
+│   │   └── api/              # API 路由
+│   ├── components/           # React 组件
+│   │   ├── forms/            # 表单组件
+│   │   └── ui/               # UI 组件
+│   ├── lib/                  # 工具函数
+│   ├── hooks/                # React Hooks
+│   ├── store/                # Zustand 状态管理
+│   ├── types/                # TypeScript 类型定义
+│   ├── public/               # 静态资源
+│   ├── .env.example          # 环境变量模板
+│   └── package.json
+│
+├── backend/                  # FastAPI 后端
+│   ├── api/                  # API 路由
+│   │   ├── routes/
+│   │   └── dependencies.py
+│   ├── core/                 # 核心配置
+│   │   ├── config.py
+│   │   └── security.py
+│   ├── graphs/               # LangGraph 工作流
+│   │   ├── base_graph.py
+│   │   └── xjcg_tender_graph.py
+│   ├── nodes/                # Graph 节点
+│   │   ├── common/
+│   │   └── xjcg_word_nodes/
+│   ├── states/               # Graph 状态
+│   ├── services/             # 业务逻辑
+│   ├── models/               # 数据模型
+│   ├── util/                 # 工具函数
+│   ├── main.py               # 应用入口
+│   └── requirements.txt
+│
+├── docs/                     # 文档
+│   ├── deployment.md         # 部署文档
+│   └── Word_COM_问题排查指南.md
+│
+├── .env.example              # 后端环境变量模板
+└── README.md                 # 本文档
+```
+
+## 🔌 API 端点
+
+### 核心 API
+
+| 方法 | 端点 | 描述 | 认证 |
+|------|------|------|------|
+| GET | `/health` | 健康检查 | 否 |
+| POST | `/api/v1/tender/generate` | 生成招标文档 | 否 |
+| POST | `/api/v1/tender/upload` | 上传文件 | 否 |
+| GET | `/api/v1/tender/status/{task_id}` | 查询任务状态 | 否 |
+| GET | `/api/v1/tender/download/{filename}` | 下载生成的文档 | 否 |
+
+### API 示例
+
+**生成招标文档:**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/tender/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tender_no": "ZBGG-2024-001",
+    "tender_type": "xjcg",
+    "template_file": "template.docx",
+    "param_files": ["params.xlsx"],
+    "model": "deepseek"
+  }'
+```
+
+**完整 API 文档:** http://localhost:8000/docs (Swagger UI)
+
+## 🔧 环境变量配置
+
+### 后端环境变量 (.env)
+
+```bash
+# 应用基础配置
+APP_NAME=TenderWord API
+APP_VERSION=1.0.0
+DEBUG=false
+HOST=0.0.0.0
+PORT=8000
+
+# CORS 配置
+CORS_ORIGINS=["http://localhost:3000","http://127.0.0.1:3000"]
+
+# LLM 提供商配置（至少配置一个）
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_API_KEY=your-api-key-here
+DEEPSEEK_MODEL=deepseek-chat
+
+ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+ARK_API_KEY=your-api-key-here
+DOUBAO_MODEL=doubao-seed-1-6-251015
+
+DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+DASHSCOPE_API_KEY=your-api-key-here
+QWEN_MODEL=qwen-plus
+
+# 文件上传配置
+UPLOAD_DIR=D:/UploadFiles
+MAX_UPLOAD_SIZE=104857600
+```
+
+### 前端环境变量 (.env.local)
+
+```bash
+# API 配置
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+## 📚 部署指南
+
+详细的部署说明请参考: [docs/deployment.md](docs/deployment.md)
+
+### Windows 服务部署 (生产环境)
+
+使用 NSSM 将后端配置为 Windows 服务:
+
 ```powershell
-streamlit run streamlit_app.py
+# 创建服务
+cd D:\Tools\nssm\win64
+.\nssm install TenderWord-API
+
+# 配置:
+# Path: D:\CompanyProject\feat-wsq-h\backend\.venv\Scripts\python.exe
+# Startup directory: D:\CompanyProject\feat-wsq-h\backend
+# Arguments: -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+
+# 启动服务
+.\nssm start TenderWord-API
 ```
 
-### 自定义IP和端口
-如果需要自定义服务地址和端口，可以使用以下参数：
-
-```powershell
-# 绑定到所有网络接口，端口8502
-streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8502
-
-# 绑定到特定IP和端口
-streamlit run streamlit_app.py --server.address 192.168.1.100 --server.port 8080
-```
-
-启动后浏览器会自动打开（或按照终端提示访问指定地址）。
-
-## 使用说明（界面操作）
+## 📝 使用说明
 
 ### 基本使用流程
-1. 输入招标编号，点击"获取信息"按钮获取项目信息
-2. 上传参考 Word 文件（模板文件）
-3. 上传技术参数文件（支持多文件上传）
-4. 选择生成模型（DeepSeek/Qwen/Doubao）
-5. 点击"开始生成"，等待完成提示
+
+1. 访问前端页面 http://localhost:3000
+2. 输入招标编号，点击"获取信息"按钮获取项目信息
+3. 上传参考 Word 文件（模板文件）
+4. 上传技术参数文件（支持多文件上传）
+5. 选择生成模型（DeepSeek/Qwen/Doubao）
+6. 点击"开始生成"，等待完成提示
+7. 下载生成的招标文档
 
 ### URL 参数路由
-系统支持通过 URL 参数自动显示对应的表单：
+
+系统支持通过 URL 参数自动显示对应的表单:
 
 ```
-http://localhost:8501/?tender_lx=0&purchase_method=5&fund_lx=0
+http://localhost:3000/?tender_lx=0&purchase_method=5&fund_lx=0&tenderno=ZBGG-2024-001
 ```
 
-**参数说明：**
+**参数说明:**
 - `tender_lx`: 招标类型（0=询价, 1=公开招标, 2=邀请招标）
 - `purchase_method`: 采购方式（5=询价采购, 1=公开招标, 2=邀请招标）
 - `fund_lx`: 资金类型（0=国内, 1=国际）
 - `tenderno`: 招标编号（可选，自动填充并获取数据）
 
-**示例：**
-```
-# 询价采购表单 + 自动获取招标数据
-http://localhost:8501/?tender_lx=0&purchase_method=5&fund_lx=0&tenderno=ZBGG-2024-001
-```
-
-**注意：** URL 参数会完整保留在地址栏中，包括 tenderno 参数。这样便于分享链接和刷新页面。
-
-**说明：**
+**说明:**
 - 上传目录固定在 `D:/UploadFiles`，若同名文件存在会自动在文件名后加时间戳
 - 生成完成后页面会显示输出文件路径，并提供下载按钮
 - 支持多用户并发使用，系统会自动排队处理
 
-## 架构说明
+## 🛠️ 开发指南
 
-### 目录结构
+### 添加新的 Graph
 
-```
-project_root/
-├── graphs/                          # Graph 层
-│   ├── __init__.py                 # 导出所有 graph
-│   ├── base_graph.py               # 基础 Graph 类
-│   └── xjcg_tender_graph.py        # 询价采购 Graph
-│
-├── states/                          # State 层
-│   ├── __init__.py                 # 导出所有 state
-│   ├── base_state.py               # 基础 State 类
-│   └── xjcg_tender_state.py        # 询价采购 State
-│
-├── nodes/                           # Node 层
-│   ├── __init__.py
-│   ├── common/                     # 通用节点（可复用）
-│   │   ├── __init__.py
-│   │   ├── file_operations.py     # 文件操作节点
-│   │   └── llm_operations.py      # LLM 调用节点
-│   └── xjcg_word_nodes/            # 询价采购专用节点
-│       ├── __init__.py
-│       ├── prepare_template.py
-│       ├── extract_tender_params.py
-│       └── ...
-│
-├── forms/                           # 表单层
-│   ├── __init__.py
-│   ├── base_form.py                # 基础表单类
-│   └── xjcg_tender_form.py         # 询价采购表单
-│
-├── config/                          # 配置层
-│   ├── __init__.py
-│   └── form_config.py              # 表单配置和路由
-│
-├── task/                            # 任务管理
-│   ├── __init__.py
-│   └── task_queue_manager.py       # 任务队列管理器
-│
-├── util/                            # 工具模块
-│   ├── __init__.py
-│   ├── fetch_tender_data.py        # 招标数据获取
-│   ├── word_*.py                   # Word 操作工具
-│   └── ...
-│
-├── streamlit_app.py                 # 主应用
-├── requirements.txt                 # 依赖列表
-└── README.md                        # 本文档
-```
+1. 在 `backend/states/` 创建 State 类
+2. 在 `backend/graphs/` 创建 Graph 类
+3. 在 `backend/graphs/__init__.py` 导出 Graph
 
-### 分层职责
-
-#### Graph 层（graphs/）
-- **职责**：定义节点连接关系和执行流程
-- **核心类**：`BaseGraph` - 提供通用功能（锁机制、进度追踪、执行方法）
-- **具体实现**：`XjcgTenderGraph` - 询价采购文档生成工作流
-
-#### State 层（states/）
-- **职责**：定义 graph 执行过程中的状态结构
-- **核心类**：`BaseState` - 定义通用字段（task_id、user_session_id）
-- **具体实现**：`XjcgTenderGraphState` - 询价采购状态定义
-
-#### Node 层（nodes/）
-- **职责**：实现具体的业务逻辑
-- **通用节点**：`nodes/common/` - 可在多个 graph 之间复用
-- **专用节点**：`nodes/xjcg_word_nodes/` - 询价采购专用
-
-#### 表单层（forms/）
-- **职责**：渲染用户输入界面、验证输入、准备初始状态
-- **核心类**：`BaseForm` - 定义表单标准接口
-- **具体实现**：`XjcgTenderForm` - 询价采购表单
-
-#### 配置层（config/）
-- **职责**：管理表单配置和 URL 参数映射
-- **核心类**：`FormConfig` - 表单配置数据类
-- **路由函数**：`match_form_by_url_params()` - URL 参数匹配
-
-### 核心特性
-
-#### 1. 跨进程文件锁
-- 使用 `CrossProcessFileLock` 确保 Word COM 操作的并发安全
-- 支持多用户并发访问，自动排队处理
-- 防止多个进程同时操作 Word 导致冲突
-
-#### 2. 进度追踪
-- 实时追踪每个节点的执行状态
-- 支持任务取消功能
-- 提供友好的进度显示界面
-
-#### 3. 表单路由系统
-- 基于 URL 参数自动显示对应表单
-- 支持多表单配置和动态路由
-- 便于集成到其他系统
-
-#### 4. 任务队列管理
-- 自动管理并发任务
-- 公平调度，按提交顺序执行
-- 支持任务取消和超时处理
-
-## 开发指南
-
-### 如何添加新的 Graph
-
-1. **创建 State 类**（在 `states/` 目录）
-
+示例:
 ```python
-# states/my_new_state.py
-from states.base_state import BaseState
-
-class MyNewGraphState(BaseState):
-    """新 Graph 的状态定义"""
-    # 添加特定字段
-    input_file: str
-    output_file: str
-    result: str
-```
-
-2. **创建 Graph 类**（在 `graphs/` 目录）
-
-```python
-# graphs/my_new_graph.py
+# backend/graphs/my_graph.py
 from graphs.base_graph import BaseGraph
-from states import MyNewGraphState
+from states import MyGraphState
 from langgraph.graph import StateGraph, START, END
 
-class MyNewGraph(BaseGraph):
-    """新 Graph 的实现"""
-    
+class MyGraph(BaseGraph):
     def get_state_class(self):
-        return MyNewGraphState
+        return MyGraphState
     
     def build_graph(self):
-        builder = StateGraph(MyNewGraphState)
-        
-        # 添加节点（使用 self.wrap_node 包装以获得进度追踪）
-        builder.add_node("node1", self.wrap_node("node1", node1_func))
-        builder.add_node("node2", self.wrap_node("node2", node2_func))
-        
-        # 定义边（执行流程）
-        builder.add_edge(START, "node1")
-        builder.add_edge("node1", "node2")
-        builder.add_edge("node2", END)
-        
+        builder = StateGraph(MyGraphState)
+        # ... 添加节点和边
         return builder
 ```
 
-3. **导出 Graph**（在 `graphs/__init__.py`）
+### 添加新的表单
+
+1. 在 `frontend/components/forms/` 创建表单组件
+2. 在 `backend/forms/` 创建对应的表单类
+3. 在 `backend/config/form_config.py` 注册表单配置
+
+### 添加 API 端点
 
 ```python
-from .my_new_graph import MyNewGraph
+# backend/api/routes/my_route.py
+from fastapi import APIRouter
 
-__all__ = [
-    # ... 其他导出
-    "MyNewGraph",
-]
+router = APIRouter(prefix="/api/v1/my-feature")
+
+@router.post("/action")
+async def my_action(data: MySchema):
+    # 实现逻辑
+    return {"result": "success"}
 ```
 
-### 如何添加新的表单
-
-1. **创建表单类**（在 `forms/` 目录）
-
-```python
-# forms/my_new_form.py
-from forms.base_form import BaseForm
-import streamlit as st
-
-class MyNewForm(BaseForm):
-    """新表单的实现"""
-    
-    def render_input_fields(self):
-        """渲染输入字段"""
-        name = st.text_input("名称")
-        file = st.file_uploader("上传文件", type=["txt"])
-        return {"name": name, "file": file}
-    
-    def validate_inputs(self, form_data):
-        """验证输入"""
-        if not form_data["name"]:
-            return False, "请输入名称"
-        if not form_data["file"]:
-            return False, "请上传文件"
-        return True, ""
-    
-    def prepare_initial_state(self, form_data):
-        """准备初始状态"""
-        # 保存文件、准备数据等
-        return {
-            "task_id": str(uuid.uuid4()),
-            "name": form_data["name"],
-            # ... 其他字段
-        }
-```
-
-2. **注册表单配置**（在 `config/form_config.py`）
-
-```python
-FORM_REGISTRY["my_new_form"] = FormConfig(
-    form_id="my_new_form",
-    tab_name="我的新表单",
-    graph_name="my_new_graph",
-    state_name="MyNewGraphState",
-    url_params={"tender_lx": 2, "purchase_method": 2, "fund_lx": 0},
-    description="新表单的描述"
-)
-```
-
-3. **注册表单类**（在 `forms/__init__.py`）
-
-```python
-from .my_new_form import MyNewForm
-
-def create_form(form_config):
-    form_map = {
-        "xjcg_tender": XjcgTenderForm,
-        "my_new_form": MyNewForm,  # 新增
-    }
-    # ...
-```
-
-### 如何添加通用节点
-
-1. **创建节点函数**（在 `nodes/common/` 目录）
-
-```python
-# nodes/common/my_operations.py
-
-def my_operation_node(state, config=None):
-    """
-    通用操作节点
-    
-    Args:
-        state: 当前状态
-        config: 配置参数
-    
-    Returns:
-        更新后的状态
-    """
-    # 实现节点逻辑
-    result = do_something(state["input"])
-    
-    return {
-        **state,
-        "output": result
-    }
-```
-
-2. **导出节点**（在 `nodes/common/__init__.py`）
-
-```python
-from .my_operations import my_operation_node
-
-__all__ = ["my_operation_node"]
-```
-
-3. **在 Graph 中使用**
-
-```python
-from nodes.common import my_operation_node
-
-class MyGraph(BaseGraph):
-    def build_graph(self):
-        builder = StateGraph(MyState)
-        builder.add_node("my_op", self.wrap_node("my_op", my_operation_node))
-        # ...
-```
-
-## 常见问题
+## ❓ 常见问题
 
 ### Word COM 相关问题
-- **错误：无法创建 Word 应用程序实例**
-  - 运行 `python diagnose_word.py` 检查环境
-  - 确保已安装 Microsoft Word 或 WPS Office
-  - 检查 pywin32 是否正确安装：`pip install pywin32`
-  - 详细排查指南：[Word COM 问题排查指南](docs/Word_COM_问题排查指南.md)
 
-### Streamlit 相关问题
-- **警告：missing ScriptRunContext**
-  - 不要直接运行 `python streamlit_app.py`
-  - 请使用 `streamlit run streamlit_app.py` 启动
+**错误：无法创建 Word 应用程序实例**
+- 运行 `python diagnose_word.py` 检查环境
+- 确保已安装 Microsoft Word 或 WPS Office
+- 检查 pywin32 是否正确安装：`pip install pywin32`
+- 详细排查指南：[Word COM 问题排查指南](docs/Word_COM_问题排查指南.md)
+
+### 端口占用问题
+
+```powershell
+# 检查端口占用
+netstat -ano | findstr :8000
+
+# 终止占用进程
+taskkill /PID <进程ID> /F
+```
+
+### 前端无法连接后端
+
+```powershell
+# 检查后端服务是否运行
+Invoke-WebRequest -Uri http://localhost:8000/health
+
+# 检查 CORS 配置
+# 确保 .env 中的 CORS_ORIGINS 包含前端地址 http://localhost:3000
+```
 
 ### 并发相关问题
-- **多用户同时使用时出现冲突**
-  - 系统已实现自动排队机制，无需担心
-  - 如果出现长时间等待，检查是否有任务卡住
-  - 可以在界面上取消卡住的任务
 
-### 表单路由问题
-- **URL 参数不生效**
-  - 检查参数名称是否正确（tender_lx、purchase_method、fund_lx）
-  - 检查参数值是否为有效整数
-  - 确保参数组合在 `FORM_REGISTRY` 中已注册
+- 系统已实现自动排队机制，无需担心
+- 如果出现长时间等待，检查是否有任务卡住
+- 可以在界面上取消卡住的任务
 
-### 开发相关问题
-- **如何调试 Graph 执行**
-  - 查看 `logs/task_execution.log` 日志文件
-  - 在节点函数中添加 print 语句
-  - 使用 Streamlit 界面的实时日志显示
+### 文件上传失败
 
-- **如何测试新添加的 Graph**
-  - 创建测试脚本，直接调用 Graph 的 invoke 方法
-  - 使用 Streamlit 界面进行端到端测试
-  - 检查生成的文件是否符合预期
+```powershell
+# 检查上传目录是否存在
+Test-Path D:\UploadFiles
 
-## 技术栈
+# 确保应用进程对目录有读写权限
+```
 
-- **前端框架**：Streamlit
-- **工作流引擎**：LangGraph
-- **LLM 集成**：支持 DeepSeek、Qwen、Doubao
-- **文档处理**：pywin32（Word COM）
-- **并发控制**：跨进程文件锁 + 任务队列
+## 🛡️ 技术栈
 
-## 许可证
+| 层级 | 技术 |
+|------|------|
+| **前端** | Next.js 16, React 19, TypeScript, Tailwind CSS 4 |
+| **后端** | FastAPI, Python 3.10+, LangGraph |
+| **LLM** | DeepSeek, Qwen, Doubao |
+| **文档处理** | pywin32 (Word COM) |
+| **状态管理** | Zustand |
+| **部署** | Windows Service (NSSM) |
+
+## 📖 相关文档
+
+- [部署文档](docs/deployment.md) - 详细部署指南
+- [Word COM 问题排查指南](docs/Word_COM_问题排查指南.md) - Word COM 环境排查
+- [FastAPI 文档](https://fastapi.tiangolo.com/)
+- [Next.js 文档](https://nextjs.org/docs)
+
+## 📄 许可证
 
 [添加许可证信息]
 
-## 联系方式
+## 📞 联系方式
 
 [添加联系方式]
+
+---
+
+**注意:** 本项目需要 Windows 环境才能完整运行，因为依赖 Microsoft Word COM 组件处理 Word 文档。

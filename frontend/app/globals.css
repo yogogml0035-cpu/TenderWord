@@ -1,0 +1,156 @@
+@import "tailwindcss";
+
+:root {
+  /* Streamlit Style Color Palette */
+  --background: #ffffff;
+  --foreground: #262730;
+  --primary: #ff4b4b;
+  --primary-hover: #e04343;
+  --secondary-bg: #f0f2f6;
+  --border: rgba(49, 51, 63, 0.2);
+  --text-muted: #6e7077;
+  --success: #28a745;
+  --warning: #ffc107;
+  --error: #dc3545;
+  --info: #17a2b8;
+  
+  /* Sidebar */
+  --sidebar-width: 280px;
+  --sidebar-bg: #f0f2f6;
+  
+  /* Spacing */
+  --section-gap: 1.5rem;
+  --card-padding: 1.5rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-secondary-bg: var(--secondary-bg);
+  --color-border: var(--border);
+  --color-text-muted: var(--text-muted);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
+  --color-info: var(--info);
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+  
+  /* Sidebar */
+  --spacing-sidebar: var(--sidebar-width);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    line-height: 1.25;
+  }
+  
+  h1 {
+    font-size: 2rem;
+  }
+  
+  h2 {
+    font-size: 1.5rem;
+  }
+  
+  h3 {
+    font-size: 1.25rem;
+  }
+}
+
+@layer components {
+  /* Streamlit-style Button */
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-4 py-2 bg-[var(--primary)] text-white rounded-md font-medium transition-colors hover:bg-[var(--primary-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-secondary {
+    @apply inline-flex items-center justify-center px-4 py-2 bg-[var(--secondary-bg)] text-[var(--foreground)] rounded-md font-medium transition-colors hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  /* Streamlit-style Card */
+  .st-card {
+    @apply bg-white rounded-lg border border-[var(--border)] p-[var(--card-padding)] shadow-sm;
+  }
+  
+  /* Streamlit-style Input */
+  .st-input {
+    @apply w-full px-3 py-2 bg-white border border-[var(--border)] rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent transition-shadow;
+  }
+  
+  /* Streamlit-style Select */
+  .st-select {
+    @apply w-full px-3 py-2 bg-white border border-[var(--border)] rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent;
+  }
+  
+  /* Streamlit-style Sidebar */
+  .st-sidebar {
+    @apply w-[var(--sidebar-width)] bg-[var(--sidebar-bg)] border-r border-[var(--border)] h-screen fixed left-0 top-0 overflow-y-auto;
+  }
+  
+  /* Main content area */
+  .st-main {
+    @apply ml-[var(--sidebar-width)] min-h-screen;
+  }
+  
+  /* Streamlit-style Container (wide layout) */
+  .st-container {
+    @apply w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+  
+  /* Form section */
+  .st-form-section {
+    @apply space-y-6 max-w-3xl mx-auto;
+  }
+  
+  /* Progress bar */
+  .st-progress-bar {
+    @apply w-full h-2 bg-[var(--secondary-bg)] rounded-full overflow-hidden;
+  }
+  
+  .st-progress-fill {
+    @apply h-full bg-[var(--primary)] transition-all duration-300 ease-out;
+  }
+  
+  /* Status badge */
+  .st-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+  
+  .st-badge-success {
+    @apply bg-green-100 text-green-800;
+  }
+  
+  .st-badge-warning {
+    @apply bg-yellow-100 text-yellow-800;
+  }
+  
+  .st-badge-error {
+    @apply bg-red-100 text-red-800;
+  }
+  
+  .st-badge-info {
+    @apply bg-blue-100 text-blue-800;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
