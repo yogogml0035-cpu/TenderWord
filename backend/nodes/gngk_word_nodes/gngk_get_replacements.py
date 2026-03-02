@@ -13,13 +13,19 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.states import GngkTenderGraphState
-from util.word_util import (
+from backend.util.word_util import (
     create_word_application,
     close_word_application,
     open_document_with_retry,
     unprotect_document,
 )
-from util.word_util import wdFindStop
+from backend.util.word_util import wdFindStop
+
+from backend.nodes.common_word_nodes.get_replacements_core import (
+    run_get_replacements,
+    ExtractorSpec,
+    ReplacementFieldSpec,
+)
 
 
 # 提取函数：每个字段的查找逻辑
@@ -639,328 +645,119 @@ def extract_contact_fields(doc_content: str, state: GngkTenderGraphState, log_pa
     return project_zbr_xbr, zbr_xbr_tel, zbr_pinyin
 
 
+
+# =============================================================================
+# Extractor Configuration
+# =============================================================================
+
+GNGK_EXTRACTORS: List[ExtractorSpec] = [
+    ExtractorSpec(
+        name="project_content",
+        enabled_if=lambda state: state.get("project_content") is not None,
+        extract_callable=extract_project_content,
+    ),
+    ExtractorSpec(
+        name="project_content_v1",
+        enabled_if=lambda state: state.get("project_content") is not None or state.get("project_content_v1") is not None,
+        extract_callable=extract_project_content_v1,
+    ),
+    ExtractorSpec(
+        name="project_number",
+        enabled_if=lambda state: state.get("project_number") is not None,
+        extract_callable=extract_project_number,
+    ),
+    ExtractorSpec(
+        name="project_name",
+        enabled_if=lambda state: state.get("project_name") is not None,
+        extract_callable=extract_project_name,
+    ),
+    ExtractorSpec(
+        name="bzj_rule",
+        enabled_if=lambda state: state.get("bzj_rule") is not None,
+        extract_callable=extract_bzj_rule,
+    ),
+    ExtractorSpec(
+        name="buyer_name",
+        enabled_if=lambda state: state.get("buyer_name") is not None,
+        extract_callable=extract_buyer_name,
+    ),
+    ExtractorSpec(
+        name="contact_fields",
+        enabled_if=lambda state: any([
+            state.get("project_zbr_xbr"),
+            state.get("zbr_xbr_tel"),
+            state.get("zbr_pinyin"),
+        ]),
+        extract_callable=extract_contact_fields,
+        output_field_names=["project_zbr_xbr", "zbr_xbr_tel", "zbr_pinyin"],
+    ),
+    ExtractorSpec(
+        name="shell_dates",
+        enabled_if=lambda state: state.get("shell_start_date") is not None or state.get("shell_end_date") is not None,
+        extract_callable=extract_shell_dates,
+        output_field_names=["shell_start_date", "shell_end_date"],
+    ),
+    ExtractorSpec(
+        name="submit_date",
+        enabled_if=lambda state: state.get("submit_date") is not None,
+        extract_callable=extract_submit_date,
+    ),
+    ExtractorSpec(
+        name="platform",
+        enabled_if=lambda state: state.get("platform") is not None,
+        extract_callable=extract_platform,
+    ),
+    ExtractorSpec(
+        name="service_fee",
+        enabled_if=lambda state: state.get("service_fee") is not None,
+        extract_callable=extract_service_fee,
+    ),
+    ExtractorSpec(
+        name="similar_project_performance_date",
+        enabled_if=lambda state: state.get("similar_project_performance_date") is not None,
+        extract_callable=extract_similar_project_performance_date,
+    ),
+]
+
+
+GNGK_REPLACEMENT_FIELDS: List[ReplacementFieldSpec] = [
+    ReplacementFieldSpec(field_name="project_content"),
+    ReplacementFieldSpec(
+        field_name="project_content_v1",
+        skip_if_equal=True,
+        fallback_fields=["project_content"],
+    ),
+    ReplacementFieldSpec(field_name="project_number"),
+    ReplacementFieldSpec(field_name="project_name"),
+    ReplacementFieldSpec(field_name="bzj_rule"),
+    ReplacementFieldSpec(field_name="buyer_name"),
+    ReplacementFieldSpec(field_name="project_zbr_xbr"),
+    ReplacementFieldSpec(field_name="zbr_xbr_tel"),
+    ReplacementFieldSpec(field_name="zbr_pinyin"),
+    ReplacementFieldSpec(field_name="shell_start_date"),
+    ReplacementFieldSpec(field_name="shell_end_date"),
+    ReplacementFieldSpec(field_name="submit_date"),
+    ReplacementFieldSpec(field_name="platform"),
+    ReplacementFieldSpec(field_name="service_fee"),
+    ReplacementFieldSpec(field_name="similar_project_performance_date"),
+]
+
+
+# =============================================================================
+# Main Function (Thin Wrapper)
+# =============================================================================
+
+
 def get_replacements(state: GngkTenderGraphState, config) -> GngkTenderGraphState:
     """
-    在 Word 文档中查找需要替换的占位符，并根据 state 中的字段建立映射关系。
-    
-    这个节点会：
-    1. 打开 prepared_doc_path 的 Word 文档
-    2. 读取文档内容，查找所有可能的占位符
-    3. 根据 state 中的字段（project_name, project_number, project_content, bzj_rule, 
-       buyer_name, project_zbr_xbr, zbr_xbr_tel, zbr_pinyin）查找对应的占位符
-    4. 将找到的占位符信息保存到 state 中，并根据 placeholder_mapping 生成替换列表
+    Thin wrapper that calls run_get_replacements core function.
     """
-    start_time = time.time()
-    print(f"[get_replacements] 开始执行...")
-    
-    template_path = state.get("prepared_doc_path")
-    
-    if not template_path:
-        raise ValueError("需要 prepared_doc_path 来获取替换内容")
-    
-    # 确保路径是绝对路径（Word COM 对象需要绝对路径）
-    import os
-    if not os.path.isabs(template_path):
-        template_path = os.path.abspath(template_path)
-    
-    # 检查文件是否存在
-    if not os.path.exists(template_path):
-        raise FileNotFoundError(f"未找到模板文档: {template_path}")
-    
-    # 检查文件是否可读
-    if not os.access(template_path, os.R_OK):
-        raise PermissionError(f"无法读取模板文档: {template_path}")
-    
-    found_placeholders: Dict[str, str] = {}  # {field_name: found_placeholder}
-    log_parts = []
-    word = None
-    doc = None
-    com_initialized = False
-    
-    try:
-        # 使用统一的工具函数创建 Word 应用程序
-        # 在并发环境下使用独立实例，避免多用户冲突
-        word, com_initialized = create_word_application(
-            initial_delay=1.0,  # 创建前等待，让之前的实例有时间完全关闭
-            post_init_delay=0.5,  # 给 Word 一点时间完成初始化
-            use_existing=False,  # 并发环境下必须使用独立实例
-            verify=True,
-            node_name="get_replacements"
-        )
-        log_parts.append("成功创建/获取 Word 实例")
-        
-        try:
-            # 使用统一的工具函数打开文档（带重试机制）
-            doc = open_document_with_retry(
-                word_app=word,
-                file_path=template_path,
-                read_only=True,
-                node_name="get_replacements"
-            )
-            log_parts.append(f"已打开: {template_path}")
-            
-            # 使用统一的工具函数取消文档保护
-            if unprotect_document(doc, node_name="get_replacements"):
-                log_parts.append("文档已取消保护")
-            
-            # 读取文档全文内容用于分析
-            doc_content = doc.Content.Text
-            log_parts.append(f"文档内容长度: {len(doc_content)} 个字符")
-            
-            # 提取首页页眉内容
-            try:
-                # 获取第一页的页眉（wdHeaderFooterPrimary = 1）
-                first_page_header = doc.Sections(1).Headers(1).Range.Text
-            except Exception as e:
-                log_parts.append(f"读取页眉时出错: {e}")
-                first_page_header = ""
-            
-            # 按顺序同步执行各个字段的查找
-            # 注意：contact_fields 函数返回三个值，需要特殊处理
-            
-            # 提取 project_content
-            if state.get("project_content"):
-                try:
-                    result = extract_project_content(doc_content, state, log_parts)
-                    if result is not None:
-                        found_placeholders["project_content"] = result
-                except Exception as e:
-                    log_parts.append(f"提取项目内容时出错: {e}")
-
-            # 提取 project_content_v1（第二章 项目名称下一段的「设备名称及数量：...」）
-            if state.get("project_content") or state.get("project_content_v1"):
-                try:
-                    result = extract_project_content_v1(doc_content, state, log_parts)
-                    if result is not None:
-                        found_placeholders["project_content_v1"] = result
-                except Exception as e:
-                    log_parts.append(f"提取项目内容(v1)时出错: {e}")
-
-            # 提取 project_number
-            if state.get("project_number"):
-                try:
-                    result = extract_project_number(doc_content, first_page_header, state, log_parts)
-                    if result is not None:
-                        found_placeholders["project_number"] = result
-                except Exception as e:
-                    log_parts.append(f"提取项目编号时出错: {e}")
-            
-            # 提取 project_name
-            if state.get("project_name"):
-                try:
-                    result = extract_project_name(doc_content, first_page_header, state, log_parts)
-                    if result is not None:
-                        found_placeholders["project_name"] = result
-                except Exception as e:
-                    log_parts.append(f"提取项目名称时出错: {e}")
-            
-            # 提取 buyer_name
-            if state.get("buyer_name"):
-                try:
-                    result = extract_buyer_name(doc_content, state, log_parts)
-                    if result is not None:
-                        found_placeholders["buyer_name"] = result
-                except Exception as e:
-                    log_parts.append(f"提取采购人名称时出错: {e}")
-            
-            
-            # 提取 bzj_rule
-            if state.get("bzj_rule"):
-                try:
-                    result = extract_bzj_rule(doc_content, state, log_parts)
-                    if result is not None:
-                        found_placeholders["bzj_rule"] = result
-                except Exception as e:
-                    log_parts.append(f"提取保证金规则时出错: {e}")
-            
-            if state.get("project_zbr_xbr") or state.get("zbr_xbr_tel") or state.get("zbr_pinyin"):
-                try:
-                    project_zbr_xbr, zbr_xbr_tel, zbr_pinyin = extract_contact_fields(doc_content, state, log_parts)
-                    if project_zbr_xbr:
-                        found_placeholders["project_zbr_xbr"] = project_zbr_xbr
-                    if zbr_xbr_tel:
-                        found_placeholders["zbr_xbr_tel"] = zbr_xbr_tel
-                    if zbr_pinyin:
-                        found_placeholders["zbr_pinyin"] = zbr_pinyin
-                except Exception as e:
-                    log_parts.append(f"提取联系字段时出错: {e}")
-            
-            if state.get("shell_start_date") or state.get("shell_end_date"):
-                try:
-                    shell_start_date, shell_end_date = extract_shell_dates(doc_content, state, log_parts)
-                    if shell_start_date:
-                        found_placeholders["shell_start_date"] = shell_start_date
-                    if shell_end_date:
-                        found_placeholders["shell_end_date"] = shell_end_date
-                except Exception as e:
-                    log_parts.append(f"提取售标时间时出错: {e}")
-            
-            # 提取 submit_date
-            if state.get("submit_date"):
-                try:
-                    result = extract_submit_date(doc_content, state, log_parts)
-                    if result is not None:
-                        found_placeholders["submit_date"] = result
-                except Exception as e:
-                    log_parts.append(f"提取递交文件时间时出错: {e}")
-            
-            # 提取 platform
-            if state.get("platform"):
-                try:
-                    result = extract_platform(doc_content, state, log_parts)
-                    if result is not None:
-                        found_placeholders["platform"] = result
-                except Exception as e:
-                    log_parts.append(f"提取发布平台时出错: {e}")
-            
-            # 提取 service_fee
-            if state.get("service_fee"):
-                try:
-                    result = extract_service_fee(doc_content, state, log_parts)
-                    if result is not None:
-                        found_placeholders["service_fee"] = result
-                except Exception as e:
-                    log_parts.append(f"提取服务费时出错: {e}")
-
-            # 记录查找结果
-            if found_placeholders:
-                log_parts.append(f"在文档中找到 {len(found_placeholders)} 个占位符")
-            else:
-                log_parts.append("在文档中未找到占位符")
-            
-        except Exception as e:
-            error_msg = f"读取文档时出错: {e}"
-            log_parts.append(error_msg)
-            # 在重新抛出异常之前，确保关闭文档和 Word
-            if 'doc' in locals() and doc:
-                try:
-                    doc.Close(SaveChanges=False)
-                except:
-                    pass
-            if 'word' in locals() and word:
-                close_word_application(word_app=word, doc=None, com_initialized=com_initialized, wait_time=0.0, node_name="get_replacements")
-            elif com_initialized:
-                try:
-                    # 使用统一的工具函数关闭 Word 应用程序
-                    close_word_application(word_app=None, doc=None, com_initialized=True, wait_time=0.0, node_name="get_replacements")
-                except:
-                    pass
-            raise
-        finally:
-            # 使用统一的工具函数关闭 Word 应用程序
-            close_word_application(
-                word_app=word,
-                doc=doc,
-                com_initialized=com_initialized,
-                wait_time=1.5,
-                node_name="get_replacements"
-            )
-            log_parts.append("资源清理完成")
-    
-    except Exception as e:
-        error_msg = f"初始化 Word COM 时出错: {e}"
-        log_parts.append(error_msg)
-        # 即使发生异常，也要确保关闭 Word 和清理 COM
-        close_word_application(
-            word_app=word,
-            doc=doc,
-            com_initialized=com_initialized,
-            wait_time=1.5,
-            node_name="get_replacements"
-        )
-        raise
-    
-    # Update state with found placeholders
-    new_state_dict = dict(state)
-    # 将找到的占位符信息保存到 state 中
-    # 可以使用一个新的字段来存储，或者直接使用现有的字段
-    # 这里我们创建一个新字段 placeholder_mapping 来存储字段名到占位符的映射
-    new_state_dict["placeholder_mapping"] = found_placeholders
-    
-    # 根据 placeholder_mapping 生成替换列表
-    replacements = []
-    if found_placeholders:
-        # 定义字段名列表（对应 state 中的字段）
-        field_names = [
-            "project_content",
-            "project_content_v1",
-            "project_number",
-            "project_name",
-            "bzj_rule",
-            "buyer_name",
-            "project_zbr_xbr",
-            "zbr_xbr_tel",
-            "zbr_pinyin",
-            "shell_start_date",
-            "shell_end_date",
-            "submit_date",
-            "platform",
-            "service_fee",
-        ]
-        
-        # 根据 placeholder_mapping 生成替换列表
-        for field_name in field_names:
-            # 检查是否有该字段的占位符映射（从文档中提取的旧值）
-            old_value = found_placeholders.get(field_name)
-            if not old_value:
-                continue
-            
-            # 获取该字段的新值（从 state 中获取）
-            new_value = state.get(field_name)
-            if field_name == "project_content_v1" and not new_value:
-                fallback = state.get("project_content")
-                if fallback:
-                    new_value = fallback
-                    log_parts.append("字段 'project_content_v1' 未提供新值，使用 'project_content' 的值作为替换内容")
-            if not new_value:
-                log_parts.append(f"字段 '{field_name}' 有占位符 '{old_value}' 但 state 中没有新值，跳过")
-                continue
-            
-            # 如果旧值和新值相同，跳过替换
-            if old_value == new_value:
-                log_parts.append(f"字段 '{field_name}': 旧值 '{old_value}' 等于新值，跳过")
-                continue
-            
-            # 生成替换对 (旧值, 新值)
-            replacements.append((old_value, new_value))
-            log_parts.append(f"为字段 '{field_name}' 生成替换: '{old_value}' -> '{new_value}'")
-        
-        # 如果没有生成任何替换项，记录日志
-        if not replacements:
-            log_parts.append("未生成任何替换 (所有字段要么缺失要么未更改)")
-        else:
-            log_parts.append(f"生成了 {len(replacements)} 对替换")
-            # 详细列出所有替换对
-            for i, (old_val, new_val) in enumerate(replacements, 1):
-                # 截断过长的值以便显示
-                old_display = old_val[:50] + "..." if len(old_val) > 50 else old_val
-                new_display = new_val[:50] + "..." if len(new_val) > 50 else new_val
-                log_parts.append(f"  [{i}] ({old_display}, {new_display})")
-    else:
-        log_parts.append("未找到占位符映射，跳过替换生成")
-    
-    # 只返回需要更新的键，避免并行执行时的状态冲突
-    # 在 LangGraph 中，并行节点应该只返回部分状态更新
-    replacement_log = "; ".join(log_parts)
-    new_state = GngkTenderGraphState(
-        placeholder_mapping=found_placeholders,
-        replacements=replacements,
-        replacement_log=replacement_log
+    return run_get_replacements(
+        state=state,
+        config=config,
+        extractors=GNGK_EXTRACTORS,
+        replacement_fields=GNGK_REPLACEMENT_FIELDS,
     )
-    # 为了日志记录，创建完整状态（仅用于日志）
-    full_state_for_log = dict(state)
-    full_state_for_log.update({
-        "placeholder_mapping": found_placeholders,
-        "replacements": replacements,
-        "replacement_log": replacement_log
-    })
-    
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    print(f"[get_replacements]: 执行日志:{replacement_log}")
-    print(f"[get_replacements] 执行完成，耗时: {elapsed_time:.2f} 秒 ({elapsed_time*1000:.0f} 毫秒)")
-    
-    return new_state
 
 
 if __name__ == "__main__":

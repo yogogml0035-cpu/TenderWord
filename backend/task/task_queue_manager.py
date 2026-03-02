@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
-from backend.util.log_util.progress_util import progress_logger
+from backend.util.log_util.progress_log import progress_log
 
 
 class TaskStatus(Enum):
@@ -236,7 +236,7 @@ class TaskQueueManager:
                 self._check_and_cancel_timeout_tasks()
             except Exception as e:
                 # 后台线程不能崩溃，静默处理错误
-                progress_logger.debug(f"[TaskQueue] 心跳检测线程出错: {e}")
+                progress_log.debug(f"[TaskQueue] 心跳检测线程出错: {e}")
             
             # 等待下一次检查
             self._cleanup_thread_stop.wait(self._cleanup_interval)
@@ -262,7 +262,7 @@ class TaskQueueManager:
         
         # 在锁外执行取消操作（cancel_task 会自己获取锁）
         for task_id, age in tasks_to_cancel:
-            progress_logger.debug(f"[TaskQueue] 任务 {task_id} 心跳超时 ({age:.1f}秒)，自动取消")
+            progress_log.debug(f"[TaskQueue] 任务 {task_id} 心跳超时 ({age:.1f}秒)，自动取消")
             self.cancel_task(task_id)
     
     def get_task(self, task_id: str) -> Optional[Task]:
@@ -534,12 +534,12 @@ class TaskQueueManager:
                 # 检查任务是否存在
                 task = self._tasks.get(task_id)
                 if not task:
-                    # print(f"[FairLock] 任务 {task_id} 不存在，放弃等待")
+                    progress_log.debug(f"[FairLock] 任务 {task_id} 不存在，放弃等待")
                     return False
                 
                 # 检查任务是否被取消
                 if task.status == TaskStatus.CANCELLED:
-                    # print(f"[FairLock] 任务 {task_id} 已被取消，放弃等待")
+                    progress_log.debug(f"[FairLock] 任务 {task_id} 已被取消，放弃等待")
                     return False
                 
                 # 检查是否轮到自己执行
@@ -554,7 +554,7 @@ class TaskQueueManager:
                             break
                     
                     if first_waiting_task_id == task_id:
-                        # print(f"[FairLock] 任务 {task_id} 轮到执行，获取执行权")
+                        progress_log.debug(f"[FairLock] 任务 {task_id} 轮到执行，获取执行权")
                         return True
                 
                 # 还没轮到自己，计算剩余超时时间
@@ -562,7 +562,7 @@ class TaskQueueManager:
                 remaining_timeout = timeout - elapsed
                 
                 if remaining_timeout <= 0:
-                    progress_logger.debug(f"[FairLock] 任务 {task_id} 等待超时")
+                    progress_log.debug(f"[FairLock] 任务 {task_id} 等待超时")
                     return False
                 
                 # 等待通知（带超时）
@@ -584,7 +584,7 @@ class TaskQueueManager:
             # 只有当前正在执行的任务才能释放
             if self._current_task_id == task_id:
                 self._current_task_id = None
-                progress_logger.debug(f"[FairLock] 任务 {task_id} 释放执行权")
+                progress_log.debug(f"[FairLock] 任务 {task_id} 释放执行权")
             
             # 通知所有等待的线程
             self._execution_condition.notify_all()

@@ -11,7 +11,7 @@
 """
 
 # Word 工具（向后兼容导出）
-from util.word_util import (
+from backend.util.word_util import (
     # word_application_util
     create_word_application,
     close_word_application,
@@ -34,14 +34,14 @@ from util.word_util import (
 )
 
 # 日志工具（向后兼容导出）
-from util.log_util import (
+from backend.util.log_util import (
     logger,
     log_task_start,
     log_task_end,
 )
 
 # 通用工具（向后兼容导出）
-from util.common_util import (
+from backend.util.common_util import (
     # llm_stream_utils
     LLMTimeoutError,
     HeartbeatMonitor,

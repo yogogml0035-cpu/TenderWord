@@ -10,7 +10,7 @@ Word 工具模块
 - Word 常量定义
 """
 
-from util.word_util.word_application_util import (
+from backend.util.word_util.word_application_util import (
     create_word_application,
     close_word_application,
     open_document_with_retry,
@@ -18,7 +18,7 @@ from util.word_util.word_application_util import (
     unprotect_document,
 )
 
-from util.word_util.word_com_manager import (
+from backend.util.word_util.word_com_manager import (
     com_lock,
     is_rpc_error,
     calculate_retry_delay,
@@ -27,7 +27,7 @@ from util.word_util.word_com_manager import (
     ComLockAcquisitionError,
 )
 
-from util.word_util.word_extraction_utils import (
+from backend.util.word_util.word_extraction_utils import (
     extract_text_from_word_file,
     extract_content_with_tables,
     extract_table_as_text,
@@ -35,7 +35,7 @@ from util.word_util.word_extraction_utils import (
     extract_text_with_superscript_subscript,
 )
 
-from util.word_util.word_document_inspector import (
+from backend.util.word_util.word_document_inspector import (
     CommentInfo,
     StrikethroughInfo,
     NonBlackFontInfo,
@@ -43,7 +43,7 @@ from util.word_util.word_document_inspector import (
     WordDocumentInspector,
 )
 
-from util.word_util.word_diagnostics import (
+from backend.util.word_util.word_diagnostics import (
     check_win32com_installation,
     check_word_installation,
     get_word_version_info,
@@ -52,7 +52,7 @@ from util.word_util.word_diagnostics import (
     WIN32COM_AVAILABLE,
 )
 
-from util.word_util.word_constants import (
+from backend.util.word_util.word_constants import (
     wdFindStop,
     wdCollapseStart,
     wdCollapseEnd,
@@ -62,6 +62,13 @@ from util.word_util.word_constants import (
     wdWithInTable,
     wdLineSpace1pt5,
     wdOutlineLevelBodyText,
+)
+
+from backend.util.word_util.anchor_utils import (
+    find_anchor_range,
+    find_anchor_with_find,
+    _iter_paragraph_hits,
+    _pick_anchor,
 )
 
 __all__ = [
@@ -107,4 +114,9 @@ __all__ = [
     "wdWithInTable",
     "wdLineSpace1pt5",
     "wdOutlineLevelBodyText",
+    # anchor_utils
+    "find_anchor_range",
+    "find_anchor_with_find",
+    "_iter_paragraph_hits",
+    "_pick_anchor",
 ]

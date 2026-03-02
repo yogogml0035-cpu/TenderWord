@@ -41,7 +41,7 @@ export interface UploadedFile {
   upload_time?: string;
 }
 
-export type FileType = 'clean_draft' | 'origin_tender' | 'params';
+export type FileType = 'clean_draft' | 'origin_tender' | 'params' | 'qualification';
 
 // ============================================
 // Generate Task Types
@@ -80,7 +80,7 @@ export interface TaskProgress {
 }
 
 export interface TaskResult {
-  output_file_path: string;
+  output_file: string;
   file_name: string;
   file_size: number;
   model_used: string;

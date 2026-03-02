@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Path, status
 from pydantic import BaseModel, Field
 
 from backend.models.tender import TenderData, TenderType
-from util.common_util import fetch_tender_data
+from backend.util.common_util import fetch_tender_data
 
 logger = logging.getLogger(__name__)
 

@@ -123,9 +123,9 @@ export function GngkTenderForm({
   );
 
   return (
-    <form onSubmit={handleSubmit} className={cn('st-form-section space-y-6', className)}>
+    <form onSubmit={handleSubmit} className={cn('form-section space-y-6', className)}>
       {/* Section 1: Tender Info */}
-      <div className="st-card">
+      <div className="card">
         <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">1. 招标信息</h3>
 
         <TenderNoInput
@@ -160,7 +160,7 @@ export function GngkTenderForm({
       </div>
 
       {/* Section 2: File Upload */}
-      <div className="st-card">
+      <div className="card">
         <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">2. 文件上传</h3>
 
         <div className="space-y-5">
@@ -209,7 +209,7 @@ export function GngkTenderForm({
       </div>
 
       {/* Section 3: Bid Sections */}
-      <div className="st-card">
+      <div className="card">
         <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">3. 投标分册</h3>
 
         <div className="space-y-3">
@@ -255,14 +255,14 @@ export function GngkTenderForm({
       </div>
 
       {/* Section 4: Model Selection */}
-      <div className="st-card">
+      <div className="card">
         <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">4. 模型选择</h3>
 
         <ModelSelector value={model} onChange={setModel} />
       </div>
 
       {/* Section 5: Advanced Settings */}
-      <div className="st-card">
+      <div className="card">
         <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">5. 高级设置（可选）</h3>
 
         <div className="space-y-4">
@@ -276,7 +276,7 @@ export function GngkTenderForm({
               onChange={(e) =>
                 setInsertionConfig((prev) => ({ ...prev, before_text: e.target.value }))
               }
-              className="st-input"
+              className="input-field"
               placeholder="插入位置前的章节标题"
             />
             <p className="text-xs text-[var(--text-muted)] mt-1">
@@ -294,7 +294,7 @@ export function GngkTenderForm({
               onChange={(e) =>
                 setInsertionConfig((prev) => ({ ...prev, after_text: e.target.value }))
               }
-              className="st-input"
+              className="input-field"
               placeholder="插入位置后的章节标题"
             />
             <p className="text-xs text-[var(--text-muted)] mt-1">

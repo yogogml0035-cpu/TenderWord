@@ -25,16 +25,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.states import TenderGraphStateBase
-from util.word_util import (
+from backend.util.word_util import (
     create_word_application,
     close_word_application,
     open_document_with_retry,
     unprotect_document,
     save_document_with_retry,
 )
-from util.word_util import wdFindStop, wdCollapseEnd
+from backend.util.word_util import wdFindStop, wdCollapseEnd
 from backend.nodes.common_word_nodes.get_comments import _get_insertion_range
-
+from backend.util.log_util.progress_log import progress_log
 logger = logging.getLogger(__name__)
 
 DEFAULT_CONTEXT_CHARS = 50
@@ -387,7 +387,7 @@ def _get_search_range_for_anchor(doc, anchor: CommentAnchor):
 
 def copy_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     start_time = time.perf_counter()
-    print("[copy_comments] 开始执行...", flush=True)
+    progress_log.debug("[copy_comments] 开始执行...")
 
     origin_tender_path = state.get("origin_tender_path")
     prepared_doc_path = state.get("prepared_doc_path")
@@ -431,7 +431,7 @@ def copy_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 existing_comment_count = 0
         if existing_comment_count > 0:
             elapsed = time.perf_counter() - start_time
-            print(f"[copy_comments] 清洁稿已存在批注({existing_comment_count})，跳过复制批注，耗时 {elapsed:.2f}s")
+            progress_log.debug(f"[copy_comments] 清洁稿已存在批注({existing_comment_count})，跳过复制批注，耗时 {elapsed:.2f}s")
             return TenderGraphStateBase(
                 copy_comments_log=f"清洁稿已存在批注({existing_comment_count})，跳过复制批注，耗时 {elapsed:.2f}s",
                 copy_comments_unmatched=[],
@@ -626,7 +626,7 @@ def copy_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
 
     elapsed = time.perf_counter() - start_time
     log = f"复制批注完成：候选={len(anchors)}，成功={added}，未匹配={len(unmatched)}，耗时 {elapsed:.2f}s"
-    print(f"[copy_comments] {log}", flush=True)
+    progress_log.debug(f"[copy_comments] {log}")
     return TenderGraphStateBase(
         copy_comments_log=log,
         copy_comments_added=added,

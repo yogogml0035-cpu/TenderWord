@@ -20,7 +20,7 @@ from typing import Any, Callable, Optional
 import pathlib
 
 from dotenv import load_dotenv
-from backend.util.log_util.progress_util import progress_logger
+from backend.util.log_util.progress_log import progress_log
 
 _DOTENV_PATH = pathlib.Path(__file__).resolve().parents[2] / ".env"
 if _DOTENV_PATH.exists():
@@ -92,7 +92,7 @@ class HeartbeatMonitor:
                 elapsed = time.time() - self._last_heartbeat
 
             if elapsed > self.timeout_seconds:
-                progress_logger.warning(
+                progress_log.warning(
                     f"{self.model_name} 流式响应超时（{elapsed:.1f}秒未收到新响应）"
                 )
                 self._timeout_occurred = True
@@ -246,13 +246,13 @@ async def stream_llm_completion(
             heartbeat=heartbeat,
             on_chunk=_on_chunk_received,
         )
-        progress_logger.debug("LLM 流式响应完成")
+        progress_log.debug("LLM 流式响应完成")
         return content
 
     except LLMTimeoutError:
         raise
     except Exception as e:
-        progress_logger.error(f"{config.display_name} 流式调用失败: {e}")
+        progress_log.error(f"{config.display_name} 流式调用失败: {e}")
         raise
     finally:
         heartbeat.stop()

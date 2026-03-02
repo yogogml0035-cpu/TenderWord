@@ -226,7 +226,7 @@ export function useTaskProgress(taskId: string | null) {
   const [logs, setLogs] = useState<Array<{ timestamp: string; level: string; message: string; node?: string }>>([]);
   const [llmOutput, setLlmOutput] = useState('');
   const [status, setStatus] = useState<'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | null>(null);
-  const [result, setResult] = useState<{ output_file_path?: string; file_name?: string } | null>(null);
+  const [result, setResult] = useState<{ output_file?: string; file_name?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const { isConnected, close } = useSSE({

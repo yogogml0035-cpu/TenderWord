@@ -37,10 +37,10 @@ get_comments  extract_tender_params  copy_comments
 
 使用示例：
     from backend.graphs import GngkTenderGraph
-    
+
     # 创建 graph 实例
     graph = GngkTenderGraph()
-    
+
     # 准备初始状态
     initial_state = {
         "origin_tender_path": "path/to/template.doc",
@@ -48,10 +48,10 @@ get_comments  extract_tender_params  copy_comments
         "project_name": "项目名称",
         # ... 其他字段
     }
-    
+
     # 同步执行
     result, elapsed = graph.invoke(initial_state)
-    
+
     # 异步执行
     result, elapsed = await graph.ainvoke(initial_state, config={
         "configurable": {
@@ -73,34 +73,32 @@ from backend.nodes.common_word_nodes import (
     get_comments,
     copy_comments,
     generate_comments,
-)
-from backend.nodes.gngk_word_nodes import (
-    get_replacements,
-    update_word,
     delete_tender_param,
-    extract_tender_params,
+    update_word,
 )
+from backend.nodes.common_word_nodes import extract_tender_params
+from backend.nodes.gngk_word_nodes import get_replacements
 
 
 class GngkTenderGraph(StandardTenderWorkflowGraph):
     """
     国内公开招标文档生成 Graph
-    
+
     继承自 BaseGraph，自动获得以下功能：
     - 跨进程文件锁（保护 Word COM 操作）
     - 节点进度追踪
     - 任务取消检查
     - 同步/异步执行方法
-    
+
     属性：
         无额外属性
-    
+
     方法：
         get_state_class(): 返回 GngkTenderGraphState 类型
         build_graph(): 构建国内公开招标文档生成的工作流
         _build_word_operations_subgraph(): 构建 Word 操作子图（私有方法）
     """
-    
+
     STATE_CLS = GngkTenderGraphState
 
     NODE_PREPARE_TEMPLATE: Callable = prepare_template

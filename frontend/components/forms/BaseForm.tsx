@@ -113,7 +113,7 @@ export function BaseForm({
     const error = errors[field.name];
 
     const baseInputClasses = cn(
-      'st-input w-full',
+      'input-field w-full',
       error && 'border-[var(--error)] focus:ring-[var(--error)]'
     );
 
@@ -174,7 +174,7 @@ export function BaseForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className={cn('st-form-section', className)}>
+    <form onSubmit={handleSubmit} className={cn('form-section', className)}>
       {title && (
         <div className="mb-6">
           <h2 className="text-xl font-semibold text-[var(--foreground)]">{title}</h2>

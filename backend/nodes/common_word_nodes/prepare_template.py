@@ -11,6 +11,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from backend.util.log_util.progress_log import progress_log
+
 from backend.states import TenderGraphStateBase
 from util.word_util import (
     create_word_application,
@@ -22,11 +24,11 @@ def prepare_template(state: TenderGraphStateBase, config) -> TenderGraphStateBas
     start_time = time.time()
     
     
-    from util.log_util import log_task_start
+    from backend.util.log_util import log_task_start
     log_task_start(state, "prepare_template")
     tender_type = state.get("tender_type")
-    print(f"[Start] 当前类型：{tender_type}")
-    print(f"[prepare_template] 开始执行...")
+    progress_log.debug(f"[Start] 当前类型：{tender_type}")
+    progress_log.debug(f"[prepare_template] 开始执行...")
     
     clean_draft_path = state.get("clean_draft_path")
     origin_tender_path = state.get("origin_tender_path")
@@ -151,6 +153,6 @@ def prepare_template(state: TenderGraphStateBase, config) -> TenderGraphStateBas
     
     end_time = time.time()
     elapsed_time = end_time - start_time
-    print(f"[prepare_template] 执行完成，耗时: {elapsed_time:.2f} 秒 ({elapsed_time*1000:.0f} 毫秒)")
+    progress_log.debug(f"[prepare_template] 执行完成，耗时: {elapsed_time:.2f} 秒 ({elapsed_time*1000:.0f} 毫秒)")
     
     return new_state

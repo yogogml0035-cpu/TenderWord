@@ -4,10 +4,13 @@ Word 文档提取工具函数
 """
 
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 import pathlib
 import time
 
-from util.word_util.word_application_util import (
+from backend.util.word_util.word_application_util import (
     create_word_application,
     close_word_application,
     open_document_with_retry,
@@ -91,8 +94,8 @@ def extract_text_from_xml(xml_content, preserve_structure=False):
                 xml_content,
                 flags=re.DOTALL,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[extract_text_from_xml] 清理注释标签失败（可忽略）: {e}")
 
         # 简单的 XML 实体解码
         def _xml_unescape(text):
@@ -138,8 +141,8 @@ def extract_text_from_xml(xml_content, preserve_structure=False):
                             is_superscript = True
                         elif val <= -4:  # 偏移 <= -2磅 视为下标
                             is_subscript = True
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[_process_run] 解析position偏移失败（可忽略）: {e}")
 
             # --- 提取文本并转换 ---
             run_texts = []
@@ -307,10 +310,7 @@ def extract_text_from_xml(xml_content, preserve_structure=False):
             return "\n".join(result_parts)
 
     except Exception as e:
-        print(f"    XML 解析失败: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.error(f"[extract_text_from_xml] XML解析失败: {e}", exc_info=True)
         return None
 
 
@@ -332,14 +332,14 @@ def extract_text_with_superscript_subscript(range_obj, use_xml=True):
             xml_content = None
             try:
                 xml_content = range_obj.WordOpenXML
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"[extract_text_with_superscript_subscript] 获取WordOpenXML失败（可忽略）: {e}")
             if xml_content and isinstance(xml_content, str) and len(xml_content) > 0:
                 xml_text = extract_text_from_xml(xml_content)
                 if xml_text is not None:
                     return xml_text
         except Exception as e:
-            print(f"    WordOpenXML 提取异常，回退到逐字符遍历: {e}")
+            logger.warning(f"[extract_text_with_superscript_subscript] WordOpenXML提取异常，回退到逐字符遍历: {e}")
 
     # 策略2: 回退到逐字符遍历 (增强版，支持位置偏移检测)
     try:
@@ -359,8 +359,8 @@ def extract_text_with_superscript_subscript(range_obj, use_xml=True):
                         code = ord(char_text)
                         if code < 32 and char_text not in ("\r", "\n", "\t"):
                             continue
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[extract_text_with_superscript_subscript] 字符代码检查失败（可忽略）: {e}")
 
                 # 检查是否是上标
                 is_superscript = False
@@ -380,10 +380,10 @@ def extract_text_with_superscript_subscript(range_obj, use_xml=True):
                             pos_val = font.Position
                             if pos_val > 1.5:
                                 is_superscript = True
-                        except:
-                            pass
-                except:
-                    pass
+                        except Exception as e:
+                            logger.debug(f"[extract_text_with_superscript_subscript] 获取font.Position失败（上标检测，可忽略）: {e}")
+                except Exception as e:
+                    logger.debug(f"[extract_text_with_superscript_subscript] 上标检测失败（可忽略）: {e}")
 
                 # 检查下标
                 try:
@@ -396,10 +396,10 @@ def extract_text_with_superscript_subscript(range_obj, use_xml=True):
                             pos_val = font.Position
                             if pos_val < -1.5:
                                 is_subscript = True
-                        except:
-                            pass
-                except:
-                    pass
+                        except Exception as e:
+                            logger.debug(f"[extract_text_with_superscript_subscript] 获取font.Position失败（下标检测，可忽略）: {e}")
+                except Exception as e:
+                    logger.debug(f"[extract_text_with_superscript_subscript] 下标检测失败（可忽略）: {e}")
 
                 # 根据上标/下标状态转换字符
                 if is_superscript and char_text in SUPERSCRIPT_MAP:
@@ -413,17 +413,18 @@ def extract_text_with_superscript_subscript(range_obj, use_xml=True):
                 # 如果处理某个字符失败，尝试获取原始文本
                 try:
                     result.append(characters(i).Text)
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[extract_text_with_superscript_subscript] 获取字符原始文本失败（可忽略）: {e}")
 
         return "".join(result)
 
     except Exception as e:
         # 最终回退
-        print(f"    提取带上标/下标文本时出错: {e}")
+        logger.error(f"[extract_text_with_superscript_subscript] 提取带上标/下标文本时出错: {e}")
         try:
             return range_obj.Text
-        except:
+        except Exception as fallback_e:
+            logger.warning(f"[extract_text_with_superscript_subscript] 获取range_obj.Text失败: {fallback_e}")
             return ""
 
 
@@ -462,6 +463,7 @@ def extract_table_as_text(table):
                     row_data.append(cell_text)
                 except Exception as cell_e:
                     # 某些合并单元格可能无法访问，填充空字符串
+                    logger.debug(f"[extract_table_as_text] 访问表格单元格失败（合并单元格，可忽略）: {cell_e}")
                     row_data.append("")
             table_data.append(row_data)
 
@@ -490,14 +492,12 @@ def extract_table_as_text(table):
         return "\n".join(markdown_lines)
 
     except Exception as e:
-        print(f"    提取表格时出错: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.error(f"[extract_table_as_text] 提取表格时出错: {e}", exc_info=True)
         # 如果出错，回退到原始文本提取
         try:
             return extract_text_with_superscript_subscript(table.Range)
-        except:
+        except Exception as fallback_e:
+            logger.warning(f"[extract_table_as_text] 回退提取也失败: {fallback_e}")
             return ""
 
 
@@ -527,8 +527,8 @@ def extract_text_with_list_numbers(range_obj):
                     try:
                         para = range_obj.Paragraphs(i)
                         paragraphs.append(para)
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[extract_text_with_list_numbers] 获取段落对象失败（可忽略）: {e}")
             except Exception as e2:
                 # 方法3: 尝试直接迭代（某些情况下可能有效）
                 try:
@@ -547,10 +547,10 @@ def extract_text_with_list_numbers(range_obj):
                     )
 
                     if has_deleted_error:
-                        print(f"    检测到对象失效，使用直接文本提取")
+                        logger.warning(f"[extract_text_with_list_numbers] 检测到对象失效，使用直接文本提取")
                     else:
-                        print(
-                            f"    无法获取段落列表，使用直接文本提取: {e1}, {e2}, {e3}"
+                        logger.warning(
+                            f"[extract_text_with_list_numbers] 无法获取段落列表，使用直接文本提取: {e1}, {e2}, {e3}"
                         )
 
                     try:
@@ -559,7 +559,7 @@ def extract_text_with_list_numbers(range_obj):
                         if text:
                             return text
                     except Exception as text_e:
-                        print(f"    直接文本提取也失败: {text_e}")
+                        logger.error(f"[extract_text_with_list_numbers] 直接文本提取也失败: {text_e}")
                         return ""
                     return ""
 
@@ -589,21 +589,24 @@ def extract_text_with_list_numbers(range_obj):
                         # 获取编号文本（如"1."、"1.1"等）
                         try:
                             list_string = list_format.ListString
-                        except:
+                        except Exception as e:
+                            logger.debug(f"[extract_text_with_list_numbers] 获取ListString失败（可忽略）: {e}")
                             # 如果获取ListString失败，尝试其他方法
                             try:
                                 # 某些版本可能使用ListValue
                                 list_string = str(list_format.ListValue) + "."
-                            except:
+                            except Exception as e:
+                                logger.debug(f"[extract_text_with_list_numbers] 获取ListValue也失败（可忽略）: {e}")
                                 list_string = ""
-                except:
+                except Exception as e:
                     # 如果无法获取ListType，尝试直接获取ListString
+                    logger.debug(f"[extract_text_with_list_numbers] 获取ListType失败（可忽略）: {e}")
                     try:
                         list_string = list_format.ListString
                         if list_string:
                             has_list = True
-                    except:
-                        pass
+                    except Exception as e2:
+                        logger.debug(f"[extract_text_with_list_numbers] 获取ListString也失败（可忽略）: {e2}")
 
                 # 获取段落文本，保留原始内容和上标/下标格式
                 para_text = extract_text_with_superscript_subscript(para_range)
@@ -630,8 +633,9 @@ def extract_text_with_list_numbers(range_obj):
                                 para_text_clean += "\r"
                             elif original_para_text.endswith("\n"):
                                 para_text_clean += "\n"
-                    except:
+                    except Exception as e:
                         # 如果无法获取原文档文本，只清理特殊字符
+                        logger.debug(f"[extract_text_with_list_numbers] 获取原文档段落文本失败（可忽略）: {e}")
                         para_text_clean = para_text.replace("\x07", "")
 
                     if has_list and list_string:
@@ -665,9 +669,9 @@ def extract_text_with_list_numbers(range_obj):
                     para_text = extract_text_with_superscript_subscript(para.Range)
                     if para_text:
                         result_lines.append(para_text)
-                except:
+                except Exception as e:
                     # 如果连文本都无法获取，跳过这个段落
-                    pass
+                    logger.debug(f"[extract_text_with_list_numbers] 回退提取段落文本失败（可忽略）: {e}")
 
         # 如果没有提取到任何内容，回退到直接提取文本（带上标/下标）
         if not result_lines:
@@ -678,16 +682,13 @@ def extract_text_with_list_numbers(range_obj):
         return "".join(result_lines)
 
     except Exception as e:
-        print(f"    提取带编号文本时出错: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.error(f"[extract_text_with_list_numbers] 提取带编号文本时出错: {e}", exc_info=True)
         # 如果出错，回退到带上标/下标的文本提取
         try:
             return extract_text_with_superscript_subscript(range_obj)
-        except:
+        except Exception as fallback_e:
             # 如果连文本都无法获取，返回空字符串
-            print("    警告: 无法提取任何文本内容")
+            logger.warning(f"[extract_text_with_list_numbers] 无法提取任何文本内容: {fallback_e}")
             return ""
 
 
@@ -715,8 +716,8 @@ def extract_content_with_tables(range_obj):
                     try:
                         table = range_obj.Tables(i)
                         tables.append(table)
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[extract_content_with_tables] 获取表格对象失败（可忽略）: {e}")
             except Exception as e2:
                 # 方法3: 尝试直接迭代
                 try:
@@ -724,13 +725,15 @@ def extract_content_with_tables(range_obj):
                         tables.append(table)
                 except Exception as e3:
                     # 所有方法都失败，回退到文本提取
-                    print(f"    无法获取表格列表，使用文本提取: {e1}, {e2}, {e3}")
+                    logger.warning(f"[extract_content_with_tables] 无法获取表格列表，使用文本提取: {e1}, {e2}, {e3}")
                     try:
                         return extract_text_with_list_numbers(range_obj)
-                    except:
+                    except Exception as fallback_e1:
+                        logger.debug(f"[extract_content_with_tables] 带编号文本提取失败: {fallback_e1}")
                         try:
                             return range_obj.Text
-                        except:
+                        except Exception as fallback_e2:
+                            logger.warning(f"[extract_content_with_tables] 直接获取range_obj.Text也失败: {fallback_e2}")
                             return ""
 
         if not tables:
@@ -798,20 +801,18 @@ def extract_content_with_tables(range_obj):
         return "".join(result_parts)
 
     except Exception as e:
-        print(f"    提取内容（含表格）时出错: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.error(f"[extract_content_with_tables] 提取内容（含表格）时出错: {e}", exc_info=True)
         # 如果出错，回退到带编号的文本提取
         try:
             return extract_text_with_list_numbers(range_obj)
-        except:
+        except Exception as fallback_e1:
             # 如果带编号提取也失败，使用带上标/下标的文本作为最后回退
+            logger.debug(f"[extract_content_with_tables] 带编号文本提取失败: {fallback_e1}")
             try:
                 return extract_text_with_superscript_subscript(range_obj)
-            except:
+            except Exception as fallback_e2:
                 # 如果连文本都无法获取，返回空字符串
-                print("    警告: 无法提取任何内容")
+                logger.warning(f"[extract_content_with_tables] 无法提取任何内容: {fallback_e2}")
                 return ""
 
 

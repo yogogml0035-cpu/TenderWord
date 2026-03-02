@@ -27,7 +27,7 @@ export interface TenderFormData {
 }
 
 // Task types
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type TaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface Task {
   id: string;

@@ -23,17 +23,19 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.states import TenderGraphStateBase
-from util.word_util import WordDocumentInspector, DocumentAnalysisResult
-from util.word_util import (
+from backend.util.word_util import WordDocumentInspector, DocumentAnalysisResult
+from backend.util.word_util import (
     create_word_application,
     close_word_application,
     open_document_with_retry,
 )
-from util.word_util import (
+from backend.util.word_util import (
     wdGoToPage,
     wdGoToAbsolute,
     wdActiveEndPageNumber,
 )
+from backend.util.log_util.progress_log import progress_log
+
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +187,7 @@ def get_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
         logger.warning("送审稿文件不存在: %s", origin_tender_path)
         return _empty_plan_state(state)
 
-    print("[get_comments] 开始执行...", flush=True)
+    progress_log.debug("[get_comments] 开始执行...")
     logger.info("get_comments 开始执行，送审稿路径: %s", origin_tender_path)
 
     word_app = None
@@ -193,7 +195,7 @@ def get_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     com_initialized = False
 
     try:
-        print("[get_comments] 正在创建 Word 并打开送审稿...", flush=True)
+        progress_log.debug("[get_comments] 正在创建 Word 并打开送审稿...")
         word_app, com_initialized = create_word_application(
             initial_delay=0.3,
             post_init_delay=0.2,
@@ -226,10 +228,9 @@ def get_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 doc, word_app, before_text, after_text, target_size
             )
             if range_start is not None and range_end is not None:
-                print(
+                progress_log.debug(
                     "[get_comments] 锚点范围仅计算一次 -> [%d, %d)，批注/删除线/非黑字均只在此范围内统计"
                     % (range_start, range_end),
-                    flush=True,
                 )
         result = inspector.analyze_document(
             range_start=range_start,
@@ -255,9 +256,8 @@ def get_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
 
     updates = _result_to_state_updates(result)
     elapsed = time.perf_counter() - start_time
-    print(
+    progress_log.debug(
         "[get_comments] 执行完成, 耗时: {:.2f} 秒 ({:.0f} 毫秒)".format(elapsed, elapsed * 1000),
-        flush=True,
     )
     logger.info(
         "送审稿提取完成: 批注=%d, 删除线=%d, 非黑字=%d, 耗时=%.2fs",

@@ -6,7 +6,7 @@
 - 招标数据获取工具
 """
 
-from util.common_util.llm_stream_utils import (
+from backend.util.common_util.llm_stream_utils import (
     LLMTimeoutError,
     HeartbeatMonitor,
     StreamCallbacks,
@@ -16,7 +16,7 @@ from util.common_util.llm_stream_utils import (
     stream_llm_completion,
 )
 
-from util.common_util.fetch_tender_data import (
+from backend.util.common_util.fetch_tender_data import (
     fetch_tender_data,
 )
 

@@ -208,7 +208,7 @@ class TestLLMStreamingWithErrorHandling:
         
         # Mock stream_llm_completion to raise LLMTimeoutError
         with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
-            from util.common_util import LLMTimeoutError
+            from backend.util.common_util import LLMTimeoutError
             mock_llm.side_effect = LLMTimeoutError("deepseek", 10)
             
             # Should not raise exception, should return empty list

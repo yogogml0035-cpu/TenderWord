@@ -11,14 +11,27 @@
 - get_comments: 从送审稿 Word 文档中提取批注内容
 - copy_comments: 从送审稿按内容锚定复制批注到模板
 - generate_comments: 基于润色文本与计划使用 LLM 生成批注指令
+- extract_tender_params: 提取招标参数内容（从锚点之间）
+- delete_tender_param: 删除招标参数内容（从锚点之间）
+- update_word: 更新 Word 文档（插入润色文本）
 """
 
 from backend.nodes.common_word_nodes.prepare_template import prepare_template
 from backend.nodes.common_word_nodes.replace_content import replace_content
-from backend.nodes.common_word_nodes.generate_polished_text import generate_polished_text
+from backend.nodes.common_word_nodes.generate_polished_text import (
+    generate_polished_text,
+)
 from backend.nodes.common_word_nodes.get_comments import get_comments
 from backend.nodes.common_word_nodes.copy_comments import copy_comments
 from backend.nodes.common_word_nodes.generate_comments import generate_comments
+from backend.nodes.common_word_nodes.extract_tender_params import extract_tender_params
+from backend.nodes.common_word_nodes.delete_tender_param import delete_tender_param
+from backend.nodes.common_word_nodes.update_word import update_word
+from backend.nodes.common_word_nodes.get_replacements_core import (
+    ExtractorSpec,
+    ReplacementFieldSpec,
+    run_get_replacements,
+)
 
 __all__ = [
     "prepare_template",
@@ -27,4 +40,10 @@ __all__ = [
     "get_comments",
     "copy_comments",
     "generate_comments",
+    "extract_tender_params",
+    "delete_tender_param",
+    "update_word",
+    "ExtractorSpec",
+    "ReplacementFieldSpec",
+    "run_get_replacements",
 ]

@@ -10,7 +10,7 @@ Word 文档内容检测工具
 
 from dataclasses import dataclass, field
 from typing import Optional
-from backend.util.log_util.progress_util import progress_logger
+from backend.util.log_util.progress_log import progress_log
 
 
 
@@ -254,13 +254,13 @@ class WordDocumentInspector:
         log_prefix = self._get_log_prefix()
         try:
             protection_type = self.doc.ProtectionType
-            progress_logger.debug(f"{log_prefix}文档保护类型: {protection_type} (-1 表示无保护)")
+            progress_log.debug(f"{log_prefix}文档保护类型: {protection_type} (-1 表示无保护)")
 
             if protection_type == -1:
                 return False, protection_type
             return True, protection_type
         except Exception as e:
-            progress_logger.debug(f"{log_prefix}检查文档保护时出错: {e}")
+            progress_log.debug(f"{log_prefix}检查文档保护时出错: {e}")
             return False, -1
 
     def get_color_name(self, color_value: int) -> str:
@@ -370,12 +370,12 @@ class WordDocumentInspector:
             and range_start < range_end
         )
         if use_range:
-            progress_logger.debug(f"{log_prefix}仅抽取批注范围: [{range_start}, {range_end})")
+            progress_log.debug(f"{log_prefix}仅抽取批注范围: [{range_start}, {range_end})")
 
         try:
             comments_collection = self.doc.Comments
             comment_count = comments_collection.Count
-            progress_logger.debug(f"{log_prefix}检测到 {comment_count} 个批注")
+            progress_log.debug(f"{log_prefix}检测到 {comment_count} 个批注")
 
             for i in range(1, comment_count + 1):
                 try:
@@ -420,18 +420,18 @@ class WordDocumentInspector:
                     comments.append(comment_info)
 
                     # 分块分行打印，避免批注内容/范围中的换行导致与下一项混在一起
-                    progress_logger.debug(f"{log_prefix}---------- 批注 {i} ----------")
-                    progress_logger.debug(f"{log_prefix}  作者: {comment_info.author}")
-                    progress_logger.debug(f"{log_prefix}  日期: {comment_info.date}")
-                    progress_logger.debug(f"{log_prefix}  批注内容:\n{comment_info.content}")
-                    progress_logger.debug(f"{log_prefix}  批注范围:\n{comment_info.scope_text}")
+                    progress_log.debug(f"{log_prefix}---------- 批注 {i} ----------")
+                    progress_log.debug(f"{log_prefix}  作者: {comment_info.author}")
+                    progress_log.debug(f"{log_prefix}  日期: {comment_info.date}")
+                    progress_log.debug(f"{log_prefix}  批注内容:\n{comment_info.content}")
+                    progress_log.debug(f"{log_prefix}  批注范围:\n{comment_info.scope_text}")
 
                 except Exception as e:
-                    progress_logger.debug(f"{log_prefix}读取批注 {i} 时出错: {e}")
+                    progress_log.debug(f"{log_prefix}读取批注 {i} 时出错: {e}")
                     continue
 
         except Exception as e:
-            progress_logger.debug(f"{log_prefix}获取批注集合时出错: {e}")
+            progress_log.debug(f"{log_prefix}获取批注集合时出错: {e}")
 
         return comments
 
@@ -561,11 +561,11 @@ class WordDocumentInspector:
             paragraphs = self.doc.Paragraphs
             total_paragraphs = paragraphs.Count
             if use_range:
-                progress_logger.debug(
+                progress_log.debug(
                     f"{log_prefix}一次遍历段落：仅锚点范围内检测删除线+非黑字（全文共 {total_paragraphs} 段，遇范围外即结束）"
                 )
             else:
-                progress_logger.debug(
+                progress_log.debug(
                     f"{log_prefix}一次遍历 {total_paragraphs} 个段落，检测删除线+非黑字"
                 )
 
@@ -587,7 +587,7 @@ class WordDocumentInspector:
                     )
                     if strike:
                         strikethroughs.append(strike)
-                        progress_logger.debug(
+                        progress_log.debug(
                             f"{log_prefix}删除线段落 {len(strikethroughs)}: '{paragraph_text}...', 删除线: '{strike.strikethrough_text}'"
                         )
 
@@ -596,15 +596,15 @@ class WordDocumentInspector:
                     )
                     if font_info:
                         non_black_fonts.append(font_info)
-                        progress_logger.debug(
+                        progress_log.debug(
                             f"{log_prefix}非黑色字体段落 {len(non_black_fonts)}: 颜色='{font_info.color_name}', 文字='{font_info.font_text}'"
                         )
                 except Exception as e:
-                    progress_logger.debug(f"{log_prefix}检测段落 {i} 时出错: {e}")
+                    progress_log.debug(f"{log_prefix}检测段落 {i} 时出错: {e}")
                     continue
 
         except Exception as e:
-            progress_logger.debug(f"{log_prefix}获取段落集合时出错: {e}")
+            progress_log.debug(f"{log_prefix}获取段落集合时出错: {e}")
 
         return strikethroughs, non_black_fonts
 
@@ -684,14 +684,14 @@ class WordDocumentInspector:
                                         non_black_fonts.append(font_info)
 
                         except Exception as e:
-                            progress_logger.debug(f"{log_prefix}检测 {story_name} 句子 {j} 时出错: {e}")
+                            progress_log.debug(f"{log_prefix}检测 {story_name} 句子 {j} 时出错: {e}")
                             continue
 
                 except Exception as e:
-                    progress_logger.debug(f"{log_prefix}获取 {story_name} 句子集合时出错: {e}")
+                    progress_log.debug(f"{log_prefix}获取 {story_name} 句子集合时出错: {e}")
 
         except Exception as e:
-            progress_logger.debug(f"{log_prefix}检测非黑色字体时出错: {e}")
+            progress_log.debug(f"{log_prefix}检测非黑色字体时出错: {e}")
 
         return non_black_fonts
 
@@ -711,7 +711,7 @@ class WordDocumentInspector:
             DocumentAnalysisResult: 文档分析结果
         """
         log_prefix = self._get_log_prefix()
-        progress_logger.debug(f"{log_prefix}开始综合分析文档...")
+        progress_log.debug(f"{log_prefix}开始综合分析文档...")
 
         result = DocumentAnalysisResult()
 
@@ -719,13 +719,13 @@ class WordDocumentInspector:
         result.is_protected = is_protected
         result.protection_type = protection_type
 
-        progress_logger.debug(f"{log_prefix}文档保护状态: {'受保护' if is_protected else '无保护'}")
+        progress_log.debug(f"{log_prefix}文档保护状态: {'受保护' if is_protected else '无保护'}")
 
         # 批注：单独遍历 doc.Comments，按范围过滤
         comments = self.inspect_comments(range_start=range_start, range_end=range_end)
         result.comments = comments
         result.total_comments = len(comments)
-        progress_logger.debug(f"{log_prefix}批注数量: {result.total_comments}")
+        progress_log.debug(f"{log_prefix}批注数量: {result.total_comments}")
 
         # 删除线+非黑字：一次遍历段落，仅在锚点范围内逐段检测，范围内检查完即结束
         strikethroughs, non_black_fonts = (
@@ -737,10 +737,10 @@ class WordDocumentInspector:
         result.total_strikethroughs = len(strikethroughs)
         result.non_black_fonts = non_black_fonts
         result.total_non_black_fonts = len(non_black_fonts)
-        progress_logger.debug(f"{log_prefix}删除线段落数量: {result.total_strikethroughs}")
-        progress_logger.debug(f"{log_prefix}非黑色字体段落数量: {result.total_non_black_fonts}")
+        progress_log.debug(f"{log_prefix}删除线段落数量: {result.total_strikethroughs}")
+        progress_log.debug(f"{log_prefix}非黑色字体段落数量: {result.total_non_black_fonts}")
 
-        progress_logger.debug(f"{log_prefix}文档分析完成")
+        progress_log.debug(f"{log_prefix}文档分析完成")
         return result
 
     def format_analysis_report(self, result: DocumentAnalysisResult) -> str:

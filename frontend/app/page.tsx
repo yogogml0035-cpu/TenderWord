@@ -83,7 +83,7 @@ function QuickActionCard({
   return (
     <Link
       href={href}
-      className="st-card group hover:shadow-md transition-shadow cursor-pointer"
+      className="card group hover:shadow-md transition-shadow cursor-pointer"
     >
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
@@ -107,7 +107,7 @@ function FeatureCard({
   description: string;
 }) {
   return (
-    <div className="st-card">
+    <div className="card">
       <h3 className="font-semibold text-[var(--foreground)] mb-2">{title}</h3>
       <p className="text-sm text-[var(--text-muted)]">{description}</p>
     </div>

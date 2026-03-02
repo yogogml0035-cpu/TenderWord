@@ -1,10 +1,9 @@
-'use client';
-
 import React from 'react';
-import { useAppStore } from '@/stores/useAppStore';
+
+import { HistorySection } from './HistorySection';
 import { Sidebar, SidebarContent, SidebarHeader } from './Sidebar';
 import { Header } from './Header';
-import { FileText, History, Settings } from 'lucide-react';
+import { FileText, Settings } from 'lucide-react';
 import Link from 'next/link';
 
 interface MainLayoutProps {
@@ -14,8 +13,6 @@ interface MainLayoutProps {
 }
 
 export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
-  const { history } = useAppStore();
-
   return (
     <div className="min-h-screen bg-[var(--background)]">
       {/* Sidebar */}
@@ -45,24 +42,7 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
           </nav>
 
           {/* History */}
-          {history.length > 0 && (
-            <div className="mt-8">
-              <p className="px-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-2 flex items-center gap-2">
-                <History className="w-3 h-3" />
-                最近生成
-              </p>
-              <div className="space-y-1">
-                {history.slice(0, 5).map((item) => (
-                  <div
-                    key={item.id}
-                    className="px-2 py-1.5 text-sm text-[var(--text-muted)] truncate hover:text-[var(--foreground)] cursor-pointer rounded-md hover:bg-white/50 transition-colors"
-                  >
-                    {item.tenderNo}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <HistorySection />
         </SidebarContent>
 
         <div className="p-4 border-t border-[var(--border)]">
@@ -74,9 +54,9 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
       </Sidebar>
 
       {/* Main Content */}
-      <main className="st-main">
+      <main className="main-content">
         {(title || subtitle) && <Header title={title} subtitle={subtitle} />}
-        <div className="st-container py-6">{children}</div>
+        <div className="container-wide py-6">{children}</div>
       </main>
     </div>
   );

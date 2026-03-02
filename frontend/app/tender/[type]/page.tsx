@@ -29,15 +29,15 @@ export default function TenderPage() {
 
   return (
     <MainLayout title={config.title} subtitle={config.description}>
-      <div className="st-form-section">
+      <div className="form-section">
         {/* Form placeholder - will be implemented in next task */}
-        <div className="st-card">
+        <div className="card">
           <div className="flex items-center justify-center h-64 text-[var(--text-muted)]">
             <div className="text-center">
               <p className="text-lg font-medium mb-2">{config.title} 表单</p>
               <p className="text-sm">此页面将在后续任务中实现</p>
               <div className="mt-4 flex justify-center gap-2">
-                <span className="st-badge st-badge-info">招标类型: {type}</span>
+                <span className="badge badge-info">招标类型: {type}</span>
               </div>
             </div>
           </div>

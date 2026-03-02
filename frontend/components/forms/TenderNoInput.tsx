@@ -3,22 +3,11 @@
 import React, { useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { Search, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { fetchTenderData as apiFetchTenderData, ApiError } from '@/lib/api';
+import type { TenderData } from '@/types/api';
 
-export interface TenderData {
-  project_name: string;
-  project_number: string;
-  project_content: string;
-  bzj_rule: string;
-  buyer_name: string;
-  project_zbr_xbr: string;
-  zbr_xbr_tel: string;
-  zbr_pinyin: string;
-  shell_start_date: string;
-  shell_end_date: string;
-  submit_date: string;
-  platform: string;
-  service_fee: string;
-}
+// Re-export TenderData for backward compatibility
+export type { TenderData };
 
 export interface TenderNoInputProps {
   value: string;
@@ -46,7 +35,7 @@ export function TenderNoInput({
   const [success, setSuccess] = useState(false);
   const [fetchedData, setFetchedData] = useState<TenderData | null>(null);
 
-  const fetchTenderData = useCallback(async () => {
+  const handleFetchData = useCallback(async () => {
     if (!value.trim()) {
       setError('请输入招标编号');
       return;
@@ -57,18 +46,14 @@ export function TenderNoInput({
     setSuccess(false);
 
     try {
-      const response = await fetch(`/api/tender/${encodeURIComponent(value.trim())}`);
-      const result = await response.json();
+      const data = await apiFetchTenderData(value.trim());
 
-      if (!response.ok || !result.success) {
-        throw new Error(result.error?.message || '获取招标数据失败');
-      }
-
-      setFetchedData(result.data);
+      setFetchedData(data);
       setSuccess(true);
-      onDataFetched?.(result.data);
+      onDataFetched?.(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '获取招标数据失败');
+      const errorMessage = err instanceof ApiError ? err.message : (err instanceof Error ? err.message : '获取招标数据失败');
+      setError(errorMessage);
       setFetchedData(null);
     } finally {
       setIsLoading(false);
@@ -79,10 +64,10 @@ export function TenderNoInput({
     (e: React.KeyboardEvent) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        fetchTenderData();
+        handleFetchData();
       }
     },
-    [fetchTenderData]
+    [handleFetchData]
   );
 
   return (
@@ -106,7 +91,7 @@ export function TenderNoInput({
             placeholder={placeholder}
             disabled={disabled || isLoading}
             className={cn(
-              'st-input w-full pr-10',
+              'input-field w-full pr-10',
               error && 'border-[var(--error)] focus:ring-[var(--error)]',
               success && 'border-[var(--success)] focus:ring-[var(--success)]'
             )}
@@ -120,7 +105,7 @@ export function TenderNoInput({
         </div>
         <button
           type="button"
-          onClick={fetchTenderData}
+          onClick={handleFetchData}
           disabled={disabled || isLoading || !value.trim()}
           className="btn-secondary whitespace-nowrap"
         >

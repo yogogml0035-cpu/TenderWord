@@ -24,6 +24,7 @@ import asyncio
 import threading
 from functools import wraps
 from typing import Callable, Any, Optional, TextIO, Type, TypedDict
+from backend.util.log_util.progress_log import progress_log
 
 
 # ============================================================================
@@ -36,7 +37,7 @@ class TaskCancelledException(Exception):
 
 # ============================================================================
 # 跨进程文件锁：确保同一时间只有一个 graph 在执行
-# 使用文件锁而不是 threading.Lock，因为 Streamlit 可能运行在多进程模式
+# 使用文件锁而不是 threading.Lock，确保多进程/多用户并发访问时的安全性
 # ============================================================================
 
 class CrossProcessFileLock:
@@ -90,7 +91,7 @@ class CrossProcessFileLock:
         # 步骤1：获取线程锁（带超时）
         thread_lock_acquired = self._thread_lock.acquire(timeout=timeout)
         if not thread_lock_acquired:
-            print("[FileLock] 获取线程锁超时")
+            progress_log.debug("[FileLock] 获取线程锁超时")
             return False
         
         try:
@@ -98,7 +99,7 @@ class CrossProcessFileLock:
             remaining_timeout = timeout - (time.time() - start_time)
             if remaining_timeout <= 0:
                 self._thread_lock.release()
-                print("[FileLock] 获取文件锁前超时")
+                progress_log.debug("[FileLock] 获取文件锁前超时")
                 return False
             
             while True:
@@ -127,7 +128,7 @@ class CrossProcessFileLock:
                     # 检查是否超时
                     elapsed = time.time() - start_time
                     if elapsed >= timeout:
-                        print(f"[FileLock] 获取文件锁超时（等待了 {elapsed:.1f} 秒）")
+                        progress_log.warning(f"[FileLock] 获取文件锁超时（等待了 {elapsed:.1f} 秒）")
                         self._thread_lock.release()
                         return False
                     
@@ -135,12 +136,12 @@ class CrossProcessFileLock:
                     time.sleep(0.5)
                     
                 except Exception as e:
-                    print(f"[FileLock] 获取文件锁时出错: {e}")
+                    progress_log.error(f"[FileLock] 获取文件锁时出错: {e}")
                     self._thread_lock.release()
                     return False
                     
         except Exception as e:
-            print(f"[FileLock] 获取锁时发生异常: {e}")
+            progress_log.error(f"[FileLock] 获取锁时发生异常: {e}")
             self._thread_lock.release()
             return False
     
@@ -156,7 +157,7 @@ class CrossProcessFileLock:
                     self._lock_file.seek(0)
                     msvcrt.locking(self._lock_file.fileno(), msvcrt.LK_UNLCK, 1)
                 except Exception as e:
-                    print(f"[FileLock] 释放文件锁时出错: {e}")
+                    progress_log.warning(f"[FileLock] 释放文件锁时出错: {e}")
                 finally:
                     self._file_lock_acquired = False
             
@@ -548,27 +549,27 @@ def invoke_with_timing(
     
     thread_name = threading.current_thread().name
     
-    print(f"[Graph] 线程 {thread_name} 正在等待执行锁...")
+    progress_log.debug(f"[Graph] 线程 {thread_name} 正在等待执行锁...")
     
     with lock:
-        print(f"[Graph] 线程 {thread_name} 获取到执行锁，开始执行...")
+        progress_log.debug(f"[Graph] 线程 {thread_name} 获取到执行锁，开始执行...")
         
         begin_ts = time.time()
         try:
             result = graph_instance.invoke(initial_state, config=config)
         finally:
             elapsed = time.time() - begin_ts
-            print(f"[Graph] 线程 {thread_name} 执行完成，释放锁")
+            progress_log.debug(f"[Graph] 线程 {thread_name} 执行完成，释放锁")
         
         if verbose:
-            print("=" * 60)
-            print(f"Graph 执行完成！")
-            print(f"总执行时间: {elapsed:.2f} 秒 ({elapsed*1000:.0f} 毫秒)")
+            progress_log.info("=" * 60)
+            progress_log.info("Graph 执行完成！")
+            progress_log.info(f"总执行时间: {elapsed:.2f} 秒 ({elapsed*1000:.0f} 毫秒)")
             if elapsed >= 60:
                 minutes = int(elapsed // 60)
                 seconds = elapsed % 60
-                print(f"总执行时间: {minutes} 分 {seconds:.2f} 秒")
-            print("=" * 60)
+                progress_log.info(f"总执行时间: {minutes} 分 {seconds:.2f} 秒")
+            progress_log.info("=" * 60)
         
         return result, elapsed
 
@@ -628,7 +629,7 @@ async def invoke_with_timing_async(
     if task_id:
         waiting_count = queue.get_waiting_count(task_id)
         if waiting_count > 0:
-            print(f"[FairLock] 任务 {task_id} 开始排队等待，前面有 {waiting_count} 个任务")
+            progress_log.debug(f"[FairLock] 任务 {task_id} 开始排队等待，前面有 {waiting_count} 个任务")
         
         # 阻塞等待，直到轮到自己
         got_turn = queue.wait_for_turn(task_id)
@@ -648,7 +649,7 @@ async def invoke_with_timing_async(
         
         with stdout_ctx, stderr_ctx:
             # 现在可以安全地打印日志了
-            print(f"[Graph] 任务 {task_id} 获取到执行锁，开始执行...")
+            progress_log.debug(f"[Graph] 任务 {task_id} 获取到执行锁，开始执行...")
             
             # 标记任务开始
             if task_id:
@@ -663,20 +664,20 @@ async def invoke_with_timing_async(
                 raise
             finally:
                 elapsed = time.time() - begin_ts
-                print(f"[Graph] 任务 {task_id} 执行完成，释放锁")
+                progress_log.debug(f"[Graph] 任务 {task_id} 执行完成，释放锁")
                 
                 # 标记任务完成（这会自动通知下一个等待的任务）
                 if task_id:
                     queue.complete_task(task_id, result=None if error_msg else "success", error=error_msg)
             
             if verbose:
-                print("=" * 60)
-                print(f"Graph 异步执行完成！")
-                print(f"总执行时间: {elapsed:.2f} 秒 ({elapsed*1000:.0f} 毫秒)")
+                progress_log.info("=" * 60)
+                progress_log.info("Graph 异步执行完成！")
+                progress_log.info(f"总执行时间: {elapsed:.2f} 秒 ({elapsed*1000:.0f} 毫秒)")
                 if elapsed >= 60:
                     minutes = int(elapsed // 60)
                     seconds = elapsed % 60
-                    print(f"总执行时间: {minutes} 分 {seconds:.2f} 秒")
-                print("=" * 60)
+                    progress_log.info(f"总执行时间: {minutes} 分 {seconds:.2f} 秒")
+                progress_log.info("=" * 60)
             
             return result, elapsed

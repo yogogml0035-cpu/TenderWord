@@ -128,7 +128,7 @@ export function ModelSelector({
         value={value}
         onChange={(e) => onChange(e.target.value as ModelType)}
         disabled={disabled}
-        className="st-select w-full"
+        className="select-field w-full"
       >
         {MODEL_OPTIONS.map((model) => (
           <option key={model.value} value={model.value}>

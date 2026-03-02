@@ -11,6 +11,7 @@
 """
 
 from __future__ import annotations
+from backend.util.log_util.progress_log import progress_log
 
 import asyncio
 import json
@@ -19,7 +20,7 @@ import pathlib
 from typing import Callable, Optional
 
 from backend.states import TenderGraphStateBase
-from util.common_util import (
+from backend.util.common_util import (
     LLMTimeoutError,
     StreamCallbacks,
     stream_llm_completion,
@@ -79,7 +80,7 @@ def generate_comments(
     start_time = time.time()
     
     # 添加启动日志消息
-    print("[generate_comments] 开始执行...")
+    progress_log.debug("[generate_comments] 开始执行...")
     
     # 从 state 读取输入数据，使用防御性默认值
     # 需求引用：2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 7.1, 8.2
@@ -90,7 +91,7 @@ def generate_comments(
     tender_type = state.get("tender_type", "xjcg")
     
     # 记录正在使用的 tender_type
-    print(f"[generate_comments] 招标类型: {tender_type}")
+    progress_log.debug(f"[generate_comments] 招标类型: {tender_type}")
     
     # 实现提示词选择和验证
     # 需求引用：5.1, 5.2, 5.3, 5.4, 5.5
@@ -135,7 +136,7 @@ def generate_comments(
         with open(comments_prompt_file, "w", encoding="utf-8") as f:
             f.write(system_prompt + "\n" + formatted_user_prompt)
     except Exception as e:
-        print(f"[generate_comments] 警告: 准备批注输出文件路径失败: {e}")
+        progress_log.warning(f"[generate_comments] 警告: 准备批注输出文件路径失败: {e}")
     
     # 实现配置提取和回调设置
     # 需求引用：4.2, 4.4, 8.3
@@ -152,7 +153,7 @@ def generate_comments(
         llm_extra_params_override = {"temperature": 1.3}
         effective_model_display = llm_model_override
 
-    print(f"[generate_comments] 使用模型: {effective_model_display}")
+    progress_log.debug(f"[generate_comments] 使用模型: {effective_model_display}")
     
     # 从 config 提取 llm_stream_callback（如果可用）
     stream_callback: Optional[Callable[[str], None]] = None
@@ -185,7 +186,7 @@ def generate_comments(
         """将 chunk 输出到控制台"""
         if suppress_llm_stdout:
             return
-        print(text, end="", flush=True)
+        progress_log.debug(text, end="", flush=True)
     
     # 创建 StreamCallbacks 对象，包含 on_chunk 和 on_update 回调
     callbacks = StreamCallbacks(
@@ -221,13 +222,11 @@ def generate_comments(
         )
     except LLMTimeoutError as e:
         # 捕获 LLMTimeoutError 并记录错误，返回空的 polished_comments 列表
-        print(f"\n[generate_comments] LLM 超时错误: {e}")
+        progress_log.error(f"\n[generate_comments] LLM 超时错误: {e}")
         return TenderGraphStateBase(polished_comments=[])
     except Exception as e:
         # 捕获一般异常，记录完整堆栈跟踪，返回空的 polished_comments 列表
-        print(f"\n[generate_comments] 发生意外错误: {e}")
-        import traceback
-        traceback.print_exc()
+        progress_log.exception(f"[generate_comments] 发生意外错误: {e}")
         return TenderGraphStateBase(polished_comments=[])
     
     # 实现带错误处理的 JSON 解析
@@ -235,7 +234,7 @@ def generate_comments(
     
     # 确保输出后有换行
     if not suppress_llm_stdout:
-        print()
+        progress_log.debug("")
     
     try:
         # 使用 json.loads 解析 LLM 输出
@@ -243,7 +242,7 @@ def generate_comments(
         
         # 验证结果是一个列表
         if not isinstance(comments, list):
-            print(f"[generate_comments] 警告: LLM 输出不是列表，而是 {type(comments).__name__}")
+            progress_log.warning(f"[generate_comments] 警告: LLM 输出不是列表，而是 {type(comments).__name__}")
             polished_comments = []
         else:
             # 将每个字典转换为包含 reference_text 和 comment_text 字段的 CommentInstruction
@@ -259,28 +258,26 @@ def generate_comments(
             ]
             
             # 成功时记录生成的批注数量
-            print(f"[generate_comments] 生成了 {len(polished_comments)} 条批注指令")
+            progress_log.info(f"[generate_comments] 生成了 {len(polished_comments)} 条批注指令")
     
     except json.JSONDecodeError as e:
         # 捕获 JSONDecodeError 并记录错误
-        print(f"[generate_comments] JSON 解析失败 (JSONDecodeError): {e}")
+        progress_log.error(f"[generate_comments] JSON 解析失败 (JSONDecodeError): {e}")
         polished_comments = []
     
     except ValueError as e:
         # 捕获 ValueError 并记录错误
-        print(f"[generate_comments] JSON 解析失败 (ValueError): {e}")
+        progress_log.error(f"[generate_comments] JSON 解析失败 (ValueError): {e}")
         polished_comments = []
     
     except KeyError as e:
         # 捕获 KeyError 并记录错误
-        print(f"[generate_comments] JSON 解析失败 (KeyError): {e}")
+        progress_log.error(f"[generate_comments] JSON 解析失败 (KeyError): {e}")
         polished_comments = []
     
     except Exception as e:
         # 捕获其他异常并记录错误
-        print(f"[generate_comments] JSON 解析时发生意外错误: {e}")
-        import traceback
-        traceback.print_exc()
+        progress_log.exception(f"[generate_comments] JSON 解析时发生意外错误: {e}")
         polished_comments = []
 
     try:
@@ -288,14 +285,14 @@ def generate_comments(
             with open(new_comments_file, "w", encoding="utf-8") as f:
                 f.write(json.dumps(polished_comments, ensure_ascii=False, indent=2))
     except Exception as e:
-        print(f"[generate_comments] 警告: 保存批注内容到文件失败: {e}")
+        progress_log.warning(f"[generate_comments] 警告: 保存批注内容到文件失败: {e}")
     
     # 计算执行持续时间
     duration = time.time() - start_time
     duration_ms = int(duration * 1000)
     
     # 记录包含执行时间的完成消息
-    print(f"[generate_comments] 执行完成，耗时: {duration:.2f} 秒 ({duration_ms} 毫秒)")
+    progress_log.info(f"[generate_comments] 执行完成，耗时: {duration:.2f} 秒 ({duration_ms} 毫秒)")
     
     # 创建仅包含 polished_comments 字段的新状态字典
     # 确保不修改输入状态对象（不可变性）

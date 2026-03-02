@@ -88,20 +88,21 @@ def check_word_installation() -> Dict[str, Any]:
                 # 获取版本信息
                 try:
                     result["version"] = word_app.Version
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[check_word_installation] 获取 Version 失败（可忽略）: {e}")
 
                 # 获取名称
                 try:
                     result["name"] = word_app.Name
-                except:
+                except Exception as e:
+                    logger.debug(f"[check_word_installation] 获取 Name 失败（可忽略）: {e}")
                     result["name"] = progid
 
                 # 获取路径
                 try:
                     result["path"] = word_app.Path
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[check_word_installation] 获取 Path 失败（可忽略）: {e}")
 
                 result["installed"] = True
                 result["com_progid"] = progid
@@ -109,8 +110,8 @@ def check_word_installation() -> Dict[str, Any]:
                 # 关闭实例
                 try:
                     word_app.Quit(SaveChanges=False)
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[check_word_installation] 关闭 Word 实例失败（可忽略）: {e}")
 
                 pythoncom.CoUninitialize()
                 return result
@@ -158,19 +159,19 @@ def get_word_version_info() -> Optional[Dict[str, Any]]:
             # 尝试获取更多信息
             try:
                 info["build"] = word_app.Build
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"[get_word_version_info] 获取 Build 失败（可忽略）: {e}")
 
             try:
                 info["language"] = word_app.Language
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"[get_word_version_info] 获取 Language 失败（可忽略）: {e}")
 
             # 关闭实例
             try:
                 word_app.Quit(SaveChanges=False)
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"[get_word_version_info] 关闭 Word 实例失败（可忽略）: {e}")
 
             pythoncom.CoUninitialize()
             return info

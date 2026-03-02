@@ -27,7 +27,7 @@ export function Sidebar({ className, children }: SidebarProps) {
   return (
     <aside
       className={cn(
-        'st-sidebar flex flex-col',
+        'sidebar flex flex-col',
         className
       )}
     >

@@ -11,13 +11,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.states import TenderGraphStateBase
-from util.word_util import (
+from backend.util.log_util.progress_log import progress_log
+from backend.util.word_util import (
     create_word_application,
     close_word_application,
     open_document_with_retry,
     unprotect_document,
 )
-from util.word_util import (
+from backend.util.word_util import (
     wdFindStop,
     wdCollapseEnd,
     wdActiveEndPageNumber,
@@ -78,7 +79,7 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
     - 失败的内容和所在页数
     """
     start_time = time.time()
-    print(f"[replace_content] 开始执行...")
+    progress_log.info("[replace_content] 开始执行...")
     
     prepared_doc_path = state.get("prepared_doc_path")
     
@@ -151,7 +152,7 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
         # 使用统一的工具函数取消文档保护
         unprotect_document(doc, node_name="replace_content")
         
-        print(f"开始替换 {len(replacements)} 对替换内容...")
+        progress_log.info(f"开始替换 {len(replacements)} 对替换内容...")
         
         # 判断哪些替换是项目内容、项目名称和项目编号
         # 通过 placeholder_mapping 来判断
@@ -203,7 +204,7 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
             for rep_idx, (search_text, replace_text) in enumerate(replacements_to_process, 1):
                 normalized_search_text = _normalize_find_text(search_text)
                 normalized_replace_text = _normalize_replace_text(replace_text)
-                print(f"  [{rep_idx}/{len(replacements_to_process)}] 正在在 [{story_type_name}] 中搜索 {repr(normalized_search_text)}...")
+                progress_log.debug(f"  [{rep_idx}/{len(replacements_to_process)}] 正在在 [{story_type_name}] 中搜索 {repr(normalized_search_text)}...")
                 
                 # 创建搜索范围的副本，避免丢失原始引用
                 search_rng = rng.Duplicate
@@ -229,7 +230,7 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
                     try:
                         search_rng.Text = normalized_replace_text
                         total_stats["total_replaced"] += 1
-                        print(f"    [已替换] {repr(normalized_search_text)} -> {repr(normalized_replace_text)} 在 {page_info}")
+                        progress_log.info(f"    [已替换] {repr(normalized_search_text)} -> {repr(normalized_replace_text)} 在 {page_info}")
 
                         if allow_comments and normalized_replace_text is not None and str(normalized_replace_text).strip() != "":
                             try:
@@ -243,19 +244,19 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
                     except Exception as e:
                         total_stats["total_error"] += 1
                         failed_replacements.append((normalized_search_text, page_num, str(e)))
-                        print(f"    [错误] 在 {page_info} 找到 {repr(normalized_search_text)} 但编辑失败: {e}")
+                        progress_log.error(f"    [错误] 在 {page_info} 找到 {repr(normalized_search_text)} 但编辑失败: {e}")
                         search_rng.Collapse(wdCollapseEnd)
                 
                 if count > 0:
-                    print(f"  摘要: 在 [{story_type_name}] 中将 {repr(normalized_search_text)} 替换为 {repr(normalized_replace_text)} 共 {count} 处")
+                    progress_log.info(f"  摘要: 在 [{story_type_name}] 中将 {repr(normalized_search_text)} 替换为 {repr(normalized_replace_text)} 共 {count} 处")
         
         # 一次遍历处理所有替换，按优先级顺序：project_content -> header -> body
         if project_content_replacements:
-            print(f"正在处理项目内容替换 ({len(project_content_replacements)} 对) 在正文中（优先处理）...")
+            progress_log.info(f"正在处理项目内容替换 ({len(project_content_replacements)} 对) 在正文中（优先处理）...")
         if header_replacements:
-            print(f"正在处理项目编号/项目名称替换 ({len(header_replacements)} 对) 在页眉和正文中...")
+            progress_log.info(f"正在处理项目编号/项目名称替换 ({len(header_replacements)} 对) 在页眉和正文中...")
         if body_replacements:
-            print(f"正在处理其他替换 ({len(body_replacements)} 对) 仅在正文中...")
+            progress_log.info(f"正在处理其他替换 ({len(body_replacements)} 对) 仅在正文中...")
         
         # 遍历所有 StoryRanges，根据类型决定处理哪些替换
         # 处理顺序：1. project_content（正文） 2. header（页眉和正文） 3. body（正文）
@@ -267,14 +268,14 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
                 
                 # 1. 优先处理项目内容（只在正文中）
                 if project_content_replacements and story_type in project_content_story_types:
-                    print(f"正在处理 [{story_type_name}]...")
+                    progress_log.debug(f"正在处理 [{story_type_name}]...")
                     process_replacements_in_range(rng, project_content_replacements, story_type_name, allow_comments=(enable_erp_comments and story_type == 1))
                 
                 # 2. 处理项目名称和项目编号（在正文和页眉中）
                 if header_replacements and story_type in header_story_types:
                     # 如果已经在处理 project_content 时打印过，这里不再重复打印
                     if not (project_content_replacements and story_type in project_content_story_types):
-                        print(f"正在处理 [{story_type_name}]...")
+                        progress_log.debug(f"正在处理 [{story_type_name}]...")
                     process_replacements_in_range(rng, header_replacements, story_type_name, allow_comments=(enable_erp_comments and story_type == 1))
                 
                 # 3. 处理其他内容（只在正文中）
@@ -282,7 +283,7 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
                     # 如果已经在处理 project_content 或 header 时打印过，这里不再重复打印
                     if not (project_content_replacements and story_type in project_content_story_types) and \
                        not (header_replacements and story_type in header_story_types):
-                        print(f"正在处理 [{story_type_name}]...")
+                        progress_log.debug(f"正在处理 [{story_type_name}]...")
                     process_replacements_in_range(rng, body_replacements, story_type_name, allow_comments=(enable_erp_comments and story_type == 1))
                 
                 try:
@@ -320,7 +321,7 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
         replacement_log_parts.append("文档已保存。")
             
     finally:
-        print("[replace_content] 开始清理资源...")
+        progress_log.info("[replace_content] 开始清理资源...")
         # 使用统一的工具函数关闭 Word 应用程序
         close_word_application(
             word_app=word,
@@ -340,6 +341,6 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
     
     end_time = time.time()
     elapsed_time = end_time - start_time
-    print(f"[replace_content] 执行完成，耗时: {elapsed_time:.2f} 秒 ({elapsed_time*1000:.0f} 毫秒)")
+    progress_log.info(f"[replace_content] 执行完成，耗时: {elapsed_time:.2f} 秒 ({elapsed_time*1000:.0f} 毫秒)")
     
     return new_state

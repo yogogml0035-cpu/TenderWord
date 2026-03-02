@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
-import type { Task, GenerationHistory, TenderType } from '@/types';
+import type { Task, TenderType } from '@/types';
 
 interface AppState {
   // Sidebar state
@@ -13,12 +13,7 @@ interface AppState {
   setCurrentTask: (task: Task | null) => void;
   updateTaskProgress: (progress: number, message?: string) => void;
 
-  // Generation history
-  history: GenerationHistory[];
-  addToHistory: (item: GenerationHistory) => void;
-  removeFromHistory: (id: string) => void;
-  clearHistory: () => void;
-
+  // Active tender type
   // Active tender type
   activeTenderType: TenderType | null;
   setActiveTenderType: (type: TenderType | null) => void;
@@ -52,18 +47,7 @@ export const useAppStore = create<AppState>()(
               : null,
           })),
 
-        // History
-        history: [],
-        addToHistory: (item) =>
-          set((state) => ({
-            history: [item, ...state.history].slice(0, 50), // Keep last 50 items
-          })),
-        removeFromHistory: (id) =>
-          set((state) => ({
-            history: state.history.filter((item) => item.id !== id),
-          })),
-        clearHistory: () => set({ history: [] }),
-
+        // Tender type
         // Tender type
         activeTenderType: null,
         setActiveTenderType: (type) => set({ activeTenderType: type }),
@@ -76,7 +60,6 @@ export const useAppStore = create<AppState>()(
         name: 'tender-app-storage',
         partialize: (state) => ({
           sidebarOpen: state.sidebarOpen,
-          history: state.history,
         }),
       }
     )

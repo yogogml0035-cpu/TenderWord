@@ -10,11 +10,14 @@ import pathlib
 import os
 
 # 添加项目根目录到路径
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from util.word_util import (
+from backend.util.word_util import (
     diagnose_word_com_environment,
     format_diagnosis_report,
 )

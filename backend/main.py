@@ -15,10 +15,14 @@ from fastapi.responses import JSONResponse
 from backend.config.settings import get_settings, settings
 
 # 导入日志工具
-from backend.util.log_util.progress_util import (
-    progress_logger,
+from backend.util.log_util.progress_log import (
+    progress_log,
     start_progress_log_listener,
     stop_progress_log_listener,
+)
+from backend.util.log_util.execution_log import (
+    start_execution_log_listener,
+    stop_execution_log_listener,
 )
 from backend.util.log_util.log_cleanup import cleanup_logs
 from backend.util.log_util.sse_log_handler import init_sse_log_handler
@@ -176,10 +180,12 @@ async def startup_event() -> None:
     # 启动进度日志监听器
     start_progress_log_listener()
     
-    # 初始化 SSE 日志 handler 并添加到 progress_logger
+    # 启动执行日志监听器
+    start_execution_log_listener()
+    
+    # 初始化 SSE 日志 handler 并添加到 progress_log
     sse_handler = init_sse_log_handler(sse_manager)
-    progress_logger.addHandler(sse_handler)
-
+    progress_log.addHandler(sse_handler)
     # 清理过期日志文件（保持总大小在 200MB 以下）
     try:
         deleted_count = cleanup_logs('backend/logs', max_total_mb=200)
@@ -204,6 +210,9 @@ async def startup_event() -> None:
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     """应用关闭时执行."""
+    # 停止执行日志监听器
+    stop_execution_log_listener()
+    
     # 停止进度日志监听器
     stop_progress_log_listener()
     

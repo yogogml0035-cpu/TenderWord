@@ -5,7 +5,7 @@
 适用于高并发场景下的进度追踪和日志记录。
 
 使用方法:
-    from backend.util.log_util.progress_util import (
+    from backend.util.log_util.progress_log import (
         progress_log,
         start_progress_log_listener,
         stop_progress_log_listener,

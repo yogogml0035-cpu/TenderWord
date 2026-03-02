@@ -1,4 +1,4 @@
-# GNGK 目录仅保留“带前缀”的差异化节点（gngk_*）与 prompt。
+# GNGK 目录仅保留"带前缀"的差异化节点（gngk_*）与 prompt。
 # 通用节点统一放在 nodes/common_word_nodes 中实现，并在此处 re-export，
 # 以保持外部导入路径 `from backend.nodes.gngk_word_nodes import ...` 不变。
 
@@ -6,12 +6,12 @@ from backend.nodes.common_word_nodes import (
     generate_polished_text,
     prepare_template,
     replace_content,
+    extract_tender_params,
+    delete_tender_param,
+    update_word,
 )
 
 from backend.nodes.gngk_word_nodes.gngk_get_replacements import get_replacements
-from backend.nodes.gngk_word_nodes.gngk_delete_tender_param import delete_tender_param
-from backend.nodes.gngk_word_nodes.gngk_extract_tender_params import extract_tender_params
-from backend.nodes.gngk_word_nodes.gngk_update_word import update_word
 
 __all__ = [
     "prepare_template",

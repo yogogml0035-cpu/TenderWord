@@ -29,7 +29,7 @@ except ImportError:
     win32com = None
 
 # 导入 COM 管理器
-from util.word_util.word_com_manager import (
+from backend.util.word_util.word_com_manager import (
     com_lock,
     is_rpc_error,
     calculate_retry_delay,
@@ -39,7 +39,7 @@ from util.word_util.word_com_manager import (
 
 # 导入诊断工具
 try:
-    from util.word_util.word_diagnostics import (
+    from backend.util.word_util.word_diagnostics import (
         diagnose_word_com_environment,
         format_diagnosis_report,
         check_word_installation,
