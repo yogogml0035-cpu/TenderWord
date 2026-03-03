@@ -109,5 +109,5 @@ export function NewChatPopup({
       />
     </div>
   );
-
+}
 export default NewChatPopup;

@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 /**
  * Polyfills for Jest/JSDOM environment
  * This file MUST be loaded before any other setup files

@@ -189,12 +189,12 @@ export function FormPanel({ className = '' }: FormPanelProps) {
       <div className="flex-1 overflow-y-auto p-4">
         {conversation.tenderType === 'xjcg' ? (
           <XjcgTenderForm
-            onSubmit={handleSubmit}
+            onSubmit={handleSubmit as any}
             isSubmitting={isSubmitting || hasActiveTask}
           />
         ) : (
           <GngkTenderForm
-            onSubmit={handleSubmit}
+            onSubmit={handleSubmit as any}
             isSubmitting={isSubmitting || hasActiveTask}
           />
         )}
