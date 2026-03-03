@@ -150,12 +150,19 @@ def extract_project_content(
     log_parts.append(f"在位置 {end_pos1} 找到结束标记1 '{end_marker1}'")
 
     # 定义所有可能的结束标记
-    end_markers = ["交付地点", "交付日期", "供应商", "项目交付地点", "项目交付日期"]
+    end_markers = [
+        "交付地点",
+        "交付日期",
+        "供应商",
+        "项目交付地点",
+        "项目交付日期",
+        "3、合格供应商资格条件",
+    ]
 
     # 在 front_end_pos 和 end_pos1 之间查找所有结束标记
     found_positions = []
     for marker in end_markers:
-        pos = doc_content.find(marker, front_end_pos, end_pos1)
+        pos = doc_content.find(marker, front_end_pos, end_pos1 + len(end_marker1))
         if pos != -1:
             found_positions.append((pos, marker))
             log_parts.append(f"在位置 {pos} 找到结束标记 '{marker}'")

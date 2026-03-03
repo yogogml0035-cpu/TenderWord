@@ -59,7 +59,7 @@ class TestPromptSelectionAndValidation:
         )
         
         # Mock the LLM call to avoid actual API calls
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             mock_llm.return_value = "[]"  # Return empty JSON array
             
             # Should not raise ValueError
@@ -78,7 +78,7 @@ class TestPromptSelectionAndValidation:
         )
         
         # Mock the LLM call to avoid actual API calls
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             mock_llm.return_value = "[]"  # Return empty JSON array
             
             # Should not raise ValueError
@@ -97,7 +97,7 @@ class TestPromptSelectionAndValidation:
         )
         
         # Mock the LLM call to avoid actual API calls
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             mock_llm.return_value = "[]"  # Return empty JSON array
             
             # Should not raise ValueError (xjcg is valid)
@@ -207,7 +207,7 @@ class TestLLMStreamingWithErrorHandling:
         )
         
         # Mock stream_llm_completion to raise LLMTimeoutError
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             from backend.util.common_util import LLMTimeoutError
             mock_llm.side_effect = LLMTimeoutError("deepseek", 10)
             
@@ -225,7 +225,7 @@ class TestLLMStreamingWithErrorHandling:
         )
         
         # Mock stream_llm_completion to raise a general exception
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             mock_llm.side_effect = RuntimeError("Unexpected error")
             
             # Should not raise exception, should return empty list
@@ -242,7 +242,7 @@ class TestLLMStreamingWithErrorHandling:
         )
         
         # Mock stream_llm_completion to return empty JSON array
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             # Create a proper async mock
             async def mock_stream(*args, **kwargs):
                 return "[]"
@@ -272,7 +272,7 @@ class TestLLMStreamingWithErrorHandling:
         }
         
         # Mock stream_llm_completion to capture call parameters
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             async def mock_stream(*args, **kwargs):
                 return "[]"
             
@@ -303,7 +303,7 @@ class TestLLMStreamingWithErrorHandling:
         )
         
         # Mock stream_llm_completion
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             async def mock_stream(*args, **kwargs):
                 return "[]"
             
@@ -329,7 +329,7 @@ class TestJSONParsingWithErrorHandling:
         # Mock stream_llm_completion to return valid JSON array
         valid_json = '[{"reference_text": "参考文本1", "comment_text": "批注内容1"}, {"reference_text": "参考文本2", "comment_text": "批注内容2"}]'
         
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             async def mock_stream(*args, **kwargs):
                 return valid_json
             
@@ -355,7 +355,7 @@ class TestJSONParsingWithErrorHandling:
         # Mock stream_llm_completion to return invalid JSON
         invalid_json = '{"invalid": "not an array"'
         
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             async def mock_stream(*args, **kwargs):
                 return invalid_json
             
@@ -377,7 +377,7 @@ class TestJSONParsingWithErrorHandling:
         # Mock stream_llm_completion to return JSON object instead of array
         non_list_json = '{"reference_text": "文本", "comment_text": "批注"}'
         
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             async def mock_stream(*args, **kwargs):
                 return non_list_json
             
@@ -399,7 +399,7 @@ class TestJSONParsingWithErrorHandling:
         # Mock stream_llm_completion to return JSON with missing fields
         json_with_missing_fields = '[{"reference_text": "文本1"}, {"comment_text": "批注2"}, {"reference_text": "文本3", "comment_text": "批注3"}]'
         
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             async def mock_stream(*args, **kwargs):
                 return json_with_missing_fields
             
@@ -426,7 +426,7 @@ class TestJSONParsingWithErrorHandling:
         # Mock stream_llm_completion to return JSON with mixed types
         json_with_mixed_types = '[{"reference_text": "文本1", "comment_text": "批注1"}, "string item", 123, null, {"reference_text": "文本2", "comment_text": "批注2"}]'
         
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             async def mock_stream(*args, **kwargs):
                 return json_with_mixed_types
             
@@ -451,7 +451,7 @@ class TestJSONParsingWithErrorHandling:
         # Mock stream_llm_completion to return empty JSON array
         empty_json = '[]'
         
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             async def mock_stream(*args, **kwargs):
                 return empty_json
             
@@ -473,34 +473,24 @@ class TestJSONParsingWithErrorHandling:
         # Mock stream_llm_completion to return valid JSON
         valid_json = '[{"reference_text": "文本1", "comment_text": "批注1"}, {"reference_text": "文本2", "comment_text": "批注2"}]'
         
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
             async def mock_stream(*args, **kwargs):
                 return valid_json
             
             mock_llm.side_effect = mock_stream
             
-            # Capture stdout to verify logging
-            import io
-            import sys
-            captured_output = io.StringIO()
-            sys.stdout = captured_output
-            
-            try:
-                result = generate_comments(state, config={})
-                
-                # Restore stdout
-                sys.stdout = sys.__stdout__
-                
-                # Verify logging message
-                output = captured_output.getvalue()
-                assert "生成了 2 条批注指令" in output
-            finally:
-                sys.stdout = sys.__stdout__
+            with patch("backend.nodes.common_word_nodes.generate_comments.progress_log.info") as mock_info:
+                generate_comments(state, config={})
+                assert any(
+                    "生成了 2 条批注指令" in str(args[0])
+                    for args, _kwargs in mock_info.call_args_list
+                    if args
+                )
 
 
 class TestStateReturnAndLogging:
     """测试状态返回和日志记录功能（任务 2.10）"""
-    
+
     def test_return_state_contains_only_polished_comments(self):
         """测试返回状态仅包含 polished_comments 字段"""
         state = XjcgTenderGraphState(
@@ -508,26 +498,24 @@ class TestStateReturnAndLogging:
             comment_plan_detail=[{"content": "批注", "scope_text": "范围"}],
             tender_type="xjcg",
         )
-        
+
         # Mock stream_llm_completion to return valid JSON
         valid_json = '[{"reference_text": "文本", "comment_text": "批注"}]'
-        
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+
+        with patch("backend.nodes.common_word_nodes.generate_comments.stream_llm_completion") as mock_llm:
             async def mock_stream(*args, **kwargs):
                 return valid_json
-            
+
             mock_llm.side_effect = mock_stream
-            
+
             result = generate_comments(state, config={})
-            
+
             # Verify only polished_comments is in the result
             assert "polished_comments" in result
-            # The result should be a TypedDict with only polished_comments
-            # Other fields should not be present in the returned dict
             result_keys = list(result.keys())
             assert len(result_keys) == 1
             assert result_keys[0] == "polished_comments"
-    
+
     def test_input_state_not_modified(self):
         """测试输入状态不被修改（不可变性）"""
         state = XjcgTenderGraphState(
@@ -535,60 +523,43 @@ class TestStateReturnAndLogging:
             comment_plan_detail=[{"content": "批注", "scope_text": "范围"}],
             tender_type="xjcg",
         )
-        
-        # Create a copy of the original state for comparison
+
         original_polished_text = state.get("polished_text")
         original_comment_plan = state.get("comment_plan_detail")
         original_tender_type = state.get("tender_type")
-        
-        # Mock stream_llm_completion to return valid JSON
+
         valid_json = '[{"reference_text": "文本", "comment_text": "批注"}]'
-        
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+
+        with patch("backend.nodes.common_word_nodes.generate_comments.stream_llm_completion") as mock_llm:
             async def mock_stream(*args, **kwargs):
                 return valid_json
-            
+
             mock_llm.side_effect = mock_stream
-            
-            result = generate_comments(state, config={})
-            
-            # Verify input state was not modified
+
+            generate_comments(state, config={})
+
             assert state.get("polished_text") == original_polished_text
             assert state.get("comment_plan_detail") == original_comment_plan
             assert state.get("tender_type") == original_tender_type
-    
+
     def test_execution_time_logging(self):
         """测试执行时间日志记录"""
         state = XjcgTenderGraphState(
             polished_text="测试文本",
             tender_type="xjcg",
         )
-        
-        # Mock stream_llm_completion to return valid JSON
-        valid_json = '[]'
-        
-        with patch('nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+
+        valid_json = "[]"
+
+        with patch("backend.nodes.common_word_nodes.generate_comments.stream_llm_completion") as mock_llm:
             async def mock_stream(*args, **kwargs):
                 return valid_json
-            
+
             mock_llm.side_effect = mock_stream
-            
-            # Capture stdout to verify logging
-            import io
-            import sys
-            captured_output = io.StringIO()
-            sys.stdout = captured_output
-            
-            try:
-                result = generate_comments(state, config={})
-                
-                # Restore stdout
-                sys.stdout = sys.__stdout__
-                
-                # Verify execution time logging
-                output = captured_output.getvalue()
-                assert "执行完成，耗时:" in output
-                assert "秒" in output
-                assert "毫秒" in output
-            finally:
-                sys.stdout = sys.__stdout__
+
+            with patch("backend.nodes.common_word_nodes.generate_comments.progress_log.info") as mock_info:
+                generate_comments(state, config={})
+                messages = [str(args[0]) for args, _kwargs in mock_info.call_args_list if args]
+                assert any("执行完成，耗时:" in msg for msg in messages)
+                assert any("秒" in msg for msg in messages)
+                assert any("毫秒" in msg for msg in messages)
