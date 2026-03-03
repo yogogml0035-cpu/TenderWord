@@ -1,19 +1,21 @@
 'use client';
 
 import React, { useRef, useEffect } from 'react';
-import { FileText, Bot, Loader2, CheckCircle2, XCircle, Download } from 'lucide-react';
+import { FileText, Bot, Loader2, CheckCircle2, XCircle, Download, RefreshCw } from 'lucide-react';
 import type { Message, LogEntry, DualColumnContent } from '@/types/chat';
 import { isDualColumnContent } from '@/types/chat';
 
 interface DualColumnMessageProps {
   message: Message;
   onDownload?: (filePath: string, fileName?: string) => void;
+  onRetry?: () => void;
   maxHeight?: number;
 }
 
 export function DualColumnMessage({ 
   message, 
   onDownload,
+  onRetry,
   maxHeight = 400 
 }: DualColumnMessageProps) {
   const leftScrollRef = useRef<HTMLDivElement>(null);
@@ -89,6 +91,16 @@ export function DualColumnMessage({
           >
             <Download className="w-4 h-4" />
             下载文件
+          </button>
+        )}
+        
+        {message.status === 'error' && onRetry && (
+          <button
+            onClick={onRetry}
+            className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 bg-blue-50 rounded hover:bg-blue-100 transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            重新生成
           </button>
         )}
       </div>

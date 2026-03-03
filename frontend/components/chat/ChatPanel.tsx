@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useCallback } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
@@ -36,6 +36,19 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     // 2. Or just store locally for now
     // For this version, we'll just add the message
   };
+
+  const handleRetry = useCallback(() => {
+    if (!conversation) return;
+    
+    // Find the last user message
+    const lastUserMessage = [...messages]
+      .reverse()
+      .find(m => m.type === 'user');
+    
+    if (lastUserMessage && typeof lastUserMessage.content === 'string') {
+      handleSendMessage(lastUserMessage.content);
+    }
+  }, [messages, conversation, handleSendMessage]);
 
   const handleDownload = async (filePath: string, fileName?: string) => {
     try {
@@ -101,6 +114,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         <MessageList
           messages={messages}
           onDownload={handleDownload}
+          onRetry={handleRetry}
         />
       </div>
 

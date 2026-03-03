@@ -9,6 +9,7 @@ import { DualColumnMessage } from './DualColumnMessage';
 interface MessageListProps {
   messages: Message[];
   onDownload?: (filePath: string, fileName?: string) => void;
+  onRetry?: () => void;
   emptyState?: React.ReactNode;
   className?: string;
 }
@@ -16,6 +17,7 @@ interface MessageListProps {
 export function MessageList({
   messages,
   onDownload,
+  onRetry,
   emptyState,
   className = '',
 }: MessageListProps) {
@@ -78,6 +80,7 @@ export function MessageList({
             key={message.id}
             message={message}
             onDownload={onDownload}
+            onRetry={onRetry}
           />
         ))}
       </div>
@@ -102,9 +105,10 @@ export function MessageList({
 interface MessageItemProps {
   message: Message;
   onDownload?: (filePath: string, fileName?: string) => void;
+  onRetry?: () => void;
 }
 
-function MessageItem({ message, onDownload }: MessageItemProps) {
+function MessageItem({ message, onDownload, onRetry }: MessageItemProps) {
   const isDualColumn = isDualColumnContent(message.content);
 
   // Render AI message with dual columns
@@ -118,6 +122,7 @@ function MessageItem({ message, onDownload }: MessageItemProps) {
           <DualColumnMessage
             message={message}
             onDownload={onDownload}
+            onRetry={onRetry}
           />
         </div>
       </div>
