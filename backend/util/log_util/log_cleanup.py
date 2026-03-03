@@ -45,7 +45,28 @@ def get_total_size(files: List[Path]) -> int:
     return sum(f.stat().st_size for f in files if f.exists())
 
 
-def cleanup_logs(log_dir: str, max_total_mb: int = 200) -> int:
+def cleanup_logs(log_dir: str, max_total_mb: int = None) -> int:
+    """清理日志文件，保持总大小在阈值以下。
+
+    当日志文件总大小超过阈值时，按修改时间排序，删除最旧的文件，
+    直到总大小低于阈值。当天的日志文件会被保护，不会被删除。
+
+    Args:
+        log_dir: 日志目录路径
+        max_total_mb: 最大总大小（MB），默认使用 settings.LOG_CLEANUP_MAX_MB
+
+    Returns:
+        删除的文件数量
+
+    Example:
+        >>> deleted = cleanup_logs('backend/logs')
+        >>> print(f"Deleted {deleted} files")
+    """
+    # 延迟导入 settings 以避免循环依赖
+    from backend.config.settings import settings
+    
+    if max_total_mb is None:
+        max_total_mb = settings.LOG_CLEANUP_MAX_MB
     """清理日志文件，保持总大小在阈值以下。
 
     当日志文件总大小超过阈值时，按修改时间排序，删除最旧的文件，
@@ -100,6 +121,10 @@ def cleanup_logs(log_dir: str, max_total_mb: int = 200) -> int:
             if total_size <= max_bytes:
                 break
         except Exception as e:
+            # 使用 stderr 输出避免循环依赖（logging 模块可能会调用 cleanup）
+            import sys
+            print(f"[log_cleanup] Warning: Failed to delete {log_file}: {e}",
+                  file=sys.stderr, flush=True)
             # 使用 stderr 输出避免循环依赖（logging 模块可能会调用 cleanup）
             import sys
             print(f"[log_cleanup] Warning: Failed to delete {log_file}: {e}",

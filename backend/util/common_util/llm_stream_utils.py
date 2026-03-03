@@ -1,5 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+import random
+import threading
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional
+
+from backend.config.settings import settings
+from backend.util.log_util.progress_log import progress_log
+
+
+class LLMTimeoutError(Exception):
+    """大模型响应超时异常"""
+
 """
 LLM 流式响应工具模块
 
@@ -166,6 +180,24 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
 
 
 def ensure_llm_env(model_provider: str) -> None:
+    """检查 LLM 配置是否完整。"""
+    config = MODEL_CONFIGS.get(model_provider, MODEL_CONFIGS["deepseek"])
+    llm_config = settings.get_llm_config(model_provider)
+    missing: list[str] = []
+    
+    if not llm_config.get("api_key"):
+        missing.append(config.api_key_env)
+    if not llm_config.get("base_url"):
+        missing.append(config.base_url_env)
+    if not llm_config.get("model"):
+        missing.append(config.model_env)
+        
+    if missing:
+        missing_text = ", ".join(missing)
+        raise ValueError(
+            f"{config.display_name} 配置缺失：{missing_text} 未设置。"
+            "请在系统环境变量或项目根目录的 .env 中补齐后重试（可参考 .env.example）。"
+        )
     config = MODEL_CONFIGS.get(model_provider, MODEL_CONFIGS["deepseek"])
     missing: list[str] = []
     for env_name in (config.api_key_env, config.base_url_env, config.model_env):
@@ -279,7 +311,20 @@ async def _stream_openai_compatible(
     )
     import httpx
 
-    api_key = os.getenv(config.api_key_env)
+    llm_config = settings.get_llm_config(config.api_key_env.replace("_API_KEY", "").lower().replace("ark", "doubao"))
+    api_key = llm_config.get("api_key")
+    if not api_key or not str(api_key).strip():
+        raise ValueError(
+            f"{config.display_name} 配置缺失：API Key 未设置。"
+            "请在系统环境变量或项目根目录的 .env 中补齐后重试（可参考 .env.example）。"
+        )
+
+    client = AsyncOpenAI(
+        api_key=api_key,
+        base_url=llm_config.get("base_url"),
+        timeout=httpx.Timeout(timeout_seconds, connect=10.0),
+        max_retries=0,
+    )
     if not api_key or not str(api_key).strip():
         raise ValueError(
             f"{config.display_name} 配置缺失：{config.api_key_env} 未设置。"
@@ -313,6 +358,12 @@ async def _stream_openai_compatible(
             )
 
     # 构建请求参数
+    create_params: dict[str, Any] = {
+        "model": model_override or llm_config.get("model"),
+        "messages": messages,
+        "stream": True,
+        **config.extra_params,  # max_tokens, temperature 等
+    }
     create_params: dict[str, Any] = {
         "model": model_override or os.getenv(config.model_env),
         "messages": messages,

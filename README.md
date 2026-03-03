@@ -81,11 +81,15 @@ pip install -r requirements.txt
 copy ..\.env.example ..\.env
 # 编辑 .env 文件填入配置
 
-# 启动后端服务
+# 启动后端服务（以下两种方式任选其一）
+
+# 方式1: 直接运行（推荐，已修复模块导入问题）
 python main.py
-# 或
+
+# 方式2: 使用 uvicorn（热重载模式，适合开发）
 uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
 
 ### 3. 前端部署
 
@@ -243,6 +247,9 @@ cd D:\Tools\nssm\win64
 # 配置:
 # Path: D:\CompanyProject\feat-wsq-h\backend\.venv\Scripts\python.exe
 # Startup directory: D:\CompanyProject\feat-wsq-h\backend
+# Arguments: main.py
+#
+# 或使用 uvicorn 方式:
 # Arguments: -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 
 # 启动服务

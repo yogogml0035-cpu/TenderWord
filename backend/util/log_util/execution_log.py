@@ -28,37 +28,69 @@ Usage:
 
 import logging
 import logging.handlers
-import os
 import queue
 from datetime import datetime
 from pathlib import Path
-from typing import Mapping, Any
+from typing import Any, Mapping
+
+# 延迟导入 settings 以避免循环导入
+_settings = None
+
+
+def _get_settings():
+    global _settings
+    if _settings is None:
+        from backend.config.settings import settings as _settings_instance
+
+        _settings = _settings_instance
+    return _settings
+
+
+def _get_log_dir() -> Path:
+    """获取日志目录。"""
+    settings = _get_settings()
+    # 如果是绝对路径，直接使用；否则相对于 backend 目录
+    log_dir = Path(settings.LOG_DIR)
+    if not log_dir.is_absolute():
+        log_dir = Path(__file__).parent.parent.parent / log_dir
+    log_dir.mkdir(exist_ok=True)
+    return log_dir
+
+
+def _get_log_queue() -> queue.Queue[logging.LogRecord]:
+    """获取日志队列。"""
+    settings = _get_settings()
+    return queue.Queue(maxsize=settings.LOG_QUEUE_MAXSIZE)
+
 
 # 日志目录: backend/logs/
-LOG_DIR = Path(__file__).parent.parent.parent / "logs"
-LOG_DIR.mkdir(exist_ok=True)
-
-# 动态生成按日期命名的日志文件
-_today = datetime.now().strftime("%Y%m%d")
-TASK_EXECUTION_LOG_FILE = str(LOG_DIR / f"execution-{_today}.log")
+LOG_DIR = _get_log_dir()
 
 # 有界队列，防止内存溢出
-_log_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=10000)
+_log_queue = _get_log_queue()
 
 # 日志文件路径
 _log_file = LOG_DIR / f"execution-{datetime.now().strftime('%Y%m%d')}.log"
 
+
 # 文件 handler - 使用 TimedRotatingFileHandler 支持按天轮转
-_file_handler = logging.handlers.TimedRotatingFileHandler(
-    filename=str(_log_file),
-    when="midnight",
-    backupCount=30,  # 保留 30 天
-    encoding="utf-8",
-    delay=True,
-)
-_file_handler.setFormatter(
-    logging.Formatter("%(asctime)s：%(message)s", "%Y-%m-%d %H:%M:%S")
-)
+def _create_file_handler():
+    """创建文件 handler。"""
+    settings = _get_settings()
+    handler = logging.handlers.TimedRotatingFileHandler(
+        filename=str(_log_file),
+        when=settings.LOG_ROTATION_WHEN,
+        backupCount=settings.EXECUTION_LOG_BACKUP_COUNT,
+        encoding="utf-8",
+        delay=True,
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s：%(message)s", "%Y-%m-%d %H:%M:%S")
+    )
+    return handler
+
+
+_file_handler = _create_file_handler()
 
 # QueueHandler - 线程安全的日志处理
 _queue_handler = logging.handlers.QueueHandler(_log_queue)
@@ -116,6 +148,9 @@ def log_task_end(state: Mapping[str, Any], task_name: str) -> None:
         f"{project_number}-{project_name}" if project_number or project_name else ""
     )
     logger.info(f"{project_zbr_xbr}-{project_info}结束生成，当前进入{task_name}")
+
+# 任务执行日志文件路径（向后兼容）
+TASK_EXECUTION_LOG_FILE = str(_log_file)
 
 
 __all__ = [

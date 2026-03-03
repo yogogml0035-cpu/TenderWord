@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, AsyncIterator, Dict, List, Optional, Set
 
+from backend.config.settings import settings
 from backend.models.sse import SSEEvent, SSEEventType
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,31 @@ class SSEManager:
         event_ttl: 事件过期时间（秒）
         heartbeat_interval: 心跳间隔（秒）
     """
+    def __init__(
+        self,
+        max_events_per_task: int = None,
+        event_ttl: int = None,
+        heartbeat_interval: int = None,
+    ):
+        """初始化 SSE 管理器.
 
+        Args:
+            max_events_per_task: 每个任务最大存储事件数，默认使用 settings.SSE_MAX_EVENTS_PER_TASK
+            event_ttl: 事件过期时间（秒），默认使用 settings.SSE_EVENT_TTL
+            heartbeat_interval: 心跳间隔（秒），默认使用 settings.SSE_HEARTBEAT_INTERVAL
+        """
+        self.max_events_per_task = max_events_per_task or settings.SSE_MAX_EVENTS_PER_TASK
+        self.event_ttl = event_ttl or settings.SSE_EVENT_TTL
+        self.heartbeat_interval = heartbeat_interval or settings.SSE_HEARTBEAT_INTERVAL
+
+        # 任务 -> 客户端集合
+        self._clients: Dict[str, Set[SSEClient]] = defaultdict(set)
+
+        # 任务 -> 事件列表（用于断线重连）
+        self._events: Dict[str, List[SSEEvent]] = defaultdict(list)
+
+        # 事件ID计数器
+        self._event_counters: Dict[str, int] = defaultdict(int)
     def __init__(
         self,
         max_events_per_task: int = 1000,

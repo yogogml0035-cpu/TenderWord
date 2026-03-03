@@ -61,3 +61,5 @@ test_py/
 
 # 临时 prompt 文件（运行时生成）
 backend/prompts/prompt_*.txt
+
+docs/*

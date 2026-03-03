@@ -139,6 +139,48 @@ class Settings(BaseSettings):
         description="允许上传的文件扩展名",
     )
 
+    # ========================================
+    # 并发锁配置
+    # ========================================
+    LOCK_FILE_PATH: Optional[str] = Field(
+        default=None,
+        description="跨进程锁文件路径，默认使用系统临时目录",
+    )
+    LOCK_TIMEOUT: float = Field(
+        default=600.0,
+        description="锁获取超时时间（秒）",
+    )
+    LOCK_WAIT_TIMEOUT: float = Field(
+        default=1200.0,
+        description="等待锁超时时间（秒）",
+    )
+
+    # ========================================
+    # 日志配置
+    # ========================================
+    LOG_DIR: str = Field(default="logs", description="日志目录（相对于backend目录）")
+    LOG_QUEUE_MAXSIZE: int = Field(default=10000, description="日志队列最大容量")
+    PROGRESS_LOG_BACKUP_COUNT: int = Field(default=7, description="进度日志保留天数")
+    EXECUTION_LOG_BACKUP_COUNT: int = Field(default=30, description="执行日志保留天数")
+    LOG_ROTATION_WHEN: str = Field(default="midnight", description="日志轮转时间")
+    LOG_CLEANUP_MAX_MB: int = Field(default=200, description="日志清理最大容量（MB）")
+
+    # ========================================
+    # SSE 配置
+    # ========================================
+    SSE_MAX_EVENTS_PER_TASK: int = Field(
+        default=1000, description="每个任务最大 SSE 事件数"
+    )
+    SSE_EVENT_TTL: int = Field(default=3600, description="SSE 事件 TTL（秒）")
+    SSE_HEARTBEAT_INTERVAL: int = Field(default=15, description="SSE 心跳间隔（秒）")
+
+    # ========================================
+    # 任务队列配置
+    # ========================================
+    TASK_TOTAL_NODES: int = Field(default=7, description="任务总节点数，用于进度计算")
+    TASK_HEARTBEAT_TIMEOUT: int = Field(default=10, description="任务心跳超时（秒）")
+    TASK_CLEANUP_INTERVAL: int = Field(default=5, description="任务清理间隔（秒）")
+
     @property
     def langsmith_tracing_enabled(self) -> bool:
         """检查是否启用 LangSmith 追踪."""

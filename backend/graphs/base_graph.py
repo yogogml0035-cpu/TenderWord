@@ -13,6 +13,21 @@
 """
 
 from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from langgraph.graph import END, START, StateGraph
+import contextlib
+import time
+import pathlib
+import os
+import tempfile
+import asyncio
+import threading
+from functools import wraps
+from typing import Callable, Any, Optional, TextIO, Type, TypedDict
+
+from backend.config.settings import settings
+from backend.util.log_util.progress_log import progress_log
 from abc import ABC, abstractmethod
 from langgraph.graph import END, START, StateGraph
 import contextlib
@@ -54,6 +69,40 @@ class CrossProcessFileLock:
     """
     
     def __init__(self, lock_file_path: str = None):
+        """初始化文件锁
+
+        Args:
+            lock_file_path: 锁文件路径，默认使用 settings.LOCK_FILE_PATH
+        """
+        if lock_file_path is None:
+            lock_file_path = settings.LOCK_FILE_PATH
+
+        if lock_file_path is None:
+            # 使用临时目录，确保所有进程都能访问
+            lock_dir = pathlib.Path(tempfile.gettempdir())
+            lock_file_path = str(lock_dir / "tender_word_graph_execution.lock")
+
+        self.lock_file_path = lock_file_path
+        self._lock_file = None
+        self._thread_lock = threading.Lock()  # 同进程内的线程锁
+        self._file_lock_acquired = False
+        
+    def acquire(self, timeout: float = None) -> bool:
+        """获取锁（带超时）
+
+        获取顺序：
+        1. 先获取线程锁（同进程内互斥）
+        2. 再获取文件锁（跨进程互斥）
+
+        Args:
+            timeout: 超时时间（秒），默认使用 settings.LOCK_TIMEOUT
+
+        Returns:
+            bool: 是否成功获取锁
+        """
+        if timeout is None:
+            timeout = settings.LOCK_TIMEOUT
+        self._lock_file = None
         """
         初始化文件锁
         

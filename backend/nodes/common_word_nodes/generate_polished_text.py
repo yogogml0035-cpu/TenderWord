@@ -1,6 +1,29 @@
 from __future__ import annotations
 
 import datetime
+import re
+import time
+from typing import Callable, Optional
+
+from backend.states import TenderGraphStateBase
+from backend.util.common_util import (
+    LLMTimeoutError,
+    StreamCallbacks,
+    stream_llm_completion,)
+from backend.prompts.generate_prompt import (
+    POLISH_SYSTEM_PROMPT,
+    POLISH_USER_PROMPT,)
+from backend.util.log_util.progress_log import progress_log
+
+# Prompt 注册表：根据 tender_type 选择对应的 prompt
+PROMPT_REGISTRY = {
+    "xjcg": (POLISH_SYSTEM_PROMPT, POLISH_USER_PROMPT),
+    "gngk": (POLISH_SYSTEM_PROMPT, POLISH_USER_PROMPT),}   
+
+def _sanitize_filename(name: str) -> str:
+    return re.sub(r'[<>\":/\\|?*]', "_", name).strip()
+
+import datetime
 from typing import Callable, Optional
 import os
 import pathlib

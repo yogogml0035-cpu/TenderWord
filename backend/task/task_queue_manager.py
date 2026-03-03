@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
+from backend.config.settings import settings
 from backend.util.log_util.progress_log import progress_log
 
 
@@ -46,7 +47,8 @@ NODE_DISPLAY_NAMES = {
     NodeName.UPDATE_WORD: "生成招标文件",
 }
 
-# 总节点数
+# 总节点数（从 settings 获取）
+TOTAL_NODES = settings.TASK_TOTAL_NODES
 TOTAL_NODES = 7
 
 
@@ -171,6 +173,8 @@ class TaskQueueManager:
         self._execution_condition = threading.Condition(self._data_lock)
         
         # 心跳超时配置（秒）
+        self._heartbeat_timeout = settings.TASK_HEARTBEAT_TIMEOUT
+        self._cleanup_interval = settings.TASK_CLEANUP_INTERVAL
         self._heartbeat_timeout = 10  # 配置时间内未收到心跳则认为用户已离开
         self._cleanup_interval = 5  # 每次检查一次超时任务的时间
         
