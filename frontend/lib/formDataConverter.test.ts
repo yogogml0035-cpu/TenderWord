@@ -1,0 +1,869 @@
+/**
+ * Unit tests for formDataConverter
+ * @module formDataConverter.test
+ */
+
+import {
+  convertXjcgFormToApiRequest,
+  convertGngkFormToApiRequest,
+  convertFormToApiRequest,
+  type GngkConversionOptions,
+  type TenderType,
+} from './formDataConverter';
+import type { XjcgTenderFormData } from '@/components/forms/XjcgTenderForm';
+import type { GngkTenderFormData } from '@/components/forms/GngkTenderForm';
+import type { UploadedFile, TenderData } from '@/types/api';
+
+// ============================================
+// Test Fixtures
+// ============================================
+
+const createMockUploadedFile = (
+  path: string,
+  name?: string
+): UploadedFile => ({
+  file_path: path,
+  file_name: name || path.split('/').pop() || 'file.docx',
+  original_name: name || path.split('/').pop() || 'file.docx',
+  size: 1024,
+  upload_time: '2024-01-01T00:00:00Z',
+});
+
+const createMockTenderData = (): TenderData => ({
+  project_name: '测试项目',
+  project_number: 'XM-2024-001',
+  project_content: '测试项目内容',
+  bzj_rule: '投标保证金规则',
+  buyer_name: '测试采购人',
+  project_zbr_xbr: '张三',
+  zbr_xbr_tel: '13800138000',
+  zbr_pinyin: 'zhangsan',
+  shell_start_date: '2024-01-01',
+  shell_end_date: '2024-01-31',
+  submit_date: '2024-01-15',
+  platform: '测试平台',
+  service_fee: '1000',
+});
+
+// ============================================
+// convertXjcgFormToApiRequest Tests
+// ============================================
+
+describe('convertXjcgFormToApiRequest', () => {
+  describe('正常数据转换', () => {
+    it('应该正确转换完整的表单数据', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-001',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          origin_tender: createMockUploadedFile('/uploads/template.docx'),
+          clean_draft: createMockUploadedFile('/uploads/clean.docx'),
+          tender_params: [
+            createMockUploadedFile('/uploads/params1.docx'),
+            createMockUploadedFile('/uploads/params2.docx'),
+          ],
+        },
+        insertion_config: {
+          before_text: '第三章',
+          after_text: '第四章',
+        },
+      };
+
+      const result = convertXjcgFormToApiRequest(formData);
+
+      expect(result.tender_no).toBe('ZBGG-2024-001');
+      expect(result.tender_data).toEqual(createMockTenderData());
+      expect(result.model).toBe('deepseek');
+      expect(result.files.origin_tender_path).toBe('/uploads/template.docx');
+      expect(result.files.clean_draft_path).toBe('/uploads/clean.docx');
+      expect(result.files.tender_param_paths).toHaveLength(2);
+      expect(result.files.tender_param_paths).toContain('/uploads/params1.docx');
+      expect(result.files.tender_param_paths).toContain('/uploads/params2.docx');
+      expect(result.insertion_config).toBeDefined();
+      expect(result.insertion_config?.before_text).toBe('第三章');
+      expect(result.insertion_config?.after_text).toBe('第四章');
+    });
+
+    it('应该正确处理只有必填字段的数据', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-002',
+        tender_data: createMockTenderData(),
+        model: 'qwen',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+        },
+      };
+
+      const result = convertXjcgFormToApiRequest(formData);
+
+      expect(result.tender_no).toBe('ZBGG-2024-002');
+      expect(result.model).toBe('qwen');
+      expect(result.files.origin_tender_path).toBeUndefined();
+      expect(result.files.clean_draft_path).toBeUndefined();
+      expect(result.files.tender_param_paths).toHaveLength(1);
+      expect(result.insertion_config).toBeUndefined();
+    });
+
+    it('应该支持不同的模型类型', () => {
+      const models: Array<'deepseek' | 'qwen' | 'doubao'> = [
+        'deepseek',
+        'qwen',
+        'doubao',
+      ];
+
+      models.forEach((model) => {
+        const formData: XjcgTenderFormData = {
+          tender_no: 'ZBGG-2024-003',
+          tender_data: createMockTenderData(),
+          model,
+          files: {
+            tender_params: [createMockUploadedFile('/uploads/params.docx')],
+          },
+        };
+
+        const result = convertXjcgFormToApiRequest(formData);
+        expect(result.model).toBe(model);
+      });
+    });
+  });
+
+  describe('空值和边界情况', () => {
+    it('应该正确处理空的 tender_params 数组', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-004',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [],
+        },
+      };
+
+      const result = convertXjcgFormToApiRequest(formData);
+
+      expect(result.files.tender_param_paths).toEqual([]);
+    });
+
+    it('应该正确处理 undefined 的 origin_tender', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-005',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          origin_tender: undefined,
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+        },
+      };
+
+      const result = convertXjcgFormToApiRequest(formData);
+
+      expect(result.files.origin_tender_path).toBeUndefined();
+    });
+
+    it('应该正确处理 undefined 的 clean_draft', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-006',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          clean_draft: undefined,
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+        },
+      };
+
+      const result = convertXjcgFormToApiRequest(formData);
+
+      expect(result.files.clean_draft_path).toBeUndefined();
+    });
+
+    it('应该正确处理 undefined 的 insertion_config', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-007',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+        },
+        insertion_config: undefined,
+      };
+
+      const result = convertXjcgFormToApiRequest(formData);
+
+      expect(result.insertion_config).toBeUndefined();
+    });
+  });
+
+  describe('多个技术参数文件', () => {
+    it('应该正确处理多个技术参数文件', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-008',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [
+            createMockUploadedFile('/uploads/params1.docx', '参数1.docx'),
+            createMockUploadedFile('/uploads/params2.docx', '参数2.docx'),
+            createMockUploadedFile('/uploads/params3.docx', '参数3.docx'),
+            createMockUploadedFile('/uploads/params4.docx', '参数4.docx'),
+            createMockUploadedFile('/uploads/params5.docx', '参数5.docx'),
+          ],
+        },
+      };
+
+      const result = convertXjcgFormToApiRequest(formData);
+
+      expect(result.files.tender_param_paths).toHaveLength(5);
+      expect(result.files.tender_param_paths).toEqual([
+        '/uploads/params1.docx',
+        '/uploads/params2.docx',
+        '/uploads/params3.docx',
+        '/uploads/params4.docx',
+        '/uploads/params5.docx',
+      ]);
+    });
+  });
+});
+
+// ============================================
+// convertGngkFormToApiRequest Tests
+// ============================================
+
+describe('convertGngkFormToApiRequest', () => {
+  describe('正常数据转换', () => {
+    it('应该正确转换完整的 GNGK 表单数据', () => {
+      const formData: GngkTenderFormData = {
+        tender_no: 'ZBGG-2024-GNGK-001',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          origin_tender: createMockUploadedFile('/uploads/template.docx'),
+          clean_draft: createMockUploadedFile('/uploads/clean.docx'),
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+          qualification: [
+            createMockUploadedFile('/uploads/qual1.pdf'),
+            createMockUploadedFile('/uploads/qual2.pdf'),
+          ],
+        },
+        insertion_config: {
+          before_text: '第三章 采购需求',
+          after_text: '第四章 投标文件有关格式',
+        },
+        bid_sections: {
+          technical: true,
+          business: true,
+          price: false,
+        },
+      };
+
+      const options: GngkConversionOptions = {
+        includeQualificationFiles: true,
+      };
+
+      const result = convertGngkFormToApiRequest(formData, options);
+
+      expect(result.tender_no).toBe('ZBGG-2024-GNGK-001');
+      expect(result.model).toBe('deepseek');
+      expect(result.files.origin_tender_path).toBe('/uploads/template.docx');
+      expect(result.files.clean_draft_path).toBe('/uploads/clean.docx');
+      expect(result.files.tender_param_paths).toHaveLength(1);
+      expect(result.insertion_config?.before_text).toBe('第三章 采购需求');
+      expect(result.insertion_config?.after_text).toBe('第四章 投标文件有关格式');
+      expect(result.qualification_files).toHaveLength(2);
+      expect(result.qualification_files).toContain('/uploads/qual1.pdf');
+      expect(result.qualification_files).toContain('/uploads/qual2.pdf');
+      expect(result.bid_sections).toEqual({
+        technical: true,
+        business: true,
+        price: false,
+      });
+    });
+
+    it('应该正确转换只有必填字段的 GNGK 数据', () => {
+      const formData: GngkTenderFormData = {
+        tender_no: 'ZBGG-2024-GNGK-002',
+        tender_data: createMockTenderData(),
+        model: 'qwen',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+        },
+      };
+
+      const result = convertGngkFormToApiRequest(formData);
+
+      expect(result.tender_no).toBe('ZBGG-2024-GNGK-002');
+      expect(result.model).toBe('qwen');
+      expect(result.files.tender_param_paths).toHaveLength(1);
+      expect(result.insertion_config).toBeUndefined();
+      expect(result.qualification_files).toBeUndefined();
+      expect(result.bid_sections).toBeUndefined();
+    });
+  });
+
+  describe('资质文件处理', () => {
+    it('当 includeQualificationFiles 为 true 时应该包含资质文件', () => {
+      const formData: GngkTenderFormData = {
+        tender_no: 'ZBGG-2024-GNGK-003',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+          qualification: [createMockUploadedFile('/uploads/qual.pdf')],
+        },
+      };
+
+      const result = convertGngkFormToApiRequest(formData, {
+        includeQualificationFiles: true,
+      });
+
+      expect(result.qualification_files).toBeDefined();
+      expect(result.qualification_files).toHaveLength(1);
+      expect(result.qualification_files).toContain('/uploads/qual.pdf');
+    });
+
+    it('当 includeQualificationFiles 为 false 时不应该包含资质文件', () => {
+      const formData: GngkTenderFormData = {
+        tender_no: 'ZBGG-2024-GNGK-004',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+          qualification: [createMockUploadedFile('/uploads/qual.pdf')],
+        },
+      };
+
+      const result = convertGngkFormToApiRequest(formData, {
+        includeQualificationFiles: false,
+      });
+
+      expect(result.qualification_files).toBeUndefined();
+    });
+
+    it('当未提供 options 时不应该包含资质文件', () => {
+      const formData: GngkTenderFormData = {
+        tender_no: 'ZBGG-2024-GNGK-005',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+          qualification: [createMockUploadedFile('/uploads/qual.pdf')],
+        },
+      };
+
+      const result = convertGngkFormToApiRequest(formData);
+
+      expect(result.qualification_files).toBeUndefined();
+    });
+
+    it('当 qualification 为空数组时不应该包含资质文件字段', () => {
+      const formData: GngkTenderFormData = {
+        tender_no: 'ZBGG-2024-GNGK-006',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+          qualification: [],
+        },
+      };
+
+      const result = convertGngkFormToApiRequest(formData, {
+        includeQualificationFiles: true,
+      });
+
+      expect(result.qualification_files).toBeUndefined();
+    });
+
+    it('当 qualification 为 undefined 时不应该包含资质文件字段', () => {
+      const formData: GngkTenderFormData = {
+        tender_no: 'ZBGG-2024-GNGK-007',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+          qualification: undefined,
+        },
+      };
+
+      const result = convertGngkFormToApiRequest(formData, {
+        includeQualificationFiles: true,
+      });
+
+      expect(result.qualification_files).toBeUndefined();
+    });
+  });
+
+  describe('投标分册处理', () => {
+    it('应该正确处理全部为 true 的投标分册', () => {
+      const formData: GngkTenderFormData = {
+        tender_no: 'ZBGG-2024-GNGK-008',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+        },
+        bid_sections: {
+          technical: true,
+          business: true,
+          price: true,
+        },
+      };
+
+      const result = convertGngkFormToApiRequest(formData);
+
+      expect(result.bid_sections).toEqual({
+        technical: true,
+        business: true,
+        price: true,
+      });
+    });
+
+    it('应该正确处理部分为 false 的投标分册', () => {
+      const formData: GngkTenderFormData = {
+        tender_no: 'ZBGG-2024-GNGK-009',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+        },
+        bid_sections: {
+          technical: true,
+          business: false,
+          price: false,
+        },
+      };
+
+      const result = convertGngkFormToApiRequest(formData);
+
+      expect(result.bid_sections).toEqual({
+        technical: true,
+        business: false,
+        price: false,
+      });
+    });
+
+    it('当 bid_sections 为 undefined 时不应该包含该字段', () => {
+      const formData: GngkTenderFormData = {
+        tender_no: 'ZBGG-2024-GNGK-010',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+        },
+        bid_sections: undefined,
+      };
+
+      const result = convertGngkFormToApiRequest(formData);
+
+      expect(result.bid_sections).toBeUndefined();
+    });
+  });
+
+  describe('边界情况', () => {
+    it('应该正确处理空的 tender_params 数组', () => {
+      const formData: GngkTenderFormData = {
+        tender_no: 'ZBGG-2024-GNGK-011',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [],
+        },
+      };
+
+      const result = convertGngkFormToApiRequest(formData);
+
+      expect(result.files.tender_param_paths).toEqual([]);
+    });
+
+    it('应该正确处理所有可选文件都是 undefined 的情况', () => {
+      const formData: GngkTenderFormData = {
+        tender_no: 'ZBGG-2024-GNGK-012',
+        tender_data: createMockTenderData(),
+        model: 'doubao',
+        files: {
+          origin_tender: undefined,
+          clean_draft: undefined,
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+          qualification: undefined,
+        },
+      };
+
+      const result = convertGngkFormToApiRequest(formData);
+
+      expect(result.files.origin_tender_path).toBeUndefined();
+      expect(result.files.clean_draft_path).toBeUndefined();
+      expect(result.files.tender_param_paths).toHaveLength(1);
+      expect(result.qualification_files).toBeUndefined();
+    });
+  });
+});
+
+// ============================================
+// convertFormToApiRequest Tests
+// ============================================
+
+describe('convertFormToApiRequest', () => {
+  describe('XJCG 类型', () => {
+    it('应该正确路由到 XJCG 转换器', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-ROUTER-001',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+        },
+      };
+
+      const result = convertFormToApiRequest('xjcg', formData);
+
+      expect(result.tender_no).toBe('ZBGG-2024-ROUTER-001');
+      expect(result.model).toBe('deepseek');
+      // XJCG 特有：不应该有 bid_sections
+      expect('bid_sections' in result).toBe(false);
+    });
+  });
+
+  describe('GNGK 类型', () => {
+    it('应该正确路由到 GNGK 转换器', () => {
+      const formData: GngkTenderFormData = {
+        tender_no: 'ZBGG-2024-ROUTER-002',
+        tender_data: createMockTenderData(),
+        model: 'qwen',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+        },
+        bid_sections: {
+          technical: true,
+          business: true,
+          price: true,
+        },
+      };
+
+      const result = convertFormToApiRequest('gngk', formData);
+
+      expect(result.tender_no).toBe('ZBGG-2024-ROUTER-002');
+      expect(result.model).toBe('qwen');
+      // GNGK 特有：应该有 bid_sections
+      expect(result.bid_sections).toBeDefined();
+      expect(result.bid_sections?.technical).toBe(true);
+    });
+  });
+
+  describe('类型安全', () => {
+    it('XJCG 类型应该返回 GenerateRequest', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-TYPE-001',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+        },
+      };
+
+      const result = convertFormToApiRequest('xjcg', formData);
+
+      // 验证返回类型包含必要的字段
+      expect(result).toHaveProperty('tender_no');
+      expect(result).toHaveProperty('tender_data');
+      expect(result).toHaveProperty('files');
+      expect(result).toHaveProperty('model');
+    });
+
+    it('GNGK 类型应该返回 GngkGenerateRequest', () => {
+      const formData: GngkTenderFormData = {
+        tender_no: 'ZBGG-2024-TYPE-002',
+        tender_data: createMockTenderData(),
+        model: 'qwen',
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+        },
+        bid_sections: {
+          technical: true,
+          business: false,
+          price: true,
+        },
+      };
+
+      const result = convertFormToApiRequest('gngk', formData);
+
+      // 验证返回类型包含必要的字段
+      expect(result).toHaveProperty('tender_no');
+      expect(result).toHaveProperty('tender_data');
+      expect(result).toHaveProperty('files');
+      expect(result).toHaveProperty('model');
+      expect(result).toHaveProperty('bid_sections');
+    });
+  });
+
+  describe('错误处理', () => {
+    it('当传入不支持的类型时应该抛出错误', () => {
+      // 注意：这个测试主要是为了代码覆盖率
+      // 在实际 TypeScript 中，类型系统会阻止传入无效的类型
+      const formData = {
+        tender_no: 'ZBGG-2024-ERROR-001',
+        tender_data: createMockTenderData(),
+        model: 'deepseek' as const,
+        files: {
+          tender_params: [createMockUploadedFile('/uploads/params.docx')],
+        },
+      };
+
+      // 使用类型断言绕过 TypeScript 检查
+      expect(() =>
+        convertFormToApiRequest(
+          'invalid' as TenderType,
+          formData as never
+        )
+      ).toThrow('Unsupported tender type: invalid');
+    });
+  });
+});
+
+// ============================================
+// 辅助函数间接测试（通过主函数）
+// ============================================
+
+describe('辅助函数行为（通过主函数测试）', () => {
+  describe('extractFilePath 行为', () => {
+    it('应该从 UploadedFile 中提取 file_path', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-HELPER-001',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          origin_tender: {
+            file_path: '/uploads/specific-path.docx',
+            file_name: 'specific.docx',
+            original_name: '原始文件名.docx',
+            size: 2048,
+          },
+          tender_params: [],
+        },
+      };
+
+      const result = convertXjcgFormToApiRequest(formData);
+
+      expect(result.files.origin_tender_path).toBe('/uploads/specific-path.docx');
+    });
+
+    it('当 UploadedFile 不存在时应该返回 undefined', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-HELPER-002',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          origin_tender: undefined,
+          tender_params: [],
+        },
+      };
+
+      const result = convertXjcgFormToApiRequest(formData);
+
+      expect(result.files.origin_tender_path).toBeUndefined();
+    });
+  });
+
+  describe('extractFilePaths 行为', () => {
+    it('应该从 UploadedFile 数组中提取所有 file_path', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-HELPER-003',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [
+            { file_path: '/a.docx', file_name: 'a', original_name: 'a', size: 1 },
+            { file_path: '/b.docx', file_name: 'b', original_name: 'b', size: 2 },
+            { file_path: '/c.docx', file_name: 'c', original_name: 'c', size: 3 },
+          ],
+        },
+      };
+
+      const result = convertXjcgFormToApiRequest(formData);
+
+      expect(result.files.tender_param_paths).toEqual(['/a.docx', '/b.docx', '/c.docx']);
+    });
+
+    it('当数组为空时应该返回空数组', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-HELPER-004',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [],
+        },
+      };
+
+      const result = convertXjcgFormToApiRequest(formData);
+
+      expect(result.files.tender_param_paths).toEqual([]);
+    });
+  });
+
+  describe('buildInsertionConfig 行为', () => {
+    it('当 insertion_config 存在时应该构建配置', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-HELPER-005',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [],
+        },
+        insertion_config: {
+          before_text: '前文本',
+          after_text: '后文本',
+        },
+      };
+
+      const result = convertXjcgFormToApiRequest(formData);
+
+      expect(result.insertion_config).toEqual({
+        before_text: '前文本',
+        after_text: '后文本',
+      });
+    });
+
+    it('当 insertion_config 不存在时应该返回 undefined', () => {
+      const formData: XjcgTenderFormData = {
+        tender_no: 'ZBGG-2024-HELPER-006',
+        tender_data: createMockTenderData(),
+        model: 'deepseek',
+        files: {
+          tender_params: [],
+        },
+      };
+
+      const result = convertXjcgFormToApiRequest(formData);
+
+      expect(result.insertion_config).toBeUndefined();
+    });
+  });
+});
+
+// ============================================
+// 集成测试
+// ============================================
+
+describe('集成测试', () => {
+  it('完整工作流：XJCG 表单数据到 API 请求', () => {
+    // 模拟真实的表单数据
+    const formData: XjcgTenderFormData = {
+      tender_no: 'ZBGG-2024-INTEGRATION-001',
+      tender_data: {
+        project_name: '某单位办公设备采购项目',
+        project_number: 'XM-2024-12345',
+        project_content: '采购办公设备一批',
+        bzj_rule: '投标保证金：人民币贰万元整',
+        buyer_name: '某单位',
+        project_zbr_xbr: '李四',
+        zbr_xbr_tel: '028-12345678',
+        zbr_pinyin: 'lisi',
+        shell_start_date: '2024-02-01 09:00',
+        shell_end_date: '2024-02-28 17:00',
+        submit_date: '2024-02-28 17:00',
+        platform: '公共资源交易中心',
+        service_fee: '500',
+      },
+      model: 'deepseek',
+      files: {
+        origin_tender: createMockUploadedFile(
+          '/uploads/origin/送审稿.docx',
+          '送审稿.docx'
+        ),
+        clean_draft: createMockUploadedFile(
+          '/uploads/clean/清洁稿.docx',
+          '清洁稿.docx'
+        ),
+        tender_params: [
+          createMockUploadedFile('/uploads/params/技术参数1.docx', '技术参数1.docx'),
+          createMockUploadedFile('/uploads/params/技术参数2.docx', '技术参数2.docx'),
+        ],
+      },
+      insertion_config: {
+        before_text: '第三章  采购需求',
+        after_text: '第四章  响应文件有关格式',
+      },
+    };
+
+    const result = convertXjcgFormToApiRequest(formData);
+
+    // 验证转换结果
+    expect(result).toMatchObject({
+      tender_no: 'ZBGG-2024-INTEGRATION-001',
+      model: 'deepseek',
+      files: {
+        origin_tender_path: '/uploads/origin/送审稿.docx',
+        clean_draft_path: '/uploads/clean/清洁稿.docx',
+        tender_param_paths: ['/uploads/params/技术参数1.docx', '/uploads/params/技术参数2.docx'],
+      },
+      insertion_config: {
+        before_text: '第三章  采购需求',
+        after_text: '第四章  响应文件有关格式',
+      },
+    });
+    expect(result.tender_data.project_name).toBe('某单位办公设备采购项目');
+  });
+
+  it('完整工作流：GNGK 表单数据到 API 请求', () => {
+    // 模拟真实的 GNGK 表单数据
+    const formData: GngkTenderFormData = {
+      tender_no: 'ZBGG-2024-INTEGRATION-002',
+      tender_data: {
+        project_name: '某单位信息化建设项目',
+        project_number: 'XM-2024-67890',
+        project_content: '信息化建设相关设备采购',
+        bzj_rule: '投标保证金：人民币伍万元整',
+        buyer_name: '某单位',
+        project_zbr_xbr: '王五',
+        zbr_xbr_tel: '028-87654321',
+        zbr_pinyin: 'wangwu',
+        shell_start_date: '2024-03-01 09:00',
+        shell_end_date: '2024-03-31 17:00',
+        submit_date: '2024-03-31 17:00',
+        platform: '公共资源交易中心',
+        service_fee: '800',
+      },
+      model: 'qwen',
+      files: {
+        tender_params: [
+          createMockUploadedFile('/uploads/params/技术规格书.docx', '技术规格书.docx'),
+        ],
+        qualification: [
+          createMockUploadedFile('/uploads/qual/资质要求.docx', '资质要求.docx'),
+        ],
+      },
+      insertion_config: {
+        before_text: '第三章  采购需求',
+        after_text: '第四章  投标文件有关格式',
+      },
+      bid_sections: {
+        technical: true,
+        business: true,
+        price: false,
+      },
+    };
+
+    const result = convertGngkFormToApiRequest(formData, {
+      includeQualificationFiles: true,
+    });
+
+    // 验证转换结果
+    expect(result).toMatchObject({
+      tender_no: 'ZBGG-2024-INTEGRATION-002',
+      model: 'qwen',
+      files: {
+        tender_param_paths: ['/uploads/params/技术规格书.docx'],
+      },
+      insertion_config: {
+        before_text: '第三章  采购需求',
+        after_text: '第四章  投标文件有关格式',
+      },
+      qualification_files: ['/uploads/qual/资质要求.docx'],
+      bid_sections: {
+        technical: true,
+        business: true,
+        price: false,
+      },
+    });
+    expect(result.tender_data.project_name).toBe('某单位信息化建设项目');
+    expect(result.files.origin_tender_path).toBeUndefined();
+    expect(result.files.clean_draft_path).toBeUndefined();
+  });
+});
