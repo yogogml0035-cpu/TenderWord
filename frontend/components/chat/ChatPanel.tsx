@@ -70,24 +70,55 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   // Empty state when no conversation selected
   if (!conversation) {
     return (
-      <div className={`flex flex-col h-full bg-gray-50 ${className}`}>
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center text-gray-400">
-            <svg
-              className="w-16 h-16 mx-auto mb-4 text-gray-300"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-              />
-            </svg>
-            <h3 className="text-lg font-medium text-gray-600 mb-2">欢迎使用 TenderWord</h3>
-            <p className="text-sm">请在左侧选择招标类型并开始新对话</p>
+      <div className={`flex flex-col h-full bg-gradient-to-br from-slate-50 to-gray-100 ${className}`}>
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="text-center max-w-md">
+            {/* Animated Icon Container */}
+            <div className="relative mb-8 inline-block">
+              <div className="absolute inset-0 bg-blue-100 rounded-full animate-pulse opacity-50" />
+              <div className="relative bg-white rounded-full p-6 shadow-lg border border-blue-100">
+                <svg
+                  className="w-16 h-16 text-blue-500"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                  />
+                </svg>
+              </div>
+            </div>
+            
+            {/* Welcome Text */}
+            <h3 className="text-2xl font-semibold text-gray-800 mb-3 tracking-tight">
+              欢迎使用 TenderWord
+            </h3>
+            <p className="text-gray-500 mb-6 leading-relaxed">
+              智能招标文档生成助手，让文档创建更高效
+            </p>
+            
+            {/* Instructions */}
+            <div className="bg-white/70 backdrop-blur-sm rounded-xl p-4 border border-gray-200/50 shadow-sm">
+              <p className="text-sm text-gray-600 mb-3 font-medium">开始新对话：</p>
+              <div className="space-y-2">
+                <div className="flex items-center gap-3 text-sm text-gray-500">
+                  <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-xs font-semibold">1</span>
+                  <span>在左侧选择招标类型</span>
+                </div>
+                <div className="flex items-center gap-3 text-sm text-gray-500">
+                  <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-xs font-semibold">2</span>
+                  <span>填写招标信息并上传文件</span>
+                </div>
+                <div className="flex items-center gap-3 text-sm text-gray-500">
+                  <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-xs font-semibold">3</span>
+                  <span>AI 自动生成招标文档</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -95,7 +126,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   }
 
   return (
-    <div className={`flex flex-col h-full bg-white ${className}`}>
+    <div className={`flex flex-col h-full bg-white shadow-sm ${className}`}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white">
         <div>
@@ -104,7 +135,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             {conversation.tenderType === 'xjcg' ? '询价采购' : '国内公开'}
           </p>
         </div>
-        <div className="text-xs text-gray-400">
+        <div className="text-xs text-gray-400 px-2 py-1 bg-gray-100 rounded">
           {messages.length} 条消息
         </div>
       </div>

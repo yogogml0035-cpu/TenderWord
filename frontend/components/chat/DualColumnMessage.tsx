@@ -84,20 +84,21 @@ export function DualColumnMessage({
           </span>
         </div>
         
+        
         {message.status === 'completed' && message.metadata?.outputFile && (
           <button
             onClick={handleDownload}
-            className="flex items-center gap-1 px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            className="flex items-center gap-1 px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors duration-200 shadow-sm"
           >
             <Download className="w-4 h-4" />
             下载文件
           </button>
         )}
-        
+
         {message.status === 'error' && onRetry && (
           <button
             onClick={onRetry}
-            className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 bg-blue-50 rounded hover:bg-blue-100 transition-colors"
+            className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 bg-blue-50 rounded hover:bg-blue-100 transition-colors duration-200"
           >
             <RefreshCw className="w-4 h-4" />
             重新生成
@@ -126,7 +127,15 @@ export function DualColumnMessage({
             className="flex-1 overflow-y-auto p-3 space-y-2"
           >
             {logs.length === 0 ? (
-              <div className="text-xs text-gray-400 text-center py-4">等待开始...</div>
+              <div className='flex flex-col items-center justify-center py-8 text-gray-400'>
+                <div className='relative mb-3'>
+                  <div className='absolute inset-0 bg-blue-100 rounded-full animate-pulse opacity-30' />
+                  <div className='relative bg-white rounded-full p-2 shadow-sm'>
+                    <FileText className='w-5 h-5 text-blue-400' />
+                  </div>
+                </div>
+                <span className='text-xs'>等待开始...</span>
+              </div>
             ) : (
               logs.map((log) => (
                 <LogEntryItem key={log.id} log={log} />
@@ -147,11 +156,19 @@ export function DualColumnMessage({
             className="flex-1 overflow-y-auto p-3"
           >
             {aiContent ? (
-              <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono">
+              <pre className='text-sm text-gray-700 whitespace-pre-wrap font-mono'>
                 {aiContent}
               </pre>
             ) : (
-              <div className="text-xs text-gray-400 text-center py-4">等待生成...</div>
+              <div className='flex flex-col items-center justify-center py-8 text-gray-400'>
+                <div className='relative mb-3'>
+                  <div className='absolute inset-0 bg-purple-100 rounded-full animate-pulse opacity-30' />
+                  <div className='relative bg-white rounded-full p-2 shadow-sm'>
+                    <Bot className='w-5 h-5 text-purple-400' />
+                  </div>
+                </div>
+                <span className='text-xs'>等待生成...</span>
+              </div>
             )}
           </div>
         </div>

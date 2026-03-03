@@ -62,12 +62,12 @@ export function ChatInput({
           disabled={disabled || loading}
           rows={1}
           className={`
-            w-full px-4 py-2 pr-10 rounded-lg border resize-none
+            w-full px-4 py-2 pr-10 rounded border resize-none
             focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+            transition-colors duration-200
             ${disabled || loading ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'}
             ${isEmpty ? 'border-gray-300' : 'border-blue-300'}
           `}
-          style={{ minHeight: '44px', maxHeight: '120px' }}
         />
         <div className="absolute right-3 bottom-2.5 text-xs text-gray-400">
           {input.length > 0 && `${input.length} 字符`}
@@ -78,14 +78,14 @@ export function ChatInput({
         onClick={handleSend}
         disabled={isEmpty || disabled || loading}
         className={`
-          flex items-center justify-center w-11 h-11 rounded-lg
+          flex items-center justify-center w-11 h-11 rounded
           transition-colors duration-200
           ${isEmpty || disabled || loading
             ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-            : 'bg-blue-500 text-white hover:bg-blue-600 shadow-sm'
+            : 'bg-blue-500 text-white hover:bg-blue-600 shadow-sm hover:shadow-md'
           }
         `}
-      >
+>
         {loading ? (
           <Loader2 className="w-5 h-5 animate-spin" />
         ) : (
