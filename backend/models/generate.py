@@ -35,7 +35,7 @@ class FormType(str, Enum):
     """
 
     XJCG_TENDER = "xjcg_tender"  # 询价采购
-    GNGK_TENDER = "gngk_tender"  # 国内公开招标
+    GNGK_TENDER = "gngk_tender"  # 国内公开
 
 
 class GenerateRequest(BaseModel):

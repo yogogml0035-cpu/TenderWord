@@ -20,7 +20,7 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
         <SidebarHeader>
           <Link href="/" className="flex items-center gap-2 text-[var(--foreground)]">
             <FileText className="w-6 h-6 text-[var(--primary)]" />
-            <span className="font-semibold text-lg">TenderWord</span>
+            <span className="font-semibold text-lg">招标文件生成</span>
           </Link>
         </SidebarHeader>
 
@@ -33,11 +33,8 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
             <NavLink href="/tender/xjcg" icon={<FileText className="w-4 h-4" />}>
               询价采购
             </NavLink>
-            <NavLink href="/tender/gkzb" icon={<FileText className="w-4 h-4" />}>
-              公开招标
-            </NavLink>
-            <NavLink href="/tender/yqzb" icon={<FileText className="w-4 h-4" />}>
-              邀请招标
+            <NavLink href="/tender/gngk" icon={<FileText className="w-4 h-4" />}>
+              国内公开
             </NavLink>
           </nav>
 

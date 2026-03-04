@@ -114,7 +114,7 @@ def extract_project_content(doc_content: str, state: GngkTenderGraphState, log_p
     
     log_parts.append(f"在位置 {start_pos1} 找到起始标记1 '{start_marker1}'")
     
-    start_marker2_pattern = r'的委托[，,]\s*现以公开招标方式邀请合格的投标人就下列货物或服务前来投标[。.]'
+    start_marker2_pattern = r'的委托[，,]\s*现以国内公开方式邀请合格的投标人就下列货物或服务前来投标[。.]'
     search_after_marker1 = start_pos1 + len(start_marker1)
     match = re.search(start_marker2_pattern, doc_content[search_after_marker1:], re.DOTALL)
     

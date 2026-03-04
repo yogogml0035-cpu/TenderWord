@@ -7,7 +7,7 @@ from typing import Dict
 
 # 招标类型对应的字体大小配置
 # xjcg: 询价采购 - 小二 (18.0pt)
-# gngk: 公开招标 - 二号 (22.0pt)
+#ZN|# gngk: 国内公开 - 二号 (22.0pt)
 TARGET_SIZES: Dict[str, float] = {
     "xjcg": 18.0,
     "gngk": 22.0,

@@ -82,6 +82,7 @@ export function createEmptyMessage(
       logs: [],
       aiContent: {
         text: '',
+        timestamp: Date.now(),
         isComplete: false,
       },
     },
@@ -108,6 +109,7 @@ export function createSystemMessage(
       logs: [],
       aiContent: {
         text: content,
+        timestamp: Date.now(),
         isComplete: true,
       },
     },
@@ -123,6 +125,7 @@ export function createEmptyDualColumnContent(): DualColumnContent {
     logs: [],
     aiContent: {
       text: '',
+      timestamp: Date.now(),
       isComplete: false,
     },
   };
@@ -184,6 +187,7 @@ export function appendAIContent(
   return {
     ...content,
     aiContent: {
+      ...content.aiContent,
       text: content.aiContent.text + text,
       isComplete,
     },

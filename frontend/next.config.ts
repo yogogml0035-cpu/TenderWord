@@ -32,6 +32,8 @@ const nextConfig: NextConfig = {
   // ========================================
   reactStrictMode: true,
 
+  devIndicators: false,
+
   // ========================================
   // TypeScript 配置
   // ========================================

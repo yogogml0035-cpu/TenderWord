@@ -3,7 +3,7 @@
  */
 
 // Tender types
-export type TenderType = 'xjcg' | 'gkzb' | 'yqzb'; // 询价采购 | 公开招标 | 邀请招标
+export type TenderType = 'xjcg' | 'gngk'; // 询价采购 | 国内公开
 export type PurchaseMethod = 0 | 1 | 2 | 5;
 export type FundType = 0 | 1; // 0=国内, 1=国际
 

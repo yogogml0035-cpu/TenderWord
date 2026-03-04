@@ -38,7 +38,7 @@ export function Sidebar({ className, children }: SidebarProps) {
 
 export function SidebarHeader({ className, children }: { className?: string; children?: React.ReactNode }) {
   return (
-    <div className={cn('p-4 border-b border-[var(--border)]', className)}>
+    <div className={cn('px-6 py-4 border-b border-[var(--border)]', className)}>
       {children}
     </div>
   );
@@ -102,13 +102,12 @@ export function SidebarWithHistory({ className }: { className?: string }) {
           <NavLink href="/tender/xjcg" icon={<FileText className="w-4 h-4" />}>
             询价采购
           </NavLink>
-          <NavLink href="/tender/gkzb" icon={<FileText className="w-4 h-4" />}>
-            公开招标
-          </NavLink>
-          <NavLink href="/tender/yqzb" icon={<FileText className="w-4 h-4" />}>
-            邀请招标
+          <NavLink href="/tender/gngk" icon={<FileText className="w-4 h-4" />}>
+            国内公开
           </NavLink>
         </nav>
+
+        {/* History Section */}
 
         {/* History Section */}
         <div className="mt-8">

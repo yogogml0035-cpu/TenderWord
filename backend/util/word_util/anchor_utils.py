@@ -182,7 +182,7 @@ def find_anchor_range(
         doc: Word 文档对象
         before_text: 前置锚点文本
         after_text: 后置锚点文本
-        target_size: 目标字号（18.0 用于询价，22.0 用于公开招标）
+        target_size: 目标字号（18.0 用于询价，22.0 用于国内公开）
         prefer_before: 前置锚点选取策略，'last' 选页码最大的（避开目录），'first' 选最小的
         prefer_after: 后置锚点选取策略，'first' 选页码最小的（第一个后续章节），'last' 选最大的
 

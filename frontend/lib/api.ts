@@ -19,6 +19,7 @@ import type {
   FileType,
   TaskStatus,
 } from '@/types/api';
+import type { Conversation } from '@/types/chat';
 
 // ============================================
 // Configuration
@@ -258,9 +259,98 @@ export function getDownloadUrl(filePath: string, downloadName?: string): string 
 // SSE Stream API
 // ============================================
 
+/**
+ * Get SSE stream URL for a task
+ */
+export function getTaskStreamUrl(taskId: string): string {
+  return `${API_BASE_URL}/api/stream/${encodeURIComponent(taskId)}`;
+}
+
+// ============================================
+// Chat/Conversation API
+// ============================================
+
+/**
+ * Save conversation to backend (if supported)
+ * POST /api/conversations
+ *
+ * Note: Current backend may not support this.
+ * Mark as TODO if backend endpoint doesn't exist.
+ */
+export async function saveConversation(
+  conversation: Conversation
+): Promise<{ id: string }> {
+  // TODO: Backend endpoint may not exist yet
+  // For now, return mock success
+  return { id: conversation.id };
+}
+
+/**
+ * Get conversation history from backend (if supported)
+ * GET /api/conversations
+ *
+ * Note: Current backend may not support this.
+ * Returns empty array for now.
+ */
+export async function getConversations(): Promise<Conversation[]> {
+  // TODO: Backend endpoint may not exist yet
+  return [];
+}
+
+/**
+ * Delete conversation from backend (if supported)
+ * DELETE /api/conversations/{id}
+ */
+export async function deleteConversation(conversationId: string): Promise<void> {
+  // TODO: Backend endpoint may not exist yet
+  return;
+}
+
+/**
+ * Update conversation title (if supported)
+ * PUT /api/conversations/{id}
+ */
+export async function updateConversationTitle(
+  conversationId: string,
+  title: string
+): Promise<void> {
+  // TODO: Backend endpoint may not exist yet
+  return;
+}
+
+// ============================================
+// Extended Task API for Chat
+// ============================================
+
+/**
+ * Create generation task and return full task data
+ * Extended version that returns complete task info for chat integration
+ */
+export async function createGenerateTaskExtended(
+  params: GenerateRequest
+): Promise<CreateTaskData & { conversationId?: string }> {
+  const result = await createGenerateTask(params);
+  return result;
+}
+
+/**
+ * Download file with progress callback (optional)
+ */
+export async function downloadFileWithProgress(
+  filePath: string,
+  downloadName?: string,
+  onProgress?: (progress: number) => void
+): Promise<Blob> {
+  // Use existing downloadFile logic
+  // Optionally add progress tracking
+  return downloadFile(filePath, downloadName);
+}
 
 // ============================================
 // Exports
 // ============================================
 
 export { API_BASE_URL };
+
+// Re-export chat-related types for convenience
+export type { Conversation, Message } from '@/types/chat';

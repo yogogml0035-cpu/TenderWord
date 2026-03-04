@@ -5,9 +5,19 @@
 
 import json
 import logging
+import os
 import sys
 from datetime import datetime
 from typing import Any, Dict
+
+# Fix module import path: add parent directory of backend to sys.path
+# This ensures all modules using `from backend.xxx` absolute imports can resolve correctly
+_current_file = os.path.abspath(__file__)
+_backend_dir = os.path.dirname(_current_file)
+_project_root = os.path.dirname(_backend_dir)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -29,6 +39,7 @@ from backend.util.log_util.sse_log_handler import init_sse_log_handler
 
 # 导入 SSE 管理器
 from backend.core.sse_manager import sse_manager
+
 # 导入 API 路由
 from backend.api.upload import router as upload_router
 from backend.api.tender import router as tender_router
@@ -36,6 +47,7 @@ from backend.api.tasks import router as tasks_router
 from backend.api.stream import router as stream_router
 from backend.api.generate import router as generate_router
 from backend.api.download import router as download_router
+
 
 # ========================================
 # JSON 日志格式化器
@@ -176,24 +188,24 @@ logger = logging.getLogger(__name__)
 async def startup_event() -> None:
     """应用启动时执行."""
     setup_logging()
-    
+
     # 启动进度日志监听器
     start_progress_log_listener()
-    
+
     # 启动执行日志监听器
     start_execution_log_listener()
-    
+
     # 初始化 SSE 日志 handler 并添加到 progress_log
     sse_handler = init_sse_log_handler(sse_manager)
     progress_log.addHandler(sse_handler)
     # 清理过期日志文件（保持总大小在 200MB 以下）
     try:
-        deleted_count = cleanup_logs('backend/logs', max_total_mb=200)
+        deleted_count = cleanup_logs("backend/logs", max_total_mb=200)
         if deleted_count > 0:
             logger.info(f"Cleaned up {deleted_count} old log files")
     except Exception as e:
         logger.warning(f"Failed to cleanup logs: {e}")
-    
+
     logger.info(
         "Application startup",
         extra={
@@ -212,10 +224,10 @@ async def shutdown_event() -> None:
     """应用关闭时执行."""
     # 停止执行日志监听器
     stop_execution_log_listener()
-    
+
     # 停止进度日志监听器
     stop_progress_log_listener()
-    
+
     logger.info("Application shutdown")
 
 

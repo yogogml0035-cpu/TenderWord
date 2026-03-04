@@ -1,8 +1,8 @@
 """
-国内公开招标文档生成 State 定义
+国内公开文档生成 State 定义
 
-本模块定义了国内公开招标文档生成 Graph 使用的状态类：
-- GngkTenderGraphState: 国内公开招标 Graph 的主状态类
+本模块定义了国内公开文档生成 Graph 使用的状态类：
+- GngkTenderGraphState: 国内公开 Graph 的主状态类
 - TextFormatState: 文本格式化子图的状态类
 - CommentInstruction: 批注指令类型定义
 
@@ -21,9 +21,9 @@ from .base_state import TenderGraphStateBase, CommentInstruction
 
 class GngkTenderGraphState(TenderGraphStateBase, total=False):
     """
-    国内公开招标 Graph 的主状态类
+    国内公开 Graph 的主状态类
 
-    继承自 TenderGraphStateBase，添加了国内公开招标特有的字段。
+    继承自 TenderGraphStateBase，添加了国内公开特有的字段。
 
     """
     project_content_v1: str

@@ -4,7 +4,16 @@
 验证图的结构和节点连接关系
 """
 
+import sys
+from pathlib import Path
+
+# Fix module import path: add project root to sys.path
+_project_root = Path(__file__).resolve().parents[2]
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
 import pytest
+from backend.graphs.xjcg_tender_graph import XjcgTenderGraph
 from backend.graphs.xjcg_tender_graph import XjcgTenderGraph
 
 

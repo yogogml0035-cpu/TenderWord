@@ -72,10 +72,46 @@ export function useSSE(options: UseSSEOptions): SSEHookReturn {
     onOpen,
     onClose,
     onReconnect,
-    ...sseOptions
+    autoReconnect,
+    maxReconnectAttempts,
+    reconnectDelay,
+    reconnectDelayMultiplier,
+    maxReconnectDelay,
+    heartbeatTimeout,
   } = options;
 
+  // Use ref for stable connection management
   const connectionRef = useRef<SSEConnection | null>(null);
+  
+  // Store callbacks in refs to avoid dependency issues
+  const callbacksRef = useRef({
+    onMessage,
+    onError,
+    onOpen,
+    onClose,
+    onReconnect,
+  });
+  
+  // Update refs when callbacks change
+  useEffect(() => {
+    callbacksRef.current = {
+      onMessage,
+      onError,
+      onOpen,
+      onClose,
+      onReconnect,
+    };
+  }, [onMessage, onError, onOpen, onClose, onReconnect]);
+  
+  // Store config options in ref
+  const optionsRef = useRef({
+    autoReconnect,
+    maxReconnectAttempts,
+    reconnectDelay,
+    reconnectDelayMultiplier,
+    maxReconnectDelay,
+    heartbeatTimeout,
+  });
   const [state, setState] = useState<SSEHookState>({
     isConnected: false,
     isReconnecting: false,
@@ -113,6 +149,14 @@ export function useSSE(options: UseSSEOptions): SSEHookReturn {
     }));
   }, []);
 
+  // Track if component is mounted
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
   const connect = useCallback(() => {
     // Close existing connection
     close();
@@ -124,47 +168,55 @@ export function useSSE(options: UseSSEOptions): SSEHookReturn {
       error: null,
     });
 
+    const callbacks = callbacksRef.current;
+    const opts = optionsRef.current;
+
     connectionRef.current = createSSEConnection(endpoint, {
-      ...sseOptions,
+      ...opts,
       onOpen: () => {
+        if (!isMountedRef.current) return;
         setState((prev) => ({
           ...prev,
           isConnected: true,
           isReconnecting: false,
           error: null,
         }));
-        onOpen?.();
+        callbacks.onOpen?.();
       },
       onMessage: (message) => {
+        if (!isMountedRef.current) return;
         addMessage(message);
-        onMessage?.(message);
+        callbacks.onMessage?.(message);
       },
       onError: (error) => {
+        if (!isMountedRef.current) return;
         setState((prev) => ({
           ...prev,
           isConnected: false,
           error: error instanceof ErrorEvent ? error.message : 'Connection error',
         }));
-        onError?.(error);
+        callbacks.onError?.(error);
       },
       onClose: () => {
+        if (!isMountedRef.current) return;
         setState((prev) => ({
           ...prev,
           isConnected: false,
           isReconnecting: false,
         }));
-        onClose?.();
+        callbacks.onClose?.();
       },
       onReconnect: (attempt) => {
+        if (!isMountedRef.current) return;
         setState((prev) => ({
           ...prev,
           isReconnecting: true,
           reconnectAttempts: attempt,
         }));
-        onReconnect?.(attempt);
+        callbacks.onReconnect?.(attempt);
       },
     });
-  }, [endpoint, sseOptions, onMessage, onError, onOpen, onClose, onReconnect, close, addMessage]);
+  }, [endpoint, close, addMessage]);
 
   const reconnect = useCallback(() => {
     connect();
@@ -172,21 +224,17 @@ export function useSSE(options: UseSSEOptions): SSEHookReturn {
 
   // Auto-connect on mount
   useEffect(() => {
-    if (autoConnect) {
+    if (!autoConnect) return;
+    
+    const timeoutId = setTimeout(() => {
       connect();
-    }
+    }, 0);
 
     return () => {
+      clearTimeout(timeoutId);
       close();
     };
   }, [autoConnect, connect, close]);
-
-  // Reconnect when endpoint changes
-  useEffect(() => {
-    if (autoConnect && connectionRef.current) {
-      connect();
-    }
-  }, [endpoint, autoConnect, connect]);
 
   return {
     ...state,

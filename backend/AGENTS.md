@@ -21,7 +21,7 @@ backend/
 ├── graphs/                       # LangGraph 工作流
 │   ├── base_graph.py             # BaseGraph 基类 + CrossProcessFileLock + StandardTenderWorkflowGraph
 │   ├── xjcg_tender_graph.py      # 询价采购 (XJCG) 工作流
-│   └── gngk_tender_graph.py      # 公开招标 (GNGK) 工作流
+│   └── gngk_tender_graph.py      # 国内公开 (GNGK) 工作流
 │
 ├── nodes/                        # Graph 节点
 │   ├── common_word_nodes/        # 通用节点 (10个，XJCG/GNGK 共享)
@@ -41,7 +41,7 @@ backend/
 │   │   ├── __init__.py
 │   │   └── xjcg_get_replacements.py      # XJCG 替换占位符生成
 │   │
-│   └── gngk_word_nodes/          # 公开招标特有节点
+│   └── gngk_word_nodes/          # 国内公开特有节点
 │       ├── __init__.py
 │       └── gngk_get_replacements.py      # GNGK 替换占位符生成
 │

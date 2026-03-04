@@ -7,7 +7,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      Frontend (Next.js)                     │
-│                     http://localhost:3000                   │
+│                     http://localhost:8502                   │
 ├─────────────────────────────────────────────────────────────┤
 │  • React 19 + TypeScript                                    │
 │  • Tailwind CSS 4                                           │
@@ -52,10 +52,34 @@
 
 | 服务 | 端口 | 用途 |
 |------|------|------|
-| 前端应用 | 3000 | Next.js 应用 |
+| 前端应用 | 8502 | Next.js 应用 |
 | 后端 API | 8000 | FastAPI 服务 |
 
 ## 🚀 快速开始
+
+### 最直接启动
+
+后端（推荐）：
+
+```powershell
+cd backend
+python main.py
+```
+
+后端（热重载，适合开发）：
+
+```powershell
+cd backend
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+前端：
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
 
 ### 1. 克隆项目
 
@@ -87,7 +111,7 @@ copy ..\.env.example ..\.env
 python main.py
 
 # 方式2: 使用 uvicorn（热重载模式，适合开发）
-uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 
@@ -109,7 +133,7 @@ npm run dev
 
 ### 4. 访问应用
 
-- 前端界面: http://localhost:3000
+- 前端界面: http://localhost:8502
 - API 文档: http://localhost:8000/docs
 - 健康检查: http://localhost:8000/health
 
@@ -204,7 +228,7 @@ HOST=0.0.0.0
 PORT=8000
 
 # CORS 配置
-CORS_ORIGINS=["http://localhost:3000","http://127.0.0.1:3000"]
+CORS_ORIGINS=["http://localhost:8502","http://127.0.0.1:8502","http://localhost:3000","http://127.0.0.1:3000"]
 
 # LLM 提供商配置（至少配置一个）
 DEEPSEEK_BASE_URL=https://api.deepseek.com
@@ -260,7 +284,7 @@ cd D:\Tools\nssm\win64
 
 ### 基本使用流程
 
-1. 访问前端页面 http://localhost:3000
+1. 访问前端页面 http://localhost:8502
 2. 输入招标编号，点击"获取信息"按钮获取项目信息
 3. 上传参考 Word 文件（模板文件）
 4. 上传技术参数文件（支持多文件上传）
@@ -273,12 +297,12 @@ cd D:\Tools\nssm\win64
 系统支持通过 URL 参数自动显示对应的表单:
 
 ```
-http://localhost:3000/?tender_lx=0&purchase_method=5&fund_lx=0&tenderno=ZBGG-2024-001
+http://localhost:8502/?tender_lx=0&purchase_method=5&fund_lx=0&tenderno=ZBGG-2024-001
 ```
 
 **参数说明:**
-- `tender_lx`: 招标类型（0=询价, 1=公开招标, 2=邀请招标）
-- `purchase_method`: 采购方式（5=询价采购, 1=公开招标, 2=邀请招标）
+- `tender_lx`: 招标类型（0=询价, 1=国内公开, 2=邀请招标）
+- `purchase_method`: 采购方式（5=询价采购, 1=国内公开, 2=邀请招标）
 - `fund_lx`: 资金类型（0=国内, 1=国际）
 - `tenderno`: 招标编号（可选，自动填充并获取数据）
 
@@ -359,7 +383,7 @@ taskkill /PID <进程ID> /F
 Invoke-WebRequest -Uri http://localhost:8000/health
 
 # 检查 CORS 配置
-# 确保 .env 中的 CORS_ORIGINS 包含前端地址 http://localhost:3000
+# 确保 .env 中的 CORS_ORIGINS 包含前端地址 http://localhost:8502
 ```
 
 ### 并发相关问题

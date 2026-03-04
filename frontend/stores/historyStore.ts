@@ -11,7 +11,7 @@ export interface HistoryItem {
   /** Tender number */
   tenderNo: string;
   /** Tender type */
-  tenderType: 'xjcg' | 'gkzb' | 'yqzb';
+  tenderType: 'xjcg' | 'gngk';
   /** Tender type display name */
   tenderTypeName: string;
   /** Task status */

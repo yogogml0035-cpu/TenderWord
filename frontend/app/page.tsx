@@ -1,5 +1,5 @@
 import { MainLayout } from '@/components/layout/MainLayout';
-import { FileText, ArrowRight, Sparkles } from 'lucide-react';
+import { Sparkles, MessageSquare } from 'lucide-react';
 import Link from 'next/link';
 
 export default function HomePage() {
@@ -18,32 +18,21 @@ export default function HomePage() {
             智能招标文件生成系统，基于 LangGraph 和 AI 技术，
             快速生成专业的招标文件
           </p>
-        </div>
 
-        {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <QuickActionCard
-            href="/tender/xjcg"
-            title="询价采购"
-            description="快速创建询价采购招标文件"
-            icon={<FileText className="w-6 h-6" />}
-          />
-          <QuickActionCard
-            href="/tender/gkzb"
-            title="公开招标"
-            description="创建标准的公开招标文档"
-            icon={<FileText className="w-6 h-6" />}
-          />
-          <QuickActionCard
-            href="/tender/yqzb"
-            title="邀请招标"
-            description="生成邀请招标相关文档"
-            icon={<FileText className="w-6 h-6" />}
-          />
+          {/* Chat Mode Link */}
+          <div className="mt-8">
+            <Link
+              href="/chat"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary)]/90 transition-colors"
+            >
+              <MessageSquare className="w-5 h-5" />
+              进入聊天模式
+            </Link>
+          </div>
         </div>
 
         {/* Features */}
-        <div className="mt-16">
+        <div className="mt-8">
           <h2 className="text-2xl font-semibold text-center mb-8">功能特性</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <FeatureCard
@@ -66,36 +55,6 @@ export default function HomePage() {
         </div>
       </div>
     </MainLayout>
-  );
-}
-
-function QuickActionCard({
-  href,
-  title,
-  description,
-  icon,
-}: {
-  href: string;
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      className="card group hover:shadow-md transition-shadow cursor-pointer"
-    >
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-[var(--secondary-bg)] rounded-lg text-[var(--primary)]">
-            {icon}
-          </div>
-          <h3 className="font-semibold text-[var(--foreground)]">{title}</h3>
-        </div>
-        <ArrowRight className="w-5 h-5 text-[var(--text-muted)] group-hover:text-[var(--primary)] group-hover:translate-x-1 transition-all" />
-      </div>
-      <p className="mt-3 text-sm text-[var(--text-muted)]">{description}</p>
-    </Link>
   );
 }
 

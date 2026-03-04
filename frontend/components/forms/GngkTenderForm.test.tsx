@@ -35,12 +35,20 @@ jest.mock('./TenderNoInput', () => ({
         onClick={() => {
           if (onDataFetched) {
             onDataFetched({
-              tender_no: value,
               project_name: '测试项目',
+              project_number: 'TEST-001',
+              project_content: '测试内容',
+              bzj_rule: '测试规则',
               buyer_name: '测试采购人',
               project_zbr_xbr: '张三',
+              zbr_xbr_tel: '13800138000',
+              zbr_pinyin: 'zhangsan',
+              shell_start_date: '2024-01-01',
+              shell_end_date: '2024-12-31',
               submit_date: '2024-12-31',
-            });
+              platform: '测试平台',
+              service_fee: '1000',
+            } as TenderData);
           }
         }}
         data-testid="fetch-tender-btn"
@@ -119,11 +127,19 @@ jest.mock('lucide-react', () => ({
 describe('GngkTenderForm', () => {
   const mockOnSubmit = jest.fn();
   const mockTenderData: TenderData = {
-    tender_no: 'GNGK-2024-001',
     project_name: '测试国内公开招标项目',
+    project_number: 'GNGK-2024-001',
+    project_content: '测试项目内容',
+    bzj_rule: '测试保证金规则',
     buyer_name: '测试采购单位',
     project_zbr_xbr: '李四',
+    zbr_xbr_tel: '13900139000',
+    zbr_pinyin: 'lisi',
+    shell_start_date: '2024-01-01',
+    shell_end_date: '2024-12-31',
     submit_date: '2024-12-31',
+    platform: '测试平台',
+    service_fee: '2000',
   };
 
   beforeEach(() => {

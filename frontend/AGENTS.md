@@ -22,7 +22,7 @@ frontend/
 │   ├── forms/                    # 表单组件 (按招标类型)
 │   │   ├── BaseForm.tsx          # 表单基础布局
 │   │   ├── XjcgTenderForm.tsx    # 询价采购表单
-│   │   ├── GngkTenderForm.tsx    # 公开招标表单
+│   │   ├── GngkTenderForm.tsx    # 国内公开表单
 │   │   ├── TenderNoInput.tsx     # 招标编号输入组件
 │   │   ├── FileUploader.tsx      # 文件上传组件
 │   │   └── ModelSelector.tsx     # 模型选择器
@@ -70,7 +70,7 @@ frontend/
 | `TenderNoInput` | 组件 | `components/forms/TenderNoInput.tsx` | 招标编号输入，自动获取项目信息 |
 | `BaseForm` | 组件 | `components/forms/BaseForm.tsx` | 表单基础布局和逻辑 |
 | `XjcgTenderForm` | 组件 | `components/forms/XjcgTenderForm.tsx` | 询价采购表单 |
-| `GngkTenderForm` | 组件 | `components/forms/GngkTenderForm.tsx` | 公开招标表单 |
+|| `GngkTenderForm` | 组件 | `components/forms/GngkTenderForm.tsx` | 国内公开表单 |
 
 ## WHERE TO LOOK
 
@@ -197,7 +197,7 @@ function MyComponent() {
 
 ```bash
 # 开发
-cd frontend && npm run dev                # 开发服务器 (port 3000)
+cd frontend && npm run dev                # 开发服务器 (port 8502)
 
 # 构建
 cd frontend && npm run build              # 生产构建
@@ -217,18 +217,18 @@ cd frontend && npm run test:e2e           # Playwright E2E 测试
 支持通过 URL 参数自动显示对应的表单:
 
 ```
-http://localhost:3000/?tender_lx=0&purchase_method=5&fund_lx=0&tenderno=ZBGG-2024-001
+http://localhost:8502/?tender_lx=0&purchase_method=5&fund_lx=0&tenderno=ZBGG-2024-001
 ```
 
 **参数说明:**
-- `tender_lx`: 招标类型（0=询价, 1=公开招标, 2=邀请招标）
-- `purchase_method`: 采购方式（5=询价采购, 1=公开招标, 2=邀请招标）
+- `tender_lx`: 招标类型（0=询价, 1=国内公开, 2=邀请招标）
+- `purchase_method`: 采购方式（5=询价采购, 1=国内公开, 2=邀请招标）
 - `fund_lx`: 资金类型（0=国内, 1=国际）
 - `tenderno`: 招标编号（可选，自动填充并获取数据）
 
 **动态路由:**
 - `/tender/xjcg` - 询价采购表单
-- `/tender/gngk` - 公开招标表单
+- `/tender/gngk` - 国内公开表单
 
 ## SSE 事件类型
 
@@ -249,7 +249,7 @@ http://localhost:3000/?tender_lx=0&purchase_method=5&fund_lx=0&tenderno=ZBGG-202
 
 ## NOTES
 
-1. **端口**: 前端 3000, 后端 8000 (CORS 已配置)
+1. **端口**: 前端 8502, 后端 8000 (CORS 已配置)
 2. **上传目录**: `D:/UploadFiles` (后端配置)
 3. **Tailwind 4**: 不使用 `tailwind.config.ts`，配置在 CSS 变量
 4. **状态持久化**: `useAppStore` 只持久化 `sidebarOpen`，其他状态不持久化

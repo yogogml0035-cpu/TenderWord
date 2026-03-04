@@ -1,13 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { XjcgTenderForm, type XjcgTenderFormData } from '@/components/forms/XjcgTenderForm';
 import { GngkTenderForm, type GngkTenderFormData } from '@/components/forms/GngkTenderForm';
-import { createGenerateTask, ApiError } from '@/lib/api';
+import { createGenerateTask, ApiError, getDownloadUrl } from '@/lib/api';
+import { useTaskProgress } from '@/hooks/useSSE';
+import { useHistoryStore } from '@/stores/historyStore';
 import type { GenerateRequest, CreateTaskData } from '@/types/api';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { AlertCircle, RefreshCw, Download, CheckCircle } from 'lucide-react';
+import { ProgressDisplay } from '@/components/ProgressDisplay';
+import { LogViewer, type LogEntry } from '@/components/LogViewer';
 
 const tenderTypeMap: Record<string, { title: string; description: string }> = {
   xjcg: {
@@ -103,6 +107,58 @@ export default function TenderPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [lastFormData, setLastFormData] = useState<XjcgTenderFormData | GngkTenderFormData | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  // History store
+  const { addToHistory, updateHistoryItem } = useHistoryStore();
+
+  // SSE task progress tracking
+  const {
+    isConnected: sseConnected,
+    progress,
+    logs,
+    status: taskStatus,
+    result: taskResult,
+    error: sseError,
+  } = useTaskProgress(currentTaskId);
+
+  // Convert logs from useTaskProgress to LogViewer format
+  const formattedLogs: LogEntry[] = logs.map(log => ({
+    timestamp: log.timestamp,
+    level: log.level.toLowerCase() as 'info' | 'warning' | 'error',
+    message: log.message,
+    node: log.node,
+  }));
+
+  // Handle SSE error
+  useEffect(() => {
+    if (sseError) {
+      setSubmitError(`任务执行错误: ${sseError}`);
+    }
+  }, [sseError]);
+
+  // Handle task status updates and update history
+  useEffect(() => {
+    if (currentTaskId && taskStatus) {
+      updateHistoryItem(currentTaskId, {
+        status: taskStatus,
+        progressPercent: progress?.progressPercent || 0,
+        outputFile: taskResult?.output_file,
+        outputFileName: taskResult?.file_name,
+      });
+    }
+  }, [taskStatus, progress, taskResult, currentTaskId, updateHistoryItem]);
+
+
+  // Handle task completion
+  useEffect(() => {
+    if (taskStatus === 'completed') {
+      setShowSuccess(true);
+      // Auto-hide success message after 5 seconds
+      const timer = setTimeout(() => setShowSuccess(false), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [taskStatus]);
 
   const handleXjcgSubmit = async (formData: XjcgTenderFormData) => {
     setLastFormData(formData);
@@ -112,6 +168,16 @@ export default function TenderPage() {
       const apiData = convertXjcgFormToApiRequest(formData);
       const response: CreateTaskData = await createGenerateTask(apiData);
       setCurrentTaskId(response.task_id);
+      // Add to history
+      addToHistory({
+        taskId: response.task_id,
+        tenderNo: formData.tender_no,
+        tenderType: type as 'xjcg' | 'gngk',
+        tenderTypeName: config.title,
+        status: 'running',
+        model: formData.model,
+        progressPercent: 0,
+      });
     } catch (error) {
       const errorMessage = getErrorMessage(error);
       setSubmitError(errorMessage);
@@ -129,6 +195,16 @@ export default function TenderPage() {
       const apiData = convertGngkFormToApiRequest(formData);
       const response: CreateTaskData = await createGenerateTask(apiData);
       setCurrentTaskId(response.task_id);
+      // Add to history
+      addToHistory({
+        taskId: response.task_id,
+        tenderNo: formData.tender_no,
+        tenderType: type as 'xjcg' | 'gngk',
+        tenderTypeName: config.title,
+        status: 'running',
+        model: formData.model,
+        progressPercent: 0,
+      });
     } catch (error) {
       const errorMessage = getErrorMessage(error);
       setSubmitError(errorMessage);
@@ -149,12 +225,43 @@ export default function TenderPage() {
     }
   };
 
+  // 处理文件下载
+  const handleDownload = () => {
+    if (taskResult?.output_file) {
+      const downloadUrl = getDownloadUrl(taskResult.output_file);
+      window.open(downloadUrl, '_blank');
+    }
+  };
+
   // Check if type is valid
   const isValidType = ['xjcg', 'gngk'].includes(type);
 
   return (
     <MainLayout title={config.title} subtitle={config.description}>
       <div className="form-section space-y-6">
+        {/* Success Notification */}
+        {showSuccess && taskStatus === 'completed' && (
+          <div className="p-4 bg-green-50 border border-green-200 rounded-lg animate-in fade-in slide-in-from-top-2 duration-300">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-green-800">
+                  任务完成！文档已成功生成
+                </p>
+                <p className="text-xs text-green-600 mt-1">
+                  您可以在下方下载生成的文档
+                </p>
+              </div>
+              <button
+                onClick={() => setShowSuccess(false)}
+                className="text-green-600 hover:text-green-800 text-sm"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Error Alert */}
         {submitError && (
           <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -179,6 +286,7 @@ export default function TenderPage() {
             </div>
           </div>
         )}
+
         {type === 'xjcg' && (
           <XjcgTenderForm
             onSubmit={handleXjcgSubmit}
@@ -202,6 +310,65 @@ export default function TenderPage() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+        
+        {/* Task Progress Section */}
+        {currentTaskId && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
+            {/* Progress Display */}
+            <div className="card">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold">任务进度</h3>
+                <span className={`badge ${sseConnected ? 'badge-success' : 'badge-warning'}`}>
+                  {sseConnected ? '已连接' : '连接中...'}
+                </span>
+              </div>
+              <ProgressDisplay
+                percent={progress.progressPercent}
+                currentNode={progress.currentNode}
+                status={
+                  taskStatus === 'completed' ? 'completed' :
+                  taskStatus === 'failed' ? 'error' :
+                  taskStatus === 'running' ? 'running' : 'idle'
+                }
+              />
+              
+              {/* Download Button - Only show when completed */}
+              {taskStatus === 'completed' && taskResult?.output_file && (
+                <div className="mt-4 pt-4 border-t border-[var(--border)]">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-green-800">
+                        文档生成完成
+                      </p>
+                      <p className="text-xs text-green-600 mt-1">
+                        {taskResult.file_name || taskResult.output_file}
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleDownload}
+                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors"
+                    >
+                      <Download className="w-4 h-4" />
+                      下载文档
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Log Viewer */}
+            {logs.length > 0 && (
+              <div className="card">
+                <div className="h-64">
+                  <LogViewer 
+                    logs={formattedLogs}
+                    onClear={() => {}}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

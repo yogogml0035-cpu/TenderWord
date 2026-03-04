@@ -135,7 +135,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     """
     在指定锚点位置将润色后的文本插入到 Word 文档中。
 
-    统一支持 xjcg（询价采购）和 gngk（公开招标）两种招标类型，
+    统一支持 xjcg（询价采购）和 gngk（国内公开）两种招标类型，
     根据状态中的 tender_type 自动选择对应的字体大小进行锚点定位。
 
     Args:

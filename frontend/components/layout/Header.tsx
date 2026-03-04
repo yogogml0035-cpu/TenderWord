@@ -12,19 +12,25 @@ export function Header({ className, children, title, subtitle }: HeaderProps) {
   return (
     <header
       className={cn(
-        'bg-white border-b border-[var(--border)] px-6 py-4',
+        'bg-white',
         className
       )}
     >
-      {title && (
-        <div>
-          <h1 className="text-xl font-semibold text-[var(--foreground)]">{title}</h1>
-          {subtitle && (
-            <p className="text-sm text-[var(--text-muted)] mt-1">{subtitle}</p>
+      <div className="px-6 py-4 border-b border-[var(--border)]">
+        <div className="flex items-start justify-between gap-4">
+          {title && (
+            <div>
+              <h1 className="text-xl font-semibold text-[var(--foreground)]">{title}</h1>
+            </div>
           )}
+          {children}
+        </div>
+      </div>
+      {subtitle && (
+        <div className="px-6 py-2">
+          <p className="text-sm text-[var(--text-muted)]">{subtitle}</p>
         </div>
       )}
-      {children}
     </header>
   );
 }

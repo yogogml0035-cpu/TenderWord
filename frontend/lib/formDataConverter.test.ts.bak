@@ -12,8 +12,8 @@ import {
 } from './formDataConverter';
 import type { XjcgTenderFormData } from '@/components/forms/XjcgTenderForm';
 import type { GngkTenderFormData } from '@/components/forms/GngkTenderForm';
-import type { UploadedFile, TenderData } from '@/types/api';
-
+import type { UploadedFile } from '@/components/forms/FileUploader';
+import type { TenderData } from '@/types/api';
 // ============================================
 // Test Fixtures
 // ============================================
@@ -22,12 +22,14 @@ const createMockUploadedFile = (
   path: string,
   name?: string
 ): UploadedFile => ({
+  id: Math.random().toString(36).substr(2, 9),
+  file: new File(['content'], name || 'file.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
   file_path: path,
   file_name: name || path.split('/').pop() || 'file.docx',
   original_name: name || path.split('/').pop() || 'file.docx',
   size: 1024,
   upload_time: '2024-01-01T00:00:00Z',
-});
+} as UploadedFile);
 
 const createMockTenderData = (): TenderData => ({
   project_name: '测试项目',
@@ -609,7 +611,7 @@ describe('convertFormToApiRequest', () => {
       // 使用类型断言绕过 TypeScript 检查
       expect(() =>
         convertFormToApiRequest(
-          'invalid' as TenderType,
+          'invalid' as never,
           formData as never
         )
       ).toThrow('Unsupported tender type: invalid');
@@ -628,13 +630,15 @@ describe('辅助函数行为（通过主函数测试）', () => {
         tender_no: 'ZBGG-2024-HELPER-001',
         tender_data: createMockTenderData(),
         model: 'deepseek',
-        files: {
           origin_tender: {
+            id: 'test-id',
+            file: new File(['content'], 'specific.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
             file_path: '/uploads/specific-path.docx',
             file_name: 'specific.docx',
             original_name: '原始文件名.docx',
             size: 2048,
-          },
+            upload_time: '2024-01-01T00:00:00Z',
+          } as UploadedFile,
           tender_params: [],
         },
       };
@@ -669,12 +673,10 @@ describe('辅助函数行为（通过主函数测试）', () => {
         model: 'deepseek',
         files: {
           tender_params: [
-            { file_path: '/a.docx', file_name: 'a', original_name: 'a', size: 1 },
-            { file_path: '/b.docx', file_name: 'b', original_name: 'b', size: 2 },
-            { file_path: '/c.docx', file_name: 'c', original_name: 'c', size: 3 },
+            { file_path: '/a.docx', file_name: 'a', original_name: 'a', size: 1 } as UploadedFile,
+            { file_path: '/b.docx', file_name: 'b', original_name: 'b', size: 2 } as UploadedFile,
+            { file_path: '/c.docx', file_name: 'c', original_name: 'c', size: 3 } as UploadedFile,
           ],
-        },
-      };
 
       const result = convertXjcgFormToApiRequest(formData);
 

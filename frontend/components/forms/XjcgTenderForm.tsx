@@ -28,13 +28,14 @@ export interface XjcgTenderFormProps {
   className?: string;
   initialTenderNo?: string;
   initialTenderData?: TenderData;
+  isSubmitting?: boolean;
 }
-
-export function XjcgTenderForm({
+  export function XjcgTenderForm({
   onSubmit,
   className,
   initialTenderNo = '',
   initialTenderData,
+  isSubmitting = false,
 }: XjcgTenderFormProps) {
   const [tenderNo, setTenderNo] = useState(initialTenderNo);
   const [tenderData, setTenderData] = useState<TenderData | null>(initialTenderData || null);
@@ -232,8 +233,48 @@ export function XjcgTenderForm({
       )}
 
       {/* Submit Button */}
-      <button type="submit" className="btn-primary w-full">
-        开始生成
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="
+          group relative w-full py-3.5 px-6
+          bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500
+          hover:from-blue-700 hover:via-blue-600 hover:to-cyan-600
+          text-white font-semibold text-lg
+          rounded-xl shadow-lg shadow-blue-500/30
+          hover:shadow-xl hover:shadow-blue-500/40
+          transform hover:-translate-y-0.5
+          transition-all duration-200 ease-out
+          disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:transform-none
+          disabled:hover:shadow-lg
+          overflow-hidden
+        "
+      >
+        {/* Shimmer effect */}
+        <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out" />
+        
+        <span className="relative flex items-center justify-center gap-3">
+          {isSubmitting ? (
+            <>
+              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              <span>提交中...</span>
+            </>
+          ) : (
+            <>
+              {/* Sparkles icon */}
+              <svg className="h-5 w-5 transition-transform group-hover:scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+              </svg>
+              <span>开始生成</span>
+              <svg className="h-5 w-5 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            </>
+          )}
+        </span>
       </button>
     </form>
   );

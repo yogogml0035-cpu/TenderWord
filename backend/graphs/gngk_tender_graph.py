@@ -1,7 +1,7 @@
 """
-国内公开招标文档生成 Graph 模块
+国内公开文档生成 Graph 模块
 
-本模块定义了 GngkTenderGraph 类，用于构建和执行国内公开招标文档生成的工作流。
+本模块定义了 GngkTenderGraph 类，用于构建和执行国内公开文档生成的工作流。
 
 主要功能：
 1. 准备 Word 模板
@@ -82,7 +82,7 @@ from backend.nodes.gngk_word_nodes import get_replacements
 
 class GngkTenderGraph(StandardTenderWorkflowGraph):
     """
-    国内公开招标文档生成 Graph
+    国内公开文档生成 Graph
 
     继承自 BaseGraph，自动获得以下功能：
     - 跨进程文件锁（保护 Word COM 操作）
@@ -95,7 +95,7 @@ class GngkTenderGraph(StandardTenderWorkflowGraph):
 
     方法：
         get_state_class(): 返回 GngkTenderGraphState 类型
-        build_graph(): 构建国内公开招标文档生成的工作流
+        build_graph(): 构建国内公开文档生成的工作流
         _build_word_operations_subgraph(): 构建 Word 操作子图（私有方法）
     """
 

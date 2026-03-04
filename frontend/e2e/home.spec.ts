@@ -53,22 +53,11 @@ test.describe('Tender Form Navigation', () => {
     await expect(form).toBeVisible();
   });
 
-  test('can navigate to GKZB (公开招标) tender form', async ({ page }) => {
-    await page.goto('/tender/gkzb');
+  test('can navigate to GNGK (国内公开) tender form', async ({ page }) => {
+    await page.goto('/tender/gngk');
     
     // Check page loaded
-    await expect(page).toHaveURL(/\/tender\/gkzb/);
-    
-    // Check for form elements
-    const form = page.locator('form').first();
-    await expect(form).toBeVisible();
-  });
-
-  test('can navigate to YQZB (邀请招标) tender form', async ({ page }) => {
-    await page.goto('/tender/yqzb');
-    
-    // Check page loaded
-    await expect(page).toHaveURL(/\/tender\/yqzb/);
+    await expect(page).toHaveURL(/\/tender\/gngk/);
     
     // Check for form elements
     const form = page.locator('form').first();

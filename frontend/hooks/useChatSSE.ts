@@ -44,16 +44,19 @@ export function useChatSSE({
   onError,
 }: UseChatSSEOptions) {
   const { updateMessage, completeTask, failTask } = useChatStore();
-  
-  // Refs to track current content for incremental updates
-  const currentContentRef = useRef<DualColumnContent>({
+
+  // Initialize content ref lazily to avoid calling Date.now during render
+  const initContentRef = useCallback(() => ({
     logs: [],
     aiContent: {
       text: '',
       timestamp: Date.now(),
       isComplete: false,
     },
-  });
+  }), []);
+
+
+  const currentContentRef = useRef<DualColumnContent>(initContentRef());
 
   const handleMessage = useCallback((sseMessage: { event: string; data: unknown }) => {
     if (!conversationId || !messageId) return;

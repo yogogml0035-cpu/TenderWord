@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const useSystemChrome = !process.env.CI && process.env.PLAYWRIGHT_USE_SYSTEM_CHROME !== '0';
+
 /**
  * Playwright E2E Testing Configuration
  * @see https://playwright.dev/docs/test-configuration
@@ -13,7 +15,7 @@ export default defineConfig({
   reporter: 'html',
   
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: 'http://localhost:8502',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -22,13 +24,16 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        ...(useSystemChrome ? { channel: 'chrome' } : {}),
+      },
     },
   ],
 
   webServer: {
     command: 'npm run dev',
-    url: 'http://localhost:3000',
+    url: 'http://localhost:8502',
     reuseExistingServer: !process.env.CI,
   },
 });

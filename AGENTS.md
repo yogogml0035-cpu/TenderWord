@@ -9,7 +9,7 @@
 TenderWord - 招标文档智能处理系统。基于 **Next.js 16 + FastAPI + LangGraph** 的前后端分离架构，支持多种招标类型文档的智能生成。依赖 Windows Word COM 进行文档处理。
 
 ### 核心特性
-- **LangGraph 工作流引擎**：支持询价采购(XJCG)和公开招标(GNGK)两种招标类型
+- **LangGraph 工作流引擎**：支持询价采购(XJCG)和国内公开(GNGK)两种招标类型
 - **实时日志流**：通过 SSE 推送任务进度和 LLM 生成内容
 - **并发控制**：跨进程文件锁 + 公平任务队列确保 Word COM 操作安全
 - **多模型支持**：DeepSeek、Qwen(DashScope)、Doubao(ARK)
@@ -39,7 +39,7 @@ feat-wsq-h/
 │   ├── graphs/            # LangGraph 工作流
 │   │   ├── base_graph.py  # BaseGraph 基类 + CrossProcessFileLock
 │   │   ├── xjcg_tender_graph.py  # 询价采购工作流
-│   │   └── gngk_tender_graph.py  # 公开招标工作流
+│   │   └── gngk_tender_graph.py  # 国内公开工作流
 │   │
 │   ├── nodes/             # Graph 节点
 │   │   ├── common_word_nodes/    # 通用节点 (10个)
@@ -54,7 +54,7 @@ feat-wsq-h/
 │   │   │   ├── replace_content.py
 │   │   │   └── update_word.py
 │   │   ├── xjcg_word_nodes/      # 询价采购特有节点
-│   │   └── gngk_word_nodes/      # 公开招标特有节点
+│   │   └── gngk_word_nodes/      # 国内公开特有节点
 │   │
 │   ├── states/            # TypedDict 状态定义
 │   │   ├── base_state.py           # BaseState + TenderGraphStateBase
@@ -145,8 +145,8 @@ feat-wsq-h/
 - **节点组织**: 
   - `common_word_nodes/` - 招标类型通用节点
   - `xjcg_word_nodes/` - 询价采购特有节点
-  - `gngk_word_nodes/` - 公开招标特有节点
-- **节点命名**: `xjcg_*.py` = 询价采购, `gngk_*.py` = 公开招标
+  - `gngk_word_nodes/` - 国内公开特有节点
+- **节点命名**: `xjcg_*.py` = 询价采购, `gngk_*.py` = 国内公开
 - **导入约定**: 使用 `from backend.util.xxx import` 标准导入
 
 #### Graph 开发约定
@@ -203,7 +203,7 @@ class MyGraphState(TenderGraphStateBase, total=False):
 #### 节点分组
 - `common_word_nodes/` - 通用节点（10个）：prepare_template, extract_tender_params, delete_tender_param, get_comments, copy_comments, generate_polished_text, generate_comments, get_replacements_core, replace_content, update_word
 - `xjcg_word_nodes/` - 询价采购特有：xjcg_get_replacements
-- `gngk_word_nodes/` - 公开招标特有：gngk_get_replacements
+- `gngk_word_nodes/` - 国内公开特有：gngk_get_replacements
 
 #### Graph 结构
 每个 Graph 继承 `StandardTenderWorkflowGraph`，它定义了标准工作流：
@@ -281,7 +281,7 @@ cd backend && python -m pytest tests/ -v
 
 ```bash
 # 开发
-cd frontend && npm run dev                # 启动前端 (port 3000)
+cd frontend && npm run dev                # 启动前端 (port 8502)
 
 # 构建
 cd frontend && npm run build              # 生产构建
@@ -326,12 +326,12 @@ cd backend && python scripts/diagnose_word.py
 ## NOTES
 
 1. **Windows 必需**: 依赖 Word COM，无法在 Linux/macOS 运行
-2. **端口**: 前端 3000, 后端 8000 (CORS 已配置)
+2. **端口**: 前端 8502, 后端 8000 (CORS 已配置)
 3. **上传目录**: `D:/UploadFiles` (在 `settings.py` 中配置)
 4. **日志目录**: `backend/logs/` (自动创建)
 5. **LLM 模型**: 支持 DeepSeek、Qwen、Doubao (通过环境变量配置)
 6. **并发限制**: Word COM 操作串行执行，支持多任务排队
-7. **招标类型**: 当前支持 XJCG(询价采购) 和 GNGK(公开招标)
+- **招标类型**: 当前支持 XJCG(询价采购) 和 GNGK(国内公开)
 
 ## REFACTORING NOTES (2026-03-03)
 

@@ -18,10 +18,10 @@ class TenderType(BaseModel):
     """
 
     tender_lx: int = Field(
-        ..., description="招标类型（0=询价, 1=公开招标, 2=邀请招标）", ge=0, le=2
+        ..., description="招标类型（0=询价, 1=国内公开, 2=邀请招标）", ge=0, le=2
     )
     purchase_method: int = Field(
-        ..., description="采购方式（5=询价采购, 1=公开招标, 2=邀请招标）", ge=0, le=5
+        ..., description="采购方式（5=询价采购, 1=国内公开, 2=邀请招标）", ge=0, le=5
     )
     fund_lx: int = Field(..., description="资金类型（0=国内, 1=国际）", ge=0, le=1)
 
