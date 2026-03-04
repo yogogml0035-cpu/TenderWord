@@ -4,11 +4,9 @@
  */
 
 import React from 'react';
-import { screen, waitFor } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { renderWithProviders } from '../utils/test-utils';
-import { server } from '../mocks/server';
-import { errorHandlers } from '../mocks/handlers';
+import { renderWithProviders } from '../../utils/test-utils';
 
 // Example component for testing
 function ExampleForm() {
@@ -85,41 +83,11 @@ describe('ExampleForm Component', () => {
   });
 });
 
-// Example of testing with MSW API mocking
-describe('API Integration Example', () => {
-  it('should handle API calls', async () => {
-    // This is a placeholder for API integration tests
-    // You would typically test components that make API calls
-    // using MSW handlers
-
-    // Example:
-    // renderWithProviders(<ComponentThatFetchesData />);
-    // await waitFor(() => {
-    //   expect(screen.getByText('Data loaded')).toBeInTheDocument();
-    // });
-  });
-
-  it('should handle API errors', async () => {
-    // Override handlers to return error
-    server.use(errorHandlers.badRequest);
-
-    // This is a placeholder for error handling tests
-    // You would test how your component handles API errors
-
-    // Example:
-    // renderWithProviders(<ComponentThatFetchesData />);
-    // await waitFor(() => {
-    //   expect(screen.getByText('Error: Invalid request')).toBeInTheDocument();
-    // });
-  });
-});
-
 // Example of testing components with store
 describe('Component with Store Integration', () => {
   it('should interact with store', async () => {
     // This is a placeholder for testing components that use Zustand stores
     // You can test store updates and component re-renders
-
     // Example:
     // const { result } = renderHook(() => useAppStore());
     // renderWithProviders(<ComponentUsingStore />);

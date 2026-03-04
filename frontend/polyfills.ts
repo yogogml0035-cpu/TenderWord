@@ -1,77 +1,70 @@
-// @ts-nocheck
+import { TextDecoder, TextEncoder } from 'util';
+import * as streamWeb from 'stream/web';
 
-/**
- * Polyfills for Jest/JSDOM environment
- * This file MUST be loaded before any other setup files
- * Add this to setupFiles in jest.config.ts
- */
+type GlobalPolyfills = typeof globalThis & {
+  TextDecoder?: typeof TextDecoder;
+  TextEncoder?: typeof TextEncoder;
+  MessageChannel?: unknown;
+  ReadableStream?: typeof streamWeb.ReadableStream;
+  WritableStream?: typeof streamWeb.WritableStream;
+  TransformStream?: typeof streamWeb.TransformStream;
+  ByteLengthQueuingStrategy?: typeof streamWeb.ByteLengthQueuingStrategy;
+  CountQueuingStrategy?: typeof streamWeb.CountQueuingStrategy;
+};
 
-const { TextDecoder, TextEncoder } = require('util');
+type MessagePortLike = {
+  onmessage: ((event: { data: unknown }) => void) | null;
+  postMessage: (data: unknown) => void;
+};
 
-// @ts-ignore
-if (typeof global.TextDecoder === 'undefined') {
-  // @ts-ignore
-  global.TextDecoder = TextDecoder;
-}
-// @ts-ignore
-if (typeof global.TextEncoder === 'undefined') {
-  // @ts-ignore
-  global.TextEncoder = TextEncoder;
-}
+class MessageChannelMock {
+  port1: MessagePortLike;
+  port2: MessagePortLike;
 
-// Polyfill for MessageChannel/MessagePort - required by undici
-const { MessageChannel, MessagePort } = require('worker_threads');
+  constructor() {
+    const port1: MessagePortLike = { onmessage: null, postMessage: () => {} };
+    const port2: MessagePortLike = {
+      onmessage: null,
+      postMessage: () => {
+        if (typeof port1.onmessage === 'function') {
+          const handler = port1.onmessage;
+          setTimeout(() => handler({ data: null }), 0);
+        }
+      },
+    };
 
-// @ts-ignore
-if (typeof global.MessageChannel === 'undefined') {
-  // @ts-ignore
-  global.MessageChannel = MessageChannel;
-}
-// @ts-ignore
-if (typeof global.MessagePort === 'undefined') {
-  // @ts-ignore
-  global.MessagePort = MessagePort;
-}
-
-// Polyfill for ReadableStream and related APIs
-const streamWeb = require('stream/web');
-
-// @ts-ignore
-if (typeof global.ReadableStream === 'undefined') {
-  // @ts-ignore
-  global.ReadableStream = streamWeb.ReadableStream;
-}
-// @ts-ignore
-if (typeof global.TransformStream === 'undefined') {
-  // @ts-ignore
-  global.TransformStream = streamWeb.TransformStream;
-}
-// @ts-ignore
-if (typeof global.ByteLengthQueuingStrategy === 'undefined') {
-  // @ts-ignore
-  global.ByteLengthQueuingStrategy = streamWeb.ByteLengthQueuingStrategy;
-}
-// @ts-ignore
-if (typeof global.CountQueuingStrategy === 'undefined') {
-  // @ts-ignore
-  global.CountQueuingStrategy = streamWeb.CountQueuingStrategy;
+    this.port1 = port1;
+    this.port2 = port2;
+  }
 }
 
-// Load undici and set up fetch polyfills
-const undici = require('undici');
+const g = globalThis as GlobalPolyfills;
 
-// @ts-ignore
-if (typeof global.Response === 'undefined') {
-  // @ts-ignore
-  global.Response = undici.Response;
+if (typeof g.TextDecoder === 'undefined') {
+  g.TextDecoder = TextDecoder as unknown as GlobalPolyfills['TextDecoder'];
 }
-// @ts-ignore
-if (typeof global.Headers === 'undefined') {
-  // @ts-ignore
-  global.Headers = undici.Headers;
+if (typeof g.TextEncoder === 'undefined') {
+  g.TextEncoder = TextEncoder as unknown as GlobalPolyfills['TextEncoder'];
 }
-// @ts-ignore
-if (typeof global.Request === 'undefined') {
-  // @ts-ignore
-  global.Request = undici.Request;
+
+if (typeof g.MessageChannel === 'undefined') {
+  g.MessageChannel = MessageChannelMock as unknown as GlobalPolyfills['MessageChannel'];
+}
+
+if (typeof g.ReadableStream === 'undefined') {
+  g.ReadableStream = streamWeb.ReadableStream as unknown as GlobalPolyfills['ReadableStream'];
+}
+if (typeof g.WritableStream === 'undefined') {
+  g.WritableStream = streamWeb.WritableStream as unknown as GlobalPolyfills['WritableStream'];
+}
+if (typeof g.TransformStream === 'undefined') {
+  g.TransformStream = streamWeb.TransformStream as unknown as GlobalPolyfills['TransformStream'];
+}
+if (typeof g.ByteLengthQueuingStrategy === 'undefined') {
+  g.ByteLengthQueuingStrategy =
+    streamWeb.ByteLengthQueuingStrategy as unknown as GlobalPolyfills['ByteLengthQueuingStrategy'];
+}
+if (typeof g.CountQueuingStrategy === 'undefined') {
+  g.CountQueuingStrategy =
+    streamWeb.CountQueuingStrategy as unknown as GlobalPolyfills['CountQueuingStrategy'];
 }

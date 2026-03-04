@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { XjcgTenderForm, type XjcgTenderFormData } from './XjcgTenderForm';
 import type { TenderData } from './TenderNoInput';
@@ -202,12 +202,7 @@ describe('XjcgTenderForm', () => {
     });
 
     it('应该使用初始招标编号', () => {
-      render(
-        <XjcgTenderForm
-          onSubmit={mockOnSubmit}
-          initialTenderNo="ZBGG-2024-INIT"
-        />
-      );
+      render(<XjcgTenderForm onSubmit={mockOnSubmit} initialTenderNo="ZBGG-2024-INIT" />);
 
       const input = screen.getByLabelText('招标编号输入框');
       expect(input).toHaveValue('ZBGG-2024-INIT');

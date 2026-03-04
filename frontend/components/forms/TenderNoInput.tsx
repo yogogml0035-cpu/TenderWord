@@ -52,7 +52,12 @@ export function TenderNoInput({
       setSuccess(true);
       onDataFetched?.(data);
     } catch (err) {
-      const errorMessage = err instanceof ApiError ? err.message : (err instanceof Error ? err.message : '获取招标数据失败');
+      const errorMessage =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : '获取招标数据失败';
       setError(errorMessage);
       setFetchedData(null);
     } finally {
@@ -74,7 +79,7 @@ export function TenderNoInput({
     <div className={cn('space-y-2', className)}>
       <label className="block text-sm font-medium text-[var(--foreground)]">
         {label}
-        {required && <span className="text-[var(--error)] ml-1">*</span>}
+        {required && <span className="ml-1 text-[var(--error)]">*</span>}
       </label>
 
       <div className="flex gap-2">
@@ -97,10 +102,10 @@ export function TenderNoInput({
             )}
           />
           {success && (
-            <CheckCircle className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--success)]" />
+            <CheckCircle className="absolute top-1/2 right-3 h-5 w-5 -translate-y-1/2 text-[var(--success)]" />
           )}
           {error && !isLoading && (
-            <AlertCircle className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--error)]" />
+            <AlertCircle className="absolute top-1/2 right-3 h-5 w-5 -translate-y-1/2 text-[var(--error)]" />
           )}
         </div>
         <button
@@ -110,10 +115,10 @@ export function TenderNoInput({
           className="btn-secondary whitespace-nowrap"
         >
           {isLoading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
+            <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <>
-              <Search className="w-4 h-4 mr-1" />
+              <Search className="mr-1 h-4 w-4" />
               获取信息
             </>
           )}
@@ -121,18 +126,16 @@ export function TenderNoInput({
       </div>
 
       {error && (
-        <p className="text-sm text-[var(--error)] flex items-center gap-1">
-          <AlertCircle className="w-4 h-4" />
+        <p className="flex items-center gap-1 text-sm text-[var(--error)]">
+          <AlertCircle className="h-4 w-4" />
           {error}
         </p>
       )}
 
       {success && fetchedData && (
-        <div className="p-3 bg-green-50 border border-green-200 rounded-md">
-          <p className="text-sm text-green-800 font-medium">{fetchedData.project_name}</p>
-          <p className="text-xs text-green-600 mt-1">
-            采购人：{fetchedData.buyer_name}
-          </p>
+        <div className="rounded-md border border-green-200 bg-green-50 p-3">
+          <p className="text-sm font-medium text-green-800">{fetchedData.project_name}</p>
+          <p className="mt-1 text-xs text-green-600">采购人：{fetchedData.buyer_name}</p>
         </div>
       )}
     </div>

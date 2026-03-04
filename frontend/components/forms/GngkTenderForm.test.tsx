@@ -60,20 +60,10 @@ jest.mock('./TenderNoInput', () => ({
 }));
 
 jest.mock('./ModelSelector', () => ({
-  ModelSelector: ({
-    value,
-    onChange,
-  }: {
-    value: string;
-    onChange: (value: string) => void;
-  }) => (
+  ModelSelector: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
     <div data-testid="model-selector">
       <label>选择模型</label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        data-testid="model-select"
-      >
+      <select value={value} onChange={(e) => onChange(e.target.value)} data-testid="model-select">
         <option value="deepseek">DeepSeek</option>
         <option value="qwen">通义千问</option>
         <option value="doubao">豆包</option>
@@ -153,11 +143,10 @@ describe('GngkTenderForm', () => {
     it('should render all form sections', () => {
       render(<GngkTenderForm onSubmit={mockOnSubmit} />);
 
-      expect(screen.getByText('1. 招标信息')).toBeInTheDocument();
+      expect(screen.getByText('招标信息')).toBeInTheDocument();
       expect(screen.getByText('2. 文件上传')).toBeInTheDocument();
-      expect(screen.getByText('3. 投标分册')).toBeInTheDocument();
-      expect(screen.getByText('4. 模型选择')).toBeInTheDocument();
-      expect(screen.getByText('5. 高级设置（可选）')).toBeInTheDocument();
+      expect(screen.getByText('模型选择')).toBeInTheDocument();
+      expect(screen.getByText('高级设置')).toBeInTheDocument();
     });
 
     it('should render TenderNoInput component', () => {
@@ -195,95 +184,6 @@ describe('GngkTenderForm', () => {
   });
 
   // ==========================================
-  // GNGK-Specific: Bid Sections Tests
-  // ==========================================
-  describe('Bid Sections (投标分册)', () => {
-    it('should render all bid section checkboxes', () => {
-      render(<GngkTenderForm onSubmit={mockOnSubmit} />);
-
-      expect(screen.getByText('技术标')).toBeInTheDocument();
-      expect(screen.getByText('商务标')).toBeInTheDocument();
-      expect(screen.getByText('价格标')).toBeInTheDocument();
-    });
-
-    it('should have all bid sections checked by default', () => {
-      render(<GngkTenderForm onSubmit={mockOnSubmit} />);
-
-      const technicalCheckbox = screen.getByRole('checkbox', { name: /技术标/i });
-      const businessCheckbox = screen.getByRole('checkbox', { name: /商务标/i });
-      const priceCheckbox = screen.getByRole('checkbox', { name: /价格标/i });
-
-      expect(technicalCheckbox).toBeChecked();
-      expect(businessCheckbox).toBeChecked();
-      expect(priceCheckbox).toBeChecked();
-    });
-
-    it('should toggle technical bid section', async () => {
-      const user = userEvent.setup();
-      render(<GngkTenderForm onSubmit={mockOnSubmit} />);
-
-      const technicalCheckbox = screen.getByRole('checkbox', { name: /技术标/i });
-      expect(technicalCheckbox).toBeChecked();
-
-      await user.click(technicalCheckbox);
-      expect(technicalCheckbox).not.toBeChecked();
-    });
-
-    it('should toggle business bid section', async () => {
-      const user = userEvent.setup();
-      render(<GngkTenderForm onSubmit={mockOnSubmit} />);
-
-      const businessCheckbox = screen.getByRole('checkbox', { name: /商务标/i });
-      expect(businessCheckbox).toBeChecked();
-
-      await user.click(businessCheckbox);
-      expect(businessCheckbox).not.toBeChecked();
-    });
-
-    it('should toggle price bid section', async () => {
-      const user = userEvent.setup();
-      render(<GngkTenderForm onSubmit={mockOnSubmit} />);
-
-      const priceCheckbox = screen.getByRole('checkbox', { name: /价格标/i });
-      expect(priceCheckbox).toBeChecked();
-
-      await user.click(priceCheckbox);
-      expect(priceCheckbox).not.toBeChecked();
-    });
-
-    it('should allow unchecking all bid sections', async () => {
-      const user = userEvent.setup();
-      render(<GngkTenderForm onSubmit={mockOnSubmit} />);
-
-      const technicalCheckbox = screen.getByRole('checkbox', { name: /技术标/i });
-      const businessCheckbox = screen.getByRole('checkbox', { name: /商务标/i });
-      const priceCheckbox = screen.getByRole('checkbox', { name: /价格标/i });
-
-      await user.click(technicalCheckbox);
-      await user.click(businessCheckbox);
-      await user.click(priceCheckbox);
-
-      expect(technicalCheckbox).not.toBeChecked();
-      expect(businessCheckbox).not.toBeChecked();
-      expect(priceCheckbox).not.toBeChecked();
-    });
-
-    it('should display bid section descriptions', () => {
-      render(<GngkTenderForm onSubmit={mockOnSubmit} />);
-
-      expect(
-        screen.getByText('包含技术方案、实施计划等内容')
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText('包含资质证明、业绩材料等内容')
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText('包含报价明细、价格说明等内容')
-      ).toBeInTheDocument();
-    });
-  });
-
-  // ==========================================
   // Advanced Settings Tests (GNGK-specific)
   // ==========================================
   describe('Advanced Settings', () => {
@@ -299,12 +199,8 @@ describe('GngkTenderForm', () => {
 
       // Query inputs by placeholder since labels are not properly linked
       const inputs = screen.getAllByRole('textbox');
-      const beforeInput = inputs.find((input) =>
-        input.getAttribute('value')?.includes('第三章')
-      );
-      const afterInput = inputs.find((input) =>
-        input.getAttribute('value')?.includes('第四章')
-      );
+      const beforeInput = inputs.find((input) => input.getAttribute('value')?.includes('第三章'));
+      const afterInput = inputs.find((input) => input.getAttribute('value')?.includes('第四章'));
 
       expect(beforeInput).toHaveValue('第三章  采购需求');
       expect(afterInput).toHaveValue('第四章  投标文件有关格式');
@@ -316,12 +212,8 @@ describe('GngkTenderForm', () => {
 
       // Query inputs by value content
       const inputs = screen.getAllByRole('textbox');
-      const beforeInput = inputs.find((input) =>
-        input.getAttribute('value')?.includes('第三章')
-      );
-      const afterInput = inputs.find((input) =>
-        input.getAttribute('value')?.includes('第四章')
-      );
+      const beforeInput = inputs.find((input) => input.getAttribute('value')?.includes('第三章'));
+      const afterInput = inputs.find((input) => input.getAttribute('value')?.includes('第四章'));
 
       await user.clear(beforeInput!);
       await user.type(beforeInput!, '新的前文本');
@@ -490,51 +382,6 @@ describe('GngkTenderForm', () => {
       expect(submittedData.tender_data.project_name).toBe('测试项目');
       expect(submittedData.model).toBe('deepseek');
       expect(submittedData.files.tender_params).toHaveLength(1);
-      expect(submittedData.bid_sections).toEqual({
-        technical: true,
-        business: true,
-        price: true,
-      });
-    });
-
-    it('should include bid sections in submission data', async () => {
-      render(<GngkTenderForm onSubmit={mockOnSubmit} />);
-
-      // Fill tender info
-      const input = screen.getByTestId('tender-no-input-field');
-      await userEvent.type(input, 'GNGK-2024-001');
-      const fetchBtn = screen.getByTestId('fetch-tender-btn');
-      fireEvent.click(fetchBtn);
-
-      await waitFor(() => {
-        expect(screen.getByText('测试项目')).toBeInTheDocument();
-      });
-
-      // Toggle bid sections
-      const businessCheckbox = screen.getByRole('checkbox', { name: /商务标/i });
-      await userEvent.click(businessCheckbox);
-
-      // Upload param file
-      const paramInput = screen.getByTestId('file-input-params');
-      const file = new File(['test'], 'params.docx', {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      });
-      fireEvent.change(paramInput, { target: { files: [file] } });
-
-      // Submit
-      const submitButtons = screen.getAllByRole('button', { name: /开始生成/i });
-      fireEvent.click(submitButtons[0]);
-
-      await waitFor(() => {
-        expect(mockOnSubmit).toHaveBeenCalled();
-      });
-
-      const submittedData = mockOnSubmit.mock.calls[0][0] as GngkTenderFormData;
-      expect(submittedData.bid_sections).toEqual({
-        technical: true,
-        business: false,
-        price: true,
-      });
     });
 
     it('should include insertion config in submission data', async () => {
@@ -751,15 +598,11 @@ describe('GngkTenderForm', () => {
       });
       fireEvent.change(paramInput, { target: { files: [paramFile] } });
 
-      // Step 4: Configure bid sections (uncheck one)
-      const priceCheckbox = screen.getByRole('checkbox', { name: /价格标/i });
-      await userEvent.click(priceCheckbox);
-
-      // Step 5: Select model
+      // Step 4: Select model
       const modelSelect = screen.getByTestId('model-select');
       fireEvent.change(modelSelect, { target: { value: 'doubao' } });
 
-      // Step 6: Submit
+      // Step 5: Submit
       const submitButtons = screen.getAllByRole('button', { name: /开始生成/i });
       fireEvent.click(submitButtons[0]);
 
@@ -771,18 +614,13 @@ describe('GngkTenderForm', () => {
       expect(submittedData).toMatchObject({
         tender_no: 'GNGK-2024-001',
         model: 'doubao',
-        bid_sections: {
-          technical: true,
-          business: true,
-          price: false,
-        },
       });
     });
 
     it('should handle async onSubmit', async () => {
-      const mockAsyncSubmit = jest.fn().mockImplementation(
-          () => new Promise((resolve) => setTimeout(resolve, 100))
-        );
+      const mockAsyncSubmit = jest
+        .fn()
+        .mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 100)));
       render(<GngkTenderForm onSubmit={mockAsyncSubmit} />);
 
       // Setup form

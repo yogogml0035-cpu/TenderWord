@@ -2,11 +2,10 @@
 
 import React, { useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
-import { BaseForm, type FormField } from './BaseForm';
 import { TenderNoInput, type TenderData } from './TenderNoInput';
 import { ModelSelector, type ModelType } from './ModelSelector';
 import { FileUploader, type UploadedFile } from './FileUploader';
-import { AlertCircle } from 'lucide-react';
+import { FormSection, FormField, ErrorDisplay, InfoCard, type TenderInfoItem } from './shared';
 
 export interface XjcgTenderFormData {
   tender_no: string;
@@ -27,10 +26,10 @@ export interface XjcgTenderFormProps {
   onSubmit: (data: XjcgTenderFormData) => Promise<void> | void;
   className?: string;
   initialTenderNo?: string;
-  initialTenderData?: TenderData;
+  initialTenderData?: TenderData | null;
   isSubmitting?: boolean;
 }
-  export function XjcgTenderForm({
+export function XjcgTenderForm({
   onSubmit,
   className,
   initialTenderNo = '',
@@ -78,7 +77,9 @@ export interface XjcgTenderFormProps {
       // Ensure files are uploaded
       const unuploadedParams = paramFiles.filter((f) => !f.file_path);
       if (unuploadedParams.length > 0) {
-        setError(`请先上传技术参数文件: ${unuploadedParams.map((f) => f.original_name).join(', ')}`);
+        setError(
+          `请先上传技术参数文件: ${unuploadedParams.map((f) => f.original_name).join(', ')}`
+        );
         return;
       }
 
@@ -99,47 +100,31 @@ export interface XjcgTenderFormProps {
     [tenderNo, tenderData, model, originFile, cleanDraftFile, paramFiles, insertionConfig, onSubmit]
   );
 
+  // Prepare tender data for InfoCard
+  const tenderInfoItems: TenderInfoItem[] = tenderData
+    ? [
+        { label: '项目名称', value: tenderData.project_name, key: 'project_name' },
+        { label: '采购人', value: tenderData.buyer_name, key: 'buyer_name' },
+        { label: '负责人', value: tenderData.project_zbr_xbr, key: 'project_zbr_xbr' },
+        { label: '投标截止', value: tenderData.submit_date, key: 'submit_date' },
+      ]
+    : [];
+
   return (
     <form onSubmit={handleSubmit} className={cn('form-section space-y-6', className)}>
       {/* Section 1: Tender Info */}
-      <div className="card">
-        <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">1. 招标信息</h3>
-        
+      <FormSection title="招标信息" index={1}>
         <TenderNoInput
           value={tenderNo}
           onChange={setTenderNo}
           onDataFetched={handleTenderDataFetched}
           required
         />
-
-        {tenderData && (
-          <div className="mt-4 p-4 bg-[var(--secondary-bg)] rounded-lg space-y-2">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs text-[var(--text-muted)]">项目名称</p>
-                <p className="text-sm font-medium text-[var(--foreground)]">{tenderData.project_name}</p>
-              </div>
-              <div>
-                <p className="text-xs text-[var(--text-muted)]">采购人</p>
-                <p className="text-sm font-medium text-[var(--foreground)]">{tenderData.buyer_name}</p>
-              </div>
-              <div>
-                <p className="text-xs text-[var(--text-muted)]">负责人</p>
-                <p className="text-sm font-medium text-[var(--foreground)]">{tenderData.project_zbr_xbr}</p>
-              </div>
-              <div>
-                <p className="text-xs text-[var(--text-muted)]">投标截止</p>
-                <p className="text-sm font-medium text-[var(--foreground)]">{tenderData.submit_date}</p>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+        {tenderData && <InfoCard items={tenderInfoItems} columns={2} />}
+      </FormSection>
 
       {/* Section 2: File Upload */}
-      <div className="card">
-        <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">2. 文件上传</h3>
-        
+      <FormSection title="文件上传" index={2}>
         <div className="space-y-5">
           <FileUploader
             label="送审稿文件（可选）"
@@ -172,104 +157,105 @@ export interface XjcgTenderFormProps {
             onUpload={(files) => setParamFiles((prev) => [...prev, ...files])}
           />
         </div>
-      </div>
+      </FormSection>
 
       {/* Section 3: Model Selection */}
-      <div className="card">
-        <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">3. 模型选择</h3>
-        
+      <FormSection title="模型选择" index={3}>
         <ModelSelector value={model} onChange={setModel} />
-      </div>
+      </FormSection>
 
       {/* Section 4: Advanced Settings */}
-      <div className="card">
-        <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">4. 高级设置（可选）</h3>
-        
+      <FormSection title="高级设置（可选）" index={4} badge="可选" badgeVariant="optional">
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-[var(--foreground)] mb-1">
-              插入位置前文本
-            </label>
-            <input
-              type="text"
-              value={insertionConfig.before_text}
-              onChange={(e) =>
-                setInsertionConfig((prev) => ({ ...prev, before_text: e.target.value }))
-              }
-              className="input-field"
-              placeholder="插入位置前的章节标题"
-            />
-            <p className="text-xs text-[var(--text-muted)] mt-1">
-              系统将在该文本位置之后插入生成的内容
-            </p>
-          </div>
+          <FormField
+            label="插入位置前文本"
+            name="before_text"
+            variant="text"
+            value={insertionConfig.before_text}
+            onChange={(value) =>
+              setInsertionConfig((prev) => ({ ...prev, before_text: value }))
+            }
+            placeholder="插入位置前的章节标题"
+            helperText="系统将在该文本位置之后插入生成的内容"
+          />
 
-          <div>
-            <label className="block text-sm font-medium text-[var(--foreground)] mb-1">
-              插入位置后文本
-            </label>
-            <input
-              type="text"
-              value={insertionConfig.after_text}
-              onChange={(e) =>
-                setInsertionConfig((prev) => ({ ...prev, after_text: e.target.value }))
-              }
-              className="input-field"
-              placeholder="插入位置后的章节标题"
-            />
-            <p className="text-xs text-[var(--text-muted)] mt-1">
-              系统将在该文本位置之前插入生成的内容
-            </p>
-          </div>
+          <FormField
+            label="插入位置后文本"
+            name="after_text"
+            variant="text"
+            value={insertionConfig.after_text}
+            onChange={(value) =>
+              setInsertionConfig((prev) => ({ ...prev, after_text: value }))
+            }
+            placeholder="插入位置后的章节标题"
+            helperText="系统将在该文本位置之前插入生成的内容"
+          />
         </div>
-      </div>
+      </FormSection>
 
       {/* Error Display */}
       {error && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
-          <AlertCircle className="w-5 h-5 text-[var(--error)]" />
-          <p className="text-sm text-[var(--error)]">{error}</p>
-        </div>
+        <ErrorDisplay message={error} onDismiss={() => setError(null)} />
       )}
 
       {/* Submit Button */}
       <button
         type="submit"
         disabled={isSubmitting}
-        className="
-          group relative w-full py-3.5 px-6
-          bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500
-          hover:from-blue-700 hover:via-blue-600 hover:to-cyan-600
-          text-white font-semibold text-lg
-          rounded-xl shadow-lg shadow-blue-500/30
-          hover:shadow-xl hover:shadow-blue-500/40
-          transform hover:-translate-y-0.5
-          transition-all duration-200 ease-out
-          disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:transform-none
-          disabled:hover:shadow-lg
-          overflow-hidden
-        "
+        className="group relative w-full transform overflow-hidden rounded-xl bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 px-6 py-3.5 text-lg font-semibold text-white shadow-lg shadow-blue-500/30 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:from-blue-700 hover:via-blue-600 hover:to-cyan-600 hover:shadow-xl hover:shadow-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:transform-none disabled:hover:shadow-lg"
       >
         {/* Shimmer effect */}
-        <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out" />
-        
+        <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-1000 ease-out group-hover:translate-x-full" />
+
         <span className="relative flex items-center justify-center gap-3">
           {isSubmitting ? (
             <>
-              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              <svg className="h-5 w-5 animate-spin" width={20} height={20} viewBox="0 0 24 24">
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                  fill="none"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                />
               </svg>
               <span>提交中...</span>
             </>
           ) : (
             <>
               {/* Sparkles icon */}
-              <svg className="h-5 w-5 transition-transform group-hover:scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+              <svg
+                className="h-5 w-5 transition-transform group-hover:scale-110"
+                width={20}
+                height={20}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"
+                />
               </svg>
               <span>开始生成</span>
-              <svg className="h-5 w-5 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg
+                className="h-5 w-5 transition-transform group-hover:translate-x-1"
+                width={20}
+                height={20}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
               </svg>
             </>

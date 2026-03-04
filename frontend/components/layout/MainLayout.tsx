@@ -3,7 +3,7 @@ import React from 'react';
 import { HistorySection } from './HistorySection';
 import { Sidebar, SidebarContent, SidebarHeader } from './Sidebar';
 import { Header } from './Header';
-import { FileText, Settings } from 'lucide-react';
+import { FileText, MessageSquare, Settings } from 'lucide-react';
 import Link from 'next/link';
 
 interface MainLayoutProps {
@@ -19,22 +19,19 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
       <Sidebar>
         <SidebarHeader>
           <Link href="/" className="flex items-center gap-2 text-[var(--foreground)]">
-            <FileText className="w-6 h-6 text-[var(--primary)]" />
-            <span className="font-semibold text-lg">招标文件生成</span>
+            <FileText className="h-6 w-6 text-[var(--primary)]" />
+            <span className="text-lg font-semibold">招标文件生成</span>
           </Link>
         </SidebarHeader>
 
         <SidebarContent>
           {/* Navigation */}
           <nav className="space-y-1">
-            <p className="px-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-2">
-              招标类型
+            <p className="mb-2 px-2 text-xs font-medium tracking-wider text-[var(--text-muted)] uppercase">
+              模式
             </p>
-            <NavLink href="/tender/xjcg" icon={<FileText className="w-4 h-4" />}>
-              询价采购
-            </NavLink>
-            <NavLink href="/tender/gngk" icon={<FileText className="w-4 h-4" />}>
-              国内公开
+            <NavLink href="/chat" icon={<MessageSquare className="h-4 w-4" />}>
+              三栏聊天
             </NavLink>
           </nav>
 
@@ -42,9 +39,9 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
           <HistorySection />
         </SidebarContent>
 
-        <div className="p-4 border-t border-[var(--border)]">
-          <button className="flex items-center gap-2 text-sm text-[var(--text-muted)] hover:text-[var(--foreground)] transition-colors">
-            <Settings className="w-4 h-4" />
+        <div className="border-t border-[var(--border)] p-4">
+          <button className="flex items-center gap-2 text-sm text-[var(--text-muted)] transition-colors hover:text-[var(--foreground)]">
+            <Settings className="h-4 w-4" />
             设置
           </button>
         </div>
@@ -71,7 +68,7 @@ function NavLink({
   return (
     <Link
       href={href}
-      className="flex items-center gap-2 px-2 py-2 text-sm font-medium text-[var(--text-muted)] rounded-md hover:bg-white hover:text-[var(--foreground)] transition-colors"
+      className="flex items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-[var(--text-muted)] transition-colors hover:bg-white hover:text-[var(--foreground)]"
     >
       {icon}
       {children}

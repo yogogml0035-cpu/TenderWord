@@ -32,11 +32,7 @@ const createSuccessGenerateResponse = (
 });
 
 // Sample error response
-const createErrorResponse = (
-  code: string,
-  message: string,
-  status: number
-): ApiErrorResponse => ({
+const createErrorResponse = (code: string, message: string): ApiErrorResponse => ({
   success: false,
   error: {
     code,
@@ -71,7 +67,7 @@ export const handlers = [
     // Validate required fields
     if (!body.tender_no || !body.tender_data || !body.files || !body.model) {
       return HttpResponse.json(
-        createErrorResponse('REQ_MISSING_FIELD', 'Missing required fields', 400),
+        createErrorResponse('REQ_MISSING_FIELD', 'Missing required fields'),
         { status: 400 }
       );
     }
@@ -168,7 +164,7 @@ export const errorHandlers = {
   badRequest: http.post(`${API_BASE_URL}/api/generate`, async () => {
     await delay(10);
     return HttpResponse.json(
-      createErrorResponse('REQ_INVALID_PARAM', 'Invalid request parameters', 400),
+      createErrorResponse('REQ_INVALID_PARAM', 'Invalid request parameters'),
       { status: 400 }
     );
   }),
@@ -176,10 +172,9 @@ export const errorHandlers = {
   // 500 Server Error
   serverError: http.post(`${API_BASE_URL}/api/generate`, async () => {
     await delay(10);
-    return HttpResponse.json(
-      createErrorResponse('SYS_INTERNAL_ERROR', 'Internal server error', 500),
-      { status: 500 }
-    );
+    return HttpResponse.json(createErrorResponse('SYS_INTERNAL_ERROR', 'Internal server error'), {
+      status: 500,
+    });
   }),
 
   // Network Error (by not returning a response)
@@ -190,10 +185,9 @@ export const errorHandlers = {
   // 404 Not Found for download
   downloadNotFound: http.get(`${API_BASE_URL}/api/download/:filePath`, async () => {
     await delay(10);
-    return HttpResponse.json(
-      createErrorResponse('FILE_NOT_FOUND', 'File not found', 404),
-      { status: 404 }
-    );
+    return HttpResponse.json(createErrorResponse('FILE_NOT_FOUND', 'File not found'), {
+      status: 404,
+    });
   }),
 
   // 500 for download
@@ -204,13 +198,9 @@ export const errorHandlers = {
 };
 
 // Task not found handler
-export const taskNotFoundHandler = http.get(
-  `${API_BASE_URL}/api/tasks/:taskId`,
-  async () => {
-    await delay(10);
-    return HttpResponse.json(
-      createErrorResponse('TASK_NOT_FOUND', 'Task not found', 404),
-      { status: 404 }
-    );
-  }
-);
+export const taskNotFoundHandler = http.get(`${API_BASE_URL}/api/tasks/:taskId`, async () => {
+  await delay(10);
+  return HttpResponse.json(createErrorResponse('TASK_NOT_FOUND', 'Task not found'), {
+    status: 404,
+  });
+});

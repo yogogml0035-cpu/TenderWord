@@ -22,7 +22,7 @@ export function MessageSkeleton() {
   return (
     <div className="flex gap-3">
       <div className="flex-shrink-0">
-        <Skeleton className="w-8 h-8 rounded-full" />
+        <Skeleton className="h-8 w-8 rounded-full" />
       </div>
       <div className="flex-1 space-y-2">
         <Skeleton className="h-4 w-3/4 rounded" />
@@ -46,26 +46,26 @@ export function FormFieldSkeleton() {
 // Dual column message skeleton
 export function DualColumnSkeleton() {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
+    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
+      <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2">
         <Skeleton className="h-4 w-20 rounded" />
         <Skeleton className="h-6 w-24 rounded" />
       </div>
-      
+
       {/* Content */}
       <div className="flex" style={{ height: '300px' }}>
         {/* Left Column */}
-        <div className="w-1/2 border-r border-gray-200 p-3 space-y-2">
+        <div className="w-1/2 space-y-2 border-r border-gray-200 p-3">
           <Skeleton className="h-3 w-full rounded" />
           <Skeleton className="h-3 w-5/6 rounded" />
           <Skeleton className="h-3 w-4/5 rounded" />
           <Skeleton className="h-3 w-full rounded" />
           <Skeleton className="h-3 w-3/4 rounded" />
         </div>
-        
+
         {/* Right Column */}
-        <div className="w-1/2 p-3 space-y-2">
+        <div className="w-1/2 space-y-2 p-3">
           <Skeleton className="h-3 w-full rounded" />
           <Skeleton className="h-3 w-5/6 rounded" />
           <Skeleton className="h-3 w-4/5 rounded" />
@@ -82,7 +82,7 @@ export function PageSkeleton() {
   return (
     <div className="flex h-full">
       {/* Sidebar skeleton */}
-      <div className="w-64 bg-gray-50 p-4 space-y-4 border-r border-gray-200">
+      <div className="w-64 space-y-4 border-r border-gray-200 bg-gray-50 p-4">
         <Skeleton className="h-8 w-full rounded-lg" />
         <div className="space-y-2">
           <Skeleton className="h-12 w-full rounded-lg" />
@@ -90,9 +90,9 @@ export function PageSkeleton() {
           <Skeleton className="h-12 w-full rounded-lg" />
         </div>
       </div>
-      
+
       {/* Main content skeleton */}
-      <div className="flex-1 p-4 space-y-4">
+      <div className="flex-1 space-y-4 p-4">
         <Skeleton className="h-16 w-full rounded-lg" />
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-4">

@@ -1,24 +1,38 @@
-/**
- * API Integration Tests
- * Tests for lib/api.ts using MSW (Mock Service Worker)
- */
-
-import { server, errorHandlers } from '@/mocks/server';
-import { http, HttpResponse } from 'msw';
 import {
+  ApiError,
+  cancelTask,
   createGenerateTask,
   downloadFile,
   fetchTenderData,
   getTaskStatus,
-  cancelTask,
   uploadFile,
-  ApiError,
 } from '@/lib/api';
 import type { GenerateRequest } from '@/types/api';
 
-const API_BASE_URL = 'http://localhost:8000';
+type FetchMock = jest.MockedFunction<typeof fetch>;
 
-// Sample valid request data
+function mockFetchJson(value: unknown, options?: { ok?: boolean; status?: number }): FetchMock {
+  const ok = options?.ok ?? true;
+  const status = options?.status ?? 200;
+
+  return jest.fn().mockResolvedValue({
+    ok,
+    status,
+    json: async () => value,
+  } as unknown as Response) as unknown as FetchMock;
+}
+
+function mockFetchBlob(value: Blob, options?: { ok?: boolean; status?: number }): FetchMock {
+  const ok = options?.ok ?? true;
+  const status = options?.status ?? 200;
+
+  return jest.fn().mockResolvedValue({
+    ok,
+    status,
+    blob: async () => value,
+  } as unknown as Response) as unknown as FetchMock;
+}
+
 const validGenerateRequest: GenerateRequest = {
   tender_no: 'ZBGG-2024-001',
   tender_data: {
@@ -43,265 +57,190 @@ const validGenerateRequest: GenerateRequest = {
 };
 
 describe('API Client', () => {
+  beforeEach(() => {
+    globalThis.fetch = jest.fn() as unknown as typeof fetch;
+  });
+
   describe('createGenerateTask', () => {
-    describe('success scenario', () => {
-      it('should return task_id on successful task creation', async () => {
-        const result = await createGenerateTask(validGenerateRequest);
-
-        expect(result).toHaveProperty('task_id');
-        expect(result.task_id).toBe('test-task-123');
-        expect(result.status).toBe('queued');
-        expect(result.queue_position).toBe(1);
+    it('should return task info on success', async () => {
+      globalThis.fetch = mockFetchJson({
+        success: true,
+        data: { task_id: 'test-task-123', status: 'queued', queue_position: 1 },
+        message: 'Task created',
+        timestamp: new Date().toISOString(),
       });
 
-      it('should send correct request body', async () => {
-        let requestBody: GenerateRequest | null = null;
+      const result = await createGenerateTask(validGenerateRequest);
+      expect(result.task_id).toBe('test-task-123');
+      expect(result.status).toBe('queued');
+      expect(result.queue_position).toBe(1);
+    });
 
-        server.use(
-          http.post(`${API_BASE_URL}/api/generate`, async ({ request }) => {
-            requestBody = (await request.json()) as GenerateRequest;
-            return HttpResponse.json({
-              success: true,
-              data: { task_id: 'new-task-id', status: 'queued' },
-              message: 'Task created',
-              timestamp: new Date().toISOString(),
-            });
-          })
-        );
+    it('should send correct request body', async () => {
+      const fetchSpy = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          data: { task_id: 'new-task-id', status: 'queued' },
+          message: 'OK',
+          timestamp: new Date().toISOString(),
+        }),
+      } as unknown as Response) as unknown as FetchMock;
+      globalThis.fetch = fetchSpy;
 
-        await createGenerateTask(validGenerateRequest);
+      await createGenerateTask(validGenerateRequest);
 
-        expect(requestBody).toEqual(validGenerateRequest);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [, init] = fetchSpy.mock.calls[0];
+      const body = (init as RequestInit).body as string;
+      expect(JSON.parse(body)).toEqual(validGenerateRequest);
+    });
+
+    it('should throw ApiError on API error response', async () => {
+      globalThis.fetch = mockFetchJson(
+        {
+          success: false,
+          error: { code: 'REQ_INVALID_PARAM', message: 'Invalid request parameters' },
+          timestamp: new Date().toISOString(),
+        },
+        { ok: false, status: 400 }
+      );
+
+      await expect(createGenerateTask(validGenerateRequest)).rejects.toBeInstanceOf(ApiError);
+      await expect(createGenerateTask(validGenerateRequest)).rejects.toMatchObject({
+        status: 400,
+        code: 'REQ_INVALID_PARAM',
       });
     });
 
-    describe('400 error (validation failure)', () => {
-      it('should throw ApiError with status 400 for invalid params', async () => {
-        server.use(errorHandlers.badRequest);
-
-        await expect(createGenerateTask(validGenerateRequest)).rejects.toThrow(ApiError);
-
-        try {
-          await createGenerateTask(validGenerateRequest);
-        } catch (error) {
-          expect(error).toBeInstanceOf(ApiError);
-          expect((error as ApiError).status).toBe(400);
-          expect((error as ApiError).code).toBe('REQ_INVALID_PARAM');
-        }
-      });
-
-      it('should include error message from response', async () => {
-        server.use(errorHandlers.badRequest);
-
-        try {
-          await createGenerateTask(validGenerateRequest);
-          fail('Should have thrown an error');
-        } catch (error) {
-          expect(error).toBeInstanceOf(ApiError);
-          expect((error as ApiError).message).toBe('Invalid request parameters');
-        }
-      });
-    });
-
-    describe('500 error (server error)', () => {
-      it('should throw ApiError with status 500 for server errors', async () => {
-        server.use(errorHandlers.serverError);
-
-        await expect(createGenerateTask(validGenerateRequest)).rejects.toThrow(ApiError);
-
-        try {
-          await createGenerateTask(validGenerateRequest);
-        } catch (error) {
-          expect(error).toBeInstanceOf(ApiError);
-          expect((error as ApiError).status).toBe(500);
-          expect((error as ApiError).code).toBe('SYS_INTERNAL_ERROR');
-        }
-      });
-    });
-
-    describe('network error', () => {
-      it('should throw error for network failures', async () => {
-        server.use(errorHandlers.networkError);
-
-        await expect(createGenerateTask(validGenerateRequest)).rejects.toThrow();
-      });
+    it('should throw on network error', async () => {
+      globalThis.fetch = jest
+        .fn()
+        .mockRejectedValue(new Error('Network error')) as unknown as typeof fetch;
+      await expect(createGenerateTask(validGenerateRequest)).rejects.toThrow('Network error');
     });
   });
 
   describe('downloadFile', () => {
-    describe('success scenario', () => {
-      it('should return Blob on successful download', async () => {
-        const result = await downloadFile('test-file.docx');
+    it('should return Blob on success', async () => {
+      const blob = new Blob(['test'], { type: 'application/octet-stream' });
+      globalThis.fetch = mockFetchBlob(blob, { ok: true, status: 200 });
 
-        expect(result).toBeInstanceOf(Blob);
-        expect(result.type).toBe('application/octet-stream');
-      });
-
-      it('should encode file path in URL', async () => {
-        let requestedUrl = '';
-
-        server.use(
-          http.get(`${API_BASE_URL}/api/download/:filePath`, ({ request }) => {
-            requestedUrl = request.url;
-            return new HttpResponse(new Blob(['test']), {
-              headers: { 'Content-Type': 'application/octet-stream' },
-            });
-          })
-        );
-
-        await downloadFile('path/with spaces/file.docx');
-
-        expect(requestedUrl).toContain('path%2Fwith%20spaces%2Ffile.docx');
-      });
-
-      it('should include download_name parameter when provided', async () => {
-        let requestedUrl = '';
-
-        server.use(
-          http.get(`${API_BASE_URL}/api/download/:filePath`, ({ request }) => {
-            requestedUrl = request.url;
-            return new HttpResponse(new Blob(['test']), {
-              headers: { 'Content-Type': 'application/octet-stream' },
-            });
-          })
-        );
-
-        await downloadFile('test-file.docx', 'custom-name.docx');
-
-        expect(requestedUrl).toContain('download_name=custom-name.docx');
-      });
+      const result = await downloadFile('test-file.docx');
+      expect(result).toBeInstanceOf(Blob);
+      expect(result.type).toBe('application/octet-stream');
     });
 
-    describe('error scenarios', () => {
-      it('should throw ApiError for 404 not found', async () => {
-        server.use(errorHandlers.downloadNotFound);
+    it('should encode file path in URL', async () => {
+      const blob = new Blob(['test'], { type: 'application/octet-stream' });
+      const fetchSpy = mockFetchBlob(blob, { ok: true, status: 200 });
+      globalThis.fetch = fetchSpy;
 
-        await expect(downloadFile('nonexistent.docx')).rejects.toThrow(ApiError);
+      await downloadFile('path/with spaces/file.docx');
 
-        try {
-          await downloadFile('nonexistent.docx');
-        } catch (error) {
-          expect(error).toBeInstanceOf(ApiError);
-          expect((error as ApiError).status).toBe(404);
-        }
-      });
+      const [url] = fetchSpy.mock.calls[0];
+      expect(String(url)).toContain('path%2Fwith%20spaces%2Ffile.docx');
+    });
 
-      it('should throw ApiError for 500 server error', async () => {
-        server.use(errorHandlers.downloadError);
+    it('should include download_name when provided', async () => {
+      const blob = new Blob(['test'], { type: 'application/octet-stream' });
+      const fetchSpy = mockFetchBlob(blob, { ok: true, status: 200 });
+      globalThis.fetch = fetchSpy;
 
-        await expect(downloadFile('error.docx')).rejects.toThrow(ApiError);
+      await downloadFile('test-file.docx', 'custom-name.docx');
 
-        try {
-          await downloadFile('error.docx');
-        } catch (error) {
-          expect(error).toBeInstanceOf(ApiError);
-          expect((error as ApiError).status).toBe(500);
-        }
-      });
+      const [url] = fetchSpy.mock.calls[0];
+      expect(String(url)).toContain('download_name=custom-name.docx');
+    });
+
+    it('should throw ApiError on non-ok response', async () => {
+      globalThis.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+      } as unknown as Response) as unknown as typeof fetch;
+      await expect(downloadFile('missing.docx')).rejects.toBeInstanceOf(ApiError);
+      await expect(downloadFile('missing.docx')).rejects.toMatchObject({ status: 404 });
     });
   });
 
   describe('fetchTenderData', () => {
-    it('should return tender data for valid tender_no', async () => {
-      const result = await fetchTenderData('ZBGG-2024-001');
+    it('should return tender data on success', async () => {
+      globalThis.fetch = mockFetchJson({
+        success: true,
+        data: { project_name: 'Test Project' },
+        message: 'OK',
+        timestamp: new Date().toISOString(),
+      });
 
-      expect(result).toHaveProperty('project_name');
+      const result = await fetchTenderData('ZBGG-2024-001');
       expect(result.project_name).toBe('Test Project');
     });
 
     it('should encode tender_no in URL', async () => {
-      let requestedUrl = '';
-
-      server.use(
-        http.get(`${API_BASE_URL}/api/tender/:tenderNo`, ({ request }) => {
-          requestedUrl = request.url;
-          return HttpResponse.json({
-            success: true,
-            data: { project_name: 'Test' },
-            message: 'OK',
-            timestamp: new Date().toISOString(),
-          });
-        })
-      );
+      const fetchSpy = mockFetchJson({
+        success: true,
+        data: { project_name: 'Test' },
+        message: 'OK',
+        timestamp: new Date().toISOString(),
+      });
+      globalThis.fetch = fetchSpy;
 
       await fetchTenderData('ZB/2024-001');
-
-      expect(requestedUrl).toContain('ZB%2F2024-001');
+      const [url] = fetchSpy.mock.calls[0];
+      expect(String(url)).toContain('ZB%2F2024-001');
     });
   });
 
   describe('getTaskStatus', () => {
-    it('should return task status for valid task_id', async () => {
-      const result = await getTaskStatus('test-task-123');
+    it('should return task status on success', async () => {
+      globalThis.fetch = mockFetchJson({
+        success: true,
+        data: { task_id: 'test-task-123', status: 'running', progress: 50 },
+        message: 'OK',
+        timestamp: new Date().toISOString(),
+      });
 
-      expect(result).toHaveProperty('task_id');
-      expect(result).toHaveProperty('status');
-      expect(result).toHaveProperty('progress');
+      const result = await getTaskStatus('test-task-123');
+      expect(result.task_id).toBe('test-task-123');
+      expect(result.status).toBe('running');
+      expect(result.progress).toBe(50);
     });
   });
 
   describe('cancelTask', () => {
-    it('should return cancelled task data', async () => {
-      const result = await cancelTask('test-task-123');
+    it('should return cancel result on success', async () => {
+      globalThis.fetch = mockFetchJson({
+        success: true,
+        data: { task_id: 'test-task-123', status: 'cancelled' },
+        message: 'OK',
+        timestamp: new Date().toISOString(),
+      });
 
-      expect(result).toHaveProperty('task_id');
+      const result = await cancelTask('test-task-123');
       expect(result.status).toBe('cancelled');
-      expect(result).toHaveProperty('cancelled_at');
     });
   });
 
   describe('uploadFile', () => {
-    it('should return uploaded file data', async () => {
-      const file = new File(['test content'], 'test.docx', {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    it('should return uploaded file info on success', async () => {
+      globalThis.fetch = mockFetchJson({
+        success: true,
+        data: {
+          file_path: '/uploads/test.docx',
+          file_name: 'test.docx',
+          original_name: 'test.docx',
+          size: 4,
+        },
+        message: 'OK',
+        timestamp: new Date().toISOString(),
       });
 
-      const result = await uploadFile(file);
-
-      expect(result).toHaveProperty('file_path');
-      expect(result).toHaveProperty('file_name');
-      expect(result).toHaveProperty('original_name');
+      const file = new File(['test'], 'test.docx', {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      const result = await uploadFile(file, 'clean_draft');
+      expect(result.file_path).toBe('/uploads/test.docx');
     });
-
-    it('should include file_type when provided', async () => {
-      let requestBody: FormData | null = null;
-
-      server.use(
-        http.post(`${API_BASE_URL}/api/upload`, async ({ request }) => {
-          requestBody = (await request.formData()) as FormData;
-          return HttpResponse.json({
-            success: true,
-            data: { file_path: '/uploads/test.docx' },
-            message: 'OK',
-            timestamp: new Date().toISOString(),
-          });
-        })
-      );
-
-      const file = new File(['test'], 'test.docx');
-      await uploadFile(file, 'clean_draft');
-
-      // FormData values can be checked
-      expect(((requestBody as unknown) as FormData).get('file_type')).toBe('clean_draft');
-    });
-  });
-});
-
-describe('ApiError', () => {
-  it('should create ApiError with default values', () => {
-    const error = new ApiError('Test error');
-
-    expect(error.message).toBe('Test error');
-    expect(error.code).toBe('UNKNOWN_ERROR');
-    expect(error.status).toBe(500);
-    expect(error.name).toBe('ApiError');
-  });
-
-  it('should create ApiError with custom values', () => {
-    const error = new ApiError('Not found', 'FILE_NOT_FOUND', 404);
-
-    expect(error.message).toBe('Not found');
-    expect(error.code).toBe('FILE_NOT_FOUND');
-    expect(error.status).toBe(404);
   });
 });

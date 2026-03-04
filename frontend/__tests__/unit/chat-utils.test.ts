@@ -63,7 +63,7 @@ describe('chat-utils', () => {
 
   describe('Timestamp Formatting', () => {
     describe('formatTimestamp', () => {
-      it('should format today\'s timestamp as HH:MM', () => {
+      it("should format today's timestamp as HH:MM", () => {
         const now = Date.now();
         const formatted = formatTimestamp(now);
         expect(formatted).toMatch(/^\d{2}:\d{2}$/);

@@ -9,11 +9,7 @@
 import type { XjcgTenderFormData } from '@/components/forms/XjcgTenderForm';
 import type { GngkTenderFormData } from '@/components/forms/GngkTenderForm';
 import type { UploadedFile } from '@/components/forms/FileUploader';
-import type {
-  GenerateRequest,
-  FilesConfig,
-  InsertionConfig,
-} from '@/types/api';
+import type { GenerateRequest, FilesConfig, InsertionConfig } from '@/types/api';
 
 // ============================================
 // Type Exports
@@ -46,7 +42,7 @@ function extractFilePaths(files: UploadedFile[] | undefined | null): string[] {
   if (!files || files.length === 0) {
     return [];
   }
-  return files.map(file => file.file_path);
+  return files.map((file) => file.file_path);
 }
 
 /**
@@ -229,16 +225,6 @@ export function convertGngkFormToApiRequest(
     if (qualificationPaths.length > 0) {
       request.qualification_files = qualificationPaths;
     }
-  }
-
-  // 处理分标配置（GNGK 特有）
-  const gngkFormData = formData as any;
-  if (gngkFormData.bid_sections) {
-    request.bid_sections = {
-      technical: gngkFormData.bid_sections.technical,
-      business: gngkFormData.bid_sections.business,
-      price: gngkFormData.bid_sections.price,
-    };
   }
 
   return request;

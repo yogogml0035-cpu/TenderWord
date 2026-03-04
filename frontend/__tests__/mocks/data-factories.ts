@@ -63,7 +63,11 @@ export class ConversationFactory {
     messageOverrides?: Partial<Message>
   ): Conversation {
     const conversation = this.create(conversationOverrides);
-    conversation.messages = MessageFactory.createMany(messageCount, conversation.id, messageOverrides);
+    conversation.messages = MessageFactory.createMany(
+      messageCount,
+      conversation.id,
+      messageOverrides
+    );
     return conversation;
   }
 
@@ -116,6 +120,7 @@ export class MessageFactory {
     const now = Date.now();
     const id = generateId('msg');
     const conversationId = overrides?.conversationId || generateId('conv');
+    const { content: contentOverrides, ...messageOverrides } = overrides || {};
 
     const dualContent: DualColumnContent = {
       logs: [
@@ -127,18 +132,17 @@ export class MessageFactory {
         timestamp: now + 200,
         isComplete: false,
       },
-      ...overrides?.content,
+      ...contentOverrides,
     };
 
     return {
       id,
       conversationId,
+      ...messageOverrides,
       type: 'ai',
       content: dualContent,
       timestamp: now,
       status: 'generating',
-      ...overrides,
-      content: dualContent, // Ensure dual content overrides
     };
   }
 
@@ -175,7 +179,11 @@ export class MessageFactory {
   /**
    * Create an AI message with task ID
    */
-  static createAIMessage(taskId: string, conversationId: string, overrides?: Partial<Message>): Message {
+  static createAIMessage(
+    taskId: string,
+    conversationId: string,
+    overrides?: Partial<Omit<Message, 'content'>> & { content?: Partial<DualColumnContent> }
+  ): Message {
     return this.createDualColumn({
       conversationId,
       type: 'ai',
@@ -187,7 +195,11 @@ export class MessageFactory {
   /**
    * Create an error message
    */
-  static createErrorMessage(conversationId: string, error: string, overrides?: Partial<Message>): Message {
+  static createErrorMessage(
+    conversationId: string,
+    error: string,
+    overrides?: Partial<Message>
+  ): Message {
     return this.create({
       conversationId,
       type: 'system',

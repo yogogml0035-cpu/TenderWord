@@ -44,7 +44,7 @@ export interface UseSSEOptions extends SSEOptions {
 
 /**
  * React Hook for SSE connections with auto-reconnect
- * 
+ *
  * @example
  * ```tsx
  * function TaskProgress({ taskId }: { taskId: string }) {
@@ -52,7 +52,7 @@ export interface UseSSEOptions extends SSEOptions {
  *     endpoint: `/api/stream/${taskId}`,
  *     onMessage: (msg) => console.log(msg),
  *   });
- * 
+ *
  *   return (
  *     <div>
  *       {isConnected ? 'Connected' : 'Disconnected'}
@@ -82,7 +82,7 @@ export function useSSE(options: UseSSEOptions): SSEHookReturn {
 
   // Use ref for stable connection management
   const connectionRef = useRef<SSEConnection | null>(null);
-  
+
   // Store callbacks in refs to avoid dependency issues
   const callbacksRef = useRef({
     onMessage,
@@ -91,7 +91,7 @@ export function useSSE(options: UseSSEOptions): SSEHookReturn {
     onClose,
     onReconnect,
   });
-  
+
   // Update refs when callbacks change
   useEffect(() => {
     callbacksRef.current = {
@@ -102,7 +102,7 @@ export function useSSE(options: UseSSEOptions): SSEHookReturn {
       onReconnect,
     };
   }, [onMessage, onError, onOpen, onClose, onReconnect]);
-  
+
   // Store config options in ref
   const optionsRef = useRef({
     autoReconnect,
@@ -121,16 +121,19 @@ export function useSSE(options: UseSSEOptions): SSEHookReturn {
   const [messages, setMessages] = useState<SSEMessage[]>([]);
   const [lastMessage, setLastMessage] = useState<SSEMessage | null>(null);
 
-  const addMessage = useCallback((message: SSEMessage) => {
-    setLastMessage(message);
-    setMessages((prev) => {
-      const newMessages = [...prev, message];
-      if (newMessages.length > maxMessageHistory) {
-        return newMessages.slice(newMessages.length - maxMessageHistory);
-      }
-      return newMessages;
-    });
-  }, [maxMessageHistory]);
+  const addMessage = useCallback(
+    (message: SSEMessage) => {
+      setLastMessage(message);
+      setMessages((prev) => {
+        const newMessages = [...prev, message];
+        if (newMessages.length > maxMessageHistory) {
+          return newMessages.slice(newMessages.length - maxMessageHistory);
+        }
+        return newMessages;
+      });
+    },
+    [maxMessageHistory]
+  );
 
   const clearMessages = useCallback(() => {
     setMessages([]);
@@ -225,7 +228,7 @@ export function useSSE(options: UseSSEOptions): SSEHookReturn {
   // Auto-connect on mount
   useEffect(() => {
     if (!autoConnect) return;
-    
+
     const timeoutId = setTimeout(() => {
       connect();
     }, 0);
@@ -248,12 +251,12 @@ export function useSSE(options: UseSSEOptions): SSEHookReturn {
 
 /**
  * Hook for tracking task progress via SSE
- * 
+ *
  * @example
  * ```tsx
  * function TaskMonitor({ taskId }: { taskId: string }) {
  *   const { progress, logs, llmOutput, status } = useTaskProgress(taskId);
- *   
+ *
  *   return (
  *     <div>
  *       <ProgressBar value={progress} />
@@ -271,9 +274,13 @@ export function useTaskProgress(taskId: string | null) {
     currentNode: '',
     currentNodeDisplay: '',
   });
-  const [logs, setLogs] = useState<Array<{ timestamp: string; level: string; message: string; node?: string }>>([]);
+  const [logs, setLogs] = useState<
+    Array<{ timestamp: string; level: string; message: string; node?: string }>
+  >([]);
   const [llmOutput, setLlmOutput] = useState('');
-  const [status, setStatus] = useState<'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | null>(null);
+  const [status, setStatus] = useState<
+    'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | null
+  >(null);
   const [result, setResult] = useState<{ output_file?: string; file_name?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -315,7 +322,7 @@ export function useTaskProgress(taskId: string | null) {
             const data = message.data as Record<string, unknown>;
             const content = (data.content as string) || '';
             const isComplete = data.is_complete as boolean;
-            
+
             if (isComplete) {
               // LLM generation complete
             } else {
@@ -337,7 +344,7 @@ export function useTaskProgress(taskId: string | null) {
         case 'error':
           if (typeof message.data === 'object' && message.data !== null) {
             const data = message.data as Record<string, unknown>;
-            setError((data.message as string) || 'Unknown error');
+            setError((data.error as string) || (data.message as string) || 'Unknown error');
             setStatus('failed');
           }
           break;
@@ -346,6 +353,15 @@ export function useTaskProgress(taskId: string | null) {
           if (typeof message.data === 'object' && message.data !== null) {
             const data = message.data as Record<string, unknown>;
             setStatus((data.status as typeof status) || 'completed');
+            if (data.result && typeof data.result === 'object') {
+              setResult(data.result as typeof result);
+            } else {
+              const output_file = data.output_file as string | undefined;
+              const file_name = data.file_name as string | undefined;
+              if (output_file || file_name) {
+                setResult({ output_file, file_name });
+              }
+            }
             close();
           }
           break;

@@ -48,13 +48,7 @@ export { renderWithProviders as render };
  * Helper to wait for loading states to complete
  */
 export async function waitForLoadingToFinish() {
-  const { waitForElementToBeRemoved } = await import('@testing-library/react');
-  
-  // Add any loading indicators here
-  // Example:
-  // await waitForElementToBeRemoved(() => 
-  //   screen.queryByRole('progressbar')
-  // );
+  return;
 }
 
 /**

@@ -240,7 +240,11 @@ export async function simulateTaskFlow(
     failAt?: number; // Fail at step (1 = logs, 2 = llm, 3 = progress, 4 = done)
   }
 ): Promise<void> {
-  const { logCount = 3, llmContentChunks = ['Content chunk 1', 'Content chunk 2'], failAt } = options || {};
+  const {
+    logCount = 3,
+    llmContentChunks = ['Content chunk 1', 'Content chunk 2'],
+    failAt,
+  } = options || {};
   const totalSteps = logCount + llmContentChunks.length + 2; // +2 for progress and done
 
   sse.connect(taskId);

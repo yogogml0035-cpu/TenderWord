@@ -44,7 +44,17 @@ interface SSEState {
   isClosed: boolean;
 }
 
-const DEFAULT_OPTIONS: Required<Pick<SSEOptions, 'autoReconnect' | 'maxReconnectAttempts' | 'reconnectDelay' | 'reconnectDelayMultiplier' | 'maxReconnectDelay' | 'heartbeatTimeout'>> = {
+const DEFAULT_OPTIONS: Required<
+  Pick<
+    SSEOptions,
+    | 'autoReconnect'
+    | 'maxReconnectAttempts'
+    | 'reconnectDelay'
+    | 'reconnectDelayMultiplier'
+    | 'maxReconnectDelay'
+    | 'heartbeatTimeout'
+  >
+> = {
   autoReconnect: true,
   maxReconnectAttempts: 5,
   reconnectDelay: 1000,
@@ -56,10 +66,7 @@ const DEFAULT_OPTIONS: Required<Pick<SSEOptions, 'autoReconnect' | 'maxReconnect
 /**
  * Create SSE connection with auto-reconnect support
  */
-export function createSSEConnection(
-  endpoint: string,
-  options: SSEOptions = {}
-): SSEConnection {
+export function createSSEConnection(endpoint: string, options: SSEOptions = {}): SSEConnection {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const state: SSEState = {
     eventSource: null,
@@ -101,7 +108,8 @@ export function createSSEConnection(
     // Build URL with Last-Event-ID header support via query param
     let url = `${apiUrl}${endpoint}`;
     if (state.lastEventId) {
-      url += (url.includes('?') ? '&' : '?') + `lastEventId=${encodeURIComponent(state.lastEventId)}`;
+      url +=
+        (url.includes('?') ? '&' : '?') + `lastEventId=${encodeURIComponent(state.lastEventId)}`;
     }
 
     const eventSource = new EventSource(url);
@@ -294,7 +302,8 @@ export function createSSEConnection(
         if (state.reconnectAttempts < opts.maxReconnectAttempts) {
           state.reconnectAttempts++;
           const delay = Math.min(
-            opts.reconnectDelay * Math.pow(opts.reconnectDelayMultiplier, state.reconnectAttempts - 1),
+            opts.reconnectDelay *
+              Math.pow(opts.reconnectDelayMultiplier, state.reconnectAttempts - 1),
             opts.maxReconnectDelay
           );
 
@@ -355,6 +364,4 @@ export function closeSSEConnection(connection: SSEConnection | null): void {
  */
 export function isSSESupported(): boolean {
   return typeof EventSource !== 'undefined';
-
-
 }

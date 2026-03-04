@@ -141,7 +141,7 @@ export function BaseForm({
             onChange={(e) => updateField(field.name, e.target.value)}
             placeholder={field.placeholder}
             rows={4}
-            className={cn(baseInputClasses, 'resize-y min-h-[100px]')}
+            className={cn(baseInputClasses, 'min-h-[100px] resize-y')}
             disabled={isSubmitting}
           />
         );
@@ -178,14 +178,12 @@ export function BaseForm({
       {title && (
         <div className="mb-6">
           <h2 className="text-xl font-semibold text-[var(--foreground)]">{title}</h2>
-          {description && (
-            <p className="mt-1 text-sm text-[var(--text-muted)]">{description}</p>
-          )}
+          {description && <p className="mt-1 text-sm text-[var(--text-muted)]">{description}</p>}
         </div>
       )}
 
       {globalError && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4">
           <p className="text-sm text-[var(--error)]">{globalError}</p>
         </div>
       )}
@@ -198,7 +196,7 @@ export function BaseForm({
               className="block text-sm font-medium text-[var(--foreground)]"
             >
               {field.label}
-              {field.required && <span className="text-[var(--error)] ml-1">*</span>}
+              {field.required && <span className="ml-1 text-[var(--error)]">*</span>}
             </label>
             {renderField(field)}
             {errors[field.name] && (
@@ -211,11 +209,7 @@ export function BaseForm({
       {children}
 
       <div className="pt-6">
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="btn-primary w-full"
-        >
+        <button type="submit" disabled={isSubmitting} className="btn-primary w-full">
           {isSubmitting ? (
             <>
               <LoadingSpinner className="mr-2" />
@@ -233,19 +227,14 @@ export function BaseForm({
 function LoadingSpinner({ className }: { className?: string }) {
   return (
     <svg
-      className={cn('animate-spin h-4 w-4', className)}
+      className={cn('h-4 w-4 animate-spin', className)}
+      width={16}
+      height={16}
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"
     >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path
         className="opacity-75"
         fill="currentColor"

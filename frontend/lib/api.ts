@@ -1,7 +1,7 @@
 /**
  * API Client for TenderWord Backend
  * Based on docs/api-contract.md
- * 
+ *
  * 使用 fetch API 实现的 API 客户端
  */
 
@@ -34,10 +34,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 /**
  * Generic API request function with error handling
  */
-async function request<T>(
-  endpoint: string,
-  options: RequestInit = {}
-): Promise<T> {
+async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
 
   const config: RequestInit = {
@@ -122,10 +119,7 @@ export async function fetchTenderData(tenderNo: string): Promise<TenderData> {
 // File Upload API
 // ============================================
 
-export async function uploadFile(
-  file: File,
-  fileType?: FileType
-): Promise<UploadedFile> {
+export async function uploadFile(file: File, fileType?: FileType): Promise<UploadedFile> {
   const formData = new FormData();
   formData.append('file', file);
   if (fileType) {
@@ -162,9 +156,7 @@ export async function uploadFiles(
 // Task API
 // ============================================
 
-export async function createGenerateTask(
-  params: GenerateRequest
-): Promise<CreateTaskData> {
+export async function createGenerateTask(params: GenerateRequest): Promise<CreateTaskData> {
   return request<CreateTaskData>('/api/generate', {
     method: 'POST',
     body: JSON.stringify(params),
@@ -188,7 +180,7 @@ export async function getTaskList(options?: {
   userSessionId?: string;
 }): Promise<TaskListData> {
   const params = new URLSearchParams();
-  
+
   if (options?.status) {
     params.append('status', options.status);
   }
@@ -216,10 +208,7 @@ export async function getTaskList(options?: {
  * 下载生成文件
  * GET /api/download/{file_path}
  */
-export async function downloadFile(
-  filePath: string,
-  downloadName?: string
-): Promise<Blob> {
+export async function downloadFile(filePath: string, downloadName?: string): Promise<Blob> {
   const params = new URLSearchParams();
   if (downloadName) {
     params.append('download_name', downloadName);
@@ -277,9 +266,7 @@ export function getTaskStreamUrl(taskId: string): string {
  * Note: Current backend may not support this.
  * Mark as TODO if backend endpoint doesn't exist.
  */
-export async function saveConversation(
-  conversation: Conversation
-): Promise<{ id: string }> {
+export async function saveConversation(conversation: Conversation): Promise<{ id: string }> {
   // TODO: Backend endpoint may not exist yet
   // For now, return mock success
   return { id: conversation.id };
@@ -301,8 +288,8 @@ export async function getConversations(): Promise<Conversation[]> {
  * Delete conversation from backend (if supported)
  * DELETE /api/conversations/{id}
  */
-export async function deleteConversation(conversationId: string): Promise<void> {
-  // TODO: Backend endpoint may not exist yet
+export async function deleteConversation(_conversationId: string): Promise<void> {
+  void _conversationId;
   return;
 }
 
@@ -311,10 +298,11 @@ export async function deleteConversation(conversationId: string): Promise<void> 
  * PUT /api/conversations/{id}
  */
 export async function updateConversationTitle(
-  conversationId: string,
-  title: string
+  _conversationId: string,
+  _title: string
 ): Promise<void> {
-  // TODO: Backend endpoint may not exist yet
+  void _conversationId;
+  void _title;
   return;
 }
 
@@ -339,8 +327,9 @@ export async function createGenerateTaskExtended(
 export async function downloadFileWithProgress(
   filePath: string,
   downloadName?: string,
-  onProgress?: (progress: number) => void
+  _onProgress?: (progress: number) => void
 ): Promise<Blob> {
+  void _onProgress;
   // Use existing downloadFile logic
   // Optionally add progress tracking
   return downloadFile(filePath, downloadName);

@@ -10,11 +10,7 @@ export interface ProgressDisplayProps {
   status: 'idle' | 'running' | 'completed' | 'error';
 }
 
-export function ProgressDisplay({
-  percent,
-  currentNode,
-  status,
-}: ProgressDisplayProps) {
+export function ProgressDisplay({ percent, currentNode, status }: ProgressDisplayProps) {
   // 根据状态获取颜色主题
   const getStatusColors = () => {
     switch (status) {
@@ -74,21 +70,14 @@ export function ProgressDisplay({
       <div className="space-y-2">
         {/* 顶部信息：百分比和状态 */}
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-[var(--foreground)]">
-            任务进度
-          </span>
-          <span className={cn('text-sm font-semibold', colors.text)}>
-            {clampedPercent}%
-          </span>
+          <span className="text-sm font-medium text-[var(--foreground)]">任务进度</span>
+          <span className={cn('text-sm font-semibold', colors.text)}>{clampedPercent}%</span>
         </div>
 
         {/* 进度条容器 */}
         <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-gray-200">
           <div
-            className={cn(
-              'h-full transition-all duration-500 ease-out',
-              colors.bar
-            )}
+            className={cn('h-full transition-all duration-500 ease-out', colors.bar)}
             style={{ width: `${clampedPercent}%` }}
             role="progressbar"
             aria-valuenow={clampedPercent}
@@ -103,19 +92,13 @@ export function ProgressDisplay({
           <div className="flex items-center gap-2">
             <span className="text-[var(--text-muted)]">当前步骤:</span>
             {nodeDisplayName ? (
-              <span className="font-medium text-[var(--foreground)]">
-                {nodeDisplayName}
-              </span>
+              <span className="font-medium text-[var(--foreground)]">{nodeDisplayName}</span>
             ) : (
               <span className="text-[var(--text-muted)]">--</span>
             )}
           </div>
           <span
-            className={cn(
-              'rounded-full px-2.5 py-0.5 text-xs font-medium',
-              colors.bg,
-              colors.text
-            )}
+            className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', colors.bg, colors.text)}
           >
             {statusText}
           </span>

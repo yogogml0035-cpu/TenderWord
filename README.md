@@ -76,10 +76,23 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 前端：
 
 ```powershell
+# 本地开发（热更新，改代码立刻生效）
 cd frontend
 npm install
 npm run dev
+
+# 生产部署（构建 + 启动；重新部署必须重新 build）
+cd frontend
+npm ci
+npm run build
+npm run start
 ```
+
+两者区别：
+
+- `npm run dev`：开发模式启动（热更新、调试友好）。适合本机开发/联调，不适合作为线上部署方式。
+- `npm run build` + `npm run start`：生产模式（先构建产物，再启动服务）。适合服务器部署；每次代码变更或环境变量（尤其 `NEXT_PUBLIC_*`）变更，都需要重新执行 `build` 才会生效。
+- `npm install` vs `npm ci`：`ci` 会严格按 `package-lock.json` 安装（更稳定，推荐用于 CI/服务器）；`install` 更适合日常开发。
 
 ### 1. 克隆项目
 
@@ -120,20 +133,30 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```powershell
 cd frontend
 
-# 安装依赖
+# 安装依赖（开发可用 npm install；服务器/CI 推荐 npm ci）
 npm install
 
 # 配置环境变量
 copy .env.example .env.local
 # 编辑 .env.local 文件
 
-# 启动开发服务器
+# 启动方式二选一：
+#
+# 方式1：开发模式（热更新，适合本地开发/联调）
+cd frontend
+npm install
 npm run dev
+
+# 方式2：生产部署（构建 + 启动；部署到服务器时用这个）
+# 注意：NEXT_PUBLIC_* 属于“构建时注入”，改了环境变量也要重新 build
+# npm ci
+# npm run build
+# npm run start
 ```
 
 ### 4. 访问应用
 
-- 前端界面: http://localhost:8502
+- 前端界面: http://localhost:8502/chat
 - API 文档: http://localhost:8000/docs
 - 健康检查: http://localhost:8000/health
 
@@ -285,20 +308,36 @@ cd D:\Tools\nssm\win64
 ### 基本使用流程
 
 1. 访问前端页面 http://localhost:8502
-2. 输入招标编号，点击"获取信息"按钮获取项目信息
-3. 上传参考 Word 文件（模板文件）
-4. 上传技术参数文件（支持多文件上传）
-5. 选择生成模型（DeepSeek/Qwen/Doubao）
-6. 点击"开始生成"，等待完成提示
-7. 下载生成的招标文档
+2. 点击首页的 **"进入聊天模式"** 按钮，进入三栏式操作界面
+3. 在左侧招标类型栏选择招标类型（询价采购 / 国内公开）
+4. 在中间表单区域：
+   - 输入招标编号，系统自动获取项目信息
+   - 上传招标文件模板（Word 文件）
+   - 上传技术参数文件（支持多文件上传）
+   - 选择生成模型（DeepSeek / Qwen / Doubao）
+5. 点击"开始生成"按钮，右侧聊天面板将实时显示生成进度和日志
+6. 生成完成后，在聊天面板中查看结果并下载生成的招标文档
+
+### 直接访问聊天页面
+
+可以直接通过以下地址进入三栏聊天模式：
+
+```
+http://localhost:8502/chat
+```
 
 ### URL 参数路由
 
-系统支持通过 URL 参数自动显示对应的表单:
+系统支持通过 URL 参数直接进入聊天模式并自动选择招标类型:
 
 ```
-http://localhost:8502/?tender_lx=0&purchase_method=5&fund_lx=0&tenderno=ZBGG-2024-001
+http://localhost:8502/chat?tender_lx=0&purchase_method=5&fund_lx=0&tenderno=ZBGG-2024-001
 ```
+
+**页面路由:**
+
+- `/` - 首页（欢迎页面，点击进入聊天模式）
+- `/chat` - 三栏聊天模式（左栏类型选择 / 中栏表单 / 右栏对话）
 
 **参数说明:**
 - `tender_lx`: 招标类型（0=询价, 1=国内公开, 2=邀请招标）
@@ -306,11 +345,12 @@ http://localhost:8502/?tender_lx=0&purchase_method=5&fund_lx=0&tenderno=ZBGG-202
 - `fund_lx`: 资金类型（0=国内, 1=国际）
 - `tenderno`: 招标编号（可选，自动填充并获取数据）
 
-**说明:**
+**界面说明:**
+- **左侧栏**: 招标类型选择，点击切换不同招标类型表单
+- **中间栏**: 表单区域，填写招标编号、上传文件、选择模型
+- **右侧栏**: 聊天面板，实时显示生成进度、日志和下载按钮
 - 上传目录固定在 `D:/UploadFiles`，若同名文件存在会自动在文件名后加时间戳
-- 生成完成后页面会显示输出文件路径，并提供下载按钮
 - 支持多用户并发使用，系统会自动排队处理
-
 ## 🛠️ 开发指南
 
 ### 添加新的 Graph

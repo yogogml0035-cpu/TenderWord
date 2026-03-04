@@ -70,9 +70,9 @@ export function LogViewer({ logs, onClear }: LogViewerProps) {
   };
 
   return (
-    <div className="flex flex-col h-full border border-[var(--border)] rounded-lg overflow-hidden bg-white">
+    <div className="flex h-full flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-white">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-[var(--background-secondary)] border-b border-[var(--border)]">
+      <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--background-secondary)] px-4 py-2">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-[var(--foreground)]">实时日志</span>
           <span className="text-xs text-[var(--text-muted)]">({logs.length} 条)</span>
@@ -80,7 +80,7 @@ export function LogViewer({ logs, onClear }: LogViewerProps) {
         {onClear && logs.length > 0 && (
           <button
             onClick={onClear}
-            className="text-xs px-2 py-1 rounded hover:bg-[var(--border)] text-[var(--text-muted)] transition-colors"
+            className="rounded px-2 py-1 text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--border)]"
             type="button"
           >
             清空
@@ -89,32 +89,26 @@ export function LogViewer({ logs, onClear }: LogViewerProps) {
       </div>
 
       {/* Log List */}
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto p-2 space-y-1 font-mono text-sm"
-      >
+      <div ref={scrollRef} className="flex-1 space-y-1 overflow-y-auto p-2 font-mono text-sm">
         {logs.length === 0 ? (
-          <div className="flex items-center justify-center h-32 text-[var(--text-muted)] text-sm">
+          <div className="flex h-32 items-center justify-center text-sm text-[var(--text-muted)]">
             暂无日志
           </div>
         ) : (
           logs.map((log, index) => (
             <div
               key={index}
-              className={cn(
-                'flex items-start gap-2 p-2 rounded',
-                getLevelStyles(log.level)
-              )}
+              className={cn('flex items-start gap-2 rounded p-2', getLevelStyles(log.level))}
             >
               {/* Timestamp */}
-              <span className="text-xs opacity-70 whitespace-nowrap flex-shrink-0">
+              <span className="flex-shrink-0 text-xs whitespace-nowrap opacity-70">
                 {formatTimestamp(log.timestamp)}
               </span>
 
               {/* Level Badge */}
               <span
                 className={cn(
-                  'text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 uppercase',
+                  'flex-shrink-0 rounded px-1.5 py-0.5 text-xs font-medium uppercase',
                   getLevelBadgeStyles(log.level)
                 )}
               >
@@ -122,14 +116,10 @@ export function LogViewer({ logs, onClear }: LogViewerProps) {
               </span>
 
               {/* Node info (if available) */}
-              {log.node && (
-                <span className="text-xs opacity-60 flex-shrink-0">
-                  [{log.node}]
-                </span>
-              )}
+              {log.node && <span className="flex-shrink-0 text-xs opacity-60">[{log.node}]</span>}
 
               {/* Message */}
-              <span className="break-words flex-1">{log.message}</span>
+              <span className="flex-1 break-words">{log.message}</span>
             </div>
           ))
         )}

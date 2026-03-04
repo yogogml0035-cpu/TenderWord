@@ -10,13 +10,8 @@ interface HeaderProps {
 
 export function Header({ className, children, title, subtitle }: HeaderProps) {
   return (
-    <header
-      className={cn(
-        'bg-white',
-        className
-      )}
-    >
-      <div className="px-6 py-4 border-b border-[var(--border)]">
+    <header className={cn('bg-white', className)}>
+      <div className="border-b border-[var(--border)] px-6 py-4">
         <div className="flex items-start justify-between gap-4">
           {title && (
             <div>

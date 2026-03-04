@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
@@ -11,11 +11,13 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({ className = '' }: ChatPanelProps) {
-  const {
-    getCurrentConversation,
-    addMessage,
-    hasActiveTasks,
-  } = useChatStore();
+  const [mounted, setMounted] = useState(false);
+  const { getCurrentConversation, addMessage, hasActiveTasks } = useChatStore();
+
+  // Fix hydration: wait for client mount before accessing persisted store
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const conversation = getCurrentConversation();
   const messages = conversation?.messages || [];
@@ -37,18 +39,16 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     // For this version, we'll just add the message
   };
 
-  const handleRetry = useCallback(() => {
+  const handleRetry = () => {
     if (!conversation) return;
-    
+
     // Find the last user message
-    const lastUserMessage = [...messages]
-      .reverse()
-      .find(m => m.type === 'user');
-    
+    const lastUserMessage = [...messages].reverse().find((m) => m.type === 'user');
+
     if (lastUserMessage && typeof lastUserMessage.content === 'string') {
       handleSendMessage(lastUserMessage.content);
     }
-  }, [messages, conversation, handleSendMessage]);
+  };
 
   const handleDownload = async (filePath: string, fileName?: string) => {
     try {
@@ -67,18 +67,22 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     }
   };
 
-  // Empty state when no conversation selected
-  if (!conversation) {
+  // Empty state when no conversation selected or during hydration
+  if (!mounted || !conversation) {
     return (
-      <div className={`flex flex-col h-full bg-gradient-to-br from-slate-50 to-gray-100 ${className}`}>
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="text-center max-w-md">
+      <div
+        className={`flex h-full flex-col bg-gradient-to-br from-slate-50 to-gray-100 ${className}`}
+      >
+        <div className="flex flex-1 items-center justify-center p-8">
+          <div className="max-w-md text-center">
             {/* Animated Icon Container */}
             <div className="relative mb-8 inline-block">
-              <div className="absolute inset-0 bg-blue-100 rounded-full animate-pulse opacity-50" />
-              <div className="relative bg-white rounded-full p-6 shadow-lg border border-blue-100">
+              <div className="absolute inset-0 animate-pulse rounded-full bg-blue-100 opacity-50" />
+              <div className="relative rounded-full border border-blue-100 bg-white p-6 shadow-lg">
                 <svg
-                  className="w-16 h-16 text-blue-500"
+                  className="h-16 w-16 text-blue-500"
+                  width={64}
+                  height={64}
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -92,29 +96,35 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
                 </svg>
               </div>
             </div>
-            
+
             {/* Welcome Text */}
-            <h3 className="text-2xl font-semibold text-gray-800 mb-3 tracking-tight">
+            <h3 className="mb-3 text-2xl font-semibold tracking-tight text-gray-800">
               欢迎使用 TenderWord
             </h3>
-            <p className="text-gray-500 mb-6 leading-relaxed">
+            <p className="mb-6 leading-relaxed text-gray-500">
               智能招标文档生成助手，让文档创建更高效
             </p>
-            
+
             {/* Instructions */}
-            <div className="bg-white/70 backdrop-blur-sm rounded-xl p-4 border border-gray-200/50 shadow-sm">
-              <p className="text-sm text-gray-600 mb-3 font-medium">开始新对话：</p>
+            <div className="rounded-xl border border-gray-200/50 bg-white/70 p-4 shadow-sm backdrop-blur-sm">
+              <p className="mb-3 text-sm font-medium text-gray-600">开始新对话：</p>
               <div className="space-y-2">
                 <div className="flex items-center gap-3 text-sm text-gray-500">
-                  <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-xs font-semibold">1</span>
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-600">
+                    1
+                  </span>
                   <span>在左侧选择招标类型</span>
                 </div>
                 <div className="flex items-center gap-3 text-sm text-gray-500">
-                  <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-xs font-semibold">2</span>
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-600">
+                    2
+                  </span>
                   <span>填写招标信息并上传文件</span>
                 </div>
                 <div className="flex items-center gap-3 text-sm text-gray-500">
-                  <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-xs font-semibold">3</span>
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-600">
+                    3
+                  </span>
                   <span>AI 自动生成招标文档</span>
                 </div>
               </div>
@@ -126,27 +136,23 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   }
 
   return (
-    <div className={`flex flex-col h-full bg-white shadow-sm ${className}`}>
+    <div className={`flex h-full flex-col bg-white shadow-sm ${className}`}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white">
+      <div className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
         <div>
           <h2 className="font-medium text-gray-900">{conversation.title}</h2>
           <p className="text-xs text-gray-500">
             {conversation.tenderType === 'xjcg' ? '询价采购' : '国内公开'}
           </p>
         </div>
-        <div className="text-xs text-gray-400 px-2 py-1 bg-gray-100 rounded">
+        <div className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-400">
           {messages.length} 条消息
         </div>
       </div>
 
       {/* Message List */}
       <div className="flex-1 overflow-hidden">
-        <MessageList
-          messages={messages}
-          onDownload={handleDownload}
-          onRetry={handleRetry}
-        />
+        <MessageList messages={messages} onDownload={handleDownload} onRetry={handleRetry} />
       </div>
 
       {/* Input */}

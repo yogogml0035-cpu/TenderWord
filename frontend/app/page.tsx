@@ -5,27 +5,24 @@ import Link from 'next/link';
 export default function HomePage() {
   return (
     <MainLayout>
-      <div className="max-w-4xl mx-auto">
+      <div className="mx-auto max-w-4xl">
         {/* Hero Section */}
-        <div className="text-center py-16">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-[var(--primary)]/10 rounded-2xl mb-6">
-            <Sparkles className="w-10 h-10 text-[var(--primary)]" />
+        <div className="py-16 text-center">
+          <div className="mb-6 inline-flex h-20 w-20 items-center justify-center rounded-2xl bg-[var(--primary)]/10">
+            <Sparkles className="h-10 w-10 text-[var(--primary)]" />
           </div>
-          <h1 className="text-4xl font-bold text-[var(--foreground)] mb-4">
-            欢迎使用 TenderWord
-          </h1>
-          <p className="text-lg text-[var(--text-muted)] max-w-2xl mx-auto">
-            智能招标文件生成系统，基于 LangGraph 和 AI 技术，
-            快速生成专业的招标文件
+          <h1 className="mb-4 text-4xl font-bold text-[var(--foreground)]">欢迎使用 TenderWord</h1>
+          <p className="mx-auto max-w-2xl text-lg text-[var(--text-muted)]">
+            智能招标文件生成系统，基于 LangGraph 和 AI 技术， 快速生成专业的招标文件
           </p>
 
           {/* Chat Mode Link */}
           <div className="mt-8">
             <Link
               href="/chat"
-              className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--primary)] text-white rounded-lg hover:bg-[var(--primary)]/90 transition-colors"
+              className="inline-flex items-center gap-2 rounded-lg bg-[var(--primary)] px-6 py-3 text-white transition-colors hover:bg-[var(--primary)]/90"
             >
-              <MessageSquare className="w-5 h-5" />
+              <MessageSquare className="h-5 w-5" />
               进入聊天模式
             </Link>
           </div>
@@ -33,8 +30,8 @@ export default function HomePage() {
 
         {/* Features */}
         <div className="mt-8">
-          <h2 className="text-2xl font-semibold text-center mb-8">功能特性</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <h2 className="mb-8 text-center text-2xl font-semibold">功能特性</h2>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <FeatureCard
               title="智能生成"
               description="基于 AI 技术，自动分析需求并生成专业招标文件"
@@ -43,14 +40,8 @@ export default function HomePage() {
               title="多模型支持"
               description="支持 DeepSeek、Qwen、Doubao 等多种大语言模型"
             />
-            <FeatureCard
-              title="实时进度"
-              description="生成过程中实时显示进度和状态更新"
-            />
-            <FeatureCard
-              title="历史记录"
-              description="自动保存生成历史，方便查看和管理"
-            />
+            <FeatureCard title="实时进度" description="生成过程中实时显示进度和状态更新" />
+            <FeatureCard title="历史记录" description="自动保存生成历史，方便查看和管理" />
           </div>
         </div>
       </div>
@@ -58,16 +49,10 @@ export default function HomePage() {
   );
 }
 
-function FeatureCard({
-  title,
-  description,
-}: {
-  title: string;
-  description: string;
-}) {
+function FeatureCard({ title, description }: { title: string; description: string }) {
   return (
     <div className="card">
-      <h3 className="font-semibold text-[var(--foreground)] mb-2">{title}</h3>
+      <h3 className="mb-2 font-semibold text-[var(--foreground)]">{title}</h3>
       <p className="text-sm text-[var(--text-muted)]">{description}</p>
     </div>
   );

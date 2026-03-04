@@ -13,15 +13,15 @@ export function HistorySection() {
 
   return (
     <div className="mt-8">
-      <p className="px-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-2 flex items-center gap-2">
-        <History className="w-3 h-3" />
+      <p className="mb-2 flex items-center gap-2 px-2 text-xs font-medium tracking-wider text-[var(--text-muted)] uppercase">
+        <History className="h-3 w-3" />
         最近生成
       </p>
       <div className="space-y-1">
         {history.slice(0, 5).map((item) => (
           <div
             key={item.id}
-            className="px-2 py-1.5 text-sm text-[var(--text-muted)] truncate hover:text-[var(--foreground)] cursor-pointer rounded-md hover:bg-white/50 transition-colors"
+            className="cursor-pointer truncate rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition-colors hover:bg-white/50 hover:text-[var(--foreground)]"
           >
             {item.tenderNo}
           </div>

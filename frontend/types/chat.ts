@@ -7,9 +7,18 @@
 // Message Types
 // ============================================
 
+import type { TenderType } from './index';
+
 export type MessageType = 'user' | 'ai' | 'system';
 
-export type MessageStatus = 'sending' | 'sent' | 'generating' | 'completed' | 'error' | 'cancelled';
+export type MessageStatus =
+  | 'pending'
+  | 'sending'
+  | 'sent'
+  | 'generating'
+  | 'completed'
+  | 'error'
+  | 'cancelled';
 
 // ============================================
 // Dual Column Content Types
@@ -66,7 +75,7 @@ export interface Message {
 export interface Conversation {
   id: string;
   title: string;
-  tenderType: 'xjcg' | 'gngk';
+  tenderType: TenderType;
   messages: Message[];
   createdAt: number;
   updatedAt: number;
@@ -106,7 +115,9 @@ export function isMessage(obj: unknown): obj is Message {
     ['user', 'ai', 'system'].includes(message.type) &&
     typeof message.timestamp === 'number' &&
     typeof message.status === 'string' &&
-    ['sending', 'sent', 'generating', 'completed', 'error', 'cancelled'].includes(message.status)
+    ['pending', 'sending', 'sent', 'generating', 'completed', 'error', 'cancelled'].includes(
+      message.status
+    )
   );
 }
 
@@ -162,7 +173,10 @@ export type CreateMessagePayload = Omit<Message, 'id' | 'timestamp'> & {
 };
 
 /** Conversation creation payload (without auto-generated fields) */
-export type CreateConversationPayload = Omit<Conversation, 'id' | 'messages' | 'createdAt' | 'updatedAt'> & {
+export type CreateConversationPayload = Omit<
+  Conversation,
+  'id' | 'messages' | 'createdAt' | 'updatedAt'
+> & {
   id?: string;
   messages?: Message[];
   createdAt?: number;

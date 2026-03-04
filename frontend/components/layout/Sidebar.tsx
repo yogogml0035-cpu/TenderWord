@@ -16,6 +16,7 @@ import {
   XCircle,
   AlertCircle,
   X,
+  MessageSquare,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -24,40 +25,39 @@ interface SidebarProps {
 }
 
 export function Sidebar({ className, children }: SidebarProps) {
+  return <aside className={cn('sidebar flex flex-col', className)}>{children}</aside>;
+}
+
+export function SidebarHeader({
+  className,
+  children,
+}: {
+  className?: string;
+  children?: React.ReactNode;
+}) {
   return (
-    <aside
-      className={cn(
-        'sidebar flex flex-col',
-        className
-      )}
-    >
-      {children}
-    </aside>
+    <div className={cn('border-b border-[var(--border)] px-6 py-4', className)}>{children}</div>
   );
 }
 
-export function SidebarHeader({ className, children }: { className?: string; children?: React.ReactNode }) {
-  return (
-    <div className={cn('px-6 py-4 border-b border-[var(--border)]', className)}>
-      {children}
-    </div>
-  );
+export function SidebarContent({
+  className,
+  children,
+}: {
+  className?: string;
+  children?: React.ReactNode;
+}) {
+  return <div className={cn('flex-1 overflow-y-auto p-4', className)}>{children}</div>;
 }
 
-export function SidebarContent({ className, children }: { className?: string; children?: React.ReactNode }) {
-  return (
-    <div className={cn('flex-1 overflow-y-auto p-4', className)}>
-      {children}
-    </div>
-  );
-}
-
-export function SidebarFooter({ className, children }: { className?: string; children?: React.ReactNode }) {
-  return (
-    <div className={cn('p-4 border-t border-[var(--border)]', className)}>
-      {children}
-    </div>
-  );
+export function SidebarFooter({
+  className,
+  children,
+}: {
+  className?: string;
+  children?: React.ReactNode;
+}) {
+  return <div className={cn('border-t border-[var(--border)] p-4', className)}>{children}</div>;
 }
 
 // Enhanced Sidebar with History
@@ -69,9 +69,9 @@ export function SidebarWithHistory({ className }: { className?: string }) {
     return (
       <button
         onClick={() => setSidebarOpen(true)}
-        className="fixed left-0 top-1/2 -translate-y-1/2 p-2 bg-white border border-l-0 border-[var(--border)] rounded-r-lg shadow-md hover:bg-gray-50 z-50"
+        className="fixed top-1/2 left-0 z-50 -translate-y-1/2 rounded-r-lg border border-l-0 border-[var(--border)] bg-white p-2 shadow-md hover:bg-gray-50"
       >
-        <History className="w-5 h-5 text-[var(--text-muted)]" />
+        <History className="h-5 w-5 text-[var(--text-muted)]" />
       </button>
     );
   }
@@ -81,14 +81,14 @@ export function SidebarWithHistory({ className }: { className?: string }) {
       <SidebarHeader>
         <div className="flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 text-[var(--foreground)]">
-            <FileText className="w-6 h-6 text-[var(--primary)]" />
-            <span className="font-semibold text-lg">TenderWord</span>
+            <FileText className="h-6 w-6 text-[var(--primary)]" />
+            <span className="text-lg font-semibold">TenderWord</span>
           </Link>
           <button
             onClick={() => setSidebarOpen(false)}
             className="p-1 text-[var(--text-muted)] hover:text-[var(--foreground)] lg:hidden"
           >
-            <X className="w-5 h-5" />
+            <X className="h-5 w-5" />
           </button>
         </div>
       </SidebarHeader>
@@ -96,14 +96,11 @@ export function SidebarWithHistory({ className }: { className?: string }) {
       <SidebarContent>
         {/* Navigation */}
         <nav className="space-y-1">
-          <p className="px-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-2">
-            招标类型
+          <p className="mb-2 px-2 text-xs font-medium tracking-wider text-[var(--text-muted)] uppercase">
+            模式
           </p>
-          <NavLink href="/tender/xjcg" icon={<FileText className="w-4 h-4" />}>
-            询价采购
-          </NavLink>
-          <NavLink href="/tender/gngk" icon={<FileText className="w-4 h-4" />}>
-            国内公开
+          <NavLink href="/chat" icon={<MessageSquare className="h-4 w-4" />}>
+            三栏聊天
           </NavLink>
         </nav>
 
@@ -111,12 +108,12 @@ export function SidebarWithHistory({ className }: { className?: string }) {
 
         {/* History Section */}
         <div className="mt-8">
-          <div className="flex items-center justify-between px-2 mb-2">
-            <p className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider flex items-center gap-2">
-              <History className="w-3 h-3" />
+          <div className="mb-2 flex items-center justify-between px-2">
+            <p className="flex items-center gap-2 text-xs font-medium tracking-wider text-[var(--text-muted)] uppercase">
+              <History className="h-3 w-3" />
               生成历史
               {history.length > 0 && (
-                <span className="bg-[var(--primary)] text-white text-[10px] px-1.5 py-0.5 rounded-full">
+                <span className="rounded-full bg-[var(--primary)] px-1.5 py-0.5 text-[10px] text-white">
                   {history.length}
                 </span>
               )}
@@ -124,9 +121,9 @@ export function SidebarWithHistory({ className }: { className?: string }) {
             {history.length > 0 && (
               <button
                 onClick={clearHistory}
-                className="text-xs text-[var(--text-muted)] hover:text-[var(--error)] flex items-center gap-1"
+                className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--error)]"
               >
-                <Trash2 className="w-3 h-3" />
+                <Trash2 className="h-3 w-3" />
                 清空
               </button>
             )}
@@ -134,7 +131,7 @@ export function SidebarWithHistory({ className }: { className?: string }) {
 
           {history.length === 0 ? (
             <div className="px-2 py-8 text-center">
-              <History className="w-8 h-8 text-[var(--text-muted)] mx-auto mb-2 opacity-50" />
+              <History className="mx-auto mb-2 h-8 w-8 text-[var(--text-muted)] opacity-50" />
               <p className="text-xs text-[var(--text-muted)]">暂无生成记录</p>
             </div>
           ) : (
@@ -147,7 +144,7 @@ export function SidebarWithHistory({ className }: { className?: string }) {
                 />
               ))}
               {history.length > 10 && (
-                <p className="text-xs text-[var(--text-muted)] text-center py-2">
+                <p className="py-2 text-center text-xs text-[var(--text-muted)]">
                   还有 {history.length - 10} 条记录...
                 </p>
               )}
@@ -157,8 +154,8 @@ export function SidebarWithHistory({ className }: { className?: string }) {
       </SidebarContent>
 
       <SidebarFooter>
-        <button className="flex items-center gap-2 text-sm text-[var(--text-muted)] hover:text-[var(--foreground)] transition-colors w-full">
-          <Settings className="w-4 h-4" />
+        <button className="flex w-full items-center gap-2 text-sm text-[var(--text-muted)] transition-colors hover:text-[var(--foreground)]">
+          <Settings className="h-4 w-4" />
           设置
         </button>
       </SidebarFooter>
@@ -178,7 +175,7 @@ function NavLink({
   return (
     <Link
       href={href}
-      className="flex items-center gap-2 px-2 py-2 text-sm font-medium text-[var(--text-muted)] rounded-md hover:bg-white hover:text-[var(--foreground)] transition-colors"
+      className="flex items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-[var(--text-muted)] transition-colors hover:bg-white hover:text-[var(--foreground)]"
     >
       {icon}
       {children}
@@ -186,23 +183,17 @@ function NavLink({
   );
 }
 
-function HistoryItemCard({
-  item,
-  onRemove,
-}: {
-  item: HistoryItem;
-  onRemove: () => void;
-}) {
+function HistoryItemCard({ item, onRemove }: { item: HistoryItem; onRemove: () => void }) {
   const getStatusIcon = () => {
     switch (item.status) {
       case 'completed':
-        return <CheckCircle2 className="w-3 h-3 text-[var(--success)]" />;
+        return <CheckCircle2 className="h-3 w-3 text-[var(--success)]" />;
       case 'failed':
-        return <XCircle className="w-3 h-3 text-[var(--error)]" />;
+        return <XCircle className="h-3 w-3 text-[var(--error)]" />;
       case 'cancelled':
-        return <AlertCircle className="w-3 h-3 text-[var(--warning)]" />;
+        return <AlertCircle className="h-3 w-3 text-[var(--warning)]" />;
       default:
-        return <Clock className="w-3 h-3 text-[var(--info)]" />;
+        return <Clock className="h-3 w-3 text-[var(--info)]" />;
     }
   };
 
@@ -220,15 +211,13 @@ function HistoryItemCard({
   };
 
   return (
-    <div className="group relative p-2 rounded-md hover:bg-white/50 transition-colors">
+    <div className="group relative rounded-md p-2 transition-colors hover:bg-white/50">
       <div className="flex items-start gap-2">
         {getStatusIcon()}
-        <div className="flex-1 min-w-0">
-          <p className="text-sm text-[var(--foreground)] truncate font-medium">
-            {item.tenderNo}
-          </p>
-          <div className="flex items-center gap-2 mt-0.5">
-            <span className={cn('text-[10px] px-1.5 py-0.5 rounded', getStatusBadgeClass())}>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-[var(--foreground)]">{item.tenderNo}</p>
+          <div className="mt-0.5 flex items-center gap-2">
+            <span className={cn('rounded px-1.5 py-0.5 text-[10px]', getStatusBadgeClass())}>
               {item.status === 'completed' && '已完成'}
               {item.status === 'failed' && '失败'}
               {item.status === 'cancelled' && '取消'}
@@ -242,10 +231,10 @@ function HistoryItemCard({
           {item.outputFile && (
             <a
               href={`/api/download/${encodeURIComponent(item.outputFile)}`}
-              className="flex items-center gap-1 mt-1 text-xs text-[var(--primary)] hover:underline"
+              className="mt-1 flex items-center gap-1 text-xs text-[var(--primary)] hover:underline"
               onClick={(e) => e.stopPropagation()}
             >
-              <Download className="w-3 h-3" />
+              <Download className="h-3 w-3" />
               下载文件
             </a>
           )}
@@ -255,9 +244,9 @@ function HistoryItemCard({
             e.stopPropagation();
             onRemove();
           }}
-          className="opacity-0 group-hover:opacity-100 p-1 text-[var(--text-muted)] hover:text-[var(--error)] transition-opacity"
+          className="p-1 text-[var(--text-muted)] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--error)]"
         >
-          <X className="w-3 h-3" />
+          <X className="h-3 w-3" />
         </button>
       </div>
     </div>

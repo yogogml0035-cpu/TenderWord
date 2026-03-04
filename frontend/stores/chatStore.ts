@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
+import type { TenderType } from '@/types';
 import type { Conversation, Message } from '@/types/chat';
 import { createConversation as createConvUtil, generateMessageId } from '@/lib/chat-utils';
 
@@ -11,14 +12,17 @@ interface ChatStore {
   isLoading: boolean;
   error: string | null;
   concurrentTaskWarning: boolean;
-  selectedTenderType: 'xjcg' | 'gngk' | null;
+  selectedTenderType: TenderType | null;
 
-  createConversation: (title: string, tenderType: 'xjcg' | 'gngk') => string;
+  createConversation: (tenderno: string, tenderType: TenderType, title?: string) => string;
   updateConversation: (id: string, updates: Partial<Conversation>) => void;
   deleteConversation: (id: string) => void;
   setCurrentConversation: (id: string | null) => void;
 
-  addMessage: (conversationId: string, message: Omit<Message, 'id' | 'timestamp' | 'conversationId'>) => string;
+  addMessage: (
+    conversationId: string,
+    message: Omit<Message, 'id' | 'timestamp' | 'conversationId'>
+  ) => string;
   updateMessage: (conversationId: string, messageId: string, updates: Partial<Message>) => void;
   deleteMessage: (conversationId: string, messageId: string) => void;
 
@@ -31,7 +35,8 @@ interface ChatStore {
   hasActiveTasks: () => boolean;
   clearError: () => void;
   dismissConcurrentWarning: () => void;
-  setSelectedTenderType: (type: 'xjcg' | 'gngk' | null) => void;
+  setSelectedTenderType: (type: TenderType | null) => void;
+  findConversationByTenderNo: (tenderno: string) => Conversation | null;
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -48,11 +53,12 @@ export const useChatStore = create<ChatStore>()(
         concurrentTaskWarning: false,
         selectedTenderType: null,
 
-        createConversation: (title, tenderType) => {
-          const conversation = createConvUtil(title, tenderType);
+        createConversation: (tenderno, tenderType, title) => {
+          const conversation = createConvUtil(title || tenderno, tenderType);
           set((state) => ({
             conversations: [conversation, ...state.conversations],
             currentConversationId: conversation.id,
+            selectedTenderType: tenderType,
           }));
           return conversation.id;
         },
@@ -81,7 +87,12 @@ export const useChatStore = create<ChatStore>()(
         setCurrentConversation: (id) => set({ currentConversationId: id }),
 
         addMessage: (conversationId, message) => {
-          const newMessage = { ...message, conversationId, id: generateMessageId(), timestamp: Date.now() };
+          const newMessage = {
+            ...message,
+            conversationId,
+            id: generateMessageId(),
+            timestamp: Date.now(),
+          };
           set((state) => ({
             conversations: state.conversations.map((conv) =>
               conv.id === conversationId
@@ -99,7 +110,15 @@ export const useChatStore = create<ChatStore>()(
                 ? {
                     ...conv,
                     messages: conv.messages.map((msg) =>
-                      msg.id === messageId ? { ...msg, ...updates } : msg
+                      msg.id === messageId
+                        ? {
+                            ...msg,
+                            ...updates,
+                            ...(updates.metadata
+                              ? { metadata: { ...(msg.metadata || {}), ...updates.metadata } }
+                              : {}),
+                          }
+                        : msg
                     ),
                     updatedAt: Date.now(),
                   }
@@ -162,6 +181,9 @@ export const useChatStore = create<ChatStore>()(
 
           set((state) => ({
             activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
+            taskMessageMap: Object.fromEntries(
+              Object.entries(state.taskMessageMap).filter(([id]) => id !== taskId)
+            ),
           }));
         },
 
@@ -178,6 +200,9 @@ export const useChatStore = create<ChatStore>()(
 
           set((state) => ({
             activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
+            taskMessageMap: Object.fromEntries(
+              Object.entries(state.taskMessageMap).filter(([id]) => id !== taskId)
+            ),
           }));
         },
 
@@ -194,18 +219,28 @@ export const useChatStore = create<ChatStore>()(
 
           set((state) => ({
             activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
+            taskMessageMap: Object.fromEntries(
+              Object.entries(state.taskMessageMap).filter(([id]) => id !== taskId)
+            ),
           }));
         },
 
         getCurrentConversation: () => {
           const state = get();
-          return state.conversations.find((conv) => conv.id === state.currentConversationId) || null;
+          return (
+            state.conversations.find((conv) => conv.id === state.currentConversationId) || null
+          );
         },
 
         hasActiveTasks: () => get().activeTaskIds.length > 0,
         clearError: () => set({ error: null }),
         dismissConcurrentWarning: () => set({ concurrentTaskWarning: false }),
         setSelectedTenderType: (type) => set({ selectedTenderType: type }),
+
+        findConversationByTenderNo: (tenderno) => {
+          const state = get();
+          return state.conversations.find((conv) => conv.title === tenderno) || null;
+        },
       }),
       {
         name: 'chat-storage',

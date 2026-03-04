@@ -264,7 +264,15 @@ export interface SSEHeartbeatEvent {
   task_id: string;
 }
 
-export type SSEEventType = 'connected' | 'log' | 'llm' | 'progress' | 'status' | 'error' | 'done' | 'heartbeat';
+export type SSEEventType =
+  | 'connected'
+  | 'log'
+  | 'llm'
+  | 'progress'
+  | 'status'
+  | 'error'
+  | 'done'
+  | 'heartbeat';
 
 // ============================================
 // Error Codes
@@ -306,7 +314,7 @@ export const ErrorCodes = {
   LLM_INVALID_MODEL: 'LLM_INVALID_MODEL',
 } as const;
 
-export type ErrorCode = typeof ErrorCodes[keyof typeof ErrorCodes];
+export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 
 // ============================================
 // Node Display Names

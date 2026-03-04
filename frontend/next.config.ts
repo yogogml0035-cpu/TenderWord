@@ -1,15 +1,38 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   // ========================================
   // API 代理配置 - 开发时转发到后端
   // ========================================
   async rewrites() {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
     return [
       {
-        source: "/api/:path*",
+        source: '/api/:path*',
         destination: `${apiUrl}/api/:path*`,
+      },
+    ];
+  },
+
+  async headers() {
+    return [
+      {
+        source: '/_next/static/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+        ],
+      },
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'no-store, max-age=0',
+          },
+        ],
       },
     ];
   },
@@ -20,9 +43,9 @@ const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
       {
-        protocol: "http",
-        hostname: "localhost",
-        port: "8000",
+        protocol: 'http',
+        hostname: 'localhost',
+        port: '8000',
       },
     ],
   },

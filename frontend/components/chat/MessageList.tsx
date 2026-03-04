@@ -28,10 +28,10 @@ export function MessageList({
   // Handle scroll events
   const handleScroll = () => {
     if (!containerRef.current) return;
-    
+
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
     const atBottom = scrollHeight - scrollTop - clientHeight < 50;
-    
+
     setIsAtBottom(atBottom);
     if (!atBottom) {
       setUserScrolled(true);
@@ -56,17 +56,17 @@ export function MessageList({
 
   if (messages.length === 0) {
     return (
-      <div className={`flex items-center justify-center h-full p-8 ${className}`}>
+      <div className={`flex h-full items-center justify-center p-8 ${className}`}>
         {emptyState || (
-          <div className="text-center max-w-sm">
+          <div className="max-w-sm text-center">
             {/* Animated Bot Icon */}
             <div className="relative mb-6 inline-block">
-              <div className="absolute inset-0 bg-blue-100 rounded-full animate-pulse opacity-50" />
-              <div className="relative bg-white rounded-full p-4 shadow-md border border-blue-100">
-                <Bot className="w-10 h-10 text-blue-500" />
+              <div className="absolute inset-0 animate-pulse rounded-full bg-blue-100 opacity-50" />
+              <div className="relative rounded-full border border-blue-100 bg-white p-4 shadow-md">
+                <Bot className="h-10 w-10 text-blue-500" />
               </div>
             </div>
-            <h3 className="text-lg font-medium text-gray-700 mb-2">开始一个新的对话</h3>
+            <h3 className="mb-2 text-lg font-medium text-gray-700">开始一个新的对话</h3>
             <p className="text-sm text-gray-500">在左侧选择招标类型并填写表单以开始生成文档</p>
           </div>
         )}
@@ -79,19 +79,15 @@ export function MessageList({
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="h-full overflow-y-auto p-4 space-y-4"
+        className="h-full space-y-4 overflow-y-auto p-4"
       >
         {messages.map((message, index) => (
-          <div 
+          <div
             key={message.id}
             className="animate-message-appear"
             style={{ animationDelay: `${Math.min(index * 100, 500)}ms` }}
           >
-            <MessageItem
-              message={message}
-              onDownload={onDownload}
-              onRetry={onRetry}
-            />
+            <MemoMessageItem message={message} onDownload={onDownload} onRetry={onRetry} />
           </div>
         ))}
       </div>
@@ -100,10 +96,22 @@ export function MessageList({
       {!isAtBottom && messages.length > 0 && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-4 right-4 p-2 bg-white rounded shadow-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors duration-200"
+          className="absolute right-4 bottom-4 rounded border border-gray-200 bg-white p-2 text-gray-600 shadow-lg transition-colors duration-200 hover:bg-gray-50"
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+          <svg
+            className="h-5 w-5"
+            width={20}
+            height={20}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 14l-7 7m0 0l-7-7m7 7V3"
+            />
           </svg>
         </button>
       )}
@@ -124,17 +132,13 @@ function MessageItem({ message, onDownload, onRetry }: MessageItemProps) {
   // Render AI message with dual columns
   if (message.type === 'ai' && isDualColumn) {
     return (
-      <div className="flex gap-3 animate-fade-in-up">
-        <div className="flex-shrink-0 w-8 h-8 rounded bg-blue-100 flex items-center justify-center shadow-sm">
-          <Bot className="w-5 h-5 text-blue-600" />
+      <div className="animate-fade-in-up flex gap-3">
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded bg-blue-100 shadow-sm">
+          <Bot className="h-5 w-5 text-blue-600" />
         </div>
-        
+
         <div className="flex-1">
-          <DualColumnMessage
-            message={message}
-            onDownload={onDownload}
-            onRetry={onRetry}
-          />
+          <DualColumnMessage message={message} onDownload={onDownload} onRetry={onRetry} />
         </div>
       </div>
     );
@@ -143,12 +147,14 @@ function MessageItem({ message, onDownload, onRetry }: MessageItemProps) {
   // Render user message
   if (message.type === 'user') {
     return (
-      <div className="flex gap-3 justify-end animate-fade-in-up">
-        <div className="flex-1 max-w-[80%]">
-          <div className="bg-blue-500 text-white rounded rounded-tr-sm px-4 py-2.5 shadow-sm">
-            <p className="text-sm">{typeof message.content === 'string' ? message.content : '...'}</p>
+      <div className="animate-fade-in-up flex justify-end gap-3">
+        <div className="max-w-[80%] flex-1">
+          <div className="rounded rounded-tr-sm bg-blue-500 px-4 py-2.5 text-white shadow-sm">
+            <p className="text-sm">
+              {typeof message.content === 'string' ? message.content : '...'}
+            </p>
           </div>
-          <div className="text-right mt-1">
+          <div className="mt-1 text-right">
             <span className="text-[10px] text-gray-400">
               {new Date(message.timestamp).toLocaleTimeString('zh-CN', {
                 hour: '2-digit',
@@ -157,9 +163,9 @@ function MessageItem({ message, onDownload, onRetry }: MessageItemProps) {
             </span>
           </div>
         </div>
-        
-        <div className="flex-shrink-0 w-8 h-8 rounded bg-gray-200 flex items-center justify-center shadow-sm">
-          <User className="w-5 h-5 text-gray-600" />
+
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded bg-gray-200 shadow-sm">
+          <User className="h-5 w-5 text-gray-600" />
         </div>
       </div>
     );
@@ -168,9 +174,9 @@ function MessageItem({ message, onDownload, onRetry }: MessageItemProps) {
   // Render system message
   if (message.type === 'system') {
     return (
-      <div className="flex justify-center animate-fade-in-up">
-        <div className="flex items-center gap-2 px-4 py-2 bg-gray-100 rounded text-xs text-gray-600 shadow-sm">
-          <Info className="w-4 h-4" />
+      <div className="animate-fade-in-up flex justify-center">
+        <div className="flex items-center gap-2 rounded bg-gray-100 px-4 py-2 text-xs text-gray-600 shadow-sm">
+          <Info className="h-4 w-4" />
           <span>{typeof message.content === 'string' ? message.content : 'System message'}</span>
         </div>
       </div>
@@ -179,5 +185,7 @@ function MessageItem({ message, onDownload, onRetry }: MessageItemProps) {
 
   return null;
 }
+
+const MemoMessageItem = React.memo(MessageItem);
 
 export default MessageList;

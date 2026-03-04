@@ -1,4 +1,5 @@
-import type { Message, Conversation, DualColumnContent, LogEntry, MessageType, MessageStatus } from '@/types/chat';
+import type { TenderType } from '@/types';
+import type { Message, Conversation, DualColumnContent, LogEntry, MessageType } from '@/types/chat';
 
 /**
  * Generate unique conversation ID
@@ -39,23 +40,23 @@ export function formatTimestamp(timestamp: number): string {
   const date = new Date(timestamp);
   const now = new Date();
   const isToday = date.toDateString() === now.toDateString();
-  
+
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
   const isYesterday = date.toDateString() === yesterday.toDateString();
-  
+
   const hours = date.getHours().toString().padStart(2, '0');
   const minutes = date.getMinutes().toString().padStart(2, '0');
   const timeStr = `${hours}:${minutes}`;
-  
+
   if (isToday) {
     return timeStr;
   }
-  
+
   if (isYesterday) {
     return `昨天 ${timeStr}`;
   }
-  
+
   const year = date.getFullYear();
   const month = (date.getMonth() + 1).toString().padStart(2, '0');
   const day = date.getDate().toString().padStart(2, '0');
@@ -68,16 +69,13 @@ export function formatTimestamp(timestamp: number): string {
  * @param conversationId - Parent conversation ID
  * @returns Message object with default values
  */
-export function createEmptyMessage(
-  type: MessageType,
-  conversationId: string
-): Message {
+export function createEmptyMessage(type: MessageType, conversationId: string): Message {
   return {
     id: generateMessageId(),
     type,
     conversationId,
     timestamp: Date.now(),
-    status: 'pending' as MessageStatus,
+    status: 'pending',
     content: {
       logs: [],
       aiContent: {
@@ -95,10 +93,7 @@ export function createEmptyMessage(
  * @param conversationId - Parent conversation ID
  * @returns System message object
  */
-export function createSystemMessage(
-  content: string,
-  conversationId: string
-): Message {
+export function createSystemMessage(content: string, conversationId: string): Message {
   return {
     id: generateMessageId(),
     type: 'system',
@@ -137,10 +132,7 @@ export function createEmptyDualColumnContent(): DualColumnContent {
  * @param tenderType - Tender type ('xjcg' | 'gngk')
  * @returns Conversation object
  */
-export function createConversation(
-  title: string,
-  tenderType: 'xjcg' | 'gngk'
-): Conversation {
+export function createConversation(title: string, tenderType: TenderType): Conversation {
   return {
     id: generateConversationId(),
     title,
@@ -165,7 +157,7 @@ export function addLogEntry(
     ...log,
     id: generateLogEntryId(),
   };
-  
+
   return {
     ...content,
     logs: [...content.logs, newLog],
@@ -199,20 +191,21 @@ export function appendAIContent(
  * @param messages - Array of messages
  * @returns Object with date keys and message arrays
  */
-export function groupMessagesByDate(
-  messages: Message[]
-): Record<string, Message[]> {
-  return messages.reduce((groups, message) => {
-    const date = new Date(message.timestamp);
-    const dateKey = date.toISOString().split('T')[0];
-    
-    if (!groups[dateKey]) {
-      groups[dateKey] = [];
-    }
-    
-    groups[dateKey].push(message);
-    return groups;
-  }, {} as Record<string, Message[]>);
+export function groupMessagesByDate(messages: Message[]): Record<string, Message[]> {
+  return messages.reduce(
+    (groups, message) => {
+      const date = new Date(message.timestamp);
+      const dateKey = date.toISOString().split('T')[0];
+
+      if (!groups[dateKey]) {
+        groups[dateKey] = [];
+      }
+
+      groups[dateKey].push(message);
+      return groups;
+    },
+    {} as Record<string, Message[]>
+  );
 }
 
 /**
@@ -224,13 +217,13 @@ export function getConversationDisplayTitle(conversation: Conversation): string 
   if (conversation.title && conversation.title.trim()) {
     return conversation.title;
   }
-  
+
   const date = new Date(conversation.createdAt);
   const dateStr = date.toLocaleDateString('zh-CN', {
     month: 'short',
     day: 'numeric',
   });
-  
+
   return `新对话 ${dateStr}`;
 }
 
@@ -244,6 +237,6 @@ export function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength) {
     return text;
   }
-  
+
   return text.substring(0, maxLength - 3) + '...';
 }
