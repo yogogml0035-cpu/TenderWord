@@ -144,10 +144,9 @@ export function convertXjcgFormToApiRequest(formData: XjcgTenderFormData): Gener
 
 /**
  * GNGK 表单数据转换选项
- * @property includeQualificationFiles - 是否包含资质文件路径（用于扩展 API）
  */
 export interface GngkConversionOptions {
-  includeQualificationFiles?: boolean;
+  // No longer includes qualification files option
 }
 
 /**
@@ -217,15 +216,10 @@ export function convertGngkFormToApiRequest(
     files: filesConfig,
     model: formData.model,
     ...(insertionConfig && { insertion_config: insertionConfig }),
-  };
+};
+  // No longer processing qualification files - removed from GNGK form
 
-  // 处理资质文件（GNGK 特有）
-  if (options.includeQualificationFiles && formData.files.qualification) {
-    const qualificationPaths = extractFilePaths(formData.files.qualification);
-    if (qualificationPaths.length > 0) {
-      request.qualification_files = qualificationPaths;
-    }
-  }
+  return request;
 
   return request;
 }

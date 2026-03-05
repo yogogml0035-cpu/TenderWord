@@ -36,7 +36,7 @@ export function TenderTypeSidebar({ onNewChat }: TenderTypeSidebarProps) {
   const [hoveredType, setHoveredType] = useState<TenderType['id'] | null>(null);
   const [mounted, setMounted] = useState(false);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { createConversation, currentConversationId, conversations } = useChatStore();
+  const { createConversation, currentConversationId, conversations, setCurrentConversation } = useChatStore();
 
   // Fix hydration: wait for client mount before accessing persisted store
   useEffect(() => {
@@ -57,6 +57,25 @@ export function TenderTypeSidebar({ onNewChat }: TenderTypeSidebarProps) {
   const scheduleClosePopup = () => {
     clearCloseTimer();
     closeTimerRef.current = setTimeout(() => setHoveredType(null), 200);
+  };
+
+  const handleTypeClick = (type: 'xjcg' | 'gngk') => {
+    // Filter conversations by this tender type
+    const typeConversations = conversations.filter(
+      (conv) => conv.tenderType === type
+    );
+
+    if (typeConversations.length > 0) {
+      // Find the most recent conversation (by updatedAt)
+      const mostRecent = typeConversations.reduce((prev, current) =>
+        prev.updatedAt > current.updatedAt ? prev : current
+      );
+      setCurrentConversation(mostRecent.id);
+    } else {
+      // No conversations exist - create a new one with default title
+      createConversation('新对话', type, '新对话');
+      // The createConversation method already sets currentConversationId in the store
+    }
   };
 
   const handleNewChat = (type: 'xjcg' | 'gngk') => {
@@ -92,6 +111,7 @@ export function TenderTypeSidebar({ onNewChat }: TenderTypeSidebarProps) {
             onMouseLeave={scheduleClosePopup}
           >
             <button
+              onClick={() => handleTypeClick(type.id)}
               className={cn(
                 'flex h-14 w-24 flex-col items-center justify-center gap-1 rounded-lg shadow-sm transition-all duration-200',
                 currentType === type.id

@@ -124,6 +124,7 @@ copy ..\.env.example ..\.env
 python main.py
 
 # 方式2: 使用 uvicorn（热重载模式，适合开发）
+cd backend
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 

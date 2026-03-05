@@ -144,9 +144,9 @@ describe('GngkTenderForm', () => {
       render(<GngkTenderForm onSubmit={mockOnSubmit} />);
 
       expect(screen.getByText('招标信息')).toBeInTheDocument();
-      expect(screen.getByText('2. 文件上传')).toBeInTheDocument();
+      expect(screen.getByText('文件上传')).toBeInTheDocument();
       expect(screen.getByText('模型选择')).toBeInTheDocument();
-      expect(screen.getByText('高级设置')).toBeInTheDocument();
+      expect(screen.getByText('高级设置（可选）')).toBeInTheDocument();
     });
 
     it('should render TenderNoInput component', () => {
@@ -165,7 +165,6 @@ describe('GngkTenderForm', () => {
       expect(screen.getByText('送审稿文件（可选）')).toBeInTheDocument();
       expect(screen.getByText('清洁稿文件（可选）')).toBeInTheDocument();
       expect(screen.getByText('技术参数文件（必填）')).toBeInTheDocument();
-      expect(screen.getByText('资格条件文件（可选）')).toBeInTheDocument();
     });
 
     it('should render submit buttons', () => {
@@ -312,12 +311,46 @@ describe('GngkTenderForm', () => {
         expect(screen.getByText('测试项目')).toBeInTheDocument();
       });
 
+      // Upload clean draft to satisfy "at least one of origin/clean"
+      const cleanInput = screen.getByTestId('file-input-clean_draft');
+      const cleanFile = new File(['clean'], 'clean.docx', {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      fireEvent.change(cleanInput, { target: { files: [cleanFile] } });
+
       // Submit without files
       const submitButtons = screen.getAllByRole('button', { name: /开始生成/i });
       fireEvent.click(submitButtons[0]);
 
       await waitFor(() => {
         expect(screen.getByText('请上传至少一个技术参数文件')).toBeInTheDocument();
+      });
+      expect(mockOnSubmit).not.toHaveBeenCalled();
+    });
+
+    it('should show error when submitting without origin and clean files', async () => {
+      render(<GngkTenderForm onSubmit={mockOnSubmit} />);
+
+      const input = screen.getByTestId('tender-no-input-field');
+      await userEvent.type(input, 'GNGK-2024-001');
+      const fetchBtn = screen.getByTestId('fetch-tender-btn');
+      fireEvent.click(fetchBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText('测试项目')).toBeInTheDocument();
+      });
+
+      const paramInput = screen.getByTestId('file-input-params');
+      const file = new File(['test'], 'params.docx', {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      fireEvent.change(paramInput, { target: { files: [file] } });
+
+      const submitButtons = screen.getAllByRole('button', { name: /开始生成/i });
+      fireEvent.click(submitButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText('清洁稿和送审稿至少要上传一个文件')).toBeInTheDocument();
       });
       expect(mockOnSubmit).not.toHaveBeenCalled();
     });
@@ -368,6 +401,11 @@ describe('GngkTenderForm', () => {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
       fireEvent.change(paramInput, { target: { files: [file] } });
+      const cleanInput = screen.getByTestId('file-input-clean_draft');
+      const cleanFile = new File(['clean'], 'clean.docx', {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      fireEvent.change(cleanInput, { target: { files: [cleanFile] } });
 
       // Submit form
       const submitButtons = screen.getAllByRole('button', { name: /开始生成/i });
@@ -403,6 +441,11 @@ describe('GngkTenderForm', () => {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
       fireEvent.change(paramInput, { target: { files: [file] } });
+      const cleanInput = screen.getByTestId('file-input-clean_draft');
+      const cleanFile = new File(['clean'], 'clean.docx', {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      fireEvent.change(cleanInput, { target: { files: [cleanFile] } });
 
       // Submit
       const submitButtons = screen.getAllByRole('button', { name: /开始生成/i });
@@ -442,6 +485,11 @@ describe('GngkTenderForm', () => {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
       fireEvent.change(paramInput, { target: { files: [file] } });
+      const cleanInput = screen.getByTestId('file-input-clean_draft');
+      const cleanFile = new File(['clean'], 'clean.docx', {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      fireEvent.change(cleanInput, { target: { files: [cleanFile] } });
 
       // Submit
       const submitButtons = screen.getAllByRole('button', { name: /开始生成/i });
@@ -541,13 +589,6 @@ describe('GngkTenderForm', () => {
       expect(cleanInput).toBeInTheDocument();
     });
 
-    it('should accept optional qualification files', async () => {
-      render(<GngkTenderForm onSubmit={mockOnSubmit} />);
-
-      const qualInput = screen.getByTestId('file-input-qualification');
-      expect(qualInput).toBeInTheDocument();
-    });
-
     it('should require param files for submission', async () => {
       render(<GngkTenderForm onSubmit={mockOnSubmit} />);
 
@@ -560,6 +601,12 @@ describe('GngkTenderForm', () => {
       await waitFor(() => {
         expect(screen.getByText('测试项目')).toBeInTheDocument();
       });
+
+      const cleanInput = screen.getByTestId('file-input-clean_draft');
+      const cleanFile = new File(['clean'], 'clean.docx', {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      fireEvent.change(cleanInput, { target: { files: [cleanFile] } });
 
       // Submit without param files
       const submitButtons = screen.getAllByRole('button', { name: /开始生成/i });
@@ -597,6 +644,11 @@ describe('GngkTenderForm', () => {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
       fireEvent.change(paramInput, { target: { files: [paramFile] } });
+      const cleanInput = screen.getByTestId('file-input-clean_draft');
+      const cleanFile = new File(['clean'], 'clean.docx', {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      fireEvent.change(cleanInput, { target: { files: [cleanFile] } });
 
       // Step 4: Select model
       const modelSelect = screen.getByTestId('model-select');
@@ -637,6 +689,11 @@ describe('GngkTenderForm', () => {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
       fireEvent.change(paramInput, { target: { files: [file] } });
+      const cleanInput = screen.getByTestId('file-input-clean_draft');
+      const cleanFile = new File(['clean'], 'clean.docx', {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      fireEvent.change(cleanInput, { target: { files: [cleanFile] } });
 
       const submitButtons = screen.getAllByRole('button', { name: /开始生成/i });
       fireEvent.click(submitButtons[0]);

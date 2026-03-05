@@ -74,9 +74,9 @@ function ChatPageContent() {
       const existingConv = findConversationByTenderNo(tenderno);
       if (existingConv) {
         setCurrentConversation(existingConv.id);
-      } else {
-        const newConv = createConversation(tenderno, tenderType);
-        setCurrentConversation(newConv.id);
+      } else if (tenderType) {
+        const newConvId = createConversation(tenderno, tenderType);
+        setCurrentConversation(newConvId);
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '获取招标数据失败';

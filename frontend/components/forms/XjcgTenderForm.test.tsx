@@ -126,10 +126,10 @@ describe('XjcgTenderForm', () => {
       render(<XjcgTenderForm onSubmit={mockOnSubmit} />);
 
       // 验证四个主要区块存在
-      expect(screen.getByText('1. 招标信息')).toBeInTheDocument();
-      expect(screen.getByText('2. 文件上传')).toBeInTheDocument();
-      expect(screen.getByText('3. 模型选择')).toBeInTheDocument();
-      expect(screen.getByText('4. 高级设置（可选）')).toBeInTheDocument();
+      expect(screen.getByText('招标信息')).toBeInTheDocument();
+      expect(screen.getByText('文件上传')).toBeInTheDocument();
+      expect(screen.getByText('模型选择')).toBeInTheDocument();
+      expect(screen.getByText('高级设置（可选）')).toBeInTheDocument();
     });
 
     it('应该渲染招标编号输入组件', () => {
@@ -298,11 +298,35 @@ describe('XjcgTenderForm', () => {
       const fetchButton = screen.getByLabelText('模拟获取招标信息');
       await user.click(fetchButton);
 
+      // 上传清洁稿（满足至少上传一个清洁稿/送审稿）
+      const cleanUploadButton = screen.getByLabelText('上传清洁稿文件（可选）');
+      await user.click(cleanUploadButton);
+
       // 点击提交
       const submitButton = screen.getAllByRole('button', { name: /开始生成/i })[0];
       await user.click(submitButton);
 
       expect(screen.getByText('请上传至少一个技术参数文件')).toBeInTheDocument();
+      expect(mockOnSubmit).not.toHaveBeenCalled();
+    });
+
+    it('提交时如果未上传清洁稿和送审稿应该显示错误', async () => {
+      const user = userEvent.setup();
+      render(<XjcgTenderForm onSubmit={mockOnSubmit} />);
+
+      const input = screen.getByLabelText('招标编号输入框');
+      await user.type(input, 'ZBGG-2024-001');
+
+      const fetchButton = screen.getByLabelText('模拟获取招标信息');
+      await user.click(fetchButton);
+
+      const uploadParamButton = screen.getByLabelText('上传技术参数文件（必填）');
+      await user.click(uploadParamButton);
+
+      const submitButton = screen.getAllByRole('button', { name: /开始生成/i })[0];
+      await user.click(submitButton);
+
+      expect(screen.getByText('清洁稿和送审稿至少要上传一个文件')).toBeInTheDocument();
       expect(mockOnSubmit).not.toHaveBeenCalled();
     });
 
@@ -339,6 +363,10 @@ describe('XjcgTenderForm', () => {
       const uploadButton = screen.getByLabelText('上传技术参数文件（必填）');
       await user.click(uploadButton);
 
+      // 上传清洁稿文件
+      const cleanUploadButton = screen.getByLabelText('上传清洁稿文件（可选）');
+      await user.click(cleanUploadButton);
+
       // 提交表单
       const submitButton = screen.getAllByRole('button', { name: /开始生成/i })[0];
       await user.click(submitButton);
@@ -374,6 +402,8 @@ describe('XjcgTenderForm', () => {
       // 上传文件
       const uploadButton = screen.getByLabelText('上传技术参数文件（必填）');
       await user.click(uploadButton);
+      const cleanUploadButton = screen.getByLabelText('上传清洁稿文件（可选）');
+      await user.click(cleanUploadButton);
 
       // 修改高级设置
       const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
@@ -443,7 +473,7 @@ describe('XjcgTenderForm', () => {
       const submitButton = screen.getAllByRole('button', { name: /开始生成/i })[0];
       await user.click(submitButton);
 
-      const errorContainer = screen.getByText('请输入招标编号').parentElement;
+      const errorContainer = screen.getByText('请输入招标编号').closest('[role="alert"]');
       expect(errorContainer).toHaveClass('flex');
     });
 

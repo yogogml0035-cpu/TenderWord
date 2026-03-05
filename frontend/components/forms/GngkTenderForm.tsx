@@ -15,7 +15,6 @@ export interface GngkTenderFormData {
     origin_tender?: UploadedFile;
     clean_draft?: UploadedFile;
     tender_params: UploadedFile[];
-    qualification?: UploadedFile[];
   };
   insertion_config: {
     before_text: string;
@@ -44,7 +43,6 @@ export function GngkTenderForm({
   const [originFile, setOriginFile] = useState<UploadedFile | null>(null);
   const [cleanDraftFile, setCleanDraftFile] = useState<UploadedFile | null>(null);
   const [paramFiles, setParamFiles] = useState<UploadedFile[]>([]);
-  const [qualificationFiles, setQualificationFiles] = useState<UploadedFile[]>([]);
   const [insertionConfig, setInsertionConfig] = useState({
     before_text: '第三章  采购需求',
     after_text: '第四章  投标文件有关格式', // GNGK特有：投标 vs XJCG的响应
@@ -72,6 +70,12 @@ export function GngkTenderForm({
         return;
       }
 
+      // 清洁稿和送审稿至少上传一个
+      if (!originFile && !cleanDraftFile) {
+        setError('清洁稿和送审稿至少要上传一个文件');
+        return;
+      }
+
       if (paramFiles.length === 0) {
         setError('请上传至少一个技术参数文件');
         return;
@@ -92,7 +96,6 @@ export function GngkTenderForm({
           origin_tender: originFile || undefined,
           clean_draft: cleanDraftFile || undefined,
           tender_params: paramFiles,
-          qualification: qualificationFiles.length > 0 ? qualificationFiles : undefined,
         },
         insertion_config: insertionConfig,
       };
@@ -106,7 +109,6 @@ export function GngkTenderForm({
       originFile,
       cleanDraftFile,
       paramFiles,
-      qualificationFiles,
       insertionConfig,
       onSubmit,
     ]
@@ -137,16 +139,6 @@ export function GngkTenderForm({
       <FormSection title="文件上传" index={2}>
         <div className="space-y-5">
           <FileUploader
-            label="送审稿文件（可选）"
-            description="上传送审稿 Word 文件"
-            accept=".doc,.docx"
-            multiple={false}
-            autoUpload={true}
-            fileType="origin_tender"
-            onUpload={(files) => setOriginFile(files[0] || null)}
-          />
-
-          <FileUploader
             label="清洁稿文件（可选）"
             description="上传清洁稿 Word 文件，如上传则优先使用"
             accept=".doc,.docx"
@@ -154,6 +146,16 @@ export function GngkTenderForm({
             autoUpload={true}
             fileType="clean_draft"
             onUpload={(files) => setCleanDraftFile(files[0] || null)}
+          />
+
+          <FileUploader
+            label="送审稿文件（可选）"
+            description="上传送审稿 Word 文件"
+            accept=".doc,.docx"
+            multiple={false}
+            autoUpload={true}
+            fileType="origin_tender"
+            onUpload={(files) => setOriginFile(files[0] || null)}
           />
 
           <FileUploader
@@ -165,18 +167,6 @@ export function GngkTenderForm({
             autoUpload={true}
             fileType="params"
             onUpload={(files) => setParamFiles((prev) => [...prev, ...files])}
-          />
-
-          {/* GNGK特有：资格条件文件上传 */}
-          <FileUploader
-            label="资格条件文件（可选）"
-            description="上传投标人资格条件要求文件"
-            accept=".doc,.docx"
-            multiple={true}
-            maxFiles={3}
-            autoUpload={true}
-            fileType="qualification"
-            onUpload={(files) => setQualificationFiles((prev) => [...prev, ...files])}
           />
         </div>
       </FormSection>

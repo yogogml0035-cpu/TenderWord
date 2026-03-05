@@ -37,6 +37,8 @@ interface ChatStore {
   dismissConcurrentWarning: () => void;
   setSelectedTenderType: (type: TenderType | null) => void;
   findConversationByTenderNo: (tenderno: string) => Conversation | null;
+  getSortedConversations: () => Conversation[];
+  getMostRecentConversationByType: (type: TenderType) => Conversation | null;
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -73,13 +75,24 @@ export const useChatStore = create<ChatStore>()(
 
         deleteConversation: (id) => {
           set((state) => {
+            const conversationToDelete = state.conversations.find((conv) => conv.id === id);
             const newConversations = state.conversations.filter((conv) => conv.id !== id);
+
+            let newCurrentId = state.currentConversationId;
+            if (state.currentConversationId === id) {
+              if (conversationToDelete) {
+                const sameTypeConversations = newConversations
+                  .filter((conv) => conv.tenderType === conversationToDelete.tenderType)
+                  .sort((a, b) => b.createdAt - a.createdAt);
+                newCurrentId = sameTypeConversations[0]?.id || null;
+              } else {
+                newCurrentId = newConversations[0]?.id || null;
+              }
+            }
+
             return {
               conversations: newConversations,
-              currentConversationId:
-                state.currentConversationId === id
-                  ? newConversations[0]?.id || null
-                  : state.currentConversationId,
+              currentConversationId: newCurrentId,
             };
           });
         },
@@ -240,6 +253,20 @@ export const useChatStore = create<ChatStore>()(
         findConversationByTenderNo: (tenderno) => {
           const state = get();
           return state.conversations.find((conv) => conv.title === tenderno) || null;
+        },
+
+        getSortedConversations: () => {
+          const state = get();
+          return [...state.conversations].sort((a, b) => b.createdAt - a.createdAt);
+        },
+
+        getMostRecentConversationByType: (type: TenderType) => {
+          const state = get();
+          return (
+            state.conversations
+              .filter((conv) => conv.tenderType === type)
+              .sort((a, b) => b.createdAt - a.createdAt)[0] || null
+          );
         },
       }),
       {

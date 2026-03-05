@@ -4,6 +4,8 @@ import React, { useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { Search, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { fetchTenderData as apiFetchTenderData, ApiError } from '@/lib/api';
+import { generateConversationTitle } from '@/lib/chat-utils';
+import { useChatStore } from '@/stores/chatStore';
 import type { TenderData } from '@/types/api';
 
 // Re-export TenderData for backward compatibility
@@ -50,6 +52,14 @@ export function TenderNoInput({
 
       setFetchedData(data);
       setSuccess(true);
+
+      // Update conversation title when data fetch succeeds
+      const { currentConversationId, updateConversation } = useChatStore.getState();
+      if (currentConversationId) {
+        const newTitle = generateConversationTitle(value.trim());
+        updateConversation(currentConversationId, { title: newTitle });
+      }
+
       onDataFetched?.(data);
     } catch (err) {
       const errorMessage =

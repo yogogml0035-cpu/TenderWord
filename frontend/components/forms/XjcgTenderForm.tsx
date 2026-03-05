@@ -69,17 +69,14 @@ export function XjcgTenderForm({
         return;
       }
 
-      if (paramFiles.length === 0) {
-        setError('请上传至少一个技术参数文件');
+      // 清洁稿和送审稿至少上传一个
+      if (!originFile && !cleanDraftFile) {
+        setError('清洁稿和送审稿至少要上传一个文件');
         return;
       }
 
-      // Ensure files are uploaded
-      const unuploadedParams = paramFiles.filter((f) => !f.file_path);
-      if (unuploadedParams.length > 0) {
-        setError(
-          `请先上传技术参数文件: ${unuploadedParams.map((f) => f.original_name).join(', ')}`
-        );
+      if (paramFiles.length === 0) {
+        setError('请上传至少一个技术参数文件');
         return;
       }
 
@@ -127,16 +124,6 @@ export function XjcgTenderForm({
       <FormSection title="文件上传" index={2}>
         <div className="space-y-5">
           <FileUploader
-            label="送审稿文件（可选）"
-            description="上传送审稿 Word 文件"
-            accept=".doc,.docx"
-            multiple={false}
-            autoUpload={true}
-            fileType="origin_tender"
-            onUpload={(files) => setOriginFile(files[0] || null)}
-          />
-
-          <FileUploader
             label="清洁稿文件（可选）"
             description="上传清洁稿 Word 文件，如上传则优先使用"
             accept=".doc,.docx"
@@ -144,6 +131,16 @@ export function XjcgTenderForm({
             autoUpload={true}
             fileType="clean_draft"
             onUpload={(files) => setCleanDraftFile(files[0] || null)}
+          />
+
+          <FileUploader
+            label="送审稿文件（可选）"
+            description="上传送审稿 Word 文件"
+            accept=".doc,.docx"
+            multiple={false}
+            autoUpload={true}
+            fileType="origin_tender"
+            onUpload={(files) => setOriginFile(files[0] || null)}
           />
 
           <FileUploader
