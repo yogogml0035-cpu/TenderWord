@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 import pathlib
 import sys
@@ -27,6 +28,10 @@ from util.word_constants import (
     wdGoToPage,
     wdGoToAbsolute,
     wdActiveEndPageNumber,
+)
+from util.anchor_utils import (
+    iter_anchor_text_variants,
+    find_word_anchor,
 )
     
 
@@ -101,117 +106,80 @@ def extract_tender_params(state: XjcgTenderGraphState, config) -> XjcgTenderGrap
         
         # 在文档正文中查找前后文本，使用字体和字号匹配
         doc_content = doc.Content
+
+        def _find_anchor(text: str, start_pos: int = 0, target_size: float = 18.0):
+            return find_word_anchor(doc_content, text, start_pos=start_pos, target_size=target_size)
         
         # 查找前置文本（使用字体和字号匹配）
-        before_page = None
-        before_end_pos = None
-        find_before_rng = doc_content.Duplicate
-        find_before = find_before_rng.Find
-        find_before.ClearFormatting()
-        find_before.Text = before_text
-        find_before.Forward = True
-        find_before.Wrap = wdFindStop
-        find_before.MatchCase = False
-        find_before.MatchWholeWord = False
-        
         print(f"正在查找前置文本 '{before_text}'（要求格式：宋体 小二/18pt）...")
-        while find_before.Execute():
-            # 检查字体和字号
-            font_name = find_before_rng.Font.Name
-            font_size = find_before_rng.Font.Size
-            is_font = (font_name == "宋体" or font_name == "SimSun")
-            is_size = abs(font_size - 18.0) < 0.5
-            
-            if is_font and is_size:
-                before_page = find_before_rng.Information(wdActiveEndPageNumber)
-                before_end_pos = find_before_rng.End
-                print(f"找到前置文本 '{before_text}'，页码: {before_page}，字体: {font_name}，字号: {font_size}pt，位置: {before_end_pos}")
-                break
-            else:
-                # 继续搜索下一个匹配项
-                find_before_rng.Collapse(wdCollapseEnd)
-                find_before_rng.End = doc_content.End
+        before_hit = _find_anchor(before_text, start_pos=0, target_size=18.0)
+        if not before_hit:
+            tried_before = " / ".join(iter_anchor_text_variants(before_text))
+            print(f"[extract_tender_params] 错误: 前置锚点找不到。尝试: {tried_before}")
+            sys.exit(1)
+        if before_hit["used_text"] != before_text:
+            print(f"前置锚点 '{before_text}' 未命中，改用 '{before_hit['used_text']}' 命中")
+        before_page = before_hit["page"]
+        before_end_pos = before_hit["end"]
+        print(
+            f"找到前置文本 '{before_hit['used_text']}'，页码: {before_page}，字体: {before_hit['font']}，字号: {before_hit['size']}pt，位置: {before_end_pos}"
+        )
         
-        if before_page is None:
-            print(f"警告: 未找到符合格式要求的前置文本 '{before_text}'（宋体 小二/18pt）")
+        # 将 before_end_pos 调整到前置锚点所在页的下一页起始处，避免第三章内容残留
+        try:
+            selection = wps.Selection
+            selection.GoTo(wdGoToPage, wdGoToAbsolute, before_page + 1)
+            next_page_start = selection.Start
+            if next_page_start > before_end_pos:
+                before_end_pos = next_page_start
+                print(f"将 before_end_pos 对齐到下一页起始: {before_end_pos}")
+        except Exception as adj_e:
+            print(f"警告: 无法对齐 before_end_pos 到下一页起始: {adj_e}")
+        
+        # 查找后置文本（从前置文本之后开始搜索，也使用字体和字号匹配）
+        after_page = None
+        after_start_pos = None  # 保存后置锚点的起始位置
+        print(f"正在查找后置文本 '{after_text}'（要求格式：宋体 小二/18pt）...")
+        after_hit = _find_anchor(after_text, start_pos=int(before_end_pos or 0), target_size=18.0)
+        if not after_hit:
+            tried_after = " / ".join(iter_anchor_text_variants(after_text))
+            print(f"[extract_tender_params] 错误: 后置锚点找不到。尝试: {tried_after}")
+            sys.exit(1)
+        if after_hit["used_text"] != after_text:
+            print(f"后置锚点 '{after_text}' 未命中，改用 '{after_hit['used_text']}' 命中")
+        after_page = after_hit["page"]
+        after_start_pos = after_hit["start"]
+        after_end_pos = after_hit["end"]
+        print(
+            f"找到后置文本 '{after_hit['used_text']}'，页码: {after_page}，字体: {after_hit['font']}，字号: {after_hit['size']}pt，起始位置: {after_start_pos}，结束位置: {after_end_pos}"
+        )
+
+        if after_page is None:
+            extracted_content = ""
+        elif after_page <= before_page:
+            print(f"错误: 后置文本页码 ({after_page}) 小于等于前置文本页码 ({before_page})")
+            extracted_content = ""
+        elif after_start_pos is None or after_end_pos is None:
+            print("错误: 未能获取后置文本位置，无法提取/清理内容")
             extracted_content = ""
         else:
-            # 将 before_end_pos 调整到前置锚点所在页的下一页起始处，避免第三章内容残留
-            try:
-                selection = wps.Selection
-                selection.GoTo(wdGoToPage, wdGoToAbsolute, before_page + 1)
-                next_page_start = selection.Start
-                if next_page_start > before_end_pos:
-                    before_end_pos = next_page_start
-                    print(f"将 before_end_pos 对齐到下一页起始: {before_end_pos}")
-            except Exception as adj_e:
-                print(f"警告: 无法对齐 before_end_pos 到下一页起始: {adj_e}")
-            
-            # 查找后置文本（从前置文本之后开始搜索，也使用字体和字号匹配）
-            after_page = None
-            after_start_pos = None  # 保存后置锚点的起始位置
-            # 从前置文本之后开始搜索
-            find_after_rng = doc_content.Duplicate
-            find_after_rng.Start = before_end_pos
-            find_after_rng.End = doc_content.End
-            
-            find_after = find_after_rng.Find
-            find_after.ClearFormatting()
-            find_after.Text = after_text
-            find_after.Forward = True
-            find_after.Wrap = wdFindStop
-            find_after.MatchCase = False
-            find_after.MatchWholeWord = False
-            
-            print(f"正在查找后置文本 '{after_text}'（要求格式：宋体 小二/18pt）...")
-            while find_after.Execute():
-                # 检查字体和字号
-                font_name = find_after_rng.Font.Name
-                font_size = find_after_rng.Font.Size
-                is_font = (font_name == "宋体" or font_name == "SimSun")
-                is_size = abs(font_size - 18.0) < 0.5
-                
-                if is_font and is_size:
-                    after_page = find_after_rng.Information(wdActiveEndPageNumber)
-                    after_start_pos = find_after_rng.Start  # 保存后置锚点的起始位置
-                    after_end_pos = find_after_rng.End  # 保存后置锚点的结束位置（第四章标题的结束位置）
-                    print(f"找到后置文本 '{after_text}'，页码: {after_page}，字体: {font_name}，字号: {font_size}pt，起始位置: {after_start_pos}，结束位置: {after_end_pos}")
-                    break
-                else:
-                    # 继续搜索下一个匹配项
-                    find_after_rng.Collapse(wdCollapseEnd)
-                    find_after_rng.End = doc_content.End
-            
-            if after_page is None:
-                print(f"警告: 未找到符合格式要求的后置文本 '{after_text}'（宋体 小二/18pt）")
-                extracted_content = ""
-            elif after_page <= before_page:
-                print(f"错误: 后置文本页码 ({after_page}) 小于等于前置文本页码 ({before_page})")
-                extracted_content = ""
-            elif after_start_pos is None or after_end_pos is None:
-                print("错误: 未能获取后置文本位置，无法提取/清理内容")
+            if before_end_pos is None:
+                print("错误: 未能获取前置文本结束位置，无法提取内容")
                 extracted_content = ""
             else:
-                # === 直接基于锚点字符范围提取内容 ===
-                if before_end_pos is None:
-                    print("错误: 未能获取前置文本结束位置，无法提取内容")
-                    extracted_content = ""
-                else:
-                    # 提取两个锚点之间的全部原始内容，作为 tender_params（保留表格格式）
-                    # 注意：提取时使用 after_start_pos，这样不会包含第四章标题
-                    between_rng = doc.Range(before_end_pos, after_start_pos)
-                    # 使用新函数提取内容，保留表格格式
-                    extracted_content = extract_content_with_tables(between_rng)
-                    total_chars = len(extracted_content)
-                    non_whitespace_chars = len([c for c in extracted_content if not c.isspace()])
-                    line_count = len(extracted_content.splitlines())
-                    table_count = len(list(between_rng.Tables))
-                    print(f"成功提取锚点之间内容，总长度: {total_chars} 字符，非空白字符: {non_whitespace_chars} 字符，行数: {line_count} 行，表格数量: {table_count} 个")
+                between_rng = doc.Range(before_end_pos, after_start_pos)
+                extracted_content = extract_content_with_tables(between_rng)
+                total_chars = len(extracted_content)
+                non_whitespace_chars = len([c for c in extracted_content if not c.isspace()])
+                line_count = len(extracted_content.splitlines())
+                table_count = len(list(between_rng.Tables))
+                print(
+                    f"成功提取锚点之间内容，总长度: {total_chars} 字符，非空白字符: {non_whitespace_chars} 字符，行数: {line_count} 行，表格数量: {table_count} 个"
+                )
 
-                    # 记录页码范围供后续节点参考
-                    start_page = before_page + 1
-                    end_page = after_page - 1
-                    print(f"[extract_tender_params] 内容提取完成，页码范围: {start_page} - {end_page}")
+                start_page = before_page + 1
+                end_page = after_page - 1
+                print(f"[extract_tender_params] 内容提取完成，页码范围: {start_page} - {end_page}")
         
     except Exception as e:
         error_msg = f"提取内容时发生错误: {e}"
