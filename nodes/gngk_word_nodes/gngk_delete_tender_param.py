@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 import pathlib
 import sys
@@ -19,7 +20,11 @@ from util.word_application_util import (
 from util.word_constants import (
     wdGoToPage,
     wdGoToAbsolute,
-    wdActiveEndPageNumber,
+)
+from util.anchor_utils import (
+    iter_anchor_text_variants,
+    iter_paragraph_anchor_hits_with_variants,
+    pick_anchor,
 )
 
 
@@ -63,49 +68,6 @@ def delete_tender_param(state, config):
     if not os.access(prepared_doc_path, os.W_OK):
         raise PermissionError(f"无法写入准备好的文档: {prepared_doc_path}")
     
-    def _iter_paragraph_hits(doc, text: str, target_size: float, with_page_info: bool = True):
-        """
-        遍历所有段落，返回所有匹配 text 且字号接近 target_size 的候选。
-        
-        Args:
-            doc: Word 文档对象
-            text: 要匹配的文本
-            target_size: 目标字号
-            with_page_info: 是否获取页码信息（慢操作，仅初次定位时使用）
-        """
-        hits = []
-        for para in doc.Paragraphs:
-            try:
-                raw = para.Range.Text
-                stripped = raw.strip()
-                if stripped != text:
-                    continue
-                
-                font_name = para.Range.Font.Name
-                font_size = para.Range.Font.Size
-                
-                # 字体可放宽：只要是宋体/SimSun即可；字号按你的逻辑
-                is_font = (font_name == "宋体" or font_name == "SimSun")
-                is_size = abs(float(font_size) - float(target_size)) < 0.5
-                
-                hit = {
-                    "start": int(para.Range.Start),
-                    "end": int(para.Range.End),
-                    "font": str(font_name),
-                    "size": float(font_size),
-                    "is_font": is_font,
-                    "is_size": is_size,
-                }
-                
-                # 只在需要时获取页码（避免重分页开销）
-                if with_page_info:
-                    hit["page"] = int(para.Range.Information(wdActiveEndPageNumber))
-                
-                hits.append(hit)
-            except Exception:
-                continue
-        return hits
-    
     def _find_anchor_fast(doc, text: str, min_start: int = 0):
         """
         快速查找锚点（不获取页码信息），用于循环中的 refresh。
@@ -128,22 +90,6 @@ def delete_tender_param(state, config):
             except Exception:
                 pass
         return None
-    
-    def _pick_anchor(hits, prefer_last: bool = True):
-        """从候选里选一个锚点：默认选页码最大的（避开目录）。"""
-        if not hits:
-            return None
-        # 优先：字体正确 + 字号正确
-        strict = [h for h in hits if h["is_font"] and h["is_size"]]
-        pool = strict if strict else hits
-        
-        # 如果有页码信息，按页码排序；否则按位置排序
-        if pool and "page" in pool[0]:
-            pool.sort(key=lambda x: (x["page"], x["start"]))
-        else:
-            pool.sort(key=lambda x: x["start"])
-        
-        return pool[-1] if prefer_last else pool[0]
     
     word = None
     doc = None
@@ -175,16 +121,28 @@ def delete_tender_param(state, config):
         
         # === 用段落扫描查找前置文本 ===
         print(f"正在用段落扫描查找前置文本 '{before_text}' (目标字号={target_size}) ...")
-        before_hits = _iter_paragraph_hits(doc, before_text, target_size)
+        before_hits, used_before_text = iter_paragraph_anchor_hits_with_variants(
+            doc,
+            before_text,
+            target_size,
+            normalize_space=True,
+            strip_control=False,
+            with_page_info=True,
+        )
         print(f"  前置文本命中数量: {len(before_hits)}")
         for i, h in enumerate(before_hits[:10], 1):
             print(f"    命中{i}: 页={h['page']}, {h['start']}-{h['end']}, 字体={h['font']}, 字号={h['size']}")
         
-        before_hit = _pick_anchor(before_hits, prefer_last=True)  # 取页码最大的，避免目录
+        before_hit = pick_anchor(before_hits, prefer_last=True)  # 取页码最大的，避免目录
         
         if not before_hit:
-            print(f"警告: 未找到前置文本 '{before_text}'")
+            tried_before = " / ".join(iter_anchor_text_variants(before_text))
+            print(f"[delete_tender_param] 错误: 前置锚点找不到。尝试: {tried_before}")
+            sys.exit(1)
         else:
+            if used_before_text != before_text:
+                print(f"前置锚点 '{before_text}' 未命中，改用 '{used_before_text}' 命中")
+                before_text = used_before_text
             before_page = before_hit["page"]
             before_end_pos = before_hit["end"]
             print(f"✅ 前置锚点选中: 页={before_page}, end_pos={before_end_pos}, 字体={before_hit['font']}, 字号={before_hit['size']}")
@@ -202,7 +160,14 @@ def delete_tender_param(state, config):
             
             # === 用段落扫描查找后置文本 ===
             print(f"正在用段落扫描查找后置文本 '{after_text}' (目标字号={target_size}) ...")
-            after_hits = _iter_paragraph_hits(doc, after_text, target_size)
+            after_hits, used_after_text = iter_paragraph_anchor_hits_with_variants(
+                doc,
+                after_text,
+                target_size,
+                normalize_space=True,
+                strip_control=False,
+                with_page_info=True,
+            )
             
             # 只保留在前置锚点之后出现的后置锚点
             after_hits = [h for h in after_hits if h["start"] >= before_end_pos]
@@ -210,13 +175,18 @@ def delete_tender_param(state, config):
             for i, h in enumerate(after_hits[:10], 1):
                 print(f"    命中{i}: 页={h['page']}, {h['start']}-{h['end']}, 字体={h['font']}, 字号={h['size']}")
             
-            after_hit = _pick_anchor(after_hits, prefer_last=False)  # 取最早的第四章
+            after_hit = pick_anchor(after_hits, prefer_last=False)  # 取最早的第四章
             
             if not after_hit:
-                print(f"警告: 未找到后置文本 '{after_text}'")
+                tried_after = " / ".join(iter_anchor_text_variants(after_text))
+                print(f"[delete_tender_param] 错误: 后置锚点找不到。尝试: {tried_after}")
+                sys.exit(1)
             elif after_hit["page"] <= before_page:
                 print(f"错误: 后置文本页码 ({after_hit['page']}) 小于等于前置文本页码 ({before_page})")
             else:
+                if used_after_text != after_text:
+                    print(f"后置锚点 '{after_text}' 未命中，改用 '{used_after_text}' 命中")
+                    after_text = used_after_text
                 after_page = after_hit["page"]
                 after_start_pos = after_hit["start"]
                 after_end_pos = after_hit["end"]

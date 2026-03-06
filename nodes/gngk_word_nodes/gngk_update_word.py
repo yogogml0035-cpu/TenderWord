@@ -29,6 +29,12 @@ from util.word_constants import (
     wdFindStop,
     wdWithInTable,
 )
+from util.anchor_utils import (
+    iter_anchor_text_variants,
+    iter_paragraph_anchor_hits_with_variants,
+    pick_anchor,
+    pick_after_anchor,
+)
 
 
 def split_polished_text_into_blocks(polished_text: str):
@@ -136,81 +142,37 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
             if unprotect_document(doc, node_name="update_word"):
                 insertion_log_parts.append("已取消文档保护")
 
-            def _norm(s: str) -> str:
-                """归一化文本：去掉首尾空白、把多空格/全角空格归一"""
-                if s is None:
-                    return ""
-                s = s.replace("\u3000", " ")  # 全角空格
-                s = re.sub(r"\s+", " ", s)    # 多空白 -> 单空格
-                return s.strip()
-            
-            def _iter_paragraph_hits(doc, text: str, target_size: float):
-                """扫描所有段落，找到文本匹配且字号/字体符合的候选。"""
-                want = _norm(text)
-                hits = []
-                for para in doc.Paragraphs:
-                    try:
-                        raw = para.Range.Text
-                        stripped = _norm(raw.replace("\r", "").replace("\a", ""))
-                        if stripped != want:
-                            continue
-                        
-                        font_name = str(para.Range.Font.Name)
-                        font_size = float(para.Range.Font.Size)
-                        is_font = font_name in ("宋体", "SimSun")
-                        is_size = abs(font_size - float(target_size)) < 0.5
-                        
-                        # 页码信息只在命中时取一次，避免频繁触发重分页
-                        page = int(para.Range.Information(wdActiveEndPageNumber))
-                        
-                        hits.append({
-                            "page": page,
-                            "start": int(para.Range.Start),
-                            "end": int(para.Range.End),
-                            "font": font_name,
-                            "size": font_size,
-                            "is_font": is_font,
-                            "is_size": is_size,
-                        })
-                    except Exception:
-                        continue
-                return hits
-            
-            def _pick_before_anchor(hits):
-                """
-                选前置锚点：默认选"页码最大"的（避开目录/前言重复标题）。
-                """
-                if not hits:
-                    return None
-                strict = [h for h in hits if h["is_font"] and h["is_size"]]
-                pool = strict if strict else hits
-                pool.sort(key=lambda x: (x["page"], x["start"]))
-                return pool[-1]
-            
-            def _pick_after_anchor(hits, min_start: int):
-                """
-                选后置锚点：取"在 min_start 之后最早出现"的那一个。
-                """
-                if not hits:
-                    return None
-                hits2 = [h for h in hits if h["start"] >= int(min_start)]
-                if not hits2:
-                    return None
-                strict = [h for h in hits2 if h["is_font"] and h["is_size"]]
-                pool = strict if strict else hits2
-                pool.sort(key=lambda x: (x["start"], x["page"]))
-                return pool[0]
-
             # gngk 模块固定使用 22.0（二号）
             target_size = 22.0
             
             # 一次扫描拿到候选（非常稳）
-            before_hits = _iter_paragraph_hits(doc, insertion_before_text, target_size)
-            after_hits  = _iter_paragraph_hits(doc, insertion_after_text, target_size)
+            before_hits, used_before_text = iter_paragraph_anchor_hits_with_variants(
+                doc,
+                insertion_before_text,
+                target_size,
+                normalize_space=True,
+                strip_control=True,
+                with_page_info=True,
+            )
+            if used_before_text != insertion_before_text and before_hits:
+                insertion_log_parts.append(f"锚点 '{insertion_before_text}' 未命中，改用 '{used_before_text}' 命中")
+            
+            after_hits, used_after_text = iter_paragraph_anchor_hits_with_variants(
+                doc,
+                insertion_after_text,
+                target_size,
+                normalize_space=True,
+                strip_control=True,
+                with_page_info=True,
+            )
+            if used_after_text != insertion_after_text and after_hits:
+                insertion_log_parts.append(f"锚点 '{insertion_after_text}' 未命中，改用 '{used_after_text}' 命中")
             
             if not before_hits:
-                raise ValueError(f"未找到前置锚点段落: {insertion_before_text}")
-            before_hit = _pick_before_anchor(before_hits)
+                tried_before = " / ".join(iter_anchor_text_variants(insertion_before_text))
+                print(f"[update_word] 错误: 前置锚点找不到。尝试: {tried_before}")
+                sys.exit(1)
+            before_hit = pick_anchor(before_hits, prefer_last=True)
             before_anchor_start = before_hit["start"]
             before_anchor_end   = before_hit["end"]
             before_anchor_page  = before_hit["page"]
@@ -225,9 +187,11 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
             except Exception:
                 insertion_bound_start = before_anchor_end
             
-            after_hit = _pick_after_anchor(after_hits, insertion_bound_start)
+            after_hit = pick_after_anchor(after_hits, insertion_bound_start)
             if not after_hit:
-                raise ValueError(f"未找到后置锚点段落: {insertion_after_text}")
+                tried_after = " / ".join(iter_anchor_text_variants(insertion_after_text))
+                print(f"[update_word] 错误: 后置锚点找不到。尝试: {tried_after}")
+                sys.exit(1)
             
             after_anchor_start = after_hit["start"]
             after_anchor_end   = after_hit["end"]

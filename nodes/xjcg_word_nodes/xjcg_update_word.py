@@ -29,6 +29,10 @@ from util.word_constants import (
     wdFindStop,
     wdWithInTable,
 )
+from util.anchor_utils import (
+    iter_anchor_text_variants,
+    find_word_anchor,
+)
 
 
 def split_polished_text_into_blocks(polished_text: str):
@@ -137,28 +141,11 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                 insertion_log_parts.append("已取消文档保护")
 
             def _find_anchor_pos(anchor_text: str, start_pos: int = 0):
-                search_rng = doc.Content.Duplicate
-                search_rng.Start = max(0, int(start_pos))
-                search_rng.End = doc.Content.End
-                finder = search_rng.Find
-                finder.ClearFormatting()
-                finder.Text = anchor_text
-                finder.Forward = True
-                finder.Wrap = wdFindStop
-                finder.MatchCase = False
-                finder.MatchWholeWord = False
-                while finder.Execute():
-                    font_name = search_rng.Font.Name
-                    font_size = search_rng.Font.Size
-                    is_font = font_name in ("宋体", "SimSun")
-                    # xjcg 模块固定使用 18.0
-                    target_size = 18.0
-                    is_size = abs(font_size - target_size) < 0.5
-                    if is_font and is_size:
-                        page = search_rng.Information(wdActiveEndPageNumber)
-                        return int(search_rng.Start), int(search_rng.End), int(page)
-                    search_rng.Collapse(wdCollapseEnd)
-                    search_rng.End = doc.Content.End
+                hit = find_word_anchor(doc.Content, anchor_text, start_pos=start_pos, target_size=18.0)
+                if hit:
+                    if hit["used_text"] != anchor_text:
+                        insertion_log_parts.append(f"锚点 '{anchor_text}' 未命中，改用 '{hit['used_text']}' 命中")
+                    return int(hit["start"]), int(hit["end"]), int(hit["page"])
                 return None
 
             # 优先使用 extract_tender_params 已计算好的页范围，避免重复查找
@@ -168,25 +155,11 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
             if start_page is None or end_page is None:
                 # 回退到自身查找
                 def _find_anchor_page(anchor_text: str) -> Optional[int]:
-                    search_rng = doc.Content.Duplicate
-                    find = search_rng.Find
-                    find.ClearFormatting()
-                    find.Text = anchor_text
-                    find.Forward = True
-                    find.Wrap = wdFindStop
-                    find.MatchCase = False
-                    find.MatchWholeWord = False
-                    while find.Execute():
-                        font_name = search_rng.Font.Name
-                        font_size = search_rng.Font.Size
-                        is_font = font_name in ("宋体", "SimSun")
-                        # xjcg 模块固定使用 18.0
-                        target_size = 18.0
-                        is_size = abs(font_size - target_size) < 0.5
-                        if is_font and is_size:
-                            return search_rng.Information(wdActiveEndPageNumber)
-                        search_rng.Collapse(wdCollapseEnd)
-                        search_rng.End = doc.Content.End
+                    hit = find_word_anchor(doc.Content, anchor_text, start_pos=0, target_size=18.0)
+                    if hit:
+                        if hit["used_text"] != anchor_text:
+                            insertion_log_parts.append(f"锚点 '{anchor_text}' 未命中，改用 '{hit['used_text']}' 命中")
+                        return int(hit["page"])
                     return None
 
                 before_page = _find_anchor_page(insertion_before_text)
@@ -195,7 +168,10 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
                 insertion_log_parts.append(f"后置锚点 '{insertion_after_text}' 所在页: {after_page}")
 
                 if before_page is None or after_page is None:
-                    raise ValueError("未找到前后锚点（需宋体/SimSun 且 18pt）")
+                    tried_before = " / ".join(iter_anchor_text_variants(insertion_before_text))
+                    tried_after = " / ".join(iter_anchor_text_variants(insertion_after_text))
+                    print(f"[update_word] 错误: 锚点找不到。前置尝试: {tried_before}；后置尝试: {tried_after}")
+                    sys.exit(1)
                 if after_page <= before_page:
                     raise ValueError(f"后置锚点页码({after_page}) 不大于前置锚点页码({before_page})")
 
@@ -212,7 +188,9 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
 
             before_anchor = _find_anchor_pos(insertion_before_text, 0)
             if before_anchor is None:
-                raise ValueError("未找到前置锚点（需宋体/SimSun 且 18pt）")
+                tried_before = " / ".join(iter_anchor_text_variants(insertion_before_text))
+                print(f"[update_word] 错误: 前置锚点找不到。尝试: {tried_before}")
+                sys.exit(1)
             before_anchor_start, before_anchor_end, before_anchor_page = before_anchor
 
             selection = word.Selection
@@ -226,7 +204,9 @@ def update_word(state: XjcgTenderGraphState, config) -> XjcgTenderGraphState:
 
             after_anchor = _find_anchor_pos(insertion_after_text, insertion_bound_start)
             if after_anchor is None:
-                raise ValueError("未找到后置锚点（需宋体/SimSun 且 18pt）")
+                tried_after = " / ".join(iter_anchor_text_variants(insertion_after_text))
+                print(f"[update_word] 错误: 后置锚点找不到。尝试: {tried_after}")
+                sys.exit(1)
             after_anchor_start, after_anchor_end, after_anchor_page = after_anchor
             insertion_bound_end = after_anchor_start
 
