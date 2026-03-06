@@ -65,12 +65,12 @@ export function InfoCard({
     return (
       <div
         className={cn(
-          'mt-4 space-y-2 rounded-lg bg-[var(--secondary-bg)] p-4',
+          'mt-4 space-y-2 rounded-lg border border-green-200 bg-green-50 p-4',
           className
         )}
       >
         {title && (
-          <h4 className="mb-3 text-sm font-semibold text-[var(--foreground)]">
+          <h4 className="mb-3 text-sm font-semibold text-green-800">
             {title}
           </h4>
         )}
@@ -90,11 +90,11 @@ export function InfoCard({
     return (
       <div
         className={cn(
-          'mt-4 rounded-lg bg-[var(--secondary-bg)] p-4 text-center',
+          'mt-4 rounded-lg border border-green-200 bg-green-50 p-4 text-center',
           className
         )}
       >
-        <p className="text-sm text-[var(--text-muted)]">{emptyMessage}</p>
+        <p className="text-sm text-green-700">{emptyMessage}</p>
       </div>
     );
   }
@@ -102,22 +102,22 @@ export function InfoCard({
   return (
     <div
       className={cn(
-        'mt-4 space-y-2 rounded-lg bg-[var(--secondary-bg)] p-4',
+        'mt-4 space-y-2 rounded-lg border border-green-200 bg-green-50 p-4',
         className
       )}
     >
       {title && (
-        <h4 className="mb-3 text-sm font-semibold text-[var(--foreground)]">
+        <h4 className="mb-3 text-sm font-semibold text-green-800">
           {title}
         </h4>
       )}
       <div className={cn('grid gap-4', columnClasses[columns])}>
         {validItems.map((item, index) => (
           <div key={item.key || index} className="space-y-1">
-            <p className="text-xs text-[var(--text-muted)]">
+            <p className="text-xs text-green-700/80">
               {item.label}
             </p>
-            <p className="text-sm font-medium text-[var(--foreground)]">
+            <p className="break-words whitespace-pre-wrap text-sm font-medium text-green-900">
               {item.value}
             </p>
           </div>

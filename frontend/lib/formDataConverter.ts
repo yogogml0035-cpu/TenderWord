@@ -9,7 +9,7 @@
 import type { XjcgTenderFormData } from '@/components/forms/XjcgTenderForm';
 import type { GngkTenderFormData } from '@/components/forms/GngkTenderForm';
 import type { UploadedFile } from '@/components/forms/FileUploader';
-import type { GenerateRequest, FilesConfig, InsertionConfig } from '@/types/api';
+import type { GenerateRequest, FilesConfig } from '@/types/api';
 
 // ============================================
 // Type Exports
@@ -60,26 +60,9 @@ function buildFilesConfig(
   const paramPaths = extractFilePaths(tenderParams);
 
   return {
-    origin_tender_path: extractFilePath(originTender),
-    clean_draft_path: extractFilePath(cleanDraft),
-    tender_param_paths: paramPaths,
-  };
-}
-
-/**
- * 构建 InsertionConfig 对象
- * @param config - 插入配置对象
- * @returns InsertionConfig 对象或 undefined
- */
-function buildInsertionConfig(
-  config: { before_text: string; after_text: string } | undefined | null
-): InsertionConfig | undefined {
-  if (!config) {
-    return undefined;
-  }
-  return {
-    before_text: config.before_text,
-    after_text: config.after_text,
+    origin_tender: extractFilePath(originTender),
+    clean_draft: extractFilePath(cleanDraft),
+    tender_params: paramPaths,
   };
 }
 
@@ -127,27 +110,18 @@ export function convertXjcgFormToApiRequest(formData: XjcgTenderFormData): Gener
     formData.files.tender_params
   );
 
-  const insertionConfig = buildInsertionConfig(formData.insertion_config);
-
   return {
-    tender_no: formData.tender_no,
+    form_type: 'xjcg_tender',
     tender_data: formData.tender_data,
-    files: filesConfig,
+    file_paths: filesConfig,
+    insertion_config: formData.insertion_config,
     model: formData.model,
-    ...(insertionConfig && { insertion_config: insertionConfig }),
   };
 }
 
 // ============================================
 // GNGK Converter
 // ============================================
-
-/**
- * GNGK 表单数据转换选项
- */
-export interface GngkConversionOptions {
-  // No longer includes qualification files option
-}
 
 /**
  * 扩展的 GNGK API 请求类型（包含资质文件）
@@ -199,8 +173,7 @@ export interface GngkGenerateRequest extends GenerateRequest {
  * ```
  */
 export function convertGngkFormToApiRequest(
-  formData: GngkTenderFormData,
-  options: GngkConversionOptions = {}
+  formData: GngkTenderFormData
 ): GngkGenerateRequest {
   const filesConfig = buildFilesConfig(
     formData.files.origin_tender,
@@ -208,18 +181,14 @@ export function convertGngkFormToApiRequest(
     formData.files.tender_params
   );
 
-  const insertionConfig = buildInsertionConfig(formData.insertion_config);
-
   const request: GngkGenerateRequest = {
-    tender_no: formData.tender_no,
+    form_type: 'gngk_tender',
     tender_data: formData.tender_data,
-    files: filesConfig,
+    file_paths: filesConfig,
+    insertion_config: formData.insertion_config,
     model: formData.model,
-    ...(insertionConfig && { insertion_config: insertionConfig }),
 };
   // No longer processing qualification files - removed from GNGK form
-
-  return request;
 
   return request;
 }

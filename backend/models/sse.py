@@ -99,9 +99,11 @@ class LLMEventData(BaseModel):
     """
 
     content: str = Field(..., description="LLM 输出内容")
+    content_mode: str = Field(default="snapshot", description="内容语义：snapshot | chunk")
     node: Optional[str] = Field(default=None, description="当前节点")
     model: Optional[str] = Field(default=None, description="使用的模型")
     is_complete: bool = Field(default=False, description="是否完成")
+    task_id: Optional[str] = Field(default=None, description="任务ID")
     timestamp: str = Field(
         default_factory=lambda: datetime.now().isoformat(), description="时间戳"
     )
@@ -122,6 +124,9 @@ class ProgressEventData(BaseModel):
     current_node_display: Optional[str] = Field(
         default=None, description="当前节点显示名"
     )
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now().isoformat(), description="时间戳"
+    )
 
 
 class DoneEventData(BaseModel):
@@ -135,6 +140,9 @@ class DoneEventData(BaseModel):
     output_file: Optional[str] = Field(default=None, description="输出文件路径")
     download_url: Optional[str] = Field(default=None, description="下载链接")
     processing_time: Optional[float] = Field(default=None, description="处理时间（秒）")
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now().isoformat(), description="时间戳"
+    )
 
 
 class ErrorEventData(BaseModel):
@@ -146,6 +154,9 @@ class ErrorEventData(BaseModel):
     error: str = Field(..., description="错误信息")
     node: Optional[str] = Field(default=None, description="发生错误的节点")
     is_fatal: bool = Field(default=True, description="是否致命错误")
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now().isoformat(), description="时间戳"
+    )
 
 
 class HeartbeatEventData(BaseModel):

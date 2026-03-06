@@ -242,6 +242,20 @@ class CrossProcessFileLock:
 # ============================================================================
 # 进度追踪辅助函数
 # ============================================================================
+TRACKED_PROGRESS_NODES = {
+    "prepare_template",
+    "get_comments",
+    "copy_comments",
+    "extract_tender_params",
+    "delete_tender_param",
+    "get_replacements",
+    "replace_content",
+    "generate_polished_text",
+    "generate_comments",
+    "update_word",
+}
+
+
 def _check_cancellation(config: dict):
     """
     检查任务是否被取消，如果被取消则抛出异常
@@ -271,6 +285,9 @@ def _update_node_progress(node_name: str, config: dict, completed: bool = True):
         config: graph 配置字典，包含 task_id
         completed: 节点是否已完成
     """
+    if node_name not in TRACKED_PROGRESS_NODES:
+        return
+
     if config and "configurable" in config:
         task_id = config["configurable"].get("task_id")
         if task_id:
@@ -370,6 +387,14 @@ class BaseGraph(ABC):
             Type[TypedDict]: State 类型
         """
         raise NotImplementedError("子类必须实现 get_state_class() 方法")
+
+    def estimate_total_nodes(self, initial_state: dict) -> int:
+        """
+        估算任务总节点数（用于前端进度条）。
+
+        子类可按流程分支覆写，默认回退到配置值。
+        """
+        return max(1, int(settings.TASK_TOTAL_NODES))
     
     def compile(self):
         """
@@ -458,7 +483,7 @@ class StandardTenderWorkflowGraph(BaseGraph):
     def estimate_total_nodes(self, initial_state: dict) -> int:
         origin_tender_path = initial_state.get("origin_tender_path")
         has_origin_for_comments = bool(origin_tender_path and str(origin_tender_path).strip())
-        return 13 if has_origin_for_comments else 10
+        return 10 if has_origin_for_comments else 7
 
     def build_graph(self) -> StateGraph:
         state_cls = self.STATE_CLS
@@ -703,6 +728,13 @@ async def invoke_with_timing_async(
             # 标记任务开始
             if task_id:
                 queue.start_task(task_id)
+                queue.register_running_async_context(
+                    task_id,
+                    asyncio.get_running_loop(),
+                    asyncio.current_task(),
+                )
+                if queue.is_task_cancelled(task_id):
+                    raise TaskCancelledException(f"任务 {task_id} 已被用户取消")
             
             begin_ts = time.time()
             error_msg = None
@@ -717,7 +749,22 @@ async def invoke_with_timing_async(
                 
                 # 标记任务完成（这会自动通知下一个等待的任务）
                 if task_id:
-                    queue.complete_task(task_id, result=None if error_msg else "success", error=error_msg)
+                    queue.clear_running_async_context(task_id)
+                    task_result = None
+                    if error_msg is None:
+                        try:
+                            if isinstance(result, dict):
+                                prepared = result.get("prepared_doc_path") or result.get("output_file")
+                                if prepared:
+                                    task_result = str(prepared)
+                        except Exception:
+                            task_result = None
+
+                    queue.complete_task(
+                        task_id,
+                        result=(task_result or "success") if error_msg is None else None,
+                        error=error_msg,
+                    )
             
             if verbose:
                 progress_log.info("=" * 60)

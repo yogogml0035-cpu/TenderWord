@@ -1,26 +1,48 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useChatStore } from '@/stores/chatStore';
+import { useChatStreamStore } from '@/stores/chatStreamStore';
+import { useHydrated } from '@/hooks/useHydrated';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { downloadFile } from '@/lib/api';
+import { isDualColumnContent, type Message } from '@/types/chat';
 
 interface ChatPanelProps {
   className?: string;
 }
 
 export function ChatPanel({ className = '' }: ChatPanelProps) {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
   const { getCurrentConversation, addMessage, hasActiveTasks } = useChatStore();
-
-  // Fix hydration: wait for client mount before accessing persisted store
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const streams = useChatStreamStore((state) => state.streams);
 
   const conversation = getCurrentConversation();
   const messages = conversation?.messages || [];
+  const mergedMessages: Message[] = messages.map((message) => {
+    if (!message.taskId) {
+      return message;
+    }
+
+    const stream = streams[message.taskId];
+    if (!stream || !isDualColumnContent(message.content)) {
+      return message;
+    }
+
+    return {
+      ...message,
+      content: stream.content,
+      metadata: {
+        ...(message.metadata || {}),
+        progressPercent: stream.progressPercent,
+        progressText: stream.progressText,
+        currentNode: stream.currentNode,
+        currentNodeDisplay: stream.currentNodeDisplay,
+        lastEventId: stream.lastEventId,
+      },
+    };
+  });
   const isLoading = hasActiveTasks();
 
   const handleSendMessage = (content: string) => {
@@ -146,13 +168,17 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           </p>
         </div>
         <div className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-400">
-          {messages.length} 条消息
+          {mergedMessages.length} 条消息
         </div>
       </div>
 
       {/* Message List */}
       <div className="flex-1 overflow-hidden">
-        <MessageList messages={messages} onDownload={handleDownload} onRetry={handleRetry} />
+        <MessageList
+          messages={mergedMessages}
+          onDownload={handleDownload}
+          onRetry={handleRetry}
+        />
       </div>
 
       {/* Input */}

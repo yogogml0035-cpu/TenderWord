@@ -25,6 +25,7 @@ from typing import Dict, List, Tuple, Any, Optional
 
 from backend.states import TenderGraphStateBase
 from backend.config.tender_config import TARGET_SIZES
+from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
     create_word_application,
     close_word_application,
@@ -37,6 +38,11 @@ from backend.util.word_util import (
 )
 from backend.util.word_util.anchor_utils import find_anchor_range
 
+NODE_NAME = "extract_tender_params"
+
+
+def _visible_log(message: str) -> None:
+    progress_log.info(f"[{NODE_NAME}] {message}")
 
 
 def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
@@ -59,6 +65,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
     """
     start_time = time.time()
     print(f"[extract_tender_params] 开始执行...")
+    _visible_log("开始提取原始采购需求")
 
     # 获取输入参数
     clean_draft_path = state.get("clean_draft_path")
@@ -111,6 +118,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
 
     try:
         # 使用统一的工具函数创建 Word 应用程序
+        _visible_log("开始打开采购需求文档")
         wps, com_initialized = create_word_application(
             initial_delay=0.5,
             post_init_delay=0.5,
@@ -126,6 +134,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
             read_only=True,
             node_name="extract_tender_params",
         )
+        _visible_log("文档打开完成，准备定位采购需求锚点")
 
         # 使用统一的工具函数取消文档保护
         unprotect_document(doc, node_name="extract_tender_params")
@@ -134,6 +143,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
         print(f"[extract_tender_params] 正在查找锚点...")
         print(f"  前置文本: '{before_text}'")
         print(f"  后置文本: '{after_text}'")
+        _visible_log("开始查找采购需求前后锚点")
 
         before_hit, after_hit = find_anchor_range(
             doc=doc,
@@ -146,9 +156,11 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
 
         if not before_hit:
             print(f"[extract_tender_params] 警告: 未找到前置文本 '{before_text}'")
+            _visible_log(f"未找到前置锚点: {before_text}")
             extracted_content = ""
         elif not after_hit:
             print(f"[extract_tender_params] 警告: 未找到后置文本 '{after_text}'")
+            _visible_log(f"未找到后置锚点: {after_text}")
             extracted_content = ""
         else:
             before_page = before_hit["page"]
@@ -167,6 +179,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
                 print(
                     f"[extract_tender_params] 错误: 后置文本页码 ({after_page}) 小于等于前置文本页码 ({before_page})"
                 )
+                _visible_log("锚点页码异常，无法提取采购需求")
                 extracted_content = ""
             else:
                 # 将 before_end_pos 对齐到下一页起始
@@ -185,6 +198,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
                     )
 
                 # 提取两个锚点之间的内容
+                _visible_log(f"锚点定位完成，开始提取第 {before_page + 1} 至 {after_page - 1} 页内容")
                 between_rng = doc.Range(before_end_pos, after_start_pos)
                 extracted_content = extract_content_with_tables(between_rng)
 
@@ -204,10 +218,20 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
                 start_page = before_page + 1
                 end_page = after_page - 1
                 print(f"[extract_tender_params] 页码范围: {start_page} - {end_page}")
+                _visible_log(
+                    f"原始采购需求提取完成，页码范围 {start_page}-{end_page}，非空白字符 {non_whitespace_chars}"
+                )
 
     except Exception as e:
+        from backend.graphs.base_graph import TaskCancelledException
+
+        if isinstance(e, TaskCancelledException):
+            progress_log.warning(f"[{NODE_NAME}] 任务已取消")
+            raise
+
         error_msg = f"提取内容时发生错误: {e}"
         print(f"[extract_tender_params] {error_msg}")
+        progress_log.error(f"[{NODE_NAME}] {error_msg}")
         import traceback
 
         traceback.print_exc()
@@ -215,6 +239,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
 
     finally:
         print("[extract_tender_params] 开始清理资源...")
+        _visible_log("开始清理 Word 资源")
         close_word_application(
             word_app=wps,
             doc=doc,
@@ -222,6 +247,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
             wait_time=1.0,
             node_name="extract_tender_params",
         )
+        _visible_log("Word 资源清理完成")
 
     # 构建更新字典
     updates: Dict[str, Any] = {
@@ -241,6 +267,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
 
     if tender_param_paths:
         print(f"[extract_tender_params] 检测到技术参数文件，开始提取...")
+        _visible_log(f"开始提取 {len(tender_param_paths)} 份技术参数文件")
         tender_params_parts: List[str] = []
 
         for tender_param_file_path in tender_param_paths:
@@ -257,6 +284,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
             print(
                 f"[extract_tender_params] 从文件提取完成: {file_path_obj.name}，长度: {len(file_text)}"
             )
+            _visible_log(f"技术参数文件提取完成: {file_path_obj.name}")
             tender_params_parts.append(file_text)
 
         tender_params = "\n\n".join([p for p in tender_params_parts if p]).strip()
@@ -265,6 +293,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"[extract_tender_params] 执行完成，耗时: {elapsed_time:.2f} 秒")
+    _visible_log(f"节点执行完成，耗时 {elapsed_time:.2f} 秒")
 
     # 返回 TypedDict 实例
     return TenderGraphStateBase(**updates)

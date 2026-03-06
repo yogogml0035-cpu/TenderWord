@@ -133,14 +133,6 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 ```powershell
 cd frontend
-
-# 安装依赖（开发可用 npm install；服务器/CI 推荐 npm ci）
-npm install
-
-# 配置环境变量
-copy .env.example .env.local
-# 编辑 .env.local 文件
-
 # 启动方式二选一：
 #
 # 方式1：开发模式（热更新，适合本地开发/联调）

@@ -10,12 +10,12 @@ import type {
   UploadedFile,
   MultipleUploadResult,
   TaskData,
+  TaskHeartbeatData,
   TaskListData,
   CancelTaskData,
   CreateTaskData,
   GenerateRequest,
   ApiSuccessResponse,
-  ApiErrorResponse,
   FileType,
   TaskStatus,
 } from '@/types/api';
@@ -45,21 +45,41 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     ...options,
   };
 
-  const response = await fetch(url, config);
-
-  const data = await response.json();
-
-  if (!response.ok || data.success === false) {
-    const errorData = data as ApiErrorResponse;
+  let response: Response;
+  try {
+    response = await fetch(url, config);
+  } catch {
     throw new ApiError(
-      errorData.error?.message || `HTTP error! status: ${response.status}`,
-      errorData.error?.code || 'UNKNOWN_ERROR',
+      `Network request failed: ${endpoint}. Please check backend availability and CORS configuration.`,
+      'NETWORK_ERROR',
+      0
+    );
+  }
+
+  const data: unknown = await response.json();
+  const payload = (data ?? {}) as Record<string, unknown>;
+  const nestedDetail = (payload.detail ?? {}) as Record<string, unknown>;
+  const errorObj =
+    (payload.error as Record<string, unknown> | undefined) ||
+    (nestedDetail.error as Record<string, unknown> | undefined);
+  const isExplicitFailure = payload.success === false || nestedDetail.success === false;
+
+  if (!response.ok || isExplicitFailure) {
+    throw new ApiError(
+      (errorObj?.message as string) || `HTTP error! status: ${response.status}`,
+      (errorObj?.code as string) || 'UNKNOWN_ERROR',
       response.status
     );
   }
 
-  const successData = data as ApiSuccessResponse<T>;
-  return successData.data;
+  // Prefer wrapped success payload: { success: true, data: ... }
+  if ('data' in payload) {
+    const successData = data as ApiSuccessResponse<T>;
+    return successData.data;
+  }
+
+  // Compatibility with legacy/flat endpoints that return business fields directly.
+  return data as T;
 }
 
 /**
@@ -168,8 +188,27 @@ export async function getTaskStatus(taskId: string): Promise<TaskData> {
 }
 
 export async function cancelTask(taskId: string): Promise<CancelTaskData> {
-  return request<CancelTaskData>(`/api/tasks/${encodeURIComponent(taskId)}`, {
-    method: 'DELETE',
+  try {
+    return await request<CancelTaskData>(`/api/tasks/${encodeURIComponent(taskId)}`, {
+      method: 'DELETE',
+    });
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'TASK_CANNOT_CANCEL') {
+      return {
+        success: true,
+        task_id: taskId,
+        message: '任务已结束，无需取消',
+        was_running: false,
+        noop: true,
+      };
+    }
+    throw error;
+  }
+}
+
+export async function sendTaskHeartbeat(taskId: string): Promise<TaskHeartbeatData> {
+  return request<TaskHeartbeatData>(`/api/tasks/${encodeURIComponent(taskId)}/heartbeat`, {
+    method: 'POST',
   });
 }
 

@@ -17,6 +17,7 @@ import {
   getConversationDisplayTitle,
   truncateText,
   generateConversationTitle,
+  inferTenderNoFromConversationTitle,
 } from '@/lib/chat-utils';
 import { ConversationFactory, MessageFactory } from '../mocks/data-factories';
 
@@ -299,62 +300,48 @@ describe('chat-utils', () => {
   });
 
   describe('generateConversationTitle', () => {
-    it('should generate title with correct format', () => {
+    it('should use tender number as title directly', () => {
       const tenderNo = 'ZBGG-2024-001';
       const title = generateConversationTitle(tenderNo);
 
-      // Format: {tenderNo}_{YYYYMMDDhhmm}
-      expect(title).toMatch(/^ZBGG-2024-001_\d{12}$/);
+      expect(title).toBe('ZBGG-2024-001');
     });
 
     it('should include tender number in title', () => {
       const tenderNo = 'TEST-2024-123';
       const title = generateConversationTitle(tenderNo);
 
-      expect(title.startsWith('TEST-2024-123_')).toBe(true);
+      expect(title).toBe('TEST-2024-123');
     });
 
-    it('should generate timestamp with 12 digits', () => {
-      const tenderNo = 'XJCG-001';
-      const title = generateConversationTitle(tenderNo);
-
-      const parts = title.split('_');
-      expect(parts).toHaveLength(2);
-      expect(parts[1]).toMatch(/^\d{12}$/);
-    });
-
-    it('should generate different titles at different times', () => {
-      // Mock Date to return specific times
-      const mockDate1 = new Date('2024-03-15T10:30:00');
-      const mockDate2 = new Date('2024-03-15T10:31:00');
-
-      const originalDate = global.Date;
-      let dateCallCount = 0;
-      global.Date = jest.fn(() => {
-        dateCallCount++;
-        return dateCallCount === 1 ? mockDate1 : mockDate2;
-      }) as unknown as typeof Date;
-      Object.setPrototypeOf(global.Date, originalDate);
-
+    it('should generate same title at different times', () => {
       const tenderNo = 'SAME-NO';
       const title1 = generateConversationTitle(tenderNo);
       const title2 = generateConversationTitle(tenderNo);
 
-      // Restore Date
-      global.Date = originalDate;
-
-      // Titles should be different due to different timestamps
-      expect(title1).toBe('SAME-NO_202403151030');
-      expect(title2).toBe('SAME-NO_202403151031');
-      expect(title1).not.toBe(title2);
+      expect(title1).toBe('SAME-NO');
+      expect(title2).toBe('SAME-NO');
+      expect(title1).toBe(title2);
     });
 
     it('should handle tender numbers with special characters', () => {
       const tenderNo = 'TEST_NO-2024.001';
       const title = generateConversationTitle(tenderNo);
 
-      expect(title.startsWith('TEST_NO-2024.001_')).toBe(true);
-      expect(title).toMatch(/^TEST_NO-2024\.001_\d{12}$/);
+      expect(title).toBe('TEST_NO-2024.001');
+    });
+  });
+
+  describe('inferTenderNoFromConversationTitle', () => {
+    it('should return tender number when title looks valid', () => {
+      expect(inferTenderNoFromConversationTitle('0811-DSITC253505')).toBe('0811-DSITC253505');
+      expect(inferTenderNoFromConversationTitle('ZBGG-2024-001')).toBe('ZBGG-2024-001');
+    });
+
+    it('should return null for custom labels', () => {
+      expect(inferTenderNoFromConversationTitle('我的询价项目')).toBeNull();
+      expect(inferTenderNoFromConversationTitle('test conversation')).toBeNull();
+      expect(inferTenderNoFromConversationTitle('NO_DIGITS')).toBeNull();
     });
   });
 });

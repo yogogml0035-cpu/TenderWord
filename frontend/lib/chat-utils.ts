@@ -244,18 +244,29 @@ export function truncateText(text: string, maxLength: number): string {
 
 /**
  * Generate conversation title from tender number
- * Format: {tenderNo}_{YYYYMMDDhhmm}
+ * Format: {tenderNo}
  * @param tenderNo - Tender number string
- * @returns Formatted conversation title
+ * @returns Conversation title
  */
 export function generateConversationTitle(tenderNo: string): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  
-  const timestamp = `${year}${month}${day}${hours}${minutes}`;
-  return `${tenderNo}_${timestamp}`;
+  return tenderNo;
+}
+
+/**
+ * Infer tender number from conversation title.
+ * Returns null when title looks like a custom label rather than a tender number.
+ */
+export function inferTenderNoFromConversationTitle(title: string): string | null {
+  const candidate = title.trim();
+  if (!candidate) return null;
+
+  // Skip human labels such as "测试会话 1" or Chinese titles.
+  if (/[\u4e00-\u9fff]/.test(candidate)) return null;
+  if (/\s/.test(candidate)) return null;
+  if (!/[0-9]/.test(candidate)) return null;
+
+  // Allow common tender no characters: letters, numbers, hyphen, underscore, dot.
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/.test(candidate)) return null;
+
+  return candidate;
 }

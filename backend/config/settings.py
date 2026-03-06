@@ -5,10 +5,18 @@
 """
 
 from functools import lru_cache
+from pathlib import Path
 from typing import List, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ENV_FILES = (
+    PROJECT_ROOT / ".env",
+    Path(__file__).resolve().parents[1] / ".env",
+)
 
 
 class Settings(BaseSettings):
@@ -19,7 +27,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=[str(p) for p in ENV_FILES],
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",  # 忽略未定义的额外环境变量
@@ -181,7 +189,7 @@ class Settings(BaseSettings):
     # 任务队列配置
     # ========================================
     TASK_TOTAL_NODES: int = Field(default=7, description="任务总节点数，用于进度计算")
-    TASK_HEARTBEAT_TIMEOUT: int = Field(default=10, description="任务心跳超时（秒）")
+    TASK_HEARTBEAT_TIMEOUT: int = Field(default=30, description="任务心跳超时（秒）")
     TASK_CLEANUP_INTERVAL: int = Field(default=5, description="任务清理间隔（秒）")
 
     @property

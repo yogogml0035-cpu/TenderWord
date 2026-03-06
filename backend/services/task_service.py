@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from backend.models.task import (
     TaskCancelResponse,
+    TaskHeartbeatResponse,
     TaskInfo,
     TaskListResponse,
     TaskProgress,
@@ -98,6 +99,20 @@ class TaskService:
                 message=f"无法取消{status_text}的任务",
                 was_running=was_running,
             )
+
+    def heartbeat_task(self, task_id: str) -> Optional[TaskHeartbeatResponse]:
+        """更新任务心跳."""
+        internal_task = self._task_queue.get_task(task_id)
+        if not internal_task:
+            return None
+
+        alive = self._task_queue.update_heartbeat(task_id)
+        return TaskHeartbeatResponse(
+            success=True,
+            task_id=task_id,
+            alive=alive,
+            status=self._convert_status(internal_task.status),
+        )
 
     def list_tasks(
         self,

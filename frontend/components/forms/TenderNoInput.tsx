@@ -27,7 +27,7 @@ export function TenderNoInput({
   onChange,
   onDataFetched,
   label = '招标编号',
-  placeholder = '请输入招标编号，如：ZBGG-2024-001',
+  placeholder = '请输入招标编号，如：0811-DSITC26xxxx',
   required = false,
   disabled = false,
   className,
@@ -35,7 +35,6 @@ export function TenderNoInput({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [fetchedData, setFetchedData] = useState<TenderData | null>(null);
 
   const handleFetchData = useCallback(async () => {
     if (!value.trim()) {
@@ -50,7 +49,6 @@ export function TenderNoInput({
     try {
       const data = await apiFetchTenderData(value.trim());
 
-      setFetchedData(data);
       setSuccess(true);
 
       // Update conversation title when data fetch succeeds
@@ -69,7 +67,6 @@ export function TenderNoInput({
             ? err.message
             : '获取招标数据失败';
       setError(errorMessage);
-      setFetchedData(null);
     } finally {
       setIsLoading(false);
     }
@@ -142,12 +139,6 @@ export function TenderNoInput({
         </p>
       )}
 
-      {success && fetchedData && (
-        <div className="rounded-md border border-green-200 bg-green-50 p-3">
-          <p className="text-sm font-medium text-green-800">{fetchedData.project_name}</p>
-          <p className="mt-1 text-xs text-green-600">采购人：{fetchedData.buyer_name}</p>
-        </div>
-      )}
     </div>
   );
 }

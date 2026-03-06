@@ -201,8 +201,8 @@ describe('GngkTenderForm', () => {
       const beforeInput = inputs.find((input) => input.getAttribute('value')?.includes('第三章'));
       const afterInput = inputs.find((input) => input.getAttribute('value')?.includes('第四章'));
 
-      expect(beforeInput).toHaveValue('第三章  采购需求');
-      expect(afterInput).toHaveValue('第四章  投标文件有关格式');
+      expect(beforeInput).toHaveValue('第三章 采购需求');
+      expect(afterInput).toHaveValue('第四章 投标文件有关格式');
     });
 
     it('should allow changing insertion config values', async () => {
@@ -247,7 +247,7 @@ describe('GngkTenderForm', () => {
         expect(screen.getByText('测试项目')).toBeInTheDocument();
         expect(screen.getByText('测试采购人')).toBeInTheDocument();
         expect(screen.getByText('张三')).toBeInTheDocument();
-        expect(screen.getByText('2024-12-31')).toBeInTheDocument();
+        expect(screen.getAllByText('2024-12-31').length).toBeGreaterThan(0);
       });
     });
 
@@ -263,7 +263,7 @@ describe('GngkTenderForm', () => {
       expect(screen.getByText('测试国内公开招标项目')).toBeInTheDocument();
       expect(screen.getByText('测试采购单位')).toBeInTheDocument();
       expect(screen.getByText('李四')).toBeInTheDocument();
-      expect(screen.getByText('2024-12-31')).toBeInTheDocument();
+      expect(screen.getAllByText('2024-12-31').length).toBeGreaterThan(0);
     });
   });
 
@@ -457,8 +457,8 @@ describe('GngkTenderForm', () => {
 
       const submittedData = mockOnSubmit.mock.calls[0][0] as GngkTenderFormData;
       expect(submittedData.insertion_config).toEqual({
-        before_text: '第三章  采购需求',
-        after_text: '第四章  投标文件有关格式',
+        before_text: '第三章 采购需求',
+        after_text: '第四章 投标文件有关格式',
       });
     });
 

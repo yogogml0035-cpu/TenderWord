@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { TenderNoInput, type TenderData } from './TenderNoInput';
 import { ModelSelector, type ModelType } from './ModelSelector';
@@ -47,6 +47,14 @@ export function XjcgTenderForm({
     after_text: '第四章  响应文件有关格式',
   });
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setTenderNo(initialTenderNo || '');
+  }, [initialTenderNo]);
+
+  useEffect(() => {
+    setTenderData(initialTenderData || null);
+  }, [initialTenderData]);
 
   const handleTenderDataFetched = useCallback((data: TenderData) => {
     setTenderData(data);
@@ -101,9 +109,18 @@ export function XjcgTenderForm({
   const tenderInfoItems: TenderInfoItem[] = tenderData
     ? [
         { label: '项目名称', value: tenderData.project_name, key: 'project_name' },
+        { label: '项目编号', value: tenderData.project_number, key: 'project_number' },
+        { label: '项目内容', value: tenderData.project_content, key: 'project_content' },
+        { label: '保证金规则', value: tenderData.bzj_rule, key: 'bzj_rule' },
         { label: '采购人', value: tenderData.buyer_name, key: 'buyer_name' },
-        { label: '负责人', value: tenderData.project_zbr_xbr, key: 'project_zbr_xbr' },
-        { label: '投标截止', value: tenderData.submit_date, key: 'submit_date' },
+        { label: '主办人/协办人', value: tenderData.project_zbr_xbr, key: 'project_zbr_xbr' },
+        { label: '主办人/协办人电话', value: tenderData.zbr_xbr_tel, key: 'zbr_xbr_tel' },
+        { label: '主办人拼音', value: tenderData.zbr_pinyin, key: 'zbr_pinyin' },
+        { label: '售标开始时间', value: tenderData.shell_start_date, key: 'shell_start_date' },
+        { label: '售标结束时间', value: tenderData.shell_end_date, key: 'shell_end_date' },
+        { label: '递交文件截止时间', value: tenderData.submit_date, key: 'submit_date' },
+        { label: '发布平台', value: tenderData.platform, key: 'platform' },
+        { label: '服务费', value: tenderData.service_fee, key: 'service_fee' },
       ]
     : [];
 

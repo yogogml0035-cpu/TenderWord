@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sys
+import asyncio
 from datetime import datetime
 from typing import Any, Dict
 
@@ -124,10 +125,12 @@ def setup_logging() -> None:
 
     # 第三方库日志级别调整
     logging.getLogger("uvicorn").setLevel(logging.INFO)
-    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("fastapi").setLevel(logging.INFO)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("backend.api.stream").setLevel(logging.INFO)
+    logging.getLogger("backend.core.sse_manager").setLevel(logging.INFO)
 
 
 # ========================================
@@ -195,9 +198,13 @@ async def startup_event() -> None:
     # 启动执行日志监听器
     start_execution_log_listener()
 
+    # 绑定主事件循环，供后台线程安全推送 SSE 事件
+    sse_manager.bind_loop(asyncio.get_running_loop())
+
     # 初始化 SSE 日志 handler 并添加到 progress_log
     sse_handler = init_sse_log_handler(sse_manager)
-    progress_log.addHandler(sse_handler)
+    if sse_handler not in progress_log.handlers:
+        progress_log.addHandler(sse_handler)
     # 清理过期日志文件（保持总大小在 200MB 以下）
     try:
         deleted_count = cleanup_logs("backend/logs", max_total_mb=200)

@@ -1,351 +1,193 @@
-# PROJECT KNOWLEDGE BASE
+# TenderWord Agent Operating Guide (AGENTS.md)
 
-**Generated:** 2026-03-03
-**Commit:** 998002b
-**Branch:** feat-wsq-h
+本文件用于给各类代码智能体提供统一的“项目记忆”和执行规范：它应当简短、强约束、可操作，覆盖高频工作流与项目特有陷阱；低频细节放在代码与局部文档中，由智能体按需检索。
 
-## OVERVIEW
+## 1) Agent 职责与行为规范
 
-TenderWord - 招标文档智能处理系统。基于 **Next.js 16 + FastAPI + LangGraph** 的前后端分离架构，支持多种招标类型文档的智能生成。依赖 Windows Word COM 进行文档处理。
+### 角色边界
+- 智能体是“结对资深工程师”：负责分析、实现、验证与回归，默认交付可合并的改动。
+- 智能体不应做“产品决策者”：需求不明确时，先给出最合理默认并声明假设，避免无休止追问。
+- 智能体不应做“运维执行者”：不得外泄密钥、不得提交/推送代码，除非用户明确要求。
 
-### 核心特性
-- **LangGraph 工作流引擎**：支持询价采购(XJCG)和国内公开(GNGK)两种招标类型
-- **实时日志流**：通过 SSE 推送任务进度和 LLM 生成内容
-- **并发控制**：跨进程文件锁 + 公平任务队列确保 Word COM 操作安全
-- **多模型支持**：DeepSeek、Qwen(DashScope)、Doubao(ARK)
+### 工作原则
+- 最小改动：优先局部修改，避免无谓重构与跨目录搬迁。
+- 遵循现有约定：先读同目录/同模块代码的既有写法，再动手。
+- 以验证为前置：改完必须跑对应的 lint/typecheck/tests（能跑则跑，跑不了要说明原因与替代验证）。
+- 失败可诊断：遇到错误要输出可复现信息（命令、关键日志、错误码），并给出下一步定位路径。
 
-## STRUCTURE
+### 安全与合规
+- 绝不打印或记录敏感信息（环境变量、token、私钥、客户数据）。
+- 不新增重量级依赖；如必须新增依赖，需明确理由、影响面与替代方案。
+- 文件/目录删除属于高风险操作，除非用户明确要求或能严格证明是无引用的冗余。
 
+## 2) 标准化指令模板与交互协议
+
+### 用户请求模板（推荐）
+#### A. 修复缺陷
+- 目标：一句话描述 bug
+- 复现：步骤 + 期望/实际
+- 影响范围：页面/接口/任务流
+- 验证：希望跑哪些测试或手工路径
+
+#### B. 新增功能
+- 目标：要新增什么能力
+- 约束：性能/兼容/不改动的模块
+- 交互：UI/接口/数据格式
+- 验证：验收用例
+
+#### C. 重构/优化
+- 目标：为什么要改（可维护性/性能/可靠性）
+- 边界：允许改哪些目录/文件
+- 风险：要避免的回归
+- 验证：需要通过的检查项
+
+### 智能体输出协议（固定）
+- 变更摘要：列出改动点与影响面
+- 关键引用：给出关键文件路径与定位点
+- 验证结果：列出已执行命令与结果
+- 风险与回滚：说明可能回归点与回滚方式
+
+## 3) 项目特定上下文约束与决策边界
+
+### 项目定位
+TenderWord：招标文档智能处理系统，前后端分离。
+- 前端：Next.js 16 / React 19 / Tailwind 4 / Zustand
+- 后端：FastAPI / LangGraph
+- 关键约束：依赖 Windows Word COM，不能在 Linux/macOS 上完整运行
+
+### 核心架构与“不可破坏”约束
+- Word COM 操作必须串行并受双层锁保护：公平队列锁 + 跨进程文件锁
+  - 队列管理：[task_queue_manager.py](file:///d:/CompanyProject/TenderWord-feat-h/backend/task/task_queue_manager.py)
+  - 跨进程锁与节点包装：[base_graph.py](file:///d:/CompanyProject/TenderWord-feat-h/backend/graphs/base_graph.py)
+- 后端日志分层不可混用
+  - 进度日志（推送前端）：[progress_log.py](file:///d:/CompanyProject/TenderWord-feat-h/backend/util/log_util/progress_log.py)
+  - 执行日志（本地调试）：[execution_log.py](file:///d:/CompanyProject/TenderWord-feat-h/backend/util/log_util/execution_log.py)
+  - SSE 推送 handler：[sse_log_handler.py](file:///d:/CompanyProject/TenderWord-feat-h/backend/util/log_util/sse_log_handler.py)
+
+### 变更决策边界
+- API 形状变更：必须同步更新前端类型与调用封装
+  - 前端 API 客户端：[api.ts](file:///d:/CompanyProject/TenderWord-feat-h/frontend/lib/api.ts)
+  - 前端 API 类型：[types/api.ts](file:///d:/CompanyProject/TenderWord-feat-h/frontend/types/api.ts)
+- 新增招标类型：必须同时提供 Graph + State +（如需）特有节点
+  - Graph：[backend/graphs/](file:///d:/CompanyProject/TenderWord-feat-h/backend/graphs/)
+  - State：[backend/states/](file:///d:/CompanyProject/TenderWord-feat-h/backend/states/)
+  - Nodes：[backend/nodes/](file:///d:/CompanyProject/TenderWord-feat-h/backend/nodes/)
+- 文档/契约来源
+  - API 契约：[API_CONTRACT.md](file:///d:/CompanyProject/TenderWord-feat-h/docs/API_CONTRACT.md)
+  - 后端真实路由：以 [backend/api/](file:///d:/CompanyProject/TenderWord-feat-h/backend/api/) 为准
+
+## 4) 错误处理策略（端到端）
+
+### 统一目标
+- 前端能展示：用户可理解的信息 + 可用于排障的错误码/状态码
+- 后端能定位：带 task_id / node / 时长 / 栈信息的日志
+- SSE 不崩：任务失败也要发送 error/done 事件，前端可收敛为可读状态
+
+### 前端（Next.js）
+- 所有网络调用走 [api.ts](file:///d:/CompanyProject/TenderWord-feat-h/frontend/lib/api.ts) 的 request 封装，不直接 fetch
+- 错误对象使用 ApiError（message/code/status），UI 层显示 message 并保留 code
+- 解析兼容策略：优先识别 `{ success: true, data: ... }`，兼容历史“扁平返回”
+
+### 后端（FastAPI）
+- 对外错误响应使用稳定结构（错误码 + 可读信息 + 可选 details）
+- 不吞异常：捕获后记录 execution_log，再返回对外错误码；涉及任务流程的错误需记录 progress_log
+- LLM/Word COM 失败要分层归因：输入参数、文件、模型调用、Word 环境
+
+### 推荐排障路径
+- 前端报错：优先看 network response + ApiError.code/status
+- 后端任务异常：先看 `backend/logs/progress-YYYYMMDD.log`（用户态），再看 `execution-YYYYMMDD.log`（栈）
+- 生成流程异常：从任务 SSE 日志定位 node，再跳到对应节点实现
+
+## 5) 可扩展的插件接口定义（面向智能体与工程扩展）
+
+本项目将“可扩展能力”分为三类：上下文插件、命令插件、运行期插件。实现时优先新增小文件/小模块，避免修改核心链路。
+
+### A. 上下文插件（Context Packs）
+- 形式：Markdown/代码片段，提供局部知识（例如某招标类型的规则、某接口边界）
+- 位置建议：`assert/` 或对应模块目录下
+- 使用约定：智能体只有在相关任务出现时才读取，不把大段文档全量注入会话
+
+### B. 命令插件（Command Packs）
+- 形式：脚本/批处理/可复用命令入口（缩短验证链路）
+- 位置建议：`backend/scripts/`、`frontend/package.json scripts`
+- 约定：命令应可在 Windows PowerShell 下运行；输出应包含失败原因与下一步建议
+
+### C. 运行期插件（Runtime Extensions）
+- 后端：新增 LangGraph 节点/子图、或增强 SSE 事件类型（需同步前端 types）
+- 前端：新增 hooks/store slices/表单组件，遵循既有目录约定
+
+## 6) 性能监控与日志规范
+
+### 指标口径（必须统一）
+- 任务：排队耗时、执行总耗时、各 node 耗时、失败率、取消率
+- SSE：连接数、断线重连次数、平均事件间隔、丢事件/解析失败
+- Word COM：启动/打开/保存耗时，锁等待时长
+
+### 日志字段（建议保持稳定）
+- task_id：所有与任务相关的日志必须带
+- node：节点名（与前端 NodeDisplayNames/进度面板一致）
+- elapsed_ms：耗时统一用毫秒
+- error_code：对外错误码（可与前端 ErrorCodes 对齐）
+
+### 日志等级与渠道
+- progress_log：面向用户的进度与可读信息，避免堆栈噪音
+- execution_log：面向排障的细节（异常栈、关键参数的“脱敏摘要”）
+
+## 项目地图（快速定位）
+
+### 目录结构（高频）
 ```
-feat-wsq-h/
-├── frontend/              # Next.js 16 前端 (React 19 + Tailwind 4)
-│   ├── app/               # App Router
-│   ├── components/
-│   │   ├── forms/         # 表单组件 (XjcgTenderForm, GngkTenderForm)
-│   │   └── layout/        # 布局组件 (Header, Sidebar, MainLayout)
-│   ├── stores/            # Zustand 状态管理
-│   ├── hooks/             # React Hooks (useSSE)
-│   └── types/             # TypeScript 类型定义
-│
-├── backend/               # FastAPI 后端 (LangGraph 工作流引擎)
-│   ├── api/               # API 路由
-│   │   ├── upload.py      # 文件上传
-│   │   ├── tender.py      # 招标数据获取
-│   │   ├── generate.py    # 文档生成
-│   │   ├── tasks.py       # 任务管理
-│   │   ├── stream.py      # SSE 流式输出
-│   │   └── download.py    # 文件下载
-│   │
-│   ├── graphs/            # LangGraph 工作流
-│   │   ├── base_graph.py  # BaseGraph 基类 + CrossProcessFileLock
-│   │   ├── xjcg_tender_graph.py  # 询价采购工作流
-│   │   └── gngk_tender_graph.py  # 国内公开工作流
-│   │
-│   ├── nodes/             # Graph 节点
-│   │   ├── common_word_nodes/    # 通用节点 (10个)
-│   │   │   ├── prepare_template.py
-│   │   │   ├── extract_tender_params.py
-│   │   │   ├── delete_tender_param.py
-│   │   │   ├── get_comments.py
-│   │   │   ├── copy_comments.py
-│   │   │   ├── generate_polished_text.py
-│   │   │   ├── generate_comments.py
-│   │   │   ├── get_replacements_core.py
-│   │   │   ├── replace_content.py
-│   │   │   └── update_word.py
-│   │   ├── xjcg_word_nodes/      # 询价采购特有节点
-│   │   └── gngk_word_nodes/      # 国内公开特有节点
-│   │
-│   ├── states/            # TypedDict 状态定义
-│   │   ├── base_state.py           # BaseState + TenderGraphStateBase
-│   │   ├── xjcg_tender_state.py
-│   │   └── gngk_tender_state.py
-│   │
-│   ├── util/              # 共享工具库 (重构后统一位置)
-│   │   ├── word_util/     # Word COM 操作
-│   │   │   ├── word_com_manager.py
-│   │   │   ├── word_application_util.py
-│   │   │   ├── word_extraction_utils.py
-│   │   │   ├── word_document_inspector.py
-│   │   │   ├── word_diagnostics.py
-│   │   │   ├── anchor_utils.py
-│   │   │   └── word_constants.py
-│   │   ├── common_util/   # 通用工具
-│   │   │   ├── llm_stream_utils.py
-│   │   │   └── fetch_tender_data.py
-│   │   └── log_util/      # 日志系统
-│   │       ├── progress_log.py      # 进度日志 (QueueHandler)
-│   │       ├── execution_log.py     # 执行日志
-│   │       ├── sse_log_handler.py   # SSE 日志推送
-│   │       └── log_cleanup.py       # 日志清理
-│   │
-│   ├── task/              # 任务队列管理
-│   │   └── task_queue_manager.py    # 公平锁 + 任务队列
-│   │
-│   ├── core/              # 核心组件
-│   │   └── sse_manager.py           # SSE 连接管理
-│   │
-│   ├── config/            # 配置
-│   │   ├── settings.py              # Pydantic Settings
-│   │   └── tender_config.py         # 招标类型配置
-│   │
-│   ├── models/            # Pydantic 模型
-│   ├── services/          # 业务逻辑
-│   └── main.py            # 应用入口 (create_application)
-│
-├── docs/                  # 部署文档
-│   ├── deployment.md
-│   └── API_CONTRACT.md
-│
-├── assert/                # 项目文档
-│   └── gngk_xjcg_graph_postmortem.md
-│
-└── .env                   # 环境变量配置
-```
-
-## WHERE TO LOOK
-
-| 任务 | 位置 | 说明 |
-|------|------|------|
-| **添加新招标类型** | `backend/graphs/`, `backend/nodes/`, `backend/states/` | 创建新 Graph + 节点 + State |
-| **修改 API 端点** | `backend/api/*.py` | FastAPI 路由 |
-| **修改前端表单** | `frontend/components/forms/` | React 表单组件 |
-| **修改 Word 处理** | `backend/util/word_util/` | Word COM 操作 |
-| **修改 LLM 调用** | `backend/util/common_util/llm_stream_utils.py` | 多模型流式输出 |
-| **修改日志系统** | `backend/util/log_util/` | 进度日志、执行日志、SSE Handler |
-| **修改任务队列** | `backend/task/task_queue_manager.py` | 公平锁机制 |
-| **环境配置** | `backend/config/settings.py` | Pydantic Settings |
-| **前端状态** | `frontend/stores/useAppStore.ts` | Zustand 全局状态 |
-| **招标类型配置** | `backend/config/tender_config.py` | 招标类型枚举和配置 |
-
-## CODE MAP
-
-| 模块 | 类型 | 位置 | 职责 |
-|------|------|------|------|
-| `BaseGraph` | 基类 | `backend/graphs/base_graph.py` | LangGraph 工作流基类，提供跨进程锁和进度追踪 |
-| `StandardTenderWorkflowGraph` | 基类 | `backend/graphs/base_graph.py` | 标准招标工作流模板，定义通用节点链 |
-| `CrossProcessFileLock` | 工具 | `backend/graphs/base_graph.py` | Windows 文件锁 (msvcrt.locking)，保护 Word COM |
-| `TaskQueueManager` | 服务 | `backend/task/task_queue_manager.py` | 公平任务队列，确保按顺序执行 |
-| `Settings` | 配置 | `backend/config/settings.py` | Pydantic Settings，管理环境变量 |
-| `TenderGraphStateBase` | 状态 | `backend/states/base_state.py` | 招标工作流基础状态类 |
-| `SSEManager` | 服务 | `backend/core/sse_manager.py` | SSE 连接管理和事件推送 |
-| `SSELogHandler` | Handler | `backend/util/log_util/sse_log_handler.py` | 将日志实时推送到前端 |
-| `progress_log` | Logger | `backend/util/log_util/progress_log.py` | 线程安全进度日志 (QueueHandler) |
-| `execution_log` | Logger | `backend/util/log_util/execution_log.py` | 执行日志，用于调试 |
-| `useAppStore` | Store | `frontend/stores/useAppStore.ts` | Zustand 全局状态，包含招标类型、任务进度 |
-| `wrap_node_with_progress` | 装饰器 | `backend/graphs/base_graph.py` | 包装节点函数，自动上报进度和检查取消 |
-
-## CONVENTIONS
-
-### 后端 (Python)
-
-#### 项目结构约定
-- **入口点**: `backend/main.py` 使用工厂模式 `create_application()`
-- **状态管理**: LangGraph TypedDict，继承 `BaseState` (`backend/states/`)
-- **节点组织**: 
-  - `common_word_nodes/` - 招标类型通用节点
-  - `xjcg_word_nodes/` - 询价采购特有节点
-  - `gngk_word_nodes/` - 国内公开特有节点
-- **节点命名**: `xjcg_*.py` = 询价采购, `gngk_*.py` = 国内公开
-- **导入约定**: 使用 `from backend.util.xxx import` 标准导入
-
-#### Graph 开发约定
-1. **继承 BaseGraph**: 所有 Graph 必须继承 `BaseGraph`
-2. **实现抽象方法**: 
-   - `build_graph()` - 构建 graph 结构
-   - `get_state_class()` - 返回使用的 state 类
-3. **节点包装**: 使用 `self.wrap_node(name, func)` 包装节点函数，自动追踪进度
-4. **并发控制**: Word COM 操作前自动获取 `CrossProcessFileLock`（通过 `invoke_with_timing_async`）
-5. **异常处理**: 使用 `progress_log.error/debug` 替代 `print()`，禁止空 `except:`
-
-#### State 定义约定
-```python
-class MyGraphState(TenderGraphStateBase, total=False):
-    my_field: str
-    # total=False 允许字段可选
+frontend/      Next.js 16 前端（表单、聊天、SSE 展示）
+backend/       FastAPI + LangGraph 后端（任务队列、Word COM、SSE）
+docs/          部署与 API 契约
+assert/        项目复盘与说明文档
 ```
 
-#### 日志记录约定
-- **进度日志**: `progress_log.info/debug()` - 用于任务进度，会推送到前端
-- **执行日志**: `execution_log.info/debug()` - 用于调试，写入文件不推送
-- **SSE 日志**: 使用 `task_log_context(task_id)` 上下文管理器
+### 去哪改（最常见任务）
+| 任务 | 入口 |
+|------|------|
+| 修改表单/UI | `frontend/components/forms/` |
+| SSE 展示/解析 | `frontend/hooks/useSSE.ts`, `frontend/lib/sse.ts` |
+| API 调用与类型 | `frontend/lib/api.ts`, `frontend/types/api.ts` |
+| 修改 API 路由 | `backend/api/*.py` |
+| 修改工作流 | `backend/graphs/`, `backend/nodes/`, `backend/states/` |
+| Word 相关 | `backend/util/word_util/` |
+| 队列与取消 | `backend/task/task_queue_manager.py` |
 
-### 前端 (TypeScript)
+## 常用命令（Windows）
 
-#### 项目结构约定
-- **路径别名**: `@/*` 映射到项目根目录
-- **状态管理**: Zustand + persist middleware，Store 文件用 `useXxxStore.ts`
-- **组件组织**: 按功能域分目录（forms/, layout/），非按类型分
-- **样式**: Tailwind CSS 4 + CSS 变量主题，不使用 `tailwind.config.ts`
-- **类型导出**: `types/index.ts` 统一导出，组件就近定义 Props
-- **命名**: 组件 PascalCase, hooks camelCase
-
-#### API 调用约定
-- 使用封装好的 API 方法，不直接调用 `fetch`
-- SSE 连接使用 `useSSE` hook
-
-## ANTI-PATTERNS (THIS PROJECT)
-
-| 禁止 | 原因 | 位置 |
-|------|------|------|
-| **中文 npm 镜像** | 供应链风险 | `frontend/package-lock.json` |
-| **无锁 Word 操作** | 必须先用 `CrossProcessFileLock` 保护 | `backend/graphs/base_graph.py` |
-| **同步阻塞** | 节点函数用 `run_in_executor` 包装 | `backend/nodes/` |
-| **空 `except:`** | 使用 `except Exception as e: logger.xxx()` | 所有 Python 文件 |
-| **`print()` 输出** | 使用 `progress_log` 或 `execution_log` | 所有 Python 文件 |
-| **`use client` 滥用** | 增加客户端 bundle，检查必要性 | `frontend/components/` |
-| **无 CI/CD** | 手动部署风险 | 项目缺失 |
-
-## UNIQUE STYLES
-
-### LangGraph 节点系统
-
-#### 节点分组
-- `common_word_nodes/` - 通用节点（10个）：prepare_template, extract_tender_params, delete_tender_param, get_comments, copy_comments, generate_polished_text, generate_comments, get_replacements_core, replace_content, update_word
-- `xjcg_word_nodes/` - 询价采购特有：xjcg_get_replacements
-- `gngk_word_nodes/` - 国内公开特有：gngk_get_replacements
-
-#### Graph 结构
-每个 Graph 继承 `StandardTenderWorkflowGraph`，它定义了标准工作流：
-1. **准备阶段**: prepare_template → extract_tender_params
-2. **批注分支**: get_comments → copy_comments（可选，需上传送审稿）
-3. **Word 操作子图**: delete_tender_param → get_replacements → replace_content
-4. **润色分支**: generate_polished_text → generate_comments（可选）
-5. **更新文档**: update_word
-
-#### 进度追踪
-- 节点函数通过 `wrap_node_with_progress()` 包装
-- 自动上报进度到 `TaskQueueManager`
-- 支持任务取消检查（`_check_cancellation`）
-
-### Word COM 并发控制
-
-#### 双层锁机制
-1. **公平锁** (`TaskQueueManager`): 确保任务按队列顺序执行
-2. **文件锁** (`CrossProcessFileLock`): 使用 Windows `msvcrt.locking` 实现跨进程互斥
-
-#### 执行流程
-```
-任务入队 → 等待公平锁（按顺序）→ 获取文件锁 → 执行 Word COM 操作 → 释放锁
-```
-
-### 日志系统架构
-
-#### 三层日志
-1. **标准日志**: FastAPI/uvicorn 的 JSON 格式日志
-2. **进度日志** (`progress_log`): 
-   - QueueHandler + QueueListener 确保线程安全
-   - 推送到 SSE，前端实时显示
-   - 写入 `backend/logs/progress-YYYYMMDD.log`
-3. **执行日志** (`execution_log`):
-   - 用于调试，不推送到前端
-   - 写入 `backend/logs/execution-YYYYMMDD.log`
-
-#### SSE 日志推送
-- 使用 `task_log_context(task_id)` 上下文管理器
-- 只推送 INFO 及以上级别日志
-- 通过 `SSELogHandler` 发送到 `SSEManager`
-
-### SSE 实时通信
-
-#### 事件类型
-- `log`: 普通日志消息
-- `llm`: LLM 生成内容流
-- `progress`: 进度更新（节点完成状态）
-- `done`: 任务完成
-- `error`: 错误信息
-
-#### 断线重连
-- 支持 `Last-Event-ID` 请求头
-- 服务端从该事件ID之后继续发送
-- 心跳机制：每 15 秒发送 `: heartbeat`
-
-## COMMANDS
-
-### 后端
-
+### 前端（frontend/）
 ```bash
-# 启动后端
-cd backend && python main.py              # 启动后端 (port 8000)
-cd backend && uvicorn backend.main:app --reload  # 热重载模式
-
-# 日志查看
-cd backend && cat logs/progress-$(date +%Y%m%d).log
-cd backend && cat logs/execution-$(date +%Y%m%d).log
-
-# 测试
-cd backend && python -m pytest tests/ -v
+npm run dev
+npm run lint
+npm run type-check
+npm run test
+npm run test:e2e
+npm run build
 ```
 
-### 前端
-
+### 后端（backend/）
 ```bash
-# 开发
-cd frontend && npm run dev                # 启动前端 (port 8502)
-
-# 构建
-cd frontend && npm run build              # 生产构建
-cd frontend && npm run start              # 启动生产服务器
-
-# 类型检查
-cd frontend && npm run lint               # ESLint
-cd frontend && npm run format             # Prettier 格式化
-cd frontend && npm run format:check       # Prettier 检查
-
-# 测试
-cd frontend && npm run test:e2e           # Playwright E2E 测试
+python main.py
+python -m pytest tests -v
+python scripts/diagnose_word.py
 ```
 
-### 诊断工具
+## 验证测试方案（用于检验本 AGENTS.md 的有效性）
 
-```bash
-# Word COM 环境诊断
-cd backend && python scripts/diagnose_word.py
+### 工程级验证（对代码改动的最低要求）
+- 前端改动：至少跑 `npm run lint` + `npm run type-check` + 相关 `npm run test`（必要时补 UI 手工路径）
+- 后端改动：至少跑 `python -m pytest tests -v`（若环境未安装 pytest，需要在变更说明中明确）
+- E2E：涉及关键用户路径（生成/下载/任务队列/聊天）时跑 `npm run test:e2e`
 
-# 查看任务队列状态
-# 访问 http://localhost:8000/api/tasks/queue
+### 智能体合规性验证（对“行为规范”的检查）
+- 约束检查：是否避免了无谓重构、是否遵循现有目录与代码风格、是否未新增依赖
+- 错误处理检查：失败场景是否返回稳定错误码、前端是否能展示可理解信息
+- 观测性检查：任务相关日志是否包含 task_id/node/耗时，是否使用正确日志通道
+- 可回滚性检查：说明中是否包含风险点与回滚方式（恢复文件/回退调用/关闭新开关）
 
-# 健康检查
-# 访问 http://localhost:8000/health
-```
-
-## API ENDPOINTS
-
-| 方法 | 端点 | 描述 |
-|------|------|------|
-| POST | `/api/upload` | 文件上传 |
-| GET | `/api/tender/info/{tender_no}` | 获取招标信息 |
-| POST | `/api/generate` | 生成招标文档 |
-| GET | `/api/tasks/{task_id}` | 获取任务状态 |
-| DELETE | `/api/tasks/{task_id}` | 取消任务 |
-| GET | `/api/tasks/queue` | 获取队列状态 |
-| GET | `/api/stream/{task_id}` | SSE 流式输出 |
-| GET | `/api/download/{filename}` | 下载文件 |
-| GET | `/health` | 健康检查 |
-
-## NOTES
-
-1. **Windows 必需**: 依赖 Word COM，无法在 Linux/macOS 运行
-2. **端口**: 前端 8502, 后端 8000 (CORS 已配置)
-3. **上传目录**: `D:/UploadFiles` (在 `settings.py` 中配置)
-4. **日志目录**: `backend/logs/` (自动创建)
-5. **LLM 模型**: 支持 DeepSeek、Qwen、Doubao (通过环境变量配置)
-6. **并发限制**: Word COM 操作串行执行，支持多任务排队
-- **招标类型**: 当前支持 XJCG(询价采购) 和 GNGK(国内公开)
-
-## REFACTORING NOTES (2026-03-03)
-
-### 最近重大变更 (commit 998002b)
-1. **工具模块迁移**: 从根目录 `util/` 迁移至 `backend/util/`，统一后端代码结构
-2. **日志系统重构**: 分离 `progress_log` 和 `execution_log`，新增 `sse_log_handler`
-3. **通用节点合并**: 将 XJCG/GNGK 通用逻辑合并到 `common_word_nodes/`
-4. **配置集中**: 招标类型配置统一到 `backend/config/tender_config.py`
-5. **前端状态更新**: 更新组件类名和状态类型定义
-6. **文件清理**: 删除根级别过时模块，更新环境配置示例
-7. **文档完善**: 添加项目结构文档 (AGENTS.md)
-
-### 开发注意事项
-- 所有工具模块导入必须使用 `from backend.util.xxx import`
-- 日志记录使用 `progress_log` 而非 `print()`
-- Word 操作必须通过 BaseGraph 的异步方法执行以确保并发安全
-- 新增招标类型需要：Graph 类 + State 类 + 特有节点（如有）
+### 建议的“验收用例集”（可作为每次大改的回归脚本）
+- 任务创建 → SSE 连接 → 进度更新 → 完成 → 下载成功
+- 无效投标号/接口 404 → 前端展示错误信息且带错误码
+- 任务取消：运行中取消 → 后端状态变更 → 前端 UI 收敛为 cancelled
+- 并发压力：同时提交 2 个任务 → 第二个进入队列 → 锁等待与进度展示正确

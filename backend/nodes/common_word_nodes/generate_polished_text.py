@@ -116,17 +116,20 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
         progress_log.debug(f"警告: 保存提示词文件失败: {e}")
     
     stream_callback: Optional[Callable[[str], None]] = None
+    complete_callback: Optional[Callable[[str], None]] = None
     suppress_llm_stdout = False
     if config:
         try:
             configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
             if isinstance(configurable, dict):
                 stream_callback = configurable.get("llm_stream_callback")
+                complete_callback = configurable.get("llm_stream_complete_callback")
                 suppress_llm_stdout = bool(configurable.get("suppress_llm_stdout", False))
             if not stream_callback and isinstance(config, dict):
                 stream_callback = config.get("llm_stream_callback")
         except Exception:
             stream_callback = None
+            complete_callback = None
 
     def _push_stream_update(text: str) -> None:
         if callable(stream_callback) and text is not None:
@@ -167,6 +170,11 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
         timeout_seconds=TIMEOUT_SECONDS,
         check_interval=CHECK_INTERVAL,
     ))
+    if callable(complete_callback):
+        try:
+            complete_callback(str(content))
+        except Exception as cb_exc:
+            progress_log.debug(f"警告: LLM 完成回调失败: {cb_exc}")
 
     try:
         output_file_base = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"

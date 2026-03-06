@@ -69,14 +69,21 @@ class SSELogHandler(logging.Handler):
             message = self.format(record)
             level = record.levelname.lower()
 
-            # 获取或创建事件循环
+            # 通过绑定的主事件循环线程安全调度到 SSEManager
+            if hasattr(self._sse_manager, "send_log_threadsafe"):
+                self._sse_manager.send_log_threadsafe(  # type: ignore[attr-defined]
+                    task_id=task_id,
+                    message=message,
+                    level=level,
+                )
+                return
+
+            # 兼容：未实现 threadsafe 调度时，尽量在当前 loop 直接创建任务
             try:
-                loop = asyncio.get_running_loop()
-                # 如果有运行中的循环，创建任务
+                asyncio.get_running_loop()
                 asyncio.create_task(self._sse_manager.send_log(task_id, message, level))
             except RuntimeError:
                 # 没有运行中的事件循环，静默跳过
-                # 这种情况通常发生在同步代码中
                 pass
 
         except Exception:
@@ -152,7 +159,10 @@ def init_sse_log_handler(sse_manager: "SSEManager") -> SSELogHandler:
         初始化后的 SSELogHandler 实例
     """
     global _sse_log_handler
-    _sse_log_handler = SSELogHandler(sse_manager)
+    if _sse_log_handler is None:
+        _sse_log_handler = SSELogHandler(sse_manager)
+    else:
+        _sse_log_handler._sse_manager = sse_manager
     return _sse_log_handler
 
 

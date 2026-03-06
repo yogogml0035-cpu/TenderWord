@@ -27,6 +27,8 @@ export interface SSEOptions {
   maxReconnectDelay?: number;
   /** Heartbeat timeout in ms (default: 10000) */
   heartbeatTimeout?: number;
+  /** Seed Last-Event-ID for late join or refresh recovery */
+  lastEventId?: string | null;
 }
 
 export interface SSEConnection {
@@ -38,11 +40,14 @@ export interface SSEConnection {
 interface SSEState {
   eventSource: EventSource | null;
   lastEventId: string | null;
+  seenEventIds: Set<string>;
   reconnectAttempts: number;
   reconnectTimer: NodeJS.Timeout | null;
   heartbeatTimer: NodeJS.Timeout | null;
   isClosed: boolean;
 }
+
+const MAX_SEEN_EVENT_IDS = 5000;
 
 const DEFAULT_OPTIONS: Required<
   Pick<
@@ -55,12 +60,12 @@ const DEFAULT_OPTIONS: Required<
     | 'heartbeatTimeout'
   >
 > = {
-  autoReconnect: true,
+  autoReconnect: false,
   maxReconnectAttempts: 5,
   reconnectDelay: 1000,
   reconnectDelayMultiplier: 1.5,
   maxReconnectDelay: 30000,
-  heartbeatTimeout: 10000,
+  heartbeatTimeout: 0,
 };
 
 /**
@@ -70,7 +75,8 @@ export function createSSEConnection(endpoint: string, options: SSEOptions = {}):
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const state: SSEState = {
     eventSource: null,
-    lastEventId: null,
+    lastEventId: opts.lastEventId ?? null,
+    seenEventIds: new Set<string>(),
     reconnectAttempts: 0,
     reconnectTimer: null,
     heartbeatTimer: null,
@@ -91,6 +97,9 @@ export function createSSEConnection(endpoint: string, options: SSEOptions = {}):
   };
 
   const setupHeartbeat = () => {
+    if (opts.heartbeatTimeout <= 0) {
+      return;
+    }
     if (state.heartbeatTimer) {
       clearTimeout(state.heartbeatTimer);
     }
@@ -104,6 +113,10 @@ export function createSSEConnection(endpoint: string, options: SSEOptions = {}):
     if (state.isClosed) return;
 
     clearTimers();
+    if (state.eventSource) {
+      state.eventSource.close();
+      state.eventSource = null;
+    }
 
     // Build URL with Last-Event-ID header support via query param
     let url = `${apiUrl}${endpoint}`;
@@ -115,6 +128,43 @@ export function createSSEConnection(endpoint: string, options: SSEOptions = {}):
     const eventSource = new EventSource(url);
     state.eventSource = eventSource;
 
+    const parseEventData = (rawData: string): unknown => {
+      try {
+        return JSON.parse(rawData);
+      } catch {
+        return rawData;
+      }
+    };
+
+    const rememberEventId = (eventId?: string): boolean => {
+      if (!eventId) return false;
+      if (state.seenEventIds.has(eventId)) {
+        return true;
+      }
+      state.seenEventIds.add(eventId);
+      state.lastEventId = eventId;
+
+      while (state.seenEventIds.size > MAX_SEEN_EVENT_IDS) {
+        const oldest = state.seenEventIds.values().next().value;
+        if (!oldest) break;
+        state.seenEventIds.delete(oldest);
+      }
+      return false;
+    };
+
+    const emitMessage = (eventName: string, event: MessageEvent) => {
+      setupHeartbeat();
+      const eventId = event.lastEventId || undefined;
+      if (rememberEventId(eventId)) {
+        return;
+      }
+      opts.onMessage?.({
+        event: eventName,
+        data: parseEventData(event.data),
+        id: eventId,
+      });
+    };
+
     eventSource.onopen = () => {
       console.log('[SSE] Connection opened');
       state.reconnectAttempts = 0;
@@ -122,167 +172,50 @@ export function createSSEConnection(endpoint: string, options: SSEOptions = {}):
       setupHeartbeat();
     };
 
-    eventSource.onmessage = (event) => {
-      setupHeartbeat();
-
-      // Update last event ID if provided
-      if (event.lastEventId) {
-        state.lastEventId = event.lastEventId;
-      }
-
-      // Handle heartbeat event
-      if (event.type === 'heartbeat') {
-        return;
-      }
-
-      try {
-        const data = JSON.parse(event.data);
-        opts.onMessage?.({
-          event: event.type,
-          data,
-          id: event.lastEventId || undefined,
-        });
-      } catch {
-        opts.onMessage?.({
-          event: event.type,
-          data: event.data,
-          id: event.lastEventId || undefined,
-        });
-      }
+    eventSource.onmessage = (event: MessageEvent) => {
+      emitMessage(event.type, event);
     };
 
     // Listen for specific events
     eventSource.addEventListener('connected', (event) => {
-      setupHeartbeat();
-      try {
-        const data = JSON.parse(event.data);
-        opts.onMessage?.({
-          event: 'connected',
-          data,
-          id: event.lastEventId || undefined,
-        });
-      } catch {
-        opts.onMessage?.({
-          event: 'connected',
-          data: event.data,
-          id: event.lastEventId || undefined,
-        });
-      }
+      emitMessage('connected', event as MessageEvent);
     });
 
     eventSource.addEventListener('log', (event) => {
-      setupHeartbeat();
-      try {
-        const data = JSON.parse(event.data);
-        opts.onMessage?.({
-          event: 'log',
-          data,
-          id: event.lastEventId || undefined,
-        });
-      } catch {
-        opts.onMessage?.({
-          event: 'log',
-          data: event.data,
-          id: event.lastEventId || undefined,
-        });
-      }
+      emitMessage('log', event as MessageEvent);
     });
 
     eventSource.addEventListener('llm', (event) => {
-      setupHeartbeat();
-      try {
-        const data = JSON.parse(event.data);
-        opts.onMessage?.({
-          event: 'llm',
-          data,
-          id: event.lastEventId || undefined,
-        });
-      } catch {
-        opts.onMessage?.({
-          event: 'llm',
-          data: event.data,
-          id: event.lastEventId || undefined,
-        });
-      }
+      emitMessage('llm', event as MessageEvent);
     });
 
     eventSource.addEventListener('progress', (event) => {
-      setupHeartbeat();
-      try {
-        const data = JSON.parse(event.data);
-        opts.onMessage?.({
-          event: 'progress',
-          data,
-          id: event.lastEventId || undefined,
-        });
-      } catch {
-        opts.onMessage?.({
-          event: 'progress',
-          data: event.data,
-          id: event.lastEventId || undefined,
-        });
-      }
+      emitMessage('progress', event as MessageEvent);
     });
 
     eventSource.addEventListener('status', (event) => {
-      setupHeartbeat();
-      try {
-        const data = JSON.parse(event.data);
-        opts.onMessage?.({
-          event: 'status',
-          data,
-          id: event.lastEventId || undefined,
-        });
-      } catch {
-        opts.onMessage?.({
-          event: 'status',
-          data: event.data,
-          id: event.lastEventId || undefined,
-        });
-      }
+      emitMessage('status', event as MessageEvent);
     });
 
     eventSource.addEventListener('error', (event: MessageEvent) => {
-      setupHeartbeat();
-      try {
-        const data = JSON.parse(event.data);
-        opts.onMessage?.({
-          event: 'error',
-          data,
-          id: event.lastEventId || undefined,
-        });
-      } catch {
-        opts.onMessage?.({
-          event: 'error',
-          data: event.data,
-          id: event.lastEventId || undefined,
-        });
-      }
+      emitMessage('error', event);
     });
 
     eventSource.addEventListener('done', (event) => {
-      setupHeartbeat();
-      try {
-        const data = JSON.parse(event.data);
-        opts.onMessage?.({
-          event: 'done',
-          data,
-          id: event.lastEventId || undefined,
-        });
-      } catch {
-        opts.onMessage?.({
-          event: 'done',
-          data: event.data,
-          id: event.lastEventId || undefined,
-        });
-      }
+      emitMessage('done', event as MessageEvent);
     });
 
-    eventSource.addEventListener('heartbeat', () => {
+    eventSource.addEventListener('heartbeat', (event) => {
       setupHeartbeat();
+      const messageEvent = event as MessageEvent;
+      const eventId = messageEvent.lastEventId || undefined;
+      if (rememberEventId(eventId)) {
+        return;
+      }
       opts.onMessage?.({
         event: 'heartbeat',
-        data: { timestamp: new Date().toISOString() },
+        data: parseEventData(messageEvent.data),
+        id: eventId,
       });
     });
 
@@ -311,6 +244,10 @@ export function createSSEConnection(endpoint: string, options: SSEOptions = {}):
           opts.onReconnect?.(state.reconnectAttempts);
 
           state.reconnectTimer = setTimeout(() => {
+            if (state.eventSource) {
+              state.eventSource.close();
+              state.eventSource = null;
+            }
             connect();
           }, delay);
         } else {

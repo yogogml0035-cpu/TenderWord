@@ -30,16 +30,41 @@ from typing import Dict, Any, Optional
 
 from backend.states import TenderGraphStateBase
 from backend.config.tender_config import TARGET_SIZES
+from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
     create_word_application,
     close_word_application,
     open_document_with_retry,
+    save_document_with_retry,
     unprotect_document,
     wdGoToPage,
     wdGoToAbsolute,
 )
 from backend.util.word_util.anchor_utils import find_anchor_range
 
+NODE_NAME = "delete_tender_param"
+HEARTBEAT_INTERVAL_SECONDS = 5.0
+
+
+def _visible_log(message: str) -> None:
+    progress_log.info(f"[{NODE_NAME}] {message}")
+
+
+def _check_cancelled(config) -> None:
+    if not isinstance(config, dict):
+        return
+    configurable = config.get("configurable")
+    if not isinstance(configurable, dict):
+        return
+    task_id = configurable.get("task_id")
+    if not task_id:
+        return
+
+    from backend.graphs.base_graph import TaskCancelledException
+    from backend.task.task_queue_manager import get_task_queue
+
+    if get_task_queue().is_task_cancelled(task_id):
+        raise TaskCancelledException(f"任务 {task_id} 已被用户取消")
 
 
 
@@ -130,6 +155,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
     """
     start_time = time.time()
     print(f"[delete_tender_param] 开始执行...")
+    _visible_log("开始删除原始采购需求")
 
     prepared_doc_path = state.get("prepared_doc_path")
     before_text = state.get("insertion_before_text")
@@ -169,6 +195,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
     try:
         # 使用统一的工具函数创建 Word 应用程序
         # 独立实例 + 预留时间，避免前序节点关闭未完成导致句柄失效
+        _visible_log("开始打开待清理文档")
         word, com_initialized = create_word_application(
             initial_delay=2.0,  # 创建前等待 2 秒，让之前的实例有时间完全关闭
             post_init_delay=1.0,  # 给 Word 初始化的时间
@@ -184,6 +211,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
             read_only=False,  # 需要写入以删除内容
             node_name="delete_tender_param",
         )
+        _visible_log("文档打开完成，准备定位采购需求锚点")
 
         # 使用统一的工具函数取消文档保护
         unprotect_document(doc, node_name="delete_tender_param")
@@ -192,6 +220,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
         print(f"[delete_tender_param] 正在查找锚点...")
         print(f"  前置文本: '{before_text}'")
         print(f"  后置文本: '{after_text}'")
+        _visible_log("开始查找删除范围锚点")
 
         before_hit, after_hit = find_anchor_range(
             doc=doc,
@@ -204,8 +233,10 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
 
         if not before_hit:
             print(f"[delete_tender_param] 警告: 未找到前置文本 '{before_text}'")
+            _visible_log(f"未找到前置锚点: {before_text}")
         elif not after_hit:
             print(f"[delete_tender_param] 警告: 未找到后置文本 '{after_text}'")
+            _visible_log(f"未找到后置锚点: {after_text}")
         else:
             before_page = before_hit["page"]
             before_end_pos = before_hit["end"]
@@ -224,6 +255,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                 print(
                     f"错误: 后置文本页码 ({after_page}) 小于等于前置文本页码 ({before_page})"
                 )
+                _visible_log("锚点页码异常，跳过删除")
             else:
                 # 将 before_end_pos 对齐到下一页起始
                 try:
@@ -239,6 +271,9 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                 # === 开始删除锚点之间的内容 ===
                 print("开始删除锚点之间的内容")
                 print(f"删除范围: {before_end_pos} -> {after_start_pos}")
+                _visible_log(
+                    f"锚点定位完成，开始删除第 {before_page + 1} 至 {after_page - 1} 页内容"
+                )
 
                 # 合法性校验，避免 Range 越界
                 doc_end = doc.Content.End
@@ -266,8 +301,10 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                         "table_time": 0,
                         "para_time": 0,
                     }
+                    last_heartbeat_at = time.monotonic()
 
                     while step_idx < max_steps:
+                        _check_cancelled(config)
                         step_idx += 1
 
                         # 每 50 步刷新一次文档末尾位置
@@ -289,6 +326,13 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
 
                         after_start_pos = after_hit_refresh["start"]
                         after_end_pos = after_hit_refresh["end"]
+                        now = time.monotonic()
+                        if now - last_heartbeat_at >= HEARTBEAT_INTERVAL_SECONDS:
+                            elapsed = now - start_time
+                            _visible_log(
+                                f"仍在删除原始采购需求，已执行 {step_idx} 步，当前范围 {current_pos}->{after_start_pos}，耗时 {elapsed:.1f} 秒"
+                            )
+                            last_heartbeat_at = now
 
                         # 检查是否已到达锚点
                         if after_start_pos <= current_pos:
@@ -476,6 +520,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                     print(
                         f"[delete_tender_param] 内容删除完成，页码范围: {start_page} - {end_page}"
                     )
+                    _visible_log(f"删除完成，页码范围 {start_page}-{end_page}，准备保存文档")
 
                     # 保存清理后的文档
                     try:
@@ -486,8 +531,10 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                             pass
 
                         print("  正在保存文档（这可能需要几秒钟）...")
-                        doc.Save()
+                        _visible_log("开始保存清理后的文档")
+                        save_document_with_retry(doc, node_name=NODE_NAME)
                         print("  文档已保存（删除完成）")
+                        _visible_log("文档保存完成")
 
                         try:
                             word.ScreenUpdating = True
@@ -497,8 +544,15 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                         print(f"  警告: 保存文档失败: {save_e}")
 
     except Exception as e:
+        from backend.graphs.base_graph import TaskCancelledException
+
+        if isinstance(e, TaskCancelledException):
+            progress_log.warning(f"[{NODE_NAME}] 任务已取消")
+            raise
+
         error_msg = f"删除内容时发生错误: {e}"
         print(f"[delete_tender_param] {error_msg}")
+        progress_log.error(f"[{NODE_NAME}] {error_msg}")
         # 打印详细的错误堆栈信息
         import traceback
 
@@ -509,6 +563,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
 
     finally:
         print("[delete_tender_param] 开始清理资源...")
+        _visible_log("开始清理 Word 资源")
         # 使用统一的工具函数关闭 Word 应用程序
         close_word_application(
             word_app=word,
@@ -517,6 +572,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
             wait_time=1.5,
             node_name="delete_tender_param",
         )
+        _visible_log("Word 资源清理完成")
 
     # 更新状态
     new_state_dict = dict(state)
@@ -526,6 +582,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
     print(
         f"[delete_tender_param] 执行完成，耗时: {elapsed_time:.2f} 秒 ({elapsed_time * 1000:.0f} 毫秒)"
     )
+    _visible_log(f"节点执行完成，耗时 {elapsed_time:.2f} 秒")
 
     return TenderGraphStateBase(**new_state_dict)
 

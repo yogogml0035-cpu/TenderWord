@@ -1,14 +1,23 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Loader2, X } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
+import { useChatStreamStore } from '@/stores/chatStreamStore';
+import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
+import { useHydrated } from '@/hooks/useHydrated';
 import { XjcgTenderForm, type XjcgTenderFormData } from '../forms/XjcgTenderForm';
 import { GngkTenderForm, type GngkTenderFormData } from '../forms/GngkTenderForm';
-import { cancelTask, createGenerateTask } from '@/lib/api';
+import { cancelTask, createGenerateTask, getTaskStatus } from '@/lib/api';
 import { useChatSSE } from '@/hooks/useChatSSE';
+import { useTaskHeartbeat } from '@/hooks/useTaskHeartbeat';
 import { convertGngkFormToApiRequest, convertXjcgFormToApiRequest } from '@/lib/formDataConverter';
+import { inferTenderNoFromConversationTitle } from '@/lib/chat-utils';
 import type { TenderData } from '@/types/api';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
 interface FormPanelProps {
   className?: string;
   /** Initial tender data from URL params (auto-fetched) */
@@ -17,51 +26,96 @@ interface FormPanelProps {
 
 export function FormPanel({ className = '', initialTenderData }: FormPanelProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
-  const [currentMessageId, setCurrentMessageId] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useHydrated();
   const {
     getCurrentConversation,
-    activeTaskIds,
     concurrentTaskWarning,
     dismissConcurrentWarning,
     cancelTask: cancelChatTask,
+    completeTask: completeChatTask,
+    failTask: failChatTask,
     startTask,
+    hasActiveTasks,
   } = useChatStore();
-
-  // Fix hydration: wait for client mount before accessing persisted store
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   const conversation = getCurrentConversation();
-  const hasActiveTask = activeTaskIds.length > 0;
+  const inferredTenderNo = conversation
+    ? inferTenderNoFromConversationTitle(conversation.title)
+    : null;
+  const hasActiveTask = hasActiveTasks();
+  const currentGeneratingMessage =
+    [...(conversation?.messages || [])]
+      .reverse()
+      .find((msg) => msg.status === 'generating' && typeof msg.taskId === 'string') || null;
+  const effectiveTaskId = currentGeneratingMessage?.taskId || null;
+  const hasCancelableCurrentTask = !!effectiveTaskId;
 
   // Use SSE for current task
   useChatSSE({
-    taskId: currentTaskId,
+    taskId: effectiveTaskId,
     conversationId: conversation?.id || null,
-    messageId: currentMessageId,
+    messageId: currentGeneratingMessage?.id || null,
     onComplete: () => {
-      setCurrentTaskId(null);
-      setCurrentMessageId(null);
       setIsSubmitting(false);
     },
     onError: (error) => {
       console.error('Task failed:', error);
-      setCurrentTaskId(null);
-      setCurrentMessageId(null);
       setIsSubmitting(false);
     },
   });
+  useTaskHeartbeat(effectiveTaskId);
 
   const handleCancelTask = async () => {
-    if (currentTaskId) {
+    const taskIdToCancel = effectiveTaskId;
+    if (taskIdToCancel) {
       try {
-        await cancelTask(currentTaskId);
-        cancelChatTask(currentTaskId);
-        setCurrentTaskId(null);
-        setCurrentMessageId(null);
+        const cancelResult = await cancelTask(taskIdToCancel);
+
+        if (cancelResult.noop) {
+          // 后端已结束（completed/failed/cancelled），前端需要主动同步状态，避免一直 generating
+          try {
+            const task = await getTaskStatus(taskIdToCancel);
+            const status = task.status;
+            const finalContent = useChatStreamStore.getState().streams[taskIdToCancel]?.content;
+
+            if (status === 'completed') {
+              let outputFile: string | undefined;
+              let fileName: string | undefined;
+              if (typeof task.result === 'string') {
+                outputFile = task.result !== 'success' ? task.result : undefined;
+              } else if (isRecord(task.result)) {
+                const outputFileValue = task.result.output_file;
+                const fileNameValue = task.result.file_name;
+                outputFile = typeof outputFileValue === 'string' ? outputFileValue : undefined;
+                fileName = typeof fileNameValue === 'string' ? fileNameValue : undefined;
+              }
+              if (!fileName && typeof outputFile === 'string') {
+                fileName = outputFile.split(/[\\/]/).pop();
+              }
+              completeChatTask(taskIdToCancel, outputFile, fileName, finalContent);
+            } else if (status === 'failed') {
+              const errorMessage = typeof task.error === 'string' ? task.error : '生成失败';
+              failChatTask(taskIdToCancel, errorMessage, finalContent);
+            } else if (status === 'cancelled') {
+              cancelChatTask(taskIdToCancel, finalContent);
+            } else {
+              cancelChatTask(taskIdToCancel, finalContent);
+            }
+          } catch {
+            cancelChatTask(
+              taskIdToCancel,
+              useChatStreamStore.getState().streams[taskIdToCancel]?.content
+            );
+          }
+        } else {
+          cancelChatTask(
+            taskIdToCancel,
+            useChatStreamStore.getState().streams[taskIdToCancel]?.content
+          );
+        }
+
+        useChatStreamStore.getState().clearStream(taskIdToCancel);
+        useChatTaskSessionStore.getState().removeSession(taskIdToCancel);
+
         setIsSubmitting(false);
       } catch (error) {
         console.error('Cancel task failed:', error);
@@ -79,17 +133,13 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         const request =
           conversation.tenderType === 'xjcg'
             ? convertXjcgFormToApiRequest(formData as XjcgTenderFormData)
-            : convertGngkFormToApiRequest(formData as GngkTenderFormData, {
-                includeQualificationFiles: true,
-              });
+            : convertGngkFormToApiRequest(formData as GngkTenderFormData);
 
         const result = await createGenerateTask(request);
-
-        // Start task in store (creates message)
-        const messageId = startTask(conversation.id, result.task_id);
-        // Track current task for SSE
-        setCurrentTaskId(result.task_id);
-        setCurrentMessageId(messageId);
+        startTask(conversation.id, result.task_id);
+        useChatTaskSessionStore.getState().upsertSession(result.task_id);
+        useChatStreamStore.getState().replaceStream(result.task_id);
+        setIsSubmitting(false);
       } catch (error) {
         console.error('Failed to create task:', error);
         setIsSubmitting(false);
@@ -177,7 +227,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
   return (
     <div className={`relative flex h-full flex-col bg-white shadow-sm ${className}`}>
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
+      <div className="relative z-20 flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
         <div>
           <h2 className="font-medium text-gray-900">招标信息</h2>
           <p className="text-xs text-gray-500">
@@ -185,7 +235,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
           </p>
         </div>
 
-        {hasActiveTask && (
+        {hasCancelableCurrentTask && (
           <button
             onClick={handleCancelTask}
             className="flex items-center gap-1 rounded bg-red-50 px-3 py-1.5 text-sm text-red-600 shadow-sm transition-colors duration-200 hover:bg-red-100"
@@ -232,14 +282,18 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
       <div className="flex-1 overflow-y-auto p-4">
         {conversation.tenderType === 'xjcg' ? (
           <XjcgTenderForm
+            key={conversation.id}
             onSubmit={handleSubmit}
             isSubmitting={isSubmitting || hasActiveTask}
+            initialTenderNo={inferredTenderNo ?? undefined}
             initialTenderData={initialTenderData ?? undefined}
           />
         ) : (
           <GngkTenderForm
+            key={conversation.id}
             onSubmit={handleSubmit}
             isSubmitting={isSubmitting || hasActiveTask}
+            initialTenderNo={inferredTenderNo ?? undefined}
             initialTenderData={initialTenderData ?? undefined}
           />
         )}

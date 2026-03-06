@@ -78,6 +78,7 @@ export function useSSE(options: UseSSEOptions): SSEHookReturn {
     reconnectDelayMultiplier,
     maxReconnectDelay,
     heartbeatTimeout,
+    lastEventId,
   } = options;
 
   // Use ref for stable connection management
@@ -111,7 +112,27 @@ export function useSSE(options: UseSSEOptions): SSEHookReturn {
     reconnectDelayMultiplier,
     maxReconnectDelay,
     heartbeatTimeout,
+    lastEventId,
   });
+  useEffect(() => {
+    optionsRef.current = {
+      autoReconnect,
+      maxReconnectAttempts,
+      reconnectDelay,
+      reconnectDelayMultiplier,
+      maxReconnectDelay,
+      heartbeatTimeout,
+      lastEventId,
+    };
+  }, [
+    autoReconnect,
+    maxReconnectAttempts,
+    reconnectDelay,
+    reconnectDelayMultiplier,
+    maxReconnectDelay,
+    heartbeatTimeout,
+    lastEventId,
+  ]);
   const [state, setState] = useState<SSEHookState>({
     isConnected: false,
     isReconnecting: false,
@@ -287,6 +308,8 @@ export function useTaskProgress(taskId: string | null) {
   const { isConnected, close } = useSSE({
     endpoint: taskId ? `/api/stream/${taskId}` : '',
     autoConnect: !!taskId,
+    autoReconnect: true,
+    heartbeatTimeout: 45000,
     onMessage: (message) => {
       switch (message.event) {
         case 'progress':
@@ -296,7 +319,7 @@ export function useTaskProgress(taskId: string | null) {
               completedCount: (data.completed_count as number) || 0,
               totalNodes: (data.total_nodes as number) || 0,
               progressPercent: (data.progress_percent as number) || 0,
-              currentNode: (data.node as string) || '',
+              currentNode: (data.current_node as string) || '',
               currentNodeDisplay: (data.current_node_display as string) || '',
             });
           }
@@ -321,12 +344,17 @@ export function useTaskProgress(taskId: string | null) {
           if (typeof message.data === 'object' && message.data !== null) {
             const data = message.data as Record<string, unknown>;
             const content = (data.content as string) || '';
+            const contentMode = (data.content_mode as string | undefined) || 'snapshot';
             const isComplete = data.is_complete as boolean;
 
-            if (isComplete) {
-              // LLM generation complete
-            } else {
+            if (contentMode === 'chunk') {
               setLlmOutput((prev) => prev + content);
+            } else {
+              setLlmOutput(content);
+            }
+
+            if (isComplete && contentMode !== 'chunk') {
+              setLlmOutput(content);
             }
           }
           break;

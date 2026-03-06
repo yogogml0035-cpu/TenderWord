@@ -54,31 +54,6 @@ class SSEManager:
     """
     def __init__(
         self,
-        max_events_per_task: int = None,
-        event_ttl: int = None,
-        heartbeat_interval: int = None,
-    ):
-        """初始化 SSE 管理器.
-
-        Args:
-            max_events_per_task: 每个任务最大存储事件数，默认使用 settings.SSE_MAX_EVENTS_PER_TASK
-            event_ttl: 事件过期时间（秒），默认使用 settings.SSE_EVENT_TTL
-            heartbeat_interval: 心跳间隔（秒），默认使用 settings.SSE_HEARTBEAT_INTERVAL
-        """
-        self.max_events_per_task = max_events_per_task or settings.SSE_MAX_EVENTS_PER_TASK
-        self.event_ttl = event_ttl or settings.SSE_EVENT_TTL
-        self.heartbeat_interval = heartbeat_interval or settings.SSE_HEARTBEAT_INTERVAL
-
-        # 任务 -> 客户端集合
-        self._clients: Dict[str, Set[SSEClient]] = defaultdict(set)
-
-        # 任务 -> 事件列表（用于断线重连）
-        self._events: Dict[str, List[SSEEvent]] = defaultdict(list)
-
-        # 事件ID计数器
-        self._event_counters: Dict[str, int] = defaultdict(int)
-    def __init__(
-        self,
         max_events_per_task: int = 1000,
         event_ttl: int = 3600,  # 1 hour
         heartbeat_interval: int = 15,  # 15 seconds
@@ -109,6 +84,9 @@ class SSEManager:
         # 锁
         self._lock = asyncio.Lock()
 
+        # 绑定的主事件循环（用于跨线程/跨 loop 安全调度）
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
         logger.info(
             "SSEManager initialized",
             extra={
@@ -117,6 +95,108 @@ class SSEManager:
                 "heartbeat_interval": heartbeat_interval,
             },
         )
+
+    def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """绑定 FastAPI/uvicorn 的主事件循环.
+
+        SSEManager 内部使用 asyncio.Lock / asyncio.Queue，这些对象要求在同一个事件循环中操作。
+        文档生成任务运行在后台线程/独立事件循环时，需要通过 run_coroutine_threadsafe
+        将事件发送调度回主事件循环。
+        """
+        self._loop = loop
+
+    def _schedule(self, coro: "asyncio.Future") -> None:
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        if running_loop is loop:
+            asyncio.create_task(coro)
+            return
+
+        try:
+            asyncio.run_coroutine_threadsafe(coro, loop)
+        except Exception:
+            logger.exception("Failed to schedule SSE coroutine", extra={"loop_bound": True})
+
+    def send_log_threadsafe(
+        self,
+        task_id: str,
+        message: str,
+        level: str = "info",
+        node: Optional[str] = None,
+    ) -> None:
+        self._schedule(self.send_log(task_id=task_id, message=message, level=level, node=node))
+
+    def send_llm_output_threadsafe(
+        self,
+        task_id: str,
+        content: str,
+        node: Optional[str] = None,
+        model: Optional[str] = None,
+        is_complete: bool = False,
+    ) -> None:
+        self._schedule(
+            self.send_llm_output(
+                task_id=task_id,
+                content=content,
+                node=node,
+                model=model,
+                is_complete=is_complete,
+            )
+        )
+
+    def send_progress_threadsafe(
+        self,
+        task_id: str,
+        completed_count: int,
+        total_nodes: int,
+        current_node: Optional[str] = None,
+        current_node_display: Optional[str] = None,
+    ) -> None:
+        self._schedule(
+            self.send_progress(
+                task_id=task_id,
+                completed_count=completed_count,
+                total_nodes=total_nodes,
+                current_node=current_node,
+                current_node_display=current_node_display,
+            )
+        )
+
+    def send_done_threadsafe(
+        self,
+        task_id: str,
+        success: bool = True,
+        message: str = "任务完成",
+        output_file: Optional[str] = None,
+        download_url: Optional[str] = None,
+        processing_time: Optional[float] = None,
+    ) -> None:
+        self._schedule(
+            self.send_done(
+                task_id=task_id,
+                success=success,
+                message=message,
+                output_file=output_file,
+                download_url=download_url,
+                processing_time=processing_time,
+            )
+        )
+
+    def send_error_threadsafe(
+        self,
+        task_id: str,
+        error: str,
+        node: Optional[str] = None,
+        is_fatal: bool = True,
+    ) -> None:
+        self._schedule(self.send_error(task_id=task_id, error=error, node=node, is_fatal=is_fatal))
 
     async def connect(
         self,
@@ -144,7 +224,7 @@ class SSEManager:
             self._clients[task_id].add(client)
             self._client_map[client_id] = client
 
-            logger.info(
+            logger.debug(
                 f"SSE client connected: {client_id}",
                 extra={
                     "task_id": task_id,
@@ -166,7 +246,7 @@ class SSEManager:
             client = self._client_map.pop(client_id, None)
             if client:
                 self._clients[client.task_id].discard(client)
-                logger.info(
+                logger.debug(
                     f"SSE client disconnected: {client_id}",
                     extra={
                         "task_id": client.task_id,
@@ -284,6 +364,14 @@ class SSEManager:
         client = await self.connect(task_id, client_id, last_event_id)
 
         try:
+            def _event_id_as_int(event: SSEEvent) -> Optional[int]:
+                if not event.id:
+                    return None
+                try:
+                    return int(event.id)
+                except (TypeError, ValueError):
+                    return None
+
             # 发送连接成功事件
             yield self._format_event(
                 SSEEvent(
@@ -297,10 +385,19 @@ class SSEManager:
             )
 
             # 如果有断线重连，发送错过的事件
-            if last_event_id is not None:
-                missed_events = await self.get_missed_events(task_id, last_event_id)
-                for event in missed_events:
-                    yield self._format_event(event)
+            # 兼容：首次连接也发送已有事件（便于页面刷新/晚连接看到历史）
+            effective_last_event_id = last_event_id if last_event_id is not None else 0
+            last_sent_event_id = effective_last_event_id
+            missed_events = await self.get_missed_events(task_id, effective_last_event_id)
+            for event in missed_events:
+                yield self._format_event(event)
+                event_id = _event_id_as_int(event)
+                if event_id is not None and event_id > last_sent_event_id:
+                    last_sent_event_id = event_id
+
+            # 如果历史事件里已经包含 done/error，则无需继续保持连接
+            if any(e.event in (SSEEventType.DONE, SSEEventType.ERROR) for e in missed_events):
+                return
 
             # 持续发送事件
             heartbeat_task = asyncio.create_task(self._heartbeat_loop(client))
@@ -313,6 +410,14 @@ class SSEManager:
                             client.event_queue.get(),
                             timeout=self.heartbeat_interval,
                         )
+
+                        # 避免“历史重放 + 实时队列”竞态导致的重复下发
+                        event_id = _event_id_as_int(event)
+                        if event_id is not None and event_id <= last_sent_event_id:
+                            continue
+                        if event_id is not None:
+                            last_sent_event_id = event_id
+
                         yield self._format_event(event)
 
                         # 如果是 done 或 error 事件，结束流
@@ -320,8 +425,15 @@ class SSEManager:
                             break
 
                     except asyncio.TimeoutError:
-                        # 发送心跳（作为注释，不触发客户端事件处理器）
-                        yield f": heartbeat {datetime.now().isoformat()}\n\n"
+                        yield self._format_event(
+                            SSEEvent(
+                                event=SSEEventType.HEARTBEAT,
+                                data={
+                                    "task_id": task_id,
+                                    "timestamp": datetime.now().isoformat(),
+                                },
+                            )
+                        )
 
             finally:
                 heartbeat_task.cancel()
@@ -433,7 +545,9 @@ class SSEManager:
             task_id,
             SSEEventType.LLM,
             {
+                "task_id": task_id,
                 "content": content,
+                "content_mode": "snapshot",
                 "node": node,
                 "model": model,
                 "is_complete": is_complete,
@@ -477,6 +591,7 @@ class SSEManager:
                 "progress_percent": round(progress_percent, 2),
                 "current_node": current_node,
                 "current_node_display": current_node_display,
+                "timestamp": datetime.now().isoformat(),
             },
         )
 
@@ -512,6 +627,7 @@ class SSEManager:
                 "output_file": output_file,
                 "download_url": download_url,
                 "processing_time": processing_time,
+                "timestamp": datetime.now().isoformat(),
             },
         )
 
@@ -541,6 +657,7 @@ class SSEManager:
                 "error": error,
                 "node": node,
                 "is_fatal": is_fatal,
+                "timestamp": datetime.now().isoformat(),
             },
         )
 

@@ -10,39 +10,6 @@ from typing import Any, Callable, Optional
 from backend.config.settings import settings
 from backend.util.log_util.progress_log import progress_log
 
-
-class LLMTimeoutError(Exception):
-    """大模型响应超时异常"""
-
-"""
-LLM 流式响应工具模块
-
-提供统一的大模型流式调用接口，支持心跳超时检测。
-支持的模型提供商：
-- doubao (豆包)
-- qwen (千问)
-- deepseek (深度求索)
-"""
-
-import asyncio
-import os
-import random
-import threading
-import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
-import pathlib
-
-from dotenv import load_dotenv
-from backend.util.log_util.progress_log import progress_log
-
-_DOTENV_PATH = pathlib.Path(__file__).resolve().parents[2] / ".env"
-if _DOTENV_PATH.exists():
-    load_dotenv(dotenv_path=_DOTENV_PATH)
-else:
-    load_dotenv()
-
-
 class LLMTimeoutError(Exception):
     """大模型响应超时异常"""
 
@@ -198,18 +165,6 @@ def ensure_llm_env(model_provider: str) -> None:
             f"{config.display_name} 配置缺失：{missing_text} 未设置。"
             "请在系统环境变量或项目根目录的 .env 中补齐后重试（可参考 .env.example）。"
         )
-    config = MODEL_CONFIGS.get(model_provider, MODEL_CONFIGS["deepseek"])
-    missing: list[str] = []
-    for env_name in (config.api_key_env, config.base_url_env, config.model_env):
-        value = os.getenv(env_name)
-        if not value or not str(value).strip():
-            missing.append(env_name)
-    if missing:
-        missing_text = ", ".join(missing)
-        raise ValueError(
-            f"{config.display_name} 配置缺失：{missing_text} 未设置。"
-            "请在系统环境变量或项目根目录的 .env 中补齐后重试（可参考 .env.example）。"
-        )
 
 
 async def stream_llm_completion(
@@ -268,6 +223,7 @@ async def stream_llm_completion(
     try:
         heartbeat.start()
         content = await _stream_openai_compatible(
+            model_provider=model_provider,
             prompt=prompt,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -291,6 +247,7 @@ async def stream_llm_completion(
 
 
 async def _stream_openai_compatible(
+    model_provider: str,
     config: ModelConfig,
     model_override: Optional[str],
     extra_params_override: Optional[dict[str, Any]],
@@ -311,29 +268,28 @@ async def _stream_openai_compatible(
     )
     import httpx
 
-    llm_config = settings.get_llm_config(config.api_key_env.replace("_API_KEY", "").lower().replace("ark", "doubao"))
+    llm_config = settings.get_llm_config(model_provider)
     api_key = llm_config.get("api_key")
+    base_url = llm_config.get("base_url")
+    model_name = llm_config.get("model")
+
+    missing: list[str] = []
     if not api_key or not str(api_key).strip():
+        missing.append(config.api_key_env)
+    if not base_url or not str(base_url).strip():
+        missing.append(config.base_url_env)
+    if not model_name or not str(model_name).strip():
+        missing.append(config.model_env)
+    if missing:
+        missing_text = ", ".join(missing)
         raise ValueError(
-            f"{config.display_name} 配置缺失：API Key 未设置。"
+            f"{config.display_name} 配置缺失：{missing_text} 未设置。"
             "请在系统环境变量或项目根目录的 .env 中补齐后重试（可参考 .env.example）。"
         )
 
     client = AsyncOpenAI(
         api_key=api_key,
-        base_url=llm_config.get("base_url"),
-        timeout=httpx.Timeout(timeout_seconds, connect=10.0),
-        max_retries=0,
-    )
-    if not api_key or not str(api_key).strip():
-        raise ValueError(
-            f"{config.display_name} 配置缺失：{config.api_key_env} 未设置。"
-            "请在系统环境变量或项目根目录的 .env 中补齐后重试（可参考 .env.example）。"
-        )
-
-    client = AsyncOpenAI(
-        api_key=api_key,
-        base_url=os.getenv(config.base_url_env),
+        base_url=base_url,
         timeout=httpx.Timeout(timeout_seconds, connect=10.0),
         max_retries=0,
     )
@@ -359,13 +315,7 @@ async def _stream_openai_compatible(
 
     # 构建请求参数
     create_params: dict[str, Any] = {
-        "model": model_override or llm_config.get("model"),
-        "messages": messages,
-        "stream": True,
-        **config.extra_params,  # max_tokens, temperature 等
-    }
-    create_params: dict[str, Any] = {
-        "model": model_override or os.getenv(config.model_env),
+        "model": model_override or model_name,
         "messages": messages,
         "stream": True,
         **config.extra_params,  # max_tokens, temperature 等

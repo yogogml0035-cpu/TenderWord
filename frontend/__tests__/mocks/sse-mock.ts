@@ -143,6 +143,7 @@ export function createLogEvent(
   node?: string
 ): SSELogEvent {
   return {
+    task_id: 'test-task',
     timestamp: new Date().toISOString(),
     level,
     message,
@@ -156,12 +157,15 @@ export function createLogEvent(
 export function createLLMEvent(
   content: string,
   node: string,
-  isComplete: boolean = false
+  isComplete: boolean = false,
+  contentMode: 'snapshot' | 'chunk' = 'snapshot'
 ): SSELLMEvent {
   return {
     timestamp: new Date().toISOString(),
+    task_id: 'test-task',
     node,
     content,
+    content_mode: contentMode,
     is_complete: isComplete,
   };
 }
@@ -176,6 +180,10 @@ export function createProgressEvent(
 ): SSEProgressEvent {
   return {
     timestamp: new Date().toISOString(),
+    task_id: 'test-task',
+    status: 'running',
+    progress_text: `${completedCount}/${totalNodes}`,
+    current_node: node,
     node,
     completed_count: completedCount,
     total_nodes: totalNodes,
@@ -200,15 +208,15 @@ export function createStatusEvent(
  * Helper to create error events
  */
 export function createErrorEvent(
-  errorCode: string,
-  message: string,
-  details?: string
+  taskId: string,
+  error: string,
+  isFatal: boolean = true
 ): SSEErrorEvent {
   return {
     timestamp: new Date().toISOString(),
-    error_code: errorCode,
-    message,
-    details,
+    task_id: taskId,
+    error,
+    is_fatal: isFatal,
   };
 }
 
@@ -217,14 +225,16 @@ export function createErrorEvent(
  */
 export function createDoneEvent(
   taskId: string,
-  status: 'completed' | 'failed' | 'cancelled',
-  totalTimeSeconds: number
+  outputFile?: string,
+  processingTime?: number
 ): SSEDoneEvent {
   return {
     timestamp: new Date().toISOString(),
     task_id: taskId,
-    status,
-    total_time_seconds: totalTimeSeconds,
+    success: true,
+    message: '任务完成',
+    output_file: outputFile,
+    processing_time: processingTime,
   };
 }
 
@@ -255,8 +265,8 @@ export async function simulateTaskFlow(
       sse.emit('log', createLogEvent(`Processing step ${i + 1}`));
     }
   } else {
-    sse.emit('error', createErrorEvent('SYS_INTERNAL_ERROR', 'Error during log phase'));
-    return;
+      sse.emit('error', createErrorEvent(taskId, 'Error during log phase'));
+      return;
   }
 
   // Emit LLM content events
@@ -266,22 +276,22 @@ export async function simulateTaskFlow(
       sse.emit('llm', createLLMEvent(llmContentChunks[i], 'generate_content', isComplete));
     }
   } else {
-    sse.emit('error', createErrorEvent('LLM_SERVICE_ERROR', 'Error during LLM generation'));
-    return;
+      sse.emit('error', createErrorEvent(taskId, 'Error during LLM generation'));
+      return;
   }
 
   // Emit progress event
   if (failAt !== 3) {
     sse.emit('progress', createProgressEvent('update_word', totalSteps - 1, totalSteps));
   } else {
-    sse.emit('error', createErrorEvent('SYS_INTERNAL_ERROR', 'Error during progress phase'));
-    return;
+      sse.emit('error', createErrorEvent(taskId, 'Error during progress phase'));
+      return;
   }
 
   // Emit done event
   if (failAt !== 4) {
-    sse.emit('done', createDoneEvent(taskId, 'completed', 60));
+    sse.emit('done', createDoneEvent(taskId, '/tmp/output.docx', 60));
   } else {
-    sse.emit('error', createErrorEvent('SYS_INTERNAL_ERROR', 'Error during completion'));
+    sse.emit('error', createErrorEvent(taskId, 'Error during completion'));
   }
 }

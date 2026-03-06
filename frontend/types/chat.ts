@@ -63,6 +63,11 @@ export interface Message {
   metadata?: {
     outputFile?: string;
     fileName?: string;
+    progressPercent?: number;
+    progressText?: string;
+    currentNode?: string;
+    currentNodeDisplay?: string;
+    lastEventId?: string;
     [key: string]: unknown;
   };
 }

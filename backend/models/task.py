@@ -155,3 +155,14 @@ class TaskCancelResponse(BaseModel):
     task_id: str = Field(..., description="任务ID")
     message: str = Field(default="", description="消息说明")
     was_running: bool = Field(default=False, description="取消时任务是否正在执行")
+
+
+class TaskHeartbeatResponse(BaseModel):
+    """
+    任务心跳响应模型
+    """
+
+    success: bool = Field(..., description="是否成功接收心跳")
+    task_id: str = Field(..., description="任务ID")
+    alive: bool = Field(..., description="任务是否仍处于活跃状态")
+    status: Optional[TaskStatus] = Field(default=None, description="任务当前状态")

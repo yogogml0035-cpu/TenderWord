@@ -48,9 +48,9 @@ export type FileType = 'clean_draft' | 'origin_tender' | 'params' | 'qualificati
 // ============================================
 
 export interface FilesConfig {
-  origin_tender_path?: string;
-  clean_draft_path?: string;
-  tender_param_paths: string[];
+  origin_tender?: string;
+  clean_draft?: string;
+  tender_params: string[];
 }
 
 export interface InsertionConfig {
@@ -59,11 +59,11 @@ export interface InsertionConfig {
 }
 
 export interface GenerateRequest {
-  tender_no: string;
+  form_type: 'xjcg_tender' | 'gngk_tender';
   tender_data: TenderData;
-  files: FilesConfig;
-  model: 'deepseek' | 'qwen' | 'doubao';
+  file_paths: FilesConfig;
   insertion_config?: InsertionConfig;
+  model: 'deepseek' | 'qwen' | 'doubao';
 }
 
 // ============================================
@@ -147,7 +147,8 @@ export interface TaskData {
   estimated_wait_seconds?: number;
   waiting_count?: number;
   progress: TaskProgress;
-  result?: TaskResult;
+  result?: TaskResult | string;
+  error?: string;
 }
 
 export type TaskResponse = ApiResponse<TaskData>;
@@ -183,12 +184,22 @@ export interface TaskListData {
 export type TaskListResponse = ApiResponse<TaskListData>;
 
 export interface CancelTaskData {
+  success: boolean;
   task_id: string;
-  status: TaskStatus;
-  cancelled_at: string;
+  message: string;
+  was_running: boolean;
+  noop?: boolean;
 }
 
 export type CancelTaskResponse = ApiResponse<CancelTaskData>;
+
+export interface TaskHeartbeatData {
+  task_id: string;
+  alive: boolean;
+  status?: TaskStatus;
+}
+
+export type TaskHeartbeatResponse = ApiResponse<TaskHeartbeatData>;
 
 // ============================================
 // Create Task Response
@@ -215,6 +226,7 @@ export interface SSEConnectedEvent {
 }
 
 export interface SSELogEvent {
+  task_id?: string;
   timestamp: string;
   level: 'INFO' | 'DEBUG' | 'WARN' | 'ERROR';
   message: string;
@@ -223,19 +235,25 @@ export interface SSELogEvent {
 
 export interface SSELLMEvent {
   timestamp: string;
-  node: string;
+  task_id?: string;
+  node?: string;
   content: string;
+  content_mode?: 'snapshot' | 'chunk';
   is_complete: boolean;
   token_count?: number;
 }
 
 export interface SSEProgressEvent {
   timestamp: string;
-  node: string;
+  task_id: string;
+  status: TaskStatus | 'running';
+  progress_text: string;
+  current_node?: string;
+  node?: string;
   completed_count: number;
   total_nodes: number;
   progress_percent: number;
-  current_node_display: string;
+  current_node_display?: string;
 }
 
 export interface SSEStatusEvent {
@@ -247,16 +265,20 @@ export interface SSEStatusEvent {
 
 export interface SSEErrorEvent {
   timestamp: string;
-  error_code: string;
-  message: string;
-  details?: string;
+  task_id: string;
+  error: string;
+  node?: string;
+  is_fatal: boolean;
 }
 
 export interface SSEDoneEvent {
   timestamp: string;
   task_id: string;
-  status: TaskStatus;
-  total_time_seconds: number;
+  success: boolean;
+  message: string;
+  output_file?: string;
+  download_url?: string;
+  processing_time?: number;
 }
 
 export interface SSEHeartbeatEvent {

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { devtools, persist } from 'zustand/middleware';
+import { createJSONStorage, devtools, persist } from 'zustand/middleware';
 
 export type HistoryStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -120,6 +120,7 @@ export const useHistoryStore = create<HistoryStore>()(
       }),
       {
         name: 'tender-history-storage',
+        storage: createJSONStorage(() => sessionStorage),
         partialize: (state) => ({
           history: state.history,
         }),

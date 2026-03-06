@@ -38,6 +38,11 @@ class FormType(str, Enum):
     GNGK_TENDER = "gngk_tender"  # 国内公开
 
 
+class InsertionConfig(BaseModel):
+    before_text: Optional[str] = Field(default=None, description="插入位置前文本（锚点）")
+    after_text: Optional[str] = Field(default=None, description="插入位置后文本（锚点）")
+
+
 class GenerateRequest(BaseModel):
     """
     文档生成请求模型
@@ -56,6 +61,9 @@ class GenerateRequest(BaseModel):
     )
     tender_data: TenderData = Field(..., description="招标数据")
     file_paths: Dict[str, str | List[str]] = Field(..., description="文件路径字典")
+    insertion_config: Optional[InsertionConfig] = Field(
+        default=None, description="插入锚点配置（可选）"
+    )
     model: LLMModel = Field(default=LLMModel.DEEPSEEK, description="使用的 LLM 模型")
 
     model_config = {
@@ -83,6 +91,10 @@ class GenerateRequest(BaseModel):
                         "D:/UploadFiles/params1.docx",
                         "D:/UploadFiles/params2.docx",
                     ],
+                },
+                "insertion_config": {
+                    "before_text": "第三章 采购需求",
+                    "after_text": "第四章 响应文件有关格式",
                 },
                 "model": "deepseek",
             }

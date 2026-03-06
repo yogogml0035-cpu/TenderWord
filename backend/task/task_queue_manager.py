@@ -8,6 +8,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -28,28 +29,35 @@ class TaskStatus(Enum):
 class NodeName(Enum):
     """Graph 节点名称（按执行顺序）"""
     PREPARE_TEMPLATE = "prepare_template"
+    GET_COMMENTS = "get_comments"
+    COPY_COMMENTS = "copy_comments"
     EXTRACT_TENDER_PARAMS = "extract_tender_params"
     DELETE_TENDER_PARAM = "delete_tender_param"
     GET_REPLACEMENTS = "get_replacements"
     REPLACE_CONTENT = "replace_content"
     GENERATE_POLISHED_TEXT = "generate_polished_text"
+    GENERATE_COMMENTS = "generate_comments"
     UPDATE_WORD = "update_word"
 
 
 # 节点显示名称映射
 NODE_DISPLAY_NAMES = {
     NodeName.PREPARE_TEMPLATE: "复制原始模板文件",
+    NodeName.GET_COMMENTS: "提取送审稿批注",
+    NodeName.COPY_COMMENTS: "复制送审稿批注",
     NodeName.EXTRACT_TENDER_PARAMS: "提取原始采购需求",
     NodeName.DELETE_TENDER_PARAM: "删除原始采购需求",
     NodeName.GET_REPLACEMENTS: "获取原始项目信息",
     NodeName.REPLACE_CONTENT: "替换最新项目信息",
     NodeName.GENERATE_POLISHED_TEXT: "AI生成采购需求",
+    NodeName.GENERATE_COMMENTS: "AI生成批注建议",
     NodeName.UPDATE_WORD: "生成招标文件",
 }
 
 # 总节点数（从 settings 获取）
 TOTAL_NODES = settings.TASK_TOTAL_NODES
-TOTAL_NODES = 7
+TRACKED_NODE_NAMES = {node.value for node in NodeName}
+HEARTBEAT_TIMEOUT_REASON = "heartbeat_timeout"
 
 
 @dataclass
@@ -167,6 +175,10 @@ class TaskQueueManager:
         self._data_lock = threading.RLock()
         self._progress_callbacks: Dict[str, Callable] = {}
         self._cancel_events: Dict[str, threading.Event] = {}  # 取消事件
+        # 运行态上下文：用于尽快中断运行中的任务
+        self._worker_futures: Dict[str, Future] = {}
+        self._running_async_loops: Dict[str, Any] = {}
+        self._running_async_tasks: Dict[str, Any] = {}
         
         # ============ 公平锁机制 ============
         # 条件变量：用于线程等待和通知，确保按队列顺序执行
@@ -175,8 +187,6 @@ class TaskQueueManager:
         # 心跳超时配置（秒）
         self._heartbeat_timeout = settings.TASK_HEARTBEAT_TIMEOUT
         self._cleanup_interval = settings.TASK_CLEANUP_INTERVAL
-        self._heartbeat_timeout = 10  # 配置时间内未收到心跳则认为用户已离开
-        self._cleanup_interval = 5  # 每次检查一次超时任务的时间
         
         # 启动后台清理线程
         self._cleanup_thread_stop = threading.Event()
@@ -187,6 +197,30 @@ class TaskQueueManager:
         )
         self._cleanup_thread.start()
     
+    def _create_task(self, user_session_id: str, task_id: Optional[str] = None) -> Task:
+        """
+        创建任务并加入队列（内部实现）
+
+        Args:
+            user_session_id: 用户会话ID
+            task_id: 指定任务ID（可选，不传则自动生成）
+
+        Returns:
+            创建的任务对象
+        """
+        with self._data_lock:
+            final_task_id = task_id or str(uuid.uuid4())[:8]
+            task = Task(
+                task_id=final_task_id,
+                user_session_id=user_session_id,
+                created_at=datetime.now(),
+                last_heartbeat=datetime.now(),  # 初始化心跳时间
+            )
+            self._tasks[final_task_id] = task
+            self._queue.append(final_task_id)
+            self._cancel_events[final_task_id] = threading.Event()  # 创建取消事件
+            return task
+
     def create_task(self, user_session_id: str) -> Task:
         """
         创建新任务并加入队列
@@ -197,18 +231,17 @@ class TaskQueueManager:
         Returns:
             创建的任务对象
         """
-        with self._data_lock:
-            task_id = str(uuid.uuid4())[:8]
-            task = Task(
-                task_id=task_id,
-                user_session_id=user_session_id,
-                created_at=datetime.now(),
-                last_heartbeat=datetime.now()  # 初始化心跳时间
-            )
-            self._tasks[task_id] = task
-            self._queue.append(task_id)
-            self._cancel_events[task_id] = threading.Event()  # 创建取消事件
-            return task
+        return self._create_task(user_session_id=user_session_id)
+
+    def add_task(self, task_id: str, user_session_id: str) -> Task:
+        """
+        兼容旧接口：使用外部提供的 task_id 创建任务。
+
+        说明：
+        - DocumentService 当前调用 add_task(task_id=..., user_session_id=...)
+        - 该方法保持兼容，避免接口漂移导致 500
+        """
+        return self._create_task(user_session_id=user_session_id, task_id=task_id)
     
     def update_heartbeat(self, task_id: str) -> bool:
         """
@@ -238,6 +271,7 @@ class TaskQueueManager:
         while not self._cleanup_thread_stop.is_set():
             try:
                 self._check_and_cancel_timeout_tasks()
+                self.cleanup_old_tasks()
             except Exception as e:
                 # 后台线程不能崩溃，静默处理错误
                 progress_log.debug(f"[TaskQueue] 心跳检测线程出错: {e}")
@@ -254,7 +288,6 @@ class TaskQueueManager:
             tasks_to_cancel = []
             
             for task_id, task in self._tasks.items():
-                # 只检查排队中或运行中的任务
                 if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING):
                     continue
                 
@@ -266,8 +299,55 @@ class TaskQueueManager:
         
         # 在锁外执行取消操作（cancel_task 会自己获取锁）
         for task_id, age in tasks_to_cancel:
-            progress_log.debug(f"[TaskQueue] 任务 {task_id} 心跳超时 ({age:.1f}秒)，自动取消")
-            self.cancel_task(task_id)
+            progress_log.warning(
+                f"[TaskQueue] 任务 {task_id} 因 {HEARTBEAT_TIMEOUT_REASON} 自动取消 "
+                f"(heartbeat_age={age:.1f}s)"
+            )
+            self.cancel_task(
+                task_id,
+                reason=HEARTBEAT_TIMEOUT_REASON,
+                message="心跳超时自动取消",
+            )
+
+    def _cleanup_task_runtime_locked(self, task_id: str):
+        """清理任务运行态资源。"""
+        self._progress_callbacks.pop(task_id, None)
+        self._cancel_events.pop(task_id, None)
+        self._worker_futures.pop(task_id, None)
+        self._running_async_loops.pop(task_id, None)
+        self._running_async_tasks.pop(task_id, None)
+
+    def _finalize_task_locked(
+        self,
+        task_id: str,
+        *,
+        status: Optional[TaskStatus] = None,
+        result: Any = None,
+        error: Optional[str] = None,
+        set_result: bool = True,
+        set_error: bool = True,
+    ) -> bool:
+        """统一完成任务终态收尾。"""
+        task = self._tasks.get(task_id)
+        if not task:
+            return False
+
+        if status is not None:
+            task.status = status
+        if set_result:
+            task.result = result
+        if set_error:
+            task.error = error
+        task.completed_at = task.completed_at or datetime.now()
+
+        if task_id in self._queue:
+            self._queue.remove(task_id)
+        if self._current_task_id == task_id:
+            self._current_task_id = None
+
+        self._cleanup_task_runtime_locked(task_id)
+        self._execution_condition.notify_all()
+        return True
     
     def get_task(self, task_id: str) -> Optional[Task]:
         """获取任务信息"""
@@ -368,19 +448,54 @@ class TaskQueueManager:
             return True
 
     def set_total_nodes(self, task_id: str, total_nodes: int) -> bool:
+        def _display_name(name: str) -> str:
+            try:
+                node = NodeName(name)
+                return NODE_DISPLAY_NAMES.get(node, name)
+            except ValueError:
+                return name
+
+        payload = None
         with self._data_lock:
             task = self._tasks.get(task_id)
             if not task:
                 return False
             safe_total = max(1, int(total_nodes))
             task.progress.total_nodes = safe_total
+
+            current_node = task.progress.running_nodes[0] if task.progress.running_nodes else None
+            current_node_display = _display_name(current_node) if current_node else None
+            payload = (
+                task.progress.completed_count,
+                task.progress.total_nodes,
+                current_node,
+                current_node_display,
+            )
+
             callback = self._progress_callbacks.get(task_id)
             if callback:
                 try:
                     callback(task.progress)
                 except Exception:
                     pass
-            return True
+
+        # 实时推送进度（不在锁内做 IO/调度）
+        if payload:
+            completed_count, total_nodes, current_node, current_node_display = payload
+            try:
+                from backend.core.sse_manager import sse_manager
+
+                sse_manager.send_progress_threadsafe(
+                    task_id=task_id,
+                    completed_count=completed_count,
+                    total_nodes=total_nodes,
+                    current_node=current_node,
+                    current_node_display=current_node_display,
+                )
+            except Exception:
+                pass
+
+        return True
     
     def update_progress(self, task_id: str, node_name: str, completed: bool = True):
         """
@@ -391,27 +506,61 @@ class TaskQueueManager:
             node_name: 节点名称
             completed: 是否已完成该节点
         """
+        if node_name not in TRACKED_NODE_NAMES:
+            return
+
+        def _display_name(name: str) -> str:
+            try:
+                node = NodeName(name)
+                return NODE_DISPLAY_NAMES.get(node, name)
+            except ValueError:
+                return name
+
+        changed = False
+        payload = None
+        log_line = None
         with self._data_lock:
             task = self._tasks.get(task_id)
             if not task:
                 return
-            
+
+            display_name = _display_name(node_name)
+
             if completed:
                 # 节点完成：从运行列表移除，加入完成列表
                 if node_name in task.progress.running_nodes:
                     task.progress.running_nodes.remove(node_name)
+                    changed = True
                 if node_name not in task.progress.completed_nodes:
                     task.progress.completed_nodes.append(node_name)
-                task.progress.last_completed_node = node_name
+                    changed = True
+                if task.progress.last_completed_node != node_name:
+                    task.progress.last_completed_node = node_name
+                    changed = True
             else:
                 # 节点开始：加入运行列表
                 if node_name not in task.progress.running_nodes:
                     task.progress.running_nodes.append(node_name)
+                    changed = True
 
             observed_total = len(task.progress.completed_nodes) + len(task.progress.running_nodes)
             if observed_total > task.progress.total_nodes:
                 task.progress.total_nodes = observed_total
-            
+                changed = True
+
+            current_node = task.progress.running_nodes[0] if task.progress.running_nodes else None
+            current_node_display = _display_name(current_node) if current_node else None
+            payload = (
+                task.progress.completed_count,
+                task.progress.total_nodes,
+                current_node,
+                current_node_display,
+            )
+
+            if changed:
+                status_text = "完成" if completed else "开始"
+                log_line = f"[{node_name}] {display_name} {status_text} ({task.progress.progress_text})"
+
             # 调用进度回调
             callback = self._progress_callbacks.get(task_id)
             if callback:
@@ -419,6 +568,26 @@ class TaskQueueManager:
                     callback(task.progress)
                 except Exception:
                     pass
+
+        # 仅在状态变化时写入 progress_log（用户态日志）
+        if log_line:
+            progress_log.info(log_line)
+
+        # 实时推送进度（不在锁内做 IO/调度）
+        if payload and changed:
+            completed_count, total_nodes, current_node, current_node_display = payload
+            try:
+                from backend.core.sse_manager import sse_manager
+
+                sse_manager.send_progress_threadsafe(
+                    task_id=task_id,
+                    completed_count=completed_count,
+                    total_nodes=total_nodes,
+                    current_node=current_node,
+                    current_node_display=current_node_display,
+                )
+            except Exception:
+                pass
     
     def complete_task(self, task_id: str, result: Any = None, error: str = None):
         """
@@ -436,34 +605,34 @@ class TaskQueueManager:
             
             # 如果任务已经被取消，不要覆盖状态
             if task.status == TaskStatus.CANCELLED:
-                # 只清理当前任务ID（如果正在执行的话）
-                if self._current_task_id == task_id:
-                    self._current_task_id = None
-                    # 通知等待的线程
-                    self._execution_condition.notify_all()
+                self._finalize_task_locked(
+                    task_id,
+                    status=TaskStatus.CANCELLED,
+                    set_result=False,
+                    set_error=False,
+                )
                 return
             
-            task.completed_at = datetime.now()
-            task.result = result
-            task.error = error
-            task.status = TaskStatus.COMPLETED if not error else TaskStatus.FAILED
-            
-            if self._current_task_id == task_id:
-                self._current_task_id = None
-            
-            # 清理进度回调和取消事件
-            self._progress_callbacks.pop(task_id, None)
-            self._cancel_events.pop(task_id, None)
-            
-            # 通知等待的线程（下一个任务可以开始了）
-            self._execution_condition.notify_all()
+            self._finalize_task_locked(
+                task_id,
+                status=TaskStatus.COMPLETED if not error else TaskStatus.FAILED,
+                result=result,
+                error=error,
+            )
     
-    def cancel_task(self, task_id: str) -> bool:
+    def cancel_task(
+        self,
+        task_id: str,
+        reason: str = "user_cancelled",
+        message: Optional[str] = None,
+    ) -> bool:
         """
         取消任务
         
         Args:
             task_id: 任务ID
+            reason: 取消原因代码
+            message: 取消说明
             
         Returns:
             是否成功取消（True: 成功取消, False: 任务不存在或已完成）
@@ -481,33 +650,43 @@ class TaskQueueManager:
             cancel_event = self._cancel_events.get(task_id)
             if cancel_event:
                 cancel_event.set()
+
+            worker_future = self._worker_futures.get(task_id)
+            running_loop = self._running_async_loops.get(task_id)
+            running_async_task = self._running_async_tasks.get(task_id)
+            cancellation_error = reason
             
             # 如果任务在排队中，直接从队列移除
             if task.status == TaskStatus.QUEUED:
-                if task_id in self._queue:
-                    self._queue.remove(task_id)
-                task.status = TaskStatus.CANCELLED
-                task.completed_at = datetime.now()
-                task.error = "用户取消"
-                # 清理
-                self._progress_callbacks.pop(task_id, None)
-                self._cancel_events.pop(task_id, None)
-                # 通知其他等待的线程（队列顺序可能变化了）
-                self._execution_condition.notify_all()
-                return True
+                if worker_future and not worker_future.running():
+                    worker_future.cancel()
+                return self._finalize_task_locked(
+                    task_id,
+                    status=TaskStatus.CANCELLED,
+                    result=None,
+                    error=cancellation_error,
+                )
             
-            # 如果任务正在运行，标记为取消（线程会检查并退出）
+            # 如果任务正在运行，标记为取消并主动请求中断
             if task.status == TaskStatus.RUNNING:
-                task.status = TaskStatus.CANCELLED
-                task.completed_at = datetime.now()
-                task.error = "用户取消"
-                if self._current_task_id == task_id:
-                    self._current_task_id = None
-                # 清理
-                self._progress_callbacks.pop(task_id, None)
-                # 通知其他等待的线程
-                self._execution_condition.notify_all()
-                return True
+                if (
+                    running_loop is not None
+                    and running_async_task is not None
+                    and not running_async_task.done()
+                ):
+                    try:
+                        running_loop.call_soon_threadsafe(running_async_task.cancel)
+                    except Exception:
+                        # 中断请求失败时保持降级路径：由节点取消检查兜底
+                        pass
+                if worker_future and not worker_future.running():
+                    worker_future.cancel()
+                return self._finalize_task_locked(
+                    task_id,
+                    status=TaskStatus.CANCELLED,
+                    result=None,
+                    error=cancellation_error,
+                )
             
             return False
     
@@ -625,6 +804,23 @@ class TaskQueueManager:
         """
         with self._data_lock:
             return self._cancel_events.get(task_id)
+
+    def register_worker_future(self, task_id: str, worker_future: Future):
+        """登记后台 worker future，用于排队任务取消时快速撤销。"""
+        with self._data_lock:
+            self._worker_futures[task_id] = worker_future
+
+    def register_running_async_context(self, task_id: str, loop: Any, async_task: Any):
+        """登记运行中的 async 上下文，用于触发 task.cancel()。"""
+        with self._data_lock:
+            self._running_async_loops[task_id] = loop
+            self._running_async_tasks[task_id] = async_task
+
+    def clear_running_async_context(self, task_id: str):
+        """清理运行中的 async 上下文。"""
+        with self._data_lock:
+            self._running_async_loops.pop(task_id, None)
+            self._running_async_tasks.pop(task_id, None)
     
     def register_progress_callback(self, task_id: str, callback: Callable[[TaskProgress], None]):
         """注册进度更新回调"""
@@ -642,13 +838,16 @@ class TaskQueueManager:
             now = datetime.now()
             to_remove = []
             for task_id, task in self._tasks.items():
-                if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+                if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
                     if task.completed_at:
                         age = (now - task.completed_at).total_seconds()
                         if age > max_age_seconds:
                             to_remove.append(task_id)
             
             for task_id in to_remove:
+                if task_id in self._queue:
+                    self._queue.remove(task_id)
+                self._cleanup_task_runtime_locked(task_id)
                 del self._tasks[task_id]
     
     def get_queue_status_text(self, task_id: str) -> str:

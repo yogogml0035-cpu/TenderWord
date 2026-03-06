@@ -65,7 +65,7 @@ export const handlers = [
     const body = (await request.json()) as GenerateRequest;
 
     // Validate required fields
-    if (!body.tender_no || !body.tender_data || !body.files || !body.model) {
+    if (!body.form_type || !body.tender_data || !body.file_paths || !body.model) {
       return HttpResponse.json(
         createErrorResponse('REQ_MISSING_FIELD', 'Missing required fields'),
         { status: 400 }

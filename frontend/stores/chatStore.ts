@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { devtools, persist } from 'zustand/middleware';
+import { createJSONStorage, devtools, persist } from 'zustand/middleware';
 import type { TenderType } from '@/types';
-import type { Conversation, Message } from '@/types/chat';
+import type { Conversation, Message, DualColumnContent } from '@/types/chat';
 import { createConversation as createConvUtil, generateMessageId } from '@/lib/chat-utils';
 
 interface ChatStore {
@@ -27,9 +27,15 @@ interface ChatStore {
   deleteMessage: (conversationId: string, messageId: string) => void;
 
   startTask: (conversationId: string, taskId: string) => string;
-  completeTask: (taskId: string, outputFile?: string, fileName?: string) => void;
-  failTask: (taskId: string, error: string) => void;
-  cancelTask: (taskId: string) => void;
+  completeTask: (
+    taskId: string,
+    outputFile?: string,
+    fileName?: string,
+    content?: DualColumnContent
+  ) => void;
+  failTask: (taskId: string, error: string, content?: DualColumnContent) => void;
+  cancelTask: (taskId: string, content?: DualColumnContent) => void;
+  discardStaleTask: (taskId: string) => void;
 
   getCurrentConversation: () => Conversation | null;
   hasActiveTasks: () => boolean;
@@ -37,6 +43,7 @@ interface ChatStore {
   dismissConcurrentWarning: () => void;
   setSelectedTenderType: (type: TenderType | null) => void;
   findConversationByTenderNo: (tenderno: string) => Conversation | null;
+  findMessageByTaskId: (taskId: string) => { conversationId: string; message: Message } | null;
   getSortedConversations: () => Conversation[];
   getMostRecentConversationByType: (type: TenderType) => Conversation | null;
 }
@@ -156,7 +163,10 @@ export const useChatStore = create<ChatStore>()(
 
         startTask: (conversationId, taskId) => {
           const state = get();
-          if (state.activeTaskIds.length > 0) {
+          const hasGeneratingMessage = state.conversations.some((conversation) =>
+            conversation.messages.some((message) => message.status === 'generating')
+          );
+          if (state.activeTaskIds.length > 0 || hasGeneratingMessage) {
             set({ concurrentTaskWarning: true });
           }
 
@@ -178,16 +188,13 @@ export const useChatStore = create<ChatStore>()(
           return messageId;
         },
 
-        completeTask: (taskId, outputFile?, fileName?) => {
-          const state = get();
-          const messageId = state.taskMessageMap[taskId];
-          const conversationId = state.conversations.find((conv) =>
-            conv.messages.some((msg) => msg.id === messageId)
-          )?.id;
+        completeTask: (taskId, outputFile?, fileName?, content?) => {
+          const locatedMessage = get().findMessageByTaskId(taskId);
 
-          if (conversationId && messageId) {
-            get().updateMessage(conversationId, messageId, {
+          if (locatedMessage) {
+            get().updateMessage(locatedMessage.conversationId, locatedMessage.message.id, {
               status: 'completed',
+              ...(content ? { content } : {}),
               metadata: { outputFile, fileName },
             });
           }
@@ -200,15 +207,15 @@ export const useChatStore = create<ChatStore>()(
           }));
         },
 
-        failTask: (taskId, error) => {
-          const state = get();
-          const messageId = state.taskMessageMap[taskId];
-          const conversationId = state.conversations.find((conv) =>
-            conv.messages.some((msg) => msg.id === messageId)
-          )?.id;
+        failTask: (taskId, error, content?) => {
+          const locatedMessage = get().findMessageByTaskId(taskId);
 
-          if (conversationId && messageId) {
-            get().updateMessage(conversationId, messageId, { status: 'error', error });
+          if (locatedMessage) {
+            get().updateMessage(locatedMessage.conversationId, locatedMessage.message.id, {
+              status: 'error',
+              error,
+              ...(content ? { content } : {}),
+            });
           }
 
           set((state) => ({
@@ -219,18 +226,32 @@ export const useChatStore = create<ChatStore>()(
           }));
         },
 
-        cancelTask: (taskId) => {
-          const state = get();
-          const messageId = state.taskMessageMap[taskId];
-          const conversationId = state.conversations.find((conv) =>
-            conv.messages.some((msg) => msg.id === messageId)
-          )?.id;
+        cancelTask: (taskId, content?) => {
+          const locatedMessage = get().findMessageByTaskId(taskId);
 
-          if (conversationId && messageId) {
-            get().updateMessage(conversationId, messageId, { status: 'cancelled' });
+          if (locatedMessage) {
+            get().updateMessage(locatedMessage.conversationId, locatedMessage.message.id, {
+              status: 'cancelled',
+              ...(content ? { content } : {}),
+            });
           }
 
           set((state) => ({
+            activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
+            taskMessageMap: Object.fromEntries(
+              Object.entries(state.taskMessageMap).filter(([id]) => id !== taskId)
+            ),
+          }));
+        },
+
+        discardStaleTask: (taskId) => {
+          set((state) => ({
+            conversations: state.conversations.map((conv) => ({
+              ...conv,
+              messages: conv.messages.filter(
+                (msg) => !(msg.taskId === taskId && msg.status === 'generating')
+              ),
+            })),
             activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
             taskMessageMap: Object.fromEntries(
               Object.entries(state.taskMessageMap).filter(([id]) => id !== taskId)
@@ -245,7 +266,11 @@ export const useChatStore = create<ChatStore>()(
           );
         },
 
-        hasActiveTasks: () => get().activeTaskIds.length > 0,
+        hasActiveTasks: () =>
+          get().activeTaskIds.length > 0 ||
+          get().conversations.some((conversation) =>
+            conversation.messages.some((message) => message.status === 'generating')
+          ),
         clearError: () => set({ error: null }),
         dismissConcurrentWarning: () => set({ concurrentTaskWarning: false }),
         setSelectedTenderType: (type) => set({ selectedTenderType: type }),
@@ -253,6 +278,17 @@ export const useChatStore = create<ChatStore>()(
         findConversationByTenderNo: (tenderno) => {
           const state = get();
           return state.conversations.find((conv) => conv.title === tenderno) || null;
+        },
+
+        findMessageByTaskId: (taskId) => {
+          const state = get();
+          for (const conversation of state.conversations) {
+            const message = conversation.messages.find((item) => item.taskId === taskId);
+            if (message) {
+              return { conversationId: conversation.id, message };
+            }
+          }
+          return null;
         },
 
         getSortedConversations: () => {
@@ -271,6 +307,7 @@ export const useChatStore = create<ChatStore>()(
       }),
       {
         name: 'chat-storage',
+        storage: createJSONStorage(() => sessionStorage),
         partialize: (state) => ({
           conversations: state.conversations,
           currentConversationId: state.currentConversationId,

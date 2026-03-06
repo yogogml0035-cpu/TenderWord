@@ -5,6 +5,7 @@ import {
   downloadFile,
   fetchTenderData,
   getTaskStatus,
+  sendTaskHeartbeat,
   uploadFile,
 } from '@/lib/api';
 import type { GenerateRequest } from '@/types/api';
@@ -34,7 +35,7 @@ function mockFetchBlob(value: Blob, options?: { ok?: boolean; status?: number })
 }
 
 const validGenerateRequest: GenerateRequest = {
-  tender_no: 'ZBGG-2024-001',
+  form_type: 'xjcg_tender',
   tender_data: {
     project_name: 'Test Project',
     project_number: 'ZBGG-2024-001',
@@ -50,8 +51,8 @@ const validGenerateRequest: GenerateRequest = {
     platform: 'Test Platform',
     service_fee: '1000',
   },
-  files: {
-    tender_param_paths: ['/uploads/params.xlsx'],
+  file_paths: {
+    tender_params: ['/uploads/params.xlsx'],
   },
   model: 'deepseek',
 };
@@ -118,7 +119,11 @@ describe('API Client', () => {
       globalThis.fetch = jest
         .fn()
         .mockRejectedValue(new Error('Network error')) as unknown as typeof fetch;
-      await expect(createGenerateTask(validGenerateRequest)).rejects.toThrow('Network error');
+      await expect(createGenerateTask(validGenerateRequest)).rejects.toBeInstanceOf(ApiError);
+      await expect(createGenerateTask(validGenerateRequest)).rejects.toMatchObject({
+        code: 'NETWORK_ERROR',
+        status: 0,
+      });
     });
   });
 
@@ -196,7 +201,19 @@ describe('API Client', () => {
     it('should return task status on success', async () => {
       globalThis.fetch = mockFetchJson({
         success: true,
-        data: { task_id: 'test-task-123', status: 'running', progress: 50 },
+        data: {
+          task_id: 'test-task-123',
+          status: 'running',
+          created_at: new Date().toISOString(),
+          progress: {
+            completed_nodes: [],
+            running_nodes: ['extract_tender_params'],
+            current_node: 'extract_tender_params',
+            completed_count: 1,
+            total_nodes: 7,
+            progress_percent: 14.3,
+          },
+        },
         message: 'OK',
         timestamp: new Date().toISOString(),
       });
@@ -204,7 +221,7 @@ describe('API Client', () => {
       const result = await getTaskStatus('test-task-123');
       expect(result.task_id).toBe('test-task-123');
       expect(result.status).toBe('running');
-      expect(result.progress).toBe(50);
+      expect(result.progress.progress_percent).toBe(14.3);
     });
   });
 
@@ -212,13 +229,51 @@ describe('API Client', () => {
     it('should return cancel result on success', async () => {
       globalThis.fetch = mockFetchJson({
         success: true,
-        data: { task_id: 'test-task-123', status: 'cancelled' },
-        message: 'OK',
-        timestamp: new Date().toISOString(),
+        task_id: 'test-task-123',
+        message: '任务已取消',
+        was_running: true,
       });
 
       const result = await cancelTask('test-task-123');
-      expect(result.status).toBe('cancelled');
+      expect(result.task_id).toBe('test-task-123');
+      expect(result.noop).toBeUndefined();
+    });
+
+    it('should treat TASK_CANNOT_CANCEL as non-fatal noop', async () => {
+      globalThis.fetch = mockFetchJson(
+        {
+          detail: {
+            success: false,
+            error: { code: 'TASK_CANNOT_CANCEL', message: '任务已结束，无需取消' },
+            timestamp: new Date().toISOString(),
+          },
+        },
+        { ok: false, status: 409 }
+      );
+
+      const result = await cancelTask('test-task-123');
+      expect(result.task_id).toBe('test-task-123');
+      expect(result.noop).toBe(true);
+    });
+  });
+
+  describe('sendTaskHeartbeat', () => {
+    it('should return heartbeat status on success', async () => {
+      globalThis.fetch = mockFetchJson({
+        success: true,
+        data: {
+          task_id: 'test-task-123',
+          alive: true,
+          status: 'running',
+        },
+        message: 'Heartbeat received',
+        timestamp: new Date().toISOString(),
+      });
+
+      const result = await sendTaskHeartbeat('test-task-123');
+      expect(result.task_id).toBe('test-task-123');
+      expect(result.alive).toBe(true);
+      expect(result.status).toBe('running');
     });
   });
 
@@ -241,6 +296,24 @@ describe('API Client', () => {
       });
       const result = await uploadFile(file, 'clean_draft');
       expect(result.file_path).toBe('/uploads/test.docx');
+    });
+
+    it('should handle flat upload response without data wrapper', async () => {
+      globalThis.fetch = mockFetchJson({
+        success: true,
+        file_path: '/uploads/flat-test.docx',
+        file_name: 'flat-test.docx',
+        original_name: 'flat-test.docx',
+        file_size: 4,
+        content_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        upload_time: new Date().toISOString(),
+      });
+
+      const file = new File(['test'], 'flat-test.docx', {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      const result = await uploadFile(file, 'clean_draft');
+      expect(result.file_path).toBe('/uploads/flat-test.docx');
     });
   });
 });

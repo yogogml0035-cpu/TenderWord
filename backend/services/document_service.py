@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -28,6 +29,9 @@ from backend.models import (
 )
 from backend.models.tender import TenderData
 from backend.task.task_queue_manager import get_task_queue
+from backend.util.log_util.execution_log import logger as execution_logger
+from backend.util.log_util.progress_log import progress_log
+from backend.util.log_util.sse_log_handler import task_log_context
 
 if TYPE_CHECKING:
     from backend.graphs.base_graph import BaseGraph
@@ -36,6 +40,110 @@ logger = logging.getLogger(__name__)
 
 # 线程池执行器
 _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="doc_gen_")
+
+
+LLM_SNAPSHOT_INTERVAL_SECONDS = 0.25
+
+
+class _BufferedLoggerWriter:
+    """将 stdout/stderr 文本按行转发到执行日志。"""
+
+    def __init__(self, level: str = "info"):
+        self._level = level.lower()
+        self._buffer = ""
+
+    def write(self, data: str) -> int:
+        if not data:
+            return 0
+        self._buffer += data
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            self._emit(line)
+        return len(data)
+
+    def flush(self) -> None:
+        if self._buffer:
+            self._emit(self._buffer)
+            self._buffer = ""
+
+    def _emit(self, line: str) -> None:
+        text = line.strip()
+        if not text:
+            return
+        if self._level == "error":
+            execution_logger.error(text)
+        else:
+            execution_logger.info(text)
+
+
+class _LLMSnapshotRelay:
+    """按节流窗口转发全文快照形式的 LLM 输出。"""
+
+    def __init__(
+        self,
+        task_id: str,
+        model_provider: str,
+        callback: "SSECallback",
+        sse_manager: Optional[Any],
+        node: str = "generate_polished_text",
+        min_interval_seconds: float = LLM_SNAPSHOT_INTERVAL_SECONDS,
+    ):
+        self.task_id = task_id
+        self.model_provider = model_provider
+        self.callback = callback
+        self.sse_manager = sse_manager
+        self.node = node
+        self.min_interval_seconds = min_interval_seconds
+        self._latest_content = ""
+        self._last_sent_content = ""
+        self._last_sent_at = 0.0
+        self._completed_content = ""
+
+    def on_snapshot(self, content: str) -> None:
+        snapshot = str(content or "")
+        if not snapshot:
+            return
+
+        self._latest_content = snapshot
+        now = time.monotonic()
+        if now - self._last_sent_at < self.min_interval_seconds:
+            return
+        if snapshot == self._last_sent_content:
+            return
+        self._emit(snapshot, is_complete=False)
+
+    def flush(self, final_content: Optional[str] = None) -> None:
+        if final_content is not None:
+            self._latest_content = str(final_content or "")
+        if not self._latest_content:
+            return
+        if self._completed_content and self._completed_content == self._latest_content:
+            return
+        self._emit(self._latest_content, is_complete=True)
+
+    def _emit(self, content: str, is_complete: bool) -> None:
+        self.callback.push_llm(
+            content=content,
+            node=self.node,
+            model=self.model_provider,
+            is_complete=is_complete,
+        )
+        if self.sse_manager is not None:
+            try:
+                self.sse_manager.send_llm_output_threadsafe(
+                    task_id=self.task_id,
+                    content=content,
+                    node=self.node,
+                    model=self.model_provider,
+                    is_complete=is_complete,
+                )
+            except Exception:
+                pass
+
+        self._last_sent_content = content
+        self._last_sent_at = time.monotonic()
+        if is_complete:
+            self._completed_content = content
 
 
 # Graph 注册表：表单类型 -> Graph 类
@@ -126,6 +234,7 @@ class SSECallback:
                 node=node,
                 model=model,
                 is_complete=is_complete,
+                task_id=self.task_id,
             ).model_dump(),
         )
         self.push_event(event)
@@ -246,7 +355,7 @@ class DocumentService:
             )
 
         # 准备初始状态
-        initial_state = self._build_initial_state(request)
+        initial_state = self._build_initial_state(request, task_id=task_id)
 
         # 在任务队列中注册任务
         self._task_queue.add_task(
@@ -263,6 +372,7 @@ class DocumentService:
             callback,
             request.model.value,
         )
+        self._task_queue.register_worker_future(task_id, future)
 
         logger.info(f"创建文档生成任务: task_id={task_id}, form_type={form_type}")
 
@@ -272,7 +382,7 @@ class DocumentService:
             message="任务已创建，正在后台执行",
         )
 
-    def _build_initial_state(self, request: GenerateRequest) -> Dict[str, Any]:
+    def _build_initial_state(self, request: GenerateRequest, task_id: str) -> Dict[str, Any]:
         """构建 Graph 初始状态.
 
         Args:
@@ -285,9 +395,11 @@ class DocumentService:
         file_paths = request.file_paths
 
         # 构建状态
+        tender_type = request.form_type.value.replace("_tender", "")
         state: Dict[str, Any] = {
-            "task_id": f"task-{uuid.uuid4().hex[:8]}-{uuid.uuid4().hex[:4]}",
-            "tender_type": request.form_type.value.replace("_tender", ""),
+            # 与队列任务ID保持一致，确保进度、取消、日志链路统一
+            "task_id": task_id,
+            "tender_type": tender_type,
             # 项目信息
             "project_name": tender_data.project_name or "",
             "project_number": tender_data.project_number or "",
@@ -304,11 +416,33 @@ class DocumentService:
             "service_fee": tender_data.service_fee or "",
         }
 
+        insertion_before_text = None
+        insertion_after_text = None
+        insertion_config = getattr(request, "insertion_config", None)
+        if insertion_config:
+            insertion_before_text = getattr(insertion_config, "before_text", None)
+            insertion_after_text = getattr(insertion_config, "after_text", None)
+
+        if not insertion_before_text or not str(insertion_before_text).strip():
+            insertion_before_text = "第三章  采购需求" if tender_type == "xjcg" else "第三章 采购需求"
+        if not insertion_after_text or not str(insertion_after_text).strip():
+            insertion_after_text = (
+                "第四章  响应文件有关格式" if tender_type == "xjcg" else "第四章 投标文件有关格式"
+            )
+
+        state["insertion_before_text"] = str(insertion_before_text)
+        state["insertion_after_text"] = str(insertion_after_text)
+
         # 文件路径
         # origin_tender_path: 送审稿（可选）
         origin_tender = file_paths.get("origin_tender") or file_paths.get("template")
         if origin_tender and isinstance(origin_tender, str):
             state["origin_tender_path"] = origin_tender
+
+        # clean_draft_path: 清洁稿（可选）
+        clean_draft = file_paths.get("clean_draft") or file_paths.get("clean_draft_path")
+        if clean_draft and isinstance(clean_draft, str):
+            state["clean_draft_path"] = clean_draft
 
         # tender_param_paths: 技术参数文件（支持多文件）
         params = file_paths.get("tender_params") or file_paths.get("params") or []
@@ -344,10 +478,19 @@ class DocumentService:
         import asyncio
 
         callback.push_log(f"开始执行文档生成任务: {task_id}")
+        progress_log.info(f"[Task] 开始执行任务: {task_id}")
+        stdout_writer = _BufferedLoggerWriter(level="info")
+        stderr_writer = _BufferedLoggerWriter(level="error")
 
         try:
             # 创建 Graph 实例
             graph_instance: BaseGraph = graph_class()
+            try:
+                total_nodes = graph_instance.estimate_total_nodes(initial_state)
+                self._task_queue.set_total_nodes(task_id, total_nodes)
+            except Exception:
+                # 总步数估算失败不影响主流程，回退默认值
+                pass
             compiled_graph = graph_instance.compile()
 
             # 创建新的事件循环
@@ -355,28 +498,48 @@ class DocumentService:
             asyncio.set_event_loop(loop)
 
             try:
-                # 执行 Graph
-                result_state, elapsed_time = loop.run_until_complete(
-                    self._invoke_graph_async(
-                        compiled_graph,
-                        initial_state,
-                        task_id,
-                        callback,
-                        model_provider,
+                with task_log_context(task_id):
+                    # 执行 Graph
+                    result_state, elapsed_time = loop.run_until_complete(
+                        self._invoke_graph_async(
+                            compiled_graph,
+                            initial_state,
+                            task_id,
+                            callback,
+                            model_provider,
+                            stdout_writer=stdout_writer,
+                            stderr_writer=stderr_writer,
+                        )
                     )
-                )
+                    stdout_writer.flush()
+                    stderr_writer.flush()
 
                 # 推送完成事件
                 output_file = result_state.get("prepared_doc_path", "")
+                output_file_str = str(output_file) if output_file else None
                 callback.push_done(
                     DoneEventData(
                         task_id=task_id,
                         success=True,
                         message="文档生成完成",
-                        output_file=output_file,
+                        output_file=output_file_str,
                         processing_time=elapsed_time,
                     )
                 )
+                progress_log.info(f"[Task] 任务执行完成: {task_id}")
+
+                try:
+                    from backend.core.sse_manager import sse_manager
+
+                    sse_manager.send_done_threadsafe(
+                        task_id=task_id,
+                        success=True,
+                        message="文档生成完成",
+                        output_file=output_file_str,
+                        processing_time=elapsed_time,
+                    )
+                except Exception:
+                    pass
 
                 logger.info(f"任务 {task_id} 执行完成，耗时 {elapsed_time:.2f}s")
 
@@ -401,17 +564,46 @@ class DocumentService:
                 loop.close()
 
         except Exception as e:
+            stdout_writer.flush()
+            stderr_writer.flush()
             error_msg = str(e)
             tb = traceback.format_exc()
             logger.error(f"任务 {task_id} 执行失败: {error_msg}\n{tb}")
+
+            # 取消属于非致命错误：前端应展示为 cancelled，而非 failed
+            is_cancelled = False
+            try:
+                from backend.graphs.base_graph import TaskCancelledException
+
+                is_cancelled = isinstance(e, TaskCancelledException)
+            except Exception:
+                is_cancelled = False
+
+            if isinstance(e, asyncio.CancelledError):
+                is_cancelled = True
 
             callback.push_error(
                 ErrorEventData(
                     task_id=task_id,
                     error=error_msg,
-                    is_fatal=True,
+                    is_fatal=not is_cancelled,
                 )
             )
+            if is_cancelled:
+                progress_log.warning(f"[Task] 任务已取消: {task_id}")
+            else:
+                progress_log.error(f"[Task] 任务执行失败: {task_id} - {error_msg}")
+
+            try:
+                from backend.core.sse_manager import sse_manager
+
+                sse_manager.send_error_threadsafe(
+                    task_id=task_id,
+                    error=error_msg,
+                    is_fatal=not is_cancelled,
+                )
+            except Exception:
+                pass
 
             # 更新任务队列状态
             self._task_queue.complete_task(task_id, result=None, error=error_msg)
@@ -423,6 +615,8 @@ class DocumentService:
         task_id: str,
         callback: SSECallback,
         model_provider: str,
+        stdout_writer: Optional[Any] = None,
+        stderr_writer: Optional[Any] = None,
     ) -> tuple:
         """异步执行 Graph.
 
@@ -437,18 +631,28 @@ class DocumentService:
             (result_state, elapsed_time)
         """
         from backend.graphs import invoke_with_timing_async
+        try:
+            from backend.core.sse_manager import sse_manager as _sse_manager
+        except Exception:  # pragma: no cover
+            _sse_manager = None
 
-        # LLM 流式回调
-        def llm_stream_callback(content: str):
-            callback.push_llm(content=content, model=model_provider)
+        llm_relay = _LLMSnapshotRelay(
+            task_id=task_id,
+            model_provider=model_provider,
+            callback=callback,
+            sse_manager=_sse_manager,
+        )
 
         # 配置
         config = {
             "configurable": {
                 "task_id": task_id,
-                "llm_stream_callback": llm_stream_callback,
+                "llm_stream_callback": llm_relay.on_snapshot,
+                "llm_stream_complete_callback": llm_relay.flush,
                 "suppress_llm_stdout": True,
                 "model_provider": model_provider,
+                "stdout_writer": stdout_writer,
+                "stderr_writer": stderr_writer,
             }
         }
 
@@ -459,6 +663,12 @@ class DocumentService:
             verbose=True,
             config=config,
         )
+        final_polished_text = None
+        if isinstance(result, dict):
+            polished_text = result.get("polished_text")
+            if polished_text:
+                final_polished_text = str(polished_text)
+        llm_relay.flush(final_polished_text)
 
         return result, elapsed
 

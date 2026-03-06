@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import inspect
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 
@@ -181,6 +182,34 @@ def run_get_replacements(
             found_placeholders: dict = {}
             log_parts: list = []
 
+            def call_extractor(fn: Callable[..., Any]):
+                try:
+                    sig = inspect.signature(fn)
+                except (TypeError, ValueError):
+                    return fn(doc_content, first_page_header, state, log_parts)
+
+                params = list(sig.parameters.values())
+                if any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params):
+                    return fn(doc_content, first_page_header, state, log_parts)
+
+                positional = [
+                    p
+                    for p in params
+                    if p.kind
+                    in (
+                        inspect.Parameter.POSITIONAL_ONLY,
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    )
+                ]
+
+                if len(positional) >= 4:
+                    return fn(doc_content, first_page_header, state, log_parts)
+                if len(positional) == 3:
+                    return fn(doc_content, state, log_parts)
+                if len(positional) == 2:
+                    return fn(doc_content, state)
+                return fn(doc_content)
+
             for spec in extractors:
                 # 检查 enabled_if 条件
                 if not spec.enabled_if(state):
@@ -188,9 +217,7 @@ def run_get_replacements(
 
                 try:
                     # 调用 extractor 获取字段值
-                    result = spec.extract_callable(
-                        doc_content, first_page_header, state, log_parts
-                    )
+                    result = call_extractor(spec.extract_callable)
 
                     # 根据返回值类型处理
                     if spec.output_field_names is not None:

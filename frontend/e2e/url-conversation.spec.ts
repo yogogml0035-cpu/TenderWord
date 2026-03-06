@@ -115,17 +115,161 @@ test.describe('URL-driven Conversation Flow', () => {
     // Verify sidebar exists
     await expect(page.getByText('询价采购')).toBeVisible();
   });
-  test('Recent conversations persist in store', async ({ page }) => {
-    // Create a conversation via URL
-    await page.goto('/chat?tenderno=HISTORY-TEST-001&purchase_method=2&tender_lx=0&fund_lx=0');
-    await expect(page.locator('.animate-spin')).not.toBeVisible({ timeout: 15000 });
+  test('Recent conversations are scoped to the current page session', async ({
+    page,
+    context,
+  }) => {
+    await page.addInitScript(() => {
+      window.sessionStorage.setItem(
+        'chat-storage',
+        JSON.stringify({
+          state: {
+            conversations: [
+              {
+                id: 'conv-history',
+                title: 'HISTORY-TEST-001',
+                tenderType: 'xjcg',
+                createdAt: 1,
+                updatedAt: 1,
+                messages: [],
+              },
+            ],
+            currentConversationId: 'conv-history',
+            selectedTenderType: 'xjcg',
+          },
+          version: 0,
+        })
+      );
+    });
 
-    // Clear URL and go back to chat
     await page.goto('/chat');
     await page.waitForLoadState('networkidle');
 
-    // Verify we're back on the chat page
-    await expect(page.getByText('类型', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '询价采购' }).hover();
+    await expect(page.getByText('最近对话')).toBeVisible();
+    await expect(page.getByRole('button', { name: /HISTORY-TEST-001/ }).last()).toBeVisible();
+
+    await page.close();
+
+    const freshPage = await context.newPage();
+    await freshPage.goto('/chat');
+    await freshPage.waitForLoadState('networkidle');
+
+    await freshPage.getByRole('button', { name: '询价采购' }).hover();
+    await expect(freshPage.getByText('最近对话')).toHaveCount(0);
+    await expect(freshPage.getByText('HISTORY-TEST-001')).toHaveCount(0);
+  });
+
+  test('Stale generating task is cleared when backend reports TASK_NOT_FOUND', async ({
+    page,
+  }) => {
+    let streamRequestCount = 0;
+
+    await page.addInitScript(() => {
+      window.sessionStorage.setItem(
+        'chat-storage',
+        JSON.stringify({
+          state: {
+            conversations: [
+              {
+                id: 'conv-stale',
+                title: 'STALE-TASK-001',
+                tenderType: 'xjcg',
+                createdAt: 1,
+                updatedAt: 1,
+                messages: [
+                  {
+                    id: 'msg-stale',
+                    conversationId: 'conv-stale',
+                    type: 'ai',
+                    content: {
+                      logs: [],
+                      aiContent: {
+                        text: '',
+                        timestamp: 1,
+                        isComplete: false,
+                      },
+                    },
+                    timestamp: 1,
+                    status: 'generating',
+                    taskId: 'task-stale',
+                  },
+                ],
+              },
+            ],
+            currentConversationId: 'conv-stale',
+            selectedTenderType: 'xjcg',
+          },
+          version: 0,
+        })
+      );
+      window.sessionStorage.setItem(
+        'chat-task-session-storage',
+        JSON.stringify({
+          state: {
+            sessions: {
+              'task-stale': {
+                taskId: 'task-stale',
+                lastEventId: '42',
+              },
+            },
+          },
+          version: 0,
+        })
+      );
+    });
+
+    await page.route('**/api/tasks/task-stale', async (route) => {
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          detail: {
+            success: false,
+            error: {
+              code: 'TASK_NOT_FOUND',
+              message: '任务不存在',
+              task_id: 'task-stale',
+            },
+          },
+        }),
+      });
+    });
+    await page.route('**/api/stream/task-stale', async (route) => {
+      streamRequestCount += 1;
+      await route.abort();
+    });
+
+    await page.goto('/chat');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.getByPlaceholder('输入消息...')).toBeVisible();
+    await expect(page.getByPlaceholder('生成中，请稍候...')).toHaveCount(0);
+
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const raw = window.sessionStorage.getItem('chat-storage');
+          if (!raw) {
+            return 0;
+          }
+          const parsed = JSON.parse(raw) as {
+            state?: {
+              conversations?: Array<{
+                messages?: Array<{ status?: string; taskId?: string }>;
+              }>;
+            };
+          };
+          return (
+            parsed.state?.conversations?.flatMap((conversation) => conversation.messages ?? []).filter(
+              (message) => message.status === 'generating' || message.taskId === 'task-stale'
+            ).length ?? 0
+          );
+        })
+      )
+      .toBe(0);
+
+    await expect.poll(() => streamRequestCount).toBe(0);
   });
   test('Page layout is responsive with three columns', async ({ page }) => {
     await page.goto('/chat');
@@ -186,4 +330,3 @@ test.describe('Form Panel Tests', () => {
     expect(tenderInfoVisible || formTypeVisible).toBeTruthy();
   });
 });
-
