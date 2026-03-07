@@ -10,8 +10,8 @@ import type {
   SSEProgressEvent,
   TaskData,
 } from '@/types/api';
-import type { DualColumnContent, LogEntry } from '@/types/chat';
-import { useChatStore } from '@/stores/chatStore';
+import type { LogEntry } from '@/types/chat';
+import { useChatStore, type TaskMessageSnapshot } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
 import { useSSE } from './useSSE';
@@ -19,52 +19,43 @@ import { useSSE } from './useSSE';
 interface UseChatSSEOptions {
   taskId: string | null;
   conversationId: string | null;
-  messageId: string | null;
   onComplete?: () => void;
   onError?: (error: string) => void;
 }
 
+const AI_CONTENT_TRIGGER_NODE = 'generate_polished_text';
+
+function isGenerateNodeCompletedLog(message: string, node?: unknown): boolean {
+  if (typeof message !== 'string' || !message) {
+    return false;
+  }
+
+  const nodeMatched =
+    node === AI_CONTENT_TRIGGER_NODE || message.includes(`[${AI_CONTENT_TRIGGER_NODE}]`);
+  if (!nodeMatched) {
+    return false;
+  }
+
+  return message.includes('完成');
+}
+
 /**
- * Hook that maps SSE events to message updates in chatStore.
- *
- * - Log events → left column (logs array)
- * - LLM events → right column (aiContent.text)
- * - Progress events → status updates (console logged)
- * - Done/error events → completion handling
- *
- * @example
- * ```tsx
- * function ChatMessage({ taskId, conversationId, messageId }) {
- *   const { isConnected, error } = useChatSSE({
- *     taskId,
- *     conversationId,
- *     messageId,
- *     onComplete: () => console.log('Task completed'),
- *     onError: (err) => console.error('Task failed:', err),
- *   });
- *
- *   return <div>{isConnected ? 'Connected' : 'Disconnected'}</div>;
- * }
- * ```
+ * Hook that maps SSE events to task-log/task-content/task-download messages.
  */
-export function useChatSSE({
-  taskId,
-  conversationId,
-  messageId,
-  onComplete,
-  onError,
-}: UseChatSSEOptions) {
+export function useChatSSE({ taskId, conversationId, onComplete, onError }: UseChatSSEOptions) {
   void conversationId;
-  void messageId;
   const completeTask = useChatStore((state) => state.completeTask);
   const failTask = useChatStore((state) => state.failTask);
   const cancelTask = useChatStore((state) => state.cancelTask);
+  const ensureTaskContentMessage = useChatStore((state) => state.ensureTaskContentMessage);
+  const markTaskContentReady = useChatStore((state) => state.markTaskContentReady);
   const discardStaleTask = useChatStore((state) => state.discardStaleTask);
   const [connectionTaskId, setConnectionTaskId] = useState<string | null>(null);
   const [connectionLastEventId, setConnectionLastEventId] = useState<string | null>(null);
   const handledTerminalTasksRef = useRef<Set<string>>(new Set());
   const onCompleteRef = useRef<typeof onComplete>(onComplete);
   const onErrorRef = useRef<typeof onError>(onError);
+  const closeRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     onCompleteRef.current = onComplete;
@@ -74,13 +65,10 @@ export function useChatSSE({
     onErrorRef.current = onError;
   }, [onError]);
 
-  const clearTaskRuntime = useCallback(
-    (targetTaskId: string) => {
-      useChatStreamStore.getState().clearStream(targetTaskId);
-      useChatTaskSessionStore.getState().removeSession(targetTaskId);
-    },
-    []
-  );
+  const clearTaskRuntime = useCallback((targetTaskId: string) => {
+    useChatStreamStore.getState().clearStream(targetTaskId);
+    useChatTaskSessionStore.getState().removeSession(targetTaskId);
+  }, []);
 
   const discardStaleTaskRuntime = useCallback(
     (targetTaskId: string) => {
@@ -93,19 +81,16 @@ export function useChatSSE({
   );
 
   const getCurrentContent = useCallback(
-    (targetTaskId: string, forceComplete: boolean = false): DualColumnContent | undefined => {
+    (targetTaskId: string, forceComplete = false): TaskMessageSnapshot | undefined => {
       const stream = useChatStreamStore.getState().streams[targetTaskId];
       if (!stream) {
         return undefined;
       }
 
       return {
-        ...stream.content,
-        aiContent: {
-          ...stream.content.aiContent,
-          isComplete: forceComplete || stream.content.aiContent.isComplete,
-          timestamp: Date.now(),
-        },
+        logs: stream.logs,
+        aiText: stream.aiText,
+        aiComplete: forceComplete || stream.aiComplete,
       };
     },
     []
@@ -225,6 +210,11 @@ export function useChatSSE({
               node: logData.node as string | undefined,
             };
             useChatStreamStore.getState().appendLog(taskId, logEntry);
+
+            if (isGenerateNodeCompletedLog(logMessage, logData.node)) {
+              const aiText = useChatStreamStore.getState().streams[taskId]?.aiText || '';
+              markTaskContentReady(taskId, aiText);
+            }
           }
           break;
 
@@ -234,15 +224,24 @@ export function useChatSSE({
             const nextText = llmData.content || '';
             const isComplete = llmData.is_complete || false;
             const contentMode = llmData.content_mode || 'snapshot';
+            const llmNode = llmData.node;
+
+            if (llmNode === AI_CONTENT_TRIGGER_NODE) {
+              ensureTaskContentMessage(taskId);
+            }
 
             if (contentMode === 'chunk') {
-              const currentText =
-                useChatStreamStore.getState().streams[taskId]?.content.aiContent.text || '';
-              useChatStreamStore
-                .getState()
-                .setAIContent(taskId, currentText + nextText, isComplete);
+              const currentText = useChatStreamStore.getState().streams[taskId]?.aiText || '';
+              const mergedText = currentText + nextText;
+              useChatStreamStore.getState().setAIContent(taskId, mergedText, isComplete);
+              if (llmNode === AI_CONTENT_TRIGGER_NODE && isComplete) {
+                markTaskContentReady(taskId, mergedText);
+              }
             } else {
               useChatStreamStore.getState().setAIContent(taskId, nextText, isComplete);
+              if (llmNode === AI_CONTENT_TRIGGER_NODE && isComplete) {
+                markTaskContentReady(taskId, nextText);
+              }
             }
           }
           break;
@@ -256,6 +255,13 @@ export function useChatSSE({
               currentNode: progressData.current_node,
               currentNodeDisplay: progressData.current_node_display,
             });
+
+            if (
+              progressData.current_node === AI_CONTENT_TRIGGER_NODE ||
+              progressData.node === AI_CONTENT_TRIGGER_NODE
+            ) {
+              ensureTaskContentMessage(taskId);
+            }
           }
           break;
 
@@ -263,9 +269,15 @@ export function useChatSSE({
           if (data && typeof data === 'object') {
             const doneData = data as SSEDoneEvent;
             const outputFile = doneData.output_file;
+            const doneFileName = (doneData as { file_name?: string }).file_name;
             const fileName =
-              typeof outputFile === 'string' ? outputFile.split(/[\\/]/).pop() : undefined;
+              typeof doneFileName === 'string' && doneFileName.length > 0
+                ? doneFileName
+                : typeof outputFile === 'string'
+                  ? outputFile.split(/[\\/]/).pop()
+                  : undefined;
             handledTerminalTasksRef.current.add(taskId);
+            closeRef.current();
             completeTask(taskId, outputFile, fileName, getCurrentContent(taskId, true));
             clearTaskRuntime(taskId);
           }
@@ -281,12 +293,14 @@ export function useChatSSE({
             handledTerminalTasksRef.current.add(taskId);
 
             if (!isFatal) {
+              closeRef.current();
               cancelTask(taskId, getCurrentContent(taskId));
               clearTaskRuntime(taskId);
               onCompleteRef.current?.();
               break;
             }
 
+            closeRef.current();
             failTask(taskId, errorMessage, getCurrentContent(taskId));
             clearTaskRuntime(taskId);
             onErrorRef.current?.(errorMessage);
@@ -302,8 +316,10 @@ export function useChatSSE({
       cancelTask,
       clearTaskRuntime,
       completeTask,
+      ensureTaskContentMessage,
       failTask,
       getCurrentContent,
+      markTaskContentReady,
       normalizeLogLevel,
       parseTimestamp,
       rememberEventId,
@@ -330,8 +346,8 @@ export function useChatSSE({
       };
     }
 
-    const locatedMessage = useChatStore.getState().findMessageByTaskId(taskId);
-    if (!locatedMessage) {
+    const locatedGroup = useChatStore.getState().findTaskMessageGroup(taskId);
+    if (!locatedGroup) {
       queueMicrotask(() => {
         if (isActive) {
           discardStaleTaskRuntime(taskId);
@@ -342,7 +358,11 @@ export function useChatSSE({
       };
     }
 
-    if (locatedMessage.message.status !== 'generating') {
+    const isGenerating =
+      locatedGroup.logMessage?.status === 'generating' ||
+      locatedGroup.contentMessage?.status === 'generating';
+
+    if (!isGenerating) {
       clearTaskRuntime(taskId);
       return () => {
         isActive = false;
@@ -360,9 +380,7 @@ export function useChatSSE({
 
       const stream = useChatStreamStore.getState().streams[taskId];
       const session = useChatTaskSessionStore.getState().sessions[taskId];
-      const streamIsEmpty =
-        !stream ||
-        (stream.content.logs.length === 0 && !stream.content.aiContent.text.trim());
+      const streamIsEmpty = !stream || (stream.logs.length === 0 && !stream.aiText.trim());
 
       const connectWith = (lastEventId: string | null) => {
         if (!isActive) {
@@ -428,6 +446,10 @@ export function useChatSSE({
     lastEventId: connectionLastEventId,
     onMessage: handleMessage,
   });
+
+  useEffect(() => {
+    closeRef.current = close;
+  }, [close]);
 
   return {
     isConnected,

@@ -20,6 +20,8 @@ export type MessageStatus =
   | 'error'
   | 'cancelled';
 
+export type TaskMessageKind = 'task-log' | 'task-content' | 'task-download';
+
 // ============================================
 // Dual Column Content Types
 // ============================================
@@ -61,6 +63,8 @@ export interface Message {
   taskId?: string;
   error?: string;
   metadata?: {
+    messageKind?: TaskMessageKind;
+    logs?: LogEntry[];
     outputFile?: string;
     fileName?: string;
     progressPercent?: number;
@@ -165,6 +169,13 @@ export function isDualColumnContent(content: unknown): content is DualColumnCont
     typeof (dualContent.aiContent as Record<string, unknown>).timestamp === 'number' &&
     typeof (dualContent.aiContent as Record<string, unknown>).isComplete === 'boolean'
   );
+}
+
+/**
+ * Check if value is a task message kind
+ */
+export function isTaskMessageKind(value: unknown): value is TaskMessageKind {
+  return value === 'task-log' || value === 'task-content' || value === 'task-download';
 }
 
 // ============================================

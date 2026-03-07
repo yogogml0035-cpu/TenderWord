@@ -40,6 +40,107 @@ from backend.util.word_util import (
 from backend.util.word_util.anchor_utils import find_anchor_range
 
 
+REQUIRED_PROTECTED_FIELD_KEYWORDS = ("交付日期", "付款方式")
+PROTECTED_FIELD_SCAN_MARGIN = 400
+
+
+def _is_keyword_paragraph(text: str, keyword: str) -> bool:
+    return keyword in text and ("：" in text or ":" in text)
+
+
+def _scan_protected_fields_in_range(doc, keywords, range_start: int, range_end: int):
+    found = {}
+    if range_end <= range_start:
+        return found
+
+    try:
+        paragraphs = doc.Range(int(range_start), int(range_end)).Paragraphs
+    except Exception:
+        return found
+
+    for para in paragraphs:
+        para_text = str(getattr(para.Range, "Text", "") or "").strip()
+        if not para_text:
+            continue
+        for keyword in keywords:
+            if keyword not in found and _is_keyword_paragraph(para_text, keyword):
+                found[keyword] = para.Range
+    return found
+
+
+def _collect_protected_fields(
+    doc,
+    keywords,
+    target_range,
+    fallback_range,
+    boundary_margin: int = PROTECTED_FIELD_SCAN_MARGIN,
+):
+    found = {}
+    scan_ranges = [target_range, fallback_range]
+
+    if fallback_range:
+        doc_end = int(getattr(getattr(doc, "Content", None), "End", fallback_range[1]))
+        expanded_start = max(0, int(fallback_range[0]) - boundary_margin)
+        expanded_end = min(doc_end, int(fallback_range[1]) + boundary_margin)
+        expanded_range = (expanded_start, expanded_end)
+        if expanded_range not in scan_ranges:
+            scan_ranges.append(expanded_range)
+
+    for scan_start, scan_end in scan_ranges:
+        missing = [keyword for keyword in keywords if keyword not in found]
+        if not missing:
+            break
+        found.update(_scan_protected_fields_in_range(doc, missing, scan_start, scan_end))
+
+    return found
+
+
+def _refresh_protected_fields(
+    doc,
+    keywords,
+    range_start: int,
+    range_end: int,
+    existing_fields: Optional[Dict[str, Any]] = None,
+):
+    """在删除可编辑内容后，按最新文档位置重新绑定受保护字段段落。"""
+
+    refreshed = dict(existing_fields or {})
+    refreshed.update(
+        _scan_protected_fields_in_range(doc, keywords, int(range_start), int(range_end))
+    )
+    return refreshed
+
+
+def _validate_required_protected_fields(
+    protected_fields, required_keywords=REQUIRED_PROTECTED_FIELD_KEYWORDS
+):
+    missing = [keyword for keyword in required_keywords if keyword not in protected_fields]
+    if missing:
+        raise ValueError(f"缺少关键受保护字段: {', '.join(missing)}")
+
+
+def _resolve_block_flow(protected_fields: Dict[str, Any]) -> Dict[str, Any]:
+    """根据已识别的受保护字段，返回与 master 对齐的块插入控制流。"""
+
+    has_delivery = "交付日期" in protected_fields
+    has_payment = "付款方式" in protected_fields
+
+    if has_delivery and has_payment:
+        block2_mode = "between_delivery_payment"
+    elif has_delivery:
+        block2_mode = "after_delivery"
+    else:
+        block2_mode = "skip"
+
+    block3_anchor = "after_payment" if has_payment else "before_after_anchor"
+    return {
+        "has_delivery": has_delivery,
+        "has_payment": has_payment,
+        "block2_mode": block2_mode,
+        "block3_anchor": block3_anchor,
+    }
+
+
 
 
 def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
@@ -324,28 +425,43 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
             else:
                 page_end = doc.Content.End
 
+            if page_end <= page_start:
+                raise ValueError(
+                    f"目标页 {target_page} 范围为空，无法定位受保护字段"
+                )
+
             # 为目标页创建范围
             if page_end > page_start:
                 page_rng = doc.Range(page_start, page_end)
 
-                # 步骤1：在页面中查找不可编辑字段
+                # 步骤1：优先在目标页定位受保护字段，必要时回查锚点边界范围
+                protected_keywords = list(REQUIRED_PROTECTED_FIELD_KEYWORDS)
+                target_range = (int(page_start), int(page_end))
+                fallback_range = (
+                    int(insertion_bound_start),
+                    int(get_insertion_bound_end()),
+                )
                 insertion_log_parts.append(
-                    f"步骤1：在第 {target_page} 页查找不可编辑字段..."
+                    "步骤1：定位关键受保护字段..."
+                    f" 目标页={target_page}({target_range[0]}-{target_range[1]})，"
+                    f" 边界范围={fallback_range[0]}-{fallback_range[1]}"
                 )
 
-                protected_keywords = ["交付日期", "付款方式"]
-                protected_fields = {}
-
-                # 在页面中查找受保护字段
-                for para in page_rng.Paragraphs:
-                    para_text = para.Range.Text.strip()
-                    for keyword in protected_keywords:
-                        if keyword in para_text and "：" in para_text:
-                            if keyword not in protected_fields:
-                                protected_fields[keyword] = para.Range
-                                insertion_log_parts.append(
-                                    f"  找到受保护字段: {keyword}"
-                                )
+                protected_fields = _collect_protected_fields(
+                    doc=doc,
+                    keywords=protected_keywords,
+                    target_range=target_range,
+                    fallback_range=fallback_range,
+                )
+                if not protected_fields:
+                    insertion_log_parts.append(
+                        "  未在目标范围内找到受保护字段，将按可编辑边界继续插入。"
+                    )
+                else:
+                    for keyword, para_rng in protected_fields.items():
+                        insertion_log_parts.append(
+                            f"  找到受保护字段: {keyword} ({int(para_rng.Start)}-{int(para_rng.End)})"
+                        )
 
                 def _range_overlaps(
                     a_start: int, a_end: int, b_start: int, b_end: int
@@ -516,14 +632,24 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         search_rng.Collapse(wdCollapseEnd)
                     return None
 
-                protected_fields = {}
-                for keyword in protected_keywords:
-                    try:
-                        para_rng = refind_protected_paragraph(keyword)
-                        if para_rng is not None:
-                            protected_fields[keyword] = para_rng
-                    except Exception:
-                        pass
+                # 删除阶段可能补回段落边界，这里先整体重绑一次字段位置，
+                # 后续块插入仍按最新段落范围操作。
+                protected_fields = _refresh_protected_fields(
+                    doc=doc,
+                    keywords=protected_keywords,
+                    range_start=int(insertion_bound_start),
+                    range_end=int(get_insertion_bound_end()),
+                    existing_fields=protected_fields,
+                )
+                if protected_fields:
+                    for keyword, para_rng in protected_fields.items():
+                        insertion_log_parts.append(
+                            f"  重定位受保护字段: {keyword} ({int(para_rng.Start)}-{int(para_rng.End)})"
+                        )
+                else:
+                    insertion_log_parts.append(
+                        "  重定位未命中受保护字段，将按回退路径插入。"
+                    )
 
                 def is_range_locked(rng) -> bool:
                     try:
@@ -952,13 +1078,15 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                                     inserted += 1
                     return inserted
 
-                # 插入块1（在交付日期之前）
+                flow = _resolve_block_flow(protected_fields)
+
+                # 插入块1（始终执行，优先在交付日期前，否则回退到目标页起始可编辑位置）
                 insertion_log_parts.append("  正在插入块1...")
                 selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
                 insert_rng = selection.Range
                 insert_rng.Collapse(wdCollapseStart)
 
-                if "交付日期" in protected_fields:
+                if flow["has_delivery"]:
                     delivery_date_rng = protected_fields["交付日期"]
                     before_pos = int(delivery_date_rng.Start)
                     safe_before = find_prev_editable_pos(before_pos, max_lookback=20000)
@@ -987,7 +1115,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     except Exception as e:
                         insertion_log_parts.append(f"    插入项出错: {e}")
 
-                if "交付日期" in protected_fields:
+                if flow["has_delivery"]:
                     insert_prefix_before_keyword("交付日期", delivery_prefix)
                     protected_fields["交付日期"] = (
                         refind_protected_paragraph("交付日期")
@@ -995,12 +1123,9 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     )
                     update_protected_field("交付日期", delivery_value)
 
-                    # 插入块2（在交付日期和付款方式之间）
+                    # 插入块2（与 master 对齐：双字段时插中间，仅交付日期时插其后）
                     insertion_log_parts.append("  插入块2...")
-                    if (
-                        "交付日期" in protected_fields
-                        and "付款方式" in protected_fields
-                    ):
+                    if flow["block2_mode"] == "between_delivery_payment":
                         delivery_date_rng = protected_fields["交付日期"]
                         protected_fields["付款方式"] = (
                             refind_protected_paragraph("付款方式")
@@ -1010,6 +1135,11 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
 
                         start_between = int(delivery_date_rng.End)
                         end_between = int(payment_method_rng.Start)
+                        if end_between < start_between:
+                            raise ValueError(
+                                "付款方式字段位于交付日期之前，停止以避免错误插入"
+                            )
+
                         safe_between = find_next_editable_pos_bounded(
                             start_between, end_between, max_lookahead=20000
                         )
@@ -1029,15 +1159,13 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                                         f"    已插入: {item['line'][:50]}..."
                                     )
                                 elif item["type"] == "table":
-                                    insert_table_with_formatting(
-                                        insert_rng, item["rows"]
-                                    )
+                                    insert_table_with_formatting(insert_rng, item["rows"])
                                     insertion_log_parts.append(
                                         f"    已插入表格，行数 {len(item['rows'])}。"
                                     )
                             except Exception as e:
                                 insertion_log_parts.append(f"    插入项出错: {e}")
-                    elif "交付日期" in protected_fields:
+                    elif flow["block2_mode"] == "after_delivery":
                         delivery_date_rng = protected_fields["交付日期"]
                         start_after = int(delivery_date_rng.End)
                         safe_after = find_next_editable_pos(start_after)
@@ -1055,16 +1183,14 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                                         f"    已插入: {item['line'][:50]}..."
                                     )
                                 elif item["type"] == "table":
-                                    insert_table_with_formatting(
-                                        insert_rng, item["rows"]
-                                    )
+                                    insert_table_with_formatting(insert_rng, item["rows"])
                                     insertion_log_parts.append(
                                         f"    已插入表格，行数 {len(item['rows'])}。"
                                     )
                             except Exception as e:
                                 insertion_log_parts.append(f"    插入项出错: {e}")
 
-                    if "付款方式" in protected_fields:
+                    if flow["has_payment"]:
                         insert_prefix_before_keyword("付款方式", payment_prefix)
                         protected_fields["付款方式"] = (
                             refind_protected_paragraph("付款方式")
@@ -1072,315 +1198,144 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         )
                         update_protected_field("付款方式", payment_value)
 
-                    # 插入块3（在付款方式之后）
-                    block3_items = convert_lines_to_items(block3)
+                # 插入块3（有付款方式则插其后，否则回退到后置锚点前）
+                block3_items = convert_lines_to_items(block3)
+                insertion_log_parts.append(f"  插入块3（{len(block3_items)} 条）...")
+                if len(block3_items) == 0:
+                    insertion_log_parts.append("    警告：块3为空，无需插入")
+                else:
                     insertion_log_parts.append(
-                        f"  插入块3（{len(block3_items)} 条）..."
-                    )
-                    if len(block3_items) == 0:
-                        insertion_log_parts.append("    警告：块3为空，无需插入")
-                    else:
-                        insertion_log_parts.append(
-                            f"    块3内容: "
-                            f"{[item['line'][:30] + '...' if item['type'] == 'text' and len(item['line']) > 30 else item['line'] if item['type'] == 'text' else '<表格>' for item in block3_items]}"
-                        )
-
-                    if "付款方式" in protected_fields:
-                        protected_fields["付款方式"] = (
-                            refind_protected_paragraph("付款方式")
-                            or protected_fields["付款方式"]
-                        )
-                        payment_method_rng = protected_fields["付款方式"]
-                        bound_end_now = int(get_insertion_bound_end())
-                        if int(payment_method_rng.End) > bound_end_now:
-                            raise ValueError(
-                                "付款方式字段位置超出插入边界，停止以避免侵入后置章节"
-                            )
-                        payment_end = int(payment_method_rng.End)
-                        start_after_payment = min(payment_end + 1, bound_end_now)
-                        safe_pos = None
-                        if start_after_payment < bound_end_now:
-                            safe_pos = find_next_editable_pos_bounded(
-                                start_after_payment, bound_end_now, max_lookahead=20000
-                            )
-                        if safe_pos is None or safe_pos >= bound_end_now:
-                            if bound_end_now > payment_end:
-                                back = find_prev_editable_pos(
-                                    bound_end_now - 1, max_lookback=20000
-                                )
-                                if back is not None and back >= payment_end:
-                                    safe_pos = back
-                        if safe_pos is None:
-                            safe_pos = start_after_payment
-                        insert_rng.Start = min(max(0, safe_pos), doc.Content.End)
-                        insert_rng.End = insert_rng.Start
-                        insert_rng.Collapse(wdCollapseStart)
-                        insertion_log_parts.append(
-                            f"    在付款方式字段后插入，位置 {insert_rng.Start}"
-                        )
-                    else:
-                        safe_pos = int(get_insertion_bound_end())
-                        insert_rng.SetRange(safe_pos, safe_pos)
-                        insert_rng.Collapse(wdCollapseStart)
-                        insertion_log_parts.append(
-                            f"    未找到付款方式字段，插入到后置锚点前，位置 {insert_rng.Start}"
-                        )
-
-                    use_inline = False
-                    try:
-                        if is_range_locked(
-                            doc.Range(int(insert_rng.Start), int(insert_rng.Start))
-                        ):
-                            use_inline = True
-                    except Exception:
-                        pass
-
-                    inserted_count = 0
-                    if use_inline and "付款方式" in protected_fields:
-                        insertion_log_parts.append(
-                            "    块3将以内联换行追加到付款方式段落末尾"
-                        )
-                        inserted_count = insert_items_inline_at_end_of_paragraph(
-                            protected_fields["付款方式"], block3_items
-                        )
-                    else:
-                        for item in block3_items:
-                            attempts = 0
-                            while attempts < 80:
-                                attempts += 1
-                                try:
-                                    ensure_editable_insert_range(insert_rng)
-                                    if item["type"] == "text":
-                                        inserted_rng = insert_content_with_formatting(
-                                            insert_rng, item["line"]
-                                        )
-                                        inserted_count += 1
-                                        insertion_log_parts.append(
-                                            f"    [{inserted_count}/{len(block3_items)}] 已插入: {item['line'][:50]}..."
-                                        )
-                                        break
-                                    elif item["type"] == "table":
-                                        insert_table_with_formatting(
-                                            insert_rng, item["rows"]
-                                        )
-                                        inserted_count += 1
-                                        insertion_log_parts.append(
-                                            f"    [{inserted_count}/{len(block3_items)}] 已插入表格，行数 {len(item['rows'])}。"
-                                        )
-                                        break
-                                except Exception as e:
-                                    if is_locked_exception(e):
-                                        try:
-                                            cur = int(insert_rng.Start)
-                                        except Exception:
-                                            cur = 0
-                                        bound_end_retry = int(get_insertion_bound_end())
-                                        nxt = find_next_editable_pos_bounded(
-                                            cur + 1,
-                                            bound_end_retry,
-                                            max_lookahead=20000,
-                                        )
-                                        if nxt is None or nxt <= cur:
-                                            insertion_log_parts.append(
-                                                f"    插入项出错: {e}"
-                                            )
-                                            break
-                                        try:
-                                            insert_rng.SetRange(nxt, nxt)
-                                            insert_rng.Collapse(wdCollapseStart)
-                                            continue
-                                        except Exception:
-                                            insertion_log_parts.append(
-                                                f"    插入项出错: {e}"
-                                            )
-                                            break
-                                    insertion_log_parts.append(f"    插入项出错: {e}")
-                                    break
-
-                    insertion_log_parts.append(
-                        f"  块3插入完成: {inserted_count}/{len(block3_items)} 条。"
+                        f"    块3内容: "
+                        f"{[item['line'][:30] + '...' if item['type'] == 'text' and len(item['line']) > 30 else item['line'] if item['type'] == 'text' else '<表格>' for item in block3_items]}"
                     )
 
-                    # 步骤5：从所有可编辑内容中移除空段落和换行符
-                    insertion_log_parts.append("步骤5：清理空段落与换行...")
-
-                    max_passes = 5
-                    total_empty_deleted = 0
-
-                    for pass_num in range(1, max_passes + 1):
-                        insertion_log_parts.append(
-                            f"  步骤5.1 第 {pass_num} 轮：删除空段落..."
+                if flow["block3_anchor"] == "after_payment" and "付款方式" in protected_fields:
+                    protected_fields["付款方式"] = (
+                        refind_protected_paragraph("付款方式")
+                        or protected_fields["付款方式"]
+                    )
+                    payment_method_rng = protected_fields["付款方式"]
+                    bound_end_now = int(get_insertion_bound_end())
+                    if int(payment_method_rng.End) > bound_end_now:
+                        raise ValueError(
+                            "付款方式字段位置超出插入边界，停止以避免侵入后置章节"
                         )
-
-                        selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                        page_start_final = selection.Start
-                        selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
-                        page_end_final = (
-                            selection.Start
-                            if selection.Information(wdActiveEndPageNumber) == next_page
-                            else doc.Content.End
+                    payment_end = int(payment_method_rng.End)
+                    start_after_payment = min(payment_end + 1, bound_end_now)
+                    safe_pos = None
+                    if start_after_payment < bound_end_now:
+                        safe_pos = find_next_editable_pos_bounded(
+                            start_after_payment, bound_end_now, max_lookahead=20000
                         )
-                        page_rng_final = doc.Range(page_start_final, page_end_final)
+                    if safe_pos is None or safe_pos >= bound_end_now:
+                        if bound_end_now > payment_end:
+                            back = find_prev_editable_pos(
+                                bound_end_now - 1, max_lookback=20000
+                            )
+                            if back is not None and back >= payment_end:
+                                safe_pos = back
+                    if safe_pos is None:
+                        safe_pos = start_after_payment
+                    insert_rng.Start = min(max(0, safe_pos), doc.Content.End)
+                    insert_rng.End = insert_rng.Start
+                    insert_rng.Collapse(wdCollapseStart)
+                    insertion_log_parts.append(
+                        f"    在付款方式字段后插入，位置 {insert_rng.Start}"
+                    )
+                else:
+                    safe_pos = int(get_insertion_bound_end())
+                    insert_rng.SetRange(safe_pos, safe_pos)
+                    insert_rng.Collapse(wdCollapseStart)
+                    insertion_log_parts.append(
+                        f"    未找到付款方式字段，插入到后置锚点前，位置 {insert_rng.Start}"
+                    )
 
-                        paras_final = list(page_rng_final.Paragraphs)
-                        empty_deleted = 0
+                use_inline = False
+                try:
+                    if is_range_locked(
+                        doc.Range(int(insert_rng.Start), int(insert_rng.Start))
+                    ):
+                        use_inline = True
+                except Exception:
+                    pass
 
-                        for i in range(len(paras_final) - 1, -1, -1):
+                inserted_count = 0
+                if use_inline and "付款方式" in protected_fields:
+                    insertion_log_parts.append(
+                        "    块3将以内联换行追加到付款方式段落末尾"
+                    )
+                    inserted_count = insert_items_inline_at_end_of_paragraph(
+                        protected_fields["付款方式"], block3_items
+                    )
+                else:
+                    for item in block3_items:
+                        attempts = 0
+                        while attempts < 80:
+                            attempts += 1
                             try:
-                                para = paras_final[i]
-
-                                if para.Range.Information(wdWithInTable):
-                                    continue
-
-                                para_text = para.Range.Text.strip()
-
-                                is_protected = is_protected_range(para.Range)
-
-                                if not is_protected:
-                                    raw_text = para.Range.Text
-                                    raw_text_no_mark = raw_text.rstrip("\r\n")
-
-                                    raw_cleaned = (
-                                        raw_text_no_mark.replace("\r", "")
-                                        .replace("\n", "")
-                                        .replace(" ", "")
-                                        .replace("\t", "")
-                                        .replace("\u00a0", "")
-                                        .replace("\u2000", "")
-                                        .replace("\u2001", "")
-                                        .replace("\u2002", "")
-                                        .replace("\u2003", "")
-                                        .replace("\u2004", "")
-                                        .replace("\u2005", "")
-                                        .replace("\u2006", "")
-                                        .replace("\u2007", "")
-                                        .replace("\u2008", "")
-                                        .replace("\u2009", "")
-                                        .replace("\u200a", "")
-                                        .replace("\u200b", "")
-                                        .strip()
+                                ensure_editable_insert_range(insert_rng)
+                                if item["type"] == "text":
+                                    inserted_rng = insert_content_with_formatting(
+                                        insert_rng, item["line"]
                                     )
-
-                                    if len(raw_cleaned) == 0:
-                                        try:
-                                            para.Range.Delete()
-                                            empty_deleted += 1
-                                            insertion_log_parts.append(
-                                                f"    删除空段落，索引 {i}"
-                                            )
-                                        except Exception as e:
-                                            insertion_log_parts.append(
-                                                f"    警告: 无法删除索引 {i} 的段落: {e}"
-                                            )
-                            except Exception as e:
-                                insertion_log_parts.append(
-                                    f"    处理第 {i} 段出错: {e}"
-                                )
-
-                        total_empty_deleted += empty_deleted
-                        insertion_log_parts.append(
-                            f"  第 {pass_num} 轮完成：删除空段 {empty_deleted} 个。"
-                        )
-
-                        if empty_deleted == 0:
-                            insertion_log_parts.append(
-                                f"  未再发现空段，第 {pass_num} 轮后停止。"
-                            )
-                            break
-
-                    insertion_log_parts.append(
-                        f"  步骤5.1完成：共删除空段 {total_empty_deleted} 个，用时 {pass_num} 轮。"
-                    )
-
-                    # 第二轮：从可编辑段落中移除换行符
-                    insertion_log_parts.append("  步骤5.2：清理可编辑段落中的换行...")
-
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                    page_start_clean = selection.Start
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
-                    page_end_clean = (
-                        selection.Start
-                        if selection.Information(wdActiveEndPageNumber) == next_page
-                        else doc.Content.End
-                    )
-                    page_rng_clean = doc.Range(page_start_clean, page_end_clean)
-
-                    cleaned_count = 0
-                    paras_to_delete = []
-
-                    for para in page_rng_clean.Paragraphs:
-                        if para.Range.Information(wdWithInTable):
-                            continue
-
-                        para_text = para.Range.Text.strip()
-
-                        if not para_text or para_text == "\r" or para_text == "\n":
-                            continue
-
-                        is_protected = is_protected_range(para.Range)
-
-                        if not is_protected:
-                            try:
-                                para_rng = para.Range
-                                full_text = para_rng.Text
-
-                                text_without_mark = full_text.rstrip("\r\n")
-
-                                if (
-                                    not text_without_mark
-                                    or len(text_without_mark.strip()) == 0
-                                ):
-                                    continue
-
-                                cleaned_text = (
-                                    text_without_mark.replace("\r", "")
-                                    .replace("\n", "")
-                                    .replace("\r\n", "")
-                                )
-
-                                cleaned_text = re.sub(r"\s+", " ", cleaned_text).strip()
-
-                                if (
-                                    cleaned_text
-                                    and len(cleaned_text) > 0
-                                    and cleaned_text != text_without_mark
-                                ):
-                                    para_rng.Text = cleaned_text + "\r"
-                                    cleaned_count += 1
+                                    inserted_count += 1
                                     insertion_log_parts.append(
-                                        f"    已清理: {cleaned_text[:50]}..."
+                                        f"    [{inserted_count}/{len(block3_items)}] 已插入: {item['line'][:50]}..."
                                     )
-                                elif cleaned_text and len(cleaned_text) > 0:
-                                    pass
-                                else:
-                                    if len(cleaned_text) == 0:
-                                        paras_to_delete.append(para_rng)
+                                    break
+                                elif item["type"] == "table":
+                                    insert_table_with_formatting(
+                                        insert_rng, item["rows"]
+                                    )
+                                    inserted_count += 1
+                                    insertion_log_parts.append(
+                                        f"    [{inserted_count}/{len(block3_items)}] 已插入表格，行数 {len(item['rows'])}。"
+                                    )
+                                    break
+                            except Exception as e:
+                                if is_locked_exception(e):
+                                    try:
+                                        cur = int(insert_rng.Start)
+                                    except Exception:
+                                        cur = 0
+                                    bound_end_retry = int(get_insertion_bound_end())
+                                    nxt = find_next_editable_pos_bounded(
+                                        cur + 1,
+                                        bound_end_retry,
+                                        max_lookahead=20000,
+                                    )
+                                    if nxt is None or nxt <= cur:
                                         insertion_log_parts.append(
-                                            f"    标记删除（清理后为空）: '{para_text[:50]}...'"
+                                            f"    插入项出错: {e}"
                                         )
-                            except Exception as e:
-                                insertion_log_parts.append(
-                                    f"    警告: 无法清理段落 '{para_text[:50]}...': {e}"
-                                )
+                                        break
+                                    try:
+                                        insert_rng.SetRange(nxt, nxt)
+                                        insert_rng.Collapse(wdCollapseStart)
+                                        continue
+                                    except Exception:
+                                        insertion_log_parts.append(
+                                            f"    插入项出错: {e}"
+                                        )
+                                        break
+                                insertion_log_parts.append(f"    插入项出错: {e}")
+                                break
 
-                    if paras_to_delete:
-                        insertion_log_parts.append(
-                            f"  删除清理后变空的段落 {len(paras_to_delete)} 个..."
-                        )
-                        for para_rng in reversed(paras_to_delete):
-                            try:
-                                para_rng.Delete()
-                            except Exception as e:
-                                insertion_log_parts.append(
-                                    f"    警告: 无法删除段落: {e}"
-                                )
+                insertion_log_parts.append(
+                    f"  块3插入完成: {inserted_count}/{len(block3_items)} 条。"
+                )
 
+                # 步骤5：从所有可编辑内容中移除空段落和换行符
+                insertion_log_parts.append("步骤5：清理空段落与换行...")
+
+                max_passes = 5
+                total_empty_deleted = 0
+
+                for pass_num in range(1, max_passes + 1):
                     insertion_log_parts.append(
-                        f"  步骤5.2完成：清理 {cleaned_count} 段，删除 {len(paras_to_delete)} 个空段。"
+                        f"  步骤5.1 第 {pass_num} 轮：删除空段落..."
                     )
 
-                    # 最终轮：再次检查是否有剩余的空段落
-                    insertion_log_parts.append("  步骤5.3：最终检查剩余空段落...")
                     selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
                     page_start_final = selection.Start
                     selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
@@ -1391,8 +1346,9 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     )
                     page_rng_final = doc.Range(page_start_final, page_end_final)
 
-                    final_empty_deleted = 0
                     paras_final = list(page_rng_final.Paragraphs)
+                    empty_deleted = 0
+
                     for i in range(len(paras_final) - 1, -1, -1):
                         try:
                             para = paras_final[i]
@@ -1407,257 +1363,425 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                             if not is_protected:
                                 raw_text = para.Range.Text
                                 raw_text_no_mark = raw_text.rstrip("\r\n")
+
                                 raw_cleaned = (
                                     raw_text_no_mark.replace("\r", "")
                                     .replace("\n", "")
                                     .replace(" ", "")
                                     .replace("\t", "")
                                     .replace("\u00a0", "")
+                                    .replace("\u2000", "")
+                                    .replace("\u2001", "")
+                                    .replace("\u2002", "")
+                                    .replace("\u2003", "")
+                                    .replace("\u2004", "")
+                                    .replace("\u2005", "")
+                                    .replace("\u2006", "")
+                                    .replace("\u2007", "")
+                                    .replace("\u2008", "")
+                                    .replace("\u2009", "")
+                                    .replace("\u200a", "")
+                                    .replace("\u200b", "")
                                     .strip()
                                 )
 
                                 if len(raw_cleaned) == 0:
                                     try:
                                         para.Range.Delete()
-                                        final_empty_deleted += 1
-                                    except Exception:
-                                        pass
-                        except Exception:
-                            pass
+                                        empty_deleted += 1
+                                        insertion_log_parts.append(
+                                            f"    删除空段落，索引 {i}"
+                                        )
+                                    except Exception as e:
+                                        insertion_log_parts.append(
+                                            f"    警告: 无法删除索引 {i} 的段落: {e}"
+                                        )
+                        except Exception as e:
+                            insertion_log_parts.append(
+                                f"    处理第 {i} 段出错: {e}"
+                            )
 
-                    if final_empty_deleted > 0:
+                    total_empty_deleted += empty_deleted
+                    insertion_log_parts.append(
+                        f"  第 {pass_num} 轮完成：删除空段 {empty_deleted} 个。"
+                    )
+
+                    if empty_deleted == 0:
                         insertion_log_parts.append(
-                            f"  步骤5.3完成：删除剩余空段 {final_empty_deleted} 个。"
+                            f"  未再发现空段，第 {pass_num} 轮后停止。"
                         )
-                    else:
-                        insertion_log_parts.append("  步骤5.3完成：未发现剩余空段。")
+                        break
 
-                    # 步骤5.4：清理插入区间内表格尾部的空白行
-                    try:
+                insertion_log_parts.append(
+                    f"  步骤5.1完成：共删除空段 {total_empty_deleted} 个，用时 {pass_num} 轮。"
+                )
 
-                        def _visible_text(s: str) -> str:
-                            if not s:
-                                return ""
-                            return (
-                                s.replace("\r", "")
+                # 第二轮：从可编辑段落中移除换行符
+                insertion_log_parts.append("  步骤5.2：清理可编辑段落中的换行...")
+
+                selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
+                page_start_clean = selection.Start
+                selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
+                page_end_clean = (
+                    selection.Start
+                    if selection.Information(wdActiveEndPageNumber) == next_page
+                    else doc.Content.End
+                )
+                page_rng_clean = doc.Range(page_start_clean, page_end_clean)
+
+                cleaned_count = 0
+                paras_to_delete = []
+
+                for para in page_rng_clean.Paragraphs:
+                    if para.Range.Information(wdWithInTable):
+                        continue
+
+                    para_text = para.Range.Text.strip()
+
+                    if not para_text or para_text == "\r" or para_text == "\n":
+                        continue
+
+                    is_protected = is_protected_range(para.Range)
+
+                    if not is_protected:
+                        try:
+                            para_rng = para.Range
+                            full_text = para_rng.Text
+
+                            text_without_mark = full_text.rstrip("\r\n")
+
+                            if (
+                                not text_without_mark
+                                or len(text_without_mark.strip()) == 0
+                            ):
+                                continue
+
+                            cleaned_text = (
+                                text_without_mark.replace("\r", "")
                                 .replace("\n", "")
-                                .replace("\x07", "")
-                                .replace("\x0b", "")
-                                .replace("\x0c", "")
-                                .replace("\a", "")
+                                .replace("\r\n", "")
+                            )
+
+                            cleaned_text = re.sub(r"\s+", " ", cleaned_text).strip()
+
+                            if (
+                                cleaned_text
+                                and len(cleaned_text) > 0
+                                and cleaned_text != text_without_mark
+                            ):
+                                para_rng.Text = cleaned_text + "\r"
+                                cleaned_count += 1
+                                insertion_log_parts.append(
+                                    f"    已清理: {cleaned_text[:50]}..."
+                                )
+                            elif cleaned_text and len(cleaned_text) > 0:
+                                pass
+                            else:
+                                if len(cleaned_text) == 0:
+                                    paras_to_delete.append(para_rng)
+                                    insertion_log_parts.append(
+                                        f"    标记删除（清理后为空）: '{para_text[:50]}...'"
+                                    )
+                        except Exception as e:
+                            insertion_log_parts.append(
+                                f"    警告: 无法清理段落 '{para_text[:50]}...': {e}"
+                            )
+
+                if paras_to_delete:
+                    insertion_log_parts.append(
+                        f"  删除清理后变空的段落 {len(paras_to_delete)} 个..."
+                    )
+                    for para_rng in reversed(paras_to_delete):
+                        try:
+                            para_rng.Delete()
+                        except Exception as e:
+                            insertion_log_parts.append(
+                                f"    警告: 无法删除段落: {e}"
+                            )
+
+                insertion_log_parts.append(
+                    f"  步骤5.2完成：清理 {cleaned_count} 段，删除 {len(paras_to_delete)} 个空段。"
+                )
+
+                # 最终轮：再次检查是否有剩余的空段落
+                insertion_log_parts.append("  步骤5.3：最终检查剩余空段落...")
+                selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
+                page_start_final = selection.Start
+                selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
+                page_end_final = (
+                    selection.Start
+                    if selection.Information(wdActiveEndPageNumber) == next_page
+                    else doc.Content.End
+                )
+                page_rng_final = doc.Range(page_start_final, page_end_final)
+
+                final_empty_deleted = 0
+                paras_final = list(page_rng_final.Paragraphs)
+                for i in range(len(paras_final) - 1, -1, -1):
+                    try:
+                        para = paras_final[i]
+
+                        if para.Range.Information(wdWithInTable):
+                            continue
+
+                        para_text = para.Range.Text.strip()
+
+                        is_protected = is_protected_range(para.Range)
+
+                        if not is_protected:
+                            raw_text = para.Range.Text
+                            raw_text_no_mark = raw_text.rstrip("\r\n")
+                            raw_cleaned = (
+                                raw_text_no_mark.replace("\r", "")
+                                .replace("\n", "")
                                 .replace(" ", "")
                                 .replace("\t", "")
                                 .replace("\u00a0", "")
-                                .replace("\u3000", "")
-                                .replace("\u2000", "")
-                                .replace("\u2001", "")
-                                .replace("\u2002", "")
-                                .replace("\u2003", "")
-                                .replace("\u2004", "")
-                                .replace("\u2005", "")
-                                .replace("\u2006", "")
-                                .replace("\u2007", "")
-                                .replace("\u2008", "")
-                                .replace("\u2009", "")
-                                .replace("\u200a", "")
-                                .replace("\u200b", "")
-                                .replace("\ufeff", "")
                                 .strip()
                             )
 
-                        def _row_is_empty(row) -> bool:
-                            try:
-                                cells = row.Cells
-                                for c in range(1, cells.Count + 1):
-                                    try:
-                                        txt = cells(c).Range.Text
-                                    except Exception:
-                                        txt = ""
-                                    if _visible_text(txt):
-                                        return False
-                                return True
-                            except Exception:
-                                return False
-
-                        def _trim_table_trailing_empty_rows(tbl) -> int:
-                            removed = 0
-                            try:
-                                for r in range(tbl.Rows.Count, 0, -1):
-                                    try:
-                                        row = tbl.Rows(r)
-                                        if _row_is_empty(row):
-                                            row.Delete()
-                                            removed += 1
-                                        else:
-                                            break
-                                    except Exception:
-                                        break
-                            except Exception:
-                                return removed
-                            return removed
-
-                        bound_start = int(insertion_bound_start)
-                        bound_end = int(get_insertion_bound_end())
-                        tbl_rng = doc.Range(bound_start, bound_end)
-                        tables = tbl_rng.Tables
-                        trimmed_tables = 0
-                        trimmed_rows_total = 0
-                        deleted_empty_tables = 0
-
-                        for t_idx in range(tables.Count, 0, -1):
-                            try:
-                                tbl = tables(t_idx)
-                                removed_rows = _trim_table_trailing_empty_rows(tbl)
-                                if removed_rows > 0:
-                                    trimmed_tables += 1
-                                    trimmed_rows_total += removed_rows
-
+                            if len(raw_cleaned) == 0:
                                 try:
-                                    cleaned_tbl_text = _visible_text(tbl.Range.Text)
+                                    para.Range.Delete()
+                                    final_empty_deleted += 1
                                 except Exception:
-                                    cleaned_tbl_text = "x"
-                                if not cleaned_tbl_text:
-                                    tbl.Range.Delete()
-                                    deleted_empty_tables += 1
-                            except Exception:
-                                continue
-
-                        if trimmed_tables > 0 or deleted_empty_tables > 0:
-                            insertion_log_parts.append(
-                                f"  步骤5.4完成：修剪表格 {trimmed_tables} 个，删除尾部空行 {trimmed_rows_total} 行，删除空表格 {deleted_empty_tables} 个。"
-                            )
+                                    pass
                     except Exception:
                         pass
 
+                if final_empty_deleted > 0:
                     insertion_log_parts.append(
-                        "步骤5完成：已清理可编辑内容中的空段落与多余换行。"
+                        f"  步骤5.3完成：删除剩余空段 {final_empty_deleted} 个。"
                     )
-                    insertion_log_parts.append("内容处理成功。")
+                else:
+                    insertion_log_parts.append("  步骤5.3完成：未发现剩余空段。")
 
-                    # 步骤6：根据 polished_comments 插入批注
-                    polished_comments = state.get("polished_comments") or []
-                    if polished_comments:
-                        insertion_log_parts.append(
-                            "步骤6：根据 polished_comments 插入批注..."
+                # 步骤5.4：清理插入区间内表格尾部的空白行
+                try:
+
+                    def _visible_text(s: str) -> str:
+                        if not s:
+                            return ""
+                        return (
+                            s.replace("\r", "")
+                            .replace("\n", "")
+                            .replace("\x07", "")
+                            .replace("\x0b", "")
+                            .replace("\x0c", "")
+                            .replace("\a", "")
+                            .replace(" ", "")
+                            .replace("\t", "")
+                            .replace("\u00a0", "")
+                            .replace("\u3000", "")
+                            .replace("\u2000", "")
+                            .replace("\u2001", "")
+                            .replace("\u2002", "")
+                            .replace("\u2003", "")
+                            .replace("\u2004", "")
+                            .replace("\u2005", "")
+                            .replace("\u2006", "")
+                            .replace("\u2007", "")
+                            .replace("\u2008", "")
+                            .replace("\u2009", "")
+                            .replace("\u200a", "")
+                            .replace("\u200b", "")
+                            .replace("\ufeff", "")
+                            .strip()
                         )
-                        bound_start = int(insertion_bound_start)
-                        bound_end = int(get_insertion_bound_end())
 
-                        def _ranges_overlap(
-                            a_start: int, a_end: int, b_start: int, b_end: int
-                        ) -> bool:
-                            return not (a_end <= b_start or b_end <= a_start)
-
-                        def _has_comment_on_range(target_rng) -> bool:
-                            try:
-                                comments = doc.Comments
-                            except Exception:
-                                return False
-                            try:
-                                count = comments.Count
-                            except Exception:
-                                return False
-                            for i in range(1, count + 1):
+                    def _row_is_empty(row) -> bool:
+                        try:
+                            cells = row.Cells
+                            for c in range(1, cells.Count + 1):
                                 try:
-                                    c = comments(i)
+                                    txt = cells(c).Range.Text
                                 except Exception:
-                                    continue
-                                c_rng = None
-                                for attr in ("Scope", "Reference", "Range"):
-                                    try:
-                                        c_rng = getattr(c, attr)
-                                    except Exception:
-                                        c_rng = None
-                                    if c_rng is not None:
-                                        break
-                                if c_rng is None:
-                                    continue
-                                try:
-                                    cs = int(c_rng.Start)
-                                    ce = int(c_rng.End)
-                                    ts = int(target_rng.Start)
-                                    te = int(target_rng.End)
-                                except Exception:
-                                    continue
-                                if _ranges_overlap(cs, ce, ts, te):
-                                    return True
+                                    txt = ""
+                                if _visible_text(txt):
+                                    return False
+                            return True
+                        except Exception:
                             return False
 
-                        last_used_end_by_ref = {}
-                        comments_added = 0
+                    def _trim_table_trailing_empty_rows(tbl) -> int:
+                        removed = 0
+                        try:
+                            for r in range(tbl.Rows.Count, 0, -1):
+                                try:
+                                    row = tbl.Rows(r)
+                                    if _row_is_empty(row):
+                                        row.Delete()
+                                        removed += 1
+                                    else:
+                                        break
+                                except Exception:
+                                    break
+                        except Exception:
+                            return removed
+                        return removed
 
-                        for idx, instr in enumerate(polished_comments):
-                            ref_text = (instr.get("reference_text") or "").strip()
-                            comment_text = (instr.get("comment_text") or "").strip()
-                            if not ref_text or not comment_text:
+                    bound_start = int(insertion_bound_start)
+                    bound_end = int(get_insertion_bound_end())
+                    tbl_rng = doc.Range(bound_start, bound_end)
+                    tables = tbl_rng.Tables
+                    trimmed_tables = 0
+                    trimmed_rows_total = 0
+                    deleted_empty_tables = 0
+
+                    for t_idx in range(tables.Count, 0, -1):
+                        try:
+                            tbl = tables(t_idx)
+                            removed_rows = _trim_table_trailing_empty_rows(tbl)
+                            if removed_rows > 0:
+                                trimmed_tables += 1
+                                trimmed_rows_total += removed_rows
+
+                            try:
+                                cleaned_tbl_text = _visible_text(tbl.Range.Text)
+                            except Exception:
+                                cleaned_tbl_text = "x"
+                            if not cleaned_tbl_text:
+                                tbl.Range.Delete()
+                                deleted_empty_tables += 1
+                        except Exception:
+                            continue
+
+                    if trimmed_tables > 0 or deleted_empty_tables > 0:
+                        insertion_log_parts.append(
+                            f"  步骤5.4完成：修剪表格 {trimmed_tables} 个，删除尾部空行 {trimmed_rows_total} 行，删除空表格 {deleted_empty_tables} 个。"
+                        )
+                except Exception:
+                    pass
+
+                insertion_log_parts.append(
+                    "步骤5完成：已清理可编辑内容中的空段落与多余换行。"
+                )
+                insertion_log_parts.append("内容处理成功。")
+
+                # 步骤6：根据 polished_comments 插入批注
+                polished_comments = state.get("polished_comments") or []
+                if polished_comments:
+                    insertion_log_parts.append(
+                        "步骤6：根据 polished_comments 插入批注..."
+                    )
+                    bound_start = int(insertion_bound_start)
+                    bound_end = int(get_insertion_bound_end())
+
+                    def _ranges_overlap(
+                        a_start: int, a_end: int, b_start: int, b_end: int
+                    ) -> bool:
+                        return not (a_end <= b_start or b_end <= a_start)
+
+                    def _has_comment_on_range(target_rng) -> bool:
+                        try:
+                            comments = doc.Comments
+                        except Exception:
+                            return False
+                        try:
+                            count = comments.Count
+                        except Exception:
+                            return False
+                        for i in range(1, count + 1):
+                            try:
+                                c = comments(i)
+                            except Exception:
                                 continue
+                            c_rng = None
+                            for attr in ("Scope", "Reference", "Range"):
+                                try:
+                                    c_rng = getattr(c, attr)
+                                except Exception:
+                                    c_rng = None
+                                if c_rng is not None:
+                                    break
+                            if c_rng is None:
+                                continue
+                            try:
+                                cs = int(c_rng.Start)
+                                ce = int(c_rng.End)
+                                ts = int(target_rng.Start)
+                                te = int(target_rng.End)
+                            except Exception:
+                                continue
+                            if _ranges_overlap(cs, ce, ts, te):
+                                return True
+                        return False
 
-                            search_texts = [ref_text]
-                            if "\n" in ref_text:
-                                search_texts.append(ref_text.replace("\n", "\r"))
+                    last_used_end_by_ref = {}
+                    comments_added = 0
 
-                            inserted_here = False
-                            for find_text in search_texts:
-                                cur_start = int(
-                                    last_used_end_by_ref.get(ref_text, bound_start)
-                                )
-                                while cur_start < bound_end:
-                                    find_rng = doc.Range(cur_start, bound_end)
-                                    finder = find_rng.Find
-                                    finder.ClearFormatting()
-                                    finder.Text = find_text
-                                    finder.Forward = True
-                                    finder.Wrap = wdFindStop
-                                    finder.MatchCase = False
-                                    finder.MatchWholeWord = False
+                    for idx, instr in enumerate(polished_comments):
+                        ref_text = (instr.get("reference_text") or "").strip()
+                        comment_text = (instr.get("comment_text") or "").strip()
+                        if not ref_text or not comment_text:
+                            continue
 
-                                    if not finder.Execute():
-                                        break
+                        search_texts = [ref_text]
+                        if "\n" in ref_text:
+                            search_texts.append(ref_text.replace("\n", "\r"))
 
-                                    try:
-                                        match_start = int(find_rng.Start)
-                                        match_end = int(find_rng.End)
-                                    except Exception:
-                                        break
+                        inserted_here = False
+                        for find_text in search_texts:
+                            cur_start = int(
+                                last_used_end_by_ref.get(ref_text, bound_start)
+                            )
+                            while cur_start < bound_end:
+                                find_rng = doc.Range(cur_start, bound_end)
+                                finder = find_rng.Find
+                                finder.ClearFormatting()
+                                finder.Text = find_text
+                                finder.Forward = True
+                                finder.Wrap = wdFindStop
+                                finder.MatchCase = False
+                                finder.MatchWholeWord = False
 
-                                    if _has_comment_on_range(find_rng):
-                                        insertion_log_parts.append(
-                                            f"  批注 [{idx + 1}] 位置已存在批注，继续向后查找 reference_text={ref_text[:40]}..."
-                                        )
-                                        cur_start = max(match_end, cur_start + 1)
-                                        continue
-
-                                    try:
-                                        doc.Comments.Add(
-                                            Range=find_rng.Duplicate, Text=comment_text
-                                        )
-                                        comments_added += 1
-                                        last_used_end_by_ref[ref_text] = match_end
-                                        insertion_log_parts.append(
-                                            f"  批注 [{idx + 1}] 已添加: reference_text={ref_text[:40]}... -> comment_text={comment_text[:40]}..."
-                                        )
-                                        inserted_here = True
-                                    except Exception as comment_e:
-                                        insertion_log_parts.append(
-                                            f"  批注 [{idx + 1}] 添加失败 (reference_text={ref_text[:40]}...): {comment_e}"
-                                        )
+                                if not finder.Execute():
                                     break
 
-                                if inserted_here:
+                                try:
+                                    match_start = int(find_rng.Start)
+                                    match_end = int(find_rng.End)
+                                except Exception:
                                     break
 
-                            if not inserted_here:
-                                insertion_log_parts.append(
-                                    f"  批注 [{idx + 1}] 未找到可插入的位置或未匹配到引用文本: {ref_text[:50]}..."
-                                )
+                                if _has_comment_on_range(find_rng):
+                                    insertion_log_parts.append(
+                                        f"  批注 [{idx + 1}] 位置已存在批注，继续向后查找 reference_text={ref_text[:40]}..."
+                                    )
+                                    cur_start = max(match_end, cur_start + 1)
+                                    continue
 
-                        insertion_log_parts.append(
-                            f"步骤6完成：成功添加 {comments_added}/{len(polished_comments)} 条批注。"
-                        )
-                    else:
-                        insertion_log_parts.append(
-                            "步骤6：无 polished_comments，跳过批注插入。"
-                        )
+                                try:
+                                    doc.Comments.Add(
+                                        Range=find_rng.Duplicate, Text=comment_text
+                                    )
+                                    comments_added += 1
+                                    last_used_end_by_ref[ref_text] = match_end
+                                    insertion_log_parts.append(
+                                        f"  批注 [{idx + 1}] 已添加: reference_text={ref_text[:40]}... -> comment_text={comment_text[:40]}..."
+                                    )
+                                    inserted_here = True
+                                except Exception as comment_e:
+                                    insertion_log_parts.append(
+                                        f"  批注 [{idx + 1}] 添加失败 (reference_text={ref_text[:40]}...): {comment_e}"
+                                    )
+                                break
+
+                            if inserted_here:
+                                break
+
+                        if not inserted_here:
+                            insertion_log_parts.append(
+                                f"  批注 [{idx + 1}] 未找到可插入的位置或未匹配到引用文本: {ref_text[:50]}..."
+                            )
+
+                    insertion_log_parts.append(
+                        f"步骤6完成：成功添加 {comments_added}/{len(polished_comments)} 条批注。"
+                    )
+                else:
+                    insertion_log_parts.append(
+                        "步骤6：无 polished_comments，跳过批注插入。"
+                    )
 
             doc.Save()
             insertion_log_parts.append("文档已保存。")

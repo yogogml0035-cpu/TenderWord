@@ -50,15 +50,24 @@ export function FileUploader({
   const [isDragging, setIsDragging] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  }, []);
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      if (disabled) {
+        return;
+      }
+      setIsDragging(true);
+    },
+    [disabled]
+  );
 
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-  }, []);
+  const handleDragLeave = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+    },
+    []
+  );
 
   const validateFile = useCallback(
     (file: File): string | null => {
@@ -154,9 +163,12 @@ export function FileUploader({
     (e: React.DragEvent) => {
       e.preventDefault();
       setIsDragging(false);
+      if (disabled) {
+        return;
+      }
       processFiles(e.dataTransfer.files);
     },
-    [processFiles]
+    [disabled, processFiles]
   );
 
   const handleFileInput = useCallback(
@@ -174,18 +186,19 @@ export function FileUploader({
     },
     [setFiles]
   );
+  const selectionHint = multiple ? `最多 ${maxFiles} 个文件` : '单文件上传';
 
   return (
-    <div className={cn('space-y-4', className)}>
+    <div className={cn('space-y-3', className)}>
       {/* Upload Area */}
       <div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={cn(
-          'relative cursor-pointer rounded-lg border-2 border-dashed p-6 transition-colors',
-          'hover:border-[var(--primary)] hover:bg-[var(--primary)]/5',
-          isDragging && 'border-[var(--primary)] bg-[var(--primary)]/10',
+          'relative cursor-pointer rounded-xl border border-dashed px-4 py-3.5 transition-all',
+          'hover:border-[var(--primary)] hover:bg-[var(--primary)]/5 hover:shadow-sm',
+          isDragging && 'border-[var(--primary)] bg-[var(--primary)]/10 shadow-sm',
           disabled && 'cursor-not-allowed opacity-50'
         )}
       >
@@ -197,14 +210,23 @@ export function FileUploader({
           disabled={disabled}
           className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
         />
-        <div className="flex flex-col items-center justify-center space-y-2 text-center">
-          <Upload className="h-10 w-10 text-[var(--text-muted)]" />
-          <div>
-            <p className="text-sm font-medium text-[var(--foreground)]">{label}</p>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">{description}</p>
+        <div className="flex flex-col gap-3 text-center sm:flex-row sm:items-center sm:justify-between sm:text-left">
+          <div className="flex flex-col items-center gap-3 sm:flex-row">
+            <div className="mx-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--primary)]/10 text-[var(--primary)] sm:mx-0">
+              <Upload className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-[var(--foreground)]">{label}</p>
+              <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">{description}</p>
+            </div>
           </div>
-          <p className="text-xs text-[var(--text-muted)]">拖放文件到此处，或点击选择文件</p>
+          <div className="inline-flex items-center justify-center rounded-full border border-[var(--primary)]/15 bg-[var(--primary)]/8 px-3 py-1.5 text-xs font-medium text-[var(--primary)]">
+            点击或拖拽上传
+          </div>
         </div>
+        <p className="mt-3 text-center text-[11px] text-[var(--text-muted)] sm:text-left">
+          {selectionHint}
+        </p>
       </div>
 
       {/* Error Messages */}
@@ -213,7 +235,7 @@ export function FileUploader({
           {errors.map((error, index) => (
             <div
               key={index}
-              className="flex items-center gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-600"
+              className="flex items-center gap-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600"
             >
               <AlertCircle className="h-4 w-4" />
               {error}
@@ -229,13 +251,13 @@ export function FileUploader({
             <div
               key={file.id}
               className={cn(
-                'flex items-center justify-between rounded-lg border-2 p-3 transition-colors',
-                'border-green-500 bg-green-50/80'
+                'flex items-center justify-between rounded-xl border px-3 py-2.5 transition-colors',
+                'border-green-200 bg-green-50/80'
               )}
             >
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100">
-                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+              <div className="flex min-w-0 items-center gap-2.5">
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-green-100">
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-green-900">

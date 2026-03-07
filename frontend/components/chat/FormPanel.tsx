@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
-import { Loader2, X } from 'lucide-react';
+import React, { useState, useCallback, useRef } from 'react';
+import { Loader2 } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
@@ -35,6 +35,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
     completeTask: completeChatTask,
     failTask: failChatTask,
     startTask,
+    activeTaskIds,
     hasActiveTasks,
   } = useChatStore();
   const conversation = getCurrentConversation();
@@ -48,12 +49,91 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
       .find((msg) => msg.status === 'generating' && typeof msg.taskId === 'string') || null;
   const effectiveTaskId = currentGeneratingMessage?.taskId || null;
   const hasCancelableCurrentTask = !!effectiveTaskId;
+  const formIsBusy = isSubmitting || hasActiveTask;
+  const syncingTerminalTasksRef = useRef<Set<string>>(new Set());
+  const heartbeatTaskIds =
+    activeTaskIds.length > 0 ? activeTaskIds : effectiveTaskId ? [effectiveTaskId] : null;
+
+  const syncTaskTerminalState = useCallback(
+    async (taskId: string, fallbackStatus?: 'cancelled' | 'failed') => {
+      const locatedGroup = useChatStore.getState().findTaskMessageGroup(taskId);
+      const isGenerating =
+        locatedGroup?.logMessage?.status === 'generating' ||
+        locatedGroup?.contentMessage?.status === 'generating';
+      if (!locatedGroup || !isGenerating) {
+        return;
+      }
+
+      if (syncingTerminalTasksRef.current.has(taskId)) {
+        return;
+      }
+      syncingTerminalTasksRef.current.add(taskId);
+
+      let settled = false;
+      const stream = useChatStreamStore.getState().streams[taskId];
+      const finalContent = stream
+        ? {
+            logs: stream.logs,
+            aiText: stream.aiText,
+            aiComplete: stream.aiComplete,
+          }
+        : undefined;
+
+      try {
+        const task = await getTaskStatus(taskId);
+        const status = task.status;
+
+        if (status === 'completed') {
+          let outputFile: string | undefined;
+          let fileName: string | undefined;
+
+          if (typeof task.result === 'string') {
+            outputFile = task.result !== 'success' ? task.result : undefined;
+          } else if (isRecord(task.result)) {
+            const outputFileValue = task.result.output_file;
+            const fileNameValue = task.result.file_name;
+            outputFile = typeof outputFileValue === 'string' ? outputFileValue : undefined;
+            fileName = typeof fileNameValue === 'string' ? fileNameValue : undefined;
+          }
+
+          if (!fileName && typeof outputFile === 'string') {
+            fileName = outputFile.split(/[\\/]/).pop();
+          }
+
+          completeChatTask(taskId, outputFile, fileName, finalContent);
+          settled = true;
+        } else if (status === 'failed') {
+          const errorMessage = typeof task.error === 'string' ? task.error : '生成失败';
+          failChatTask(taskId, errorMessage, finalContent);
+          settled = true;
+        } else if (status === 'cancelled') {
+          cancelChatTask(taskId, finalContent);
+          settled = true;
+        }
+      } catch {
+        if (fallbackStatus === 'failed') {
+          failChatTask(taskId, '生成失败', finalContent);
+          settled = true;
+        } else if (fallbackStatus === 'cancelled') {
+          cancelChatTask(taskId, finalContent);
+          settled = true;
+        }
+      } finally {
+        syncingTerminalTasksRef.current.delete(taskId);
+        if (settled) {
+          useChatStreamStore.getState().clearStream(taskId);
+          useChatTaskSessionStore.getState().removeSession(taskId);
+          setIsSubmitting(false);
+        }
+      }
+    },
+    [cancelChatTask, completeChatTask, failChatTask]
+  );
 
   // Use SSE for current task
   useChatSSE({
     taskId: effectiveTaskId,
     conversationId: conversation?.id || null,
-    messageId: currentGeneratingMessage?.id || null,
     onComplete: () => {
       setIsSubmitting(false);
     },
@@ -62,7 +142,15 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
       setIsSubmitting(false);
     },
   });
-  useTaskHeartbeat(effectiveTaskId);
+  useTaskHeartbeat(heartbeatTaskIds, {
+    onTerminalState: (taskId, status) => {
+      if (status === 'cancelled' || status === 'failed') {
+        void syncTaskTerminalState(taskId, status);
+        return;
+      }
+      void syncTaskTerminalState(taskId);
+    },
+  });
 
   const handleCancelTask = async () => {
     const taskIdToCancel = effectiveTaskId;
@@ -71,45 +159,19 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         const cancelResult = await cancelTask(taskIdToCancel);
 
         if (cancelResult.noop) {
-          // 后端已结束（completed/failed/cancelled），前端需要主动同步状态，避免一直 generating
-          try {
-            const task = await getTaskStatus(taskIdToCancel);
-            const status = task.status;
-            const finalContent = useChatStreamStore.getState().streams[taskIdToCancel]?.content;
-
-            if (status === 'completed') {
-              let outputFile: string | undefined;
-              let fileName: string | undefined;
-              if (typeof task.result === 'string') {
-                outputFile = task.result !== 'success' ? task.result : undefined;
-              } else if (isRecord(task.result)) {
-                const outputFileValue = task.result.output_file;
-                const fileNameValue = task.result.file_name;
-                outputFile = typeof outputFileValue === 'string' ? outputFileValue : undefined;
-                fileName = typeof fileNameValue === 'string' ? fileNameValue : undefined;
-              }
-              if (!fileName && typeof outputFile === 'string') {
-                fileName = outputFile.split(/[\\/]/).pop();
-              }
-              completeChatTask(taskIdToCancel, outputFile, fileName, finalContent);
-            } else if (status === 'failed') {
-              const errorMessage = typeof task.error === 'string' ? task.error : '生成失败';
-              failChatTask(taskIdToCancel, errorMessage, finalContent);
-            } else if (status === 'cancelled') {
-              cancelChatTask(taskIdToCancel, finalContent);
-            } else {
-              cancelChatTask(taskIdToCancel, finalContent);
-            }
-          } catch {
-            cancelChatTask(
-              taskIdToCancel,
-              useChatStreamStore.getState().streams[taskIdToCancel]?.content
-            );
-          }
+          // 后端已结束（completed/failed/cancelled），前端主动同步终态，避免一直 generating
+          await syncTaskTerminalState(taskIdToCancel, 'cancelled');
         } else {
+          const stream = useChatStreamStore.getState().streams[taskIdToCancel];
           cancelChatTask(
             taskIdToCancel,
-            useChatStreamStore.getState().streams[taskIdToCancel]?.content
+            stream
+              ? {
+                  logs: stream.logs,
+                  aiText: stream.aiText,
+                  aiComplete: stream.aiComplete,
+                }
+              : undefined
           );
         }
 
@@ -227,23 +289,13 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
   return (
     <div className={`relative flex h-full flex-col bg-white shadow-sm ${className}`}>
       {/* Header */}
-      <div className="relative z-20 flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
+      <div className="relative z-20 border-b border-gray-200 bg-white px-4 py-3">
         <div>
           <h2 className="font-medium text-gray-900">招标信息</h2>
           <p className="text-xs text-gray-500">
             {conversation.tenderType === 'xjcg' ? '询价采购' : '国内公开'}
           </p>
         </div>
-
-        {hasCancelableCurrentTask && (
-          <button
-            onClick={handleCancelTask}
-            className="flex items-center gap-1 rounded bg-red-50 px-3 py-1.5 text-sm text-red-600 shadow-sm transition-colors duration-200 hover:bg-red-100"
-          >
-            <X className="h-4 w-4" />
-            取消生成
-          </button>
-        )}
       </div>
 
       {/* Concurrent Task Warning */}
@@ -284,7 +336,9 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
           <XjcgTenderForm
             key={conversation.id}
             onSubmit={handleSubmit}
-            isSubmitting={isSubmitting || hasActiveTask}
+            isSubmitting={formIsBusy}
+            canCancel={hasCancelableCurrentTask}
+            onCancel={handleCancelTask}
             initialTenderNo={inferredTenderNo ?? undefined}
             initialTenderData={initialTenderData ?? undefined}
           />
@@ -292,19 +346,24 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
           <GngkTenderForm
             key={conversation.id}
             onSubmit={handleSubmit}
-            isSubmitting={isSubmitting || hasActiveTask}
+            isSubmitting={formIsBusy}
+            canCancel={hasCancelableCurrentTask}
+            onCancel={handleCancelTask}
             initialTenderNo={inferredTenderNo ?? undefined}
             initialTenderData={initialTenderData ?? undefined}
           />
         )}
       </div>
 
-      {/* Loading Overlay */}
       {hasActiveTask && (
-        <div className="animate-fade-in-up absolute inset-0 z-10 flex items-center justify-center bg-white/80">
-          <div className="rounded border border-gray-200 bg-white p-6 text-center shadow-lg">
-            <Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin text-blue-500" />
-            <p className="text-sm text-gray-600">正在生成招标文档...</p>
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none absolute inset-x-0 top-1/2 z-30 flex -translate-y-1/2 justify-center px-6"
+        >
+          <div className="flex w-full max-w-md items-center justify-center gap-3 rounded-full border border-blue-200 bg-white/95 px-5 py-3 text-center text-sm font-medium text-blue-700 shadow-xl shadow-blue-100/80 backdrop-blur">
+            <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+            <p>正在生成招标文档...</p>
           </div>
         </div>
       )}

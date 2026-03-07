@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 import pathlib
 import sys
@@ -48,6 +49,13 @@ HEARTBEAT_INTERVAL_SECONDS = 5.0
 
 def _visible_log(message: str) -> None:
     progress_log.info(f"[{NODE_NAME}] {message}")
+
+
+def _calculate_elapsed_seconds(
+    start_monotonic: float, current_monotonic: Optional[float] = None
+) -> float:
+    current = time.monotonic() if current_monotonic is None else current_monotonic
+    return max(0.0, current - start_monotonic)
 
 
 def _check_cancelled(config) -> None:
@@ -141,6 +149,160 @@ def _is_range_locked(rng, doc) -> bool:
     return False
 
 
+def _find_paragraph_containing_any(
+    doc, texts: tuple[str, ...], min_start: int = 0
+):
+    """在指定起点之后，查找首个包含任一文本的段落。"""
+
+    for para in doc.Paragraphs:
+        try:
+            rng = para.Range
+            if int(rng.End) < int(min_start):
+                continue
+            para_text = str(getattr(rng, "Text", "") or "")
+            if any(text in para_text for text in texts):
+                return rng
+        except Exception:
+            continue
+    return None
+
+
+def _find_first_visible_insert_offset(paragraph_text: str) -> int:
+    """优先将换行插入到编号前，否则回退到首个可见字符前。"""
+
+    if not paragraph_text:
+        return 0
+
+    digit_match = re.search(r"\d", paragraph_text)
+    if digit_match:
+        return digit_match.start()
+
+    for idx, char in enumerate(paragraph_text):
+        if not char.isspace() and char not in ("\r", "\n", "\a"):
+            return idx
+    return 0
+
+
+def _insert_paragraph_break_before_delivery(
+    doc, delivery_para_rng, fallback_pos: Optional[int]
+) -> bool:
+    """在交付日期段落前补一个段落边界，失败时回退到原删除起点。"""
+
+    inserted = False
+
+    if delivery_para_rng is not None:
+        try:
+            para_text_raw = str(getattr(delivery_para_rng, "Text", "") or "")
+            insert_offset = _find_first_visible_insert_offset(para_text_raw)
+            insert_pos = int(delivery_para_rng.Start) + int(insert_offset)
+            doc.Range(insert_pos, insert_pos).InsertBefore("\r")
+            inserted = True
+        except Exception:
+            inserted = False
+
+    if inserted or fallback_pos is None:
+        return inserted
+
+    try:
+        safe_pos = min(max(0, int(fallback_pos)), int(doc.Content.End))
+        doc.Range(safe_pos, safe_pos).InsertParagraphAfter()
+        return True
+    except Exception:
+        return False
+
+
+def _ensure_paragraph_break_after_payment(
+    doc, payment_para_rng, max_scan_chars: int = 4000
+) -> bool:
+    """在付款方式段落后补回车，必要时跳过受保护位置向后探测。"""
+
+    if payment_para_rng is None:
+        return False
+
+    try:
+        payment_end = int(payment_para_rng.End)
+        doc_end = int(doc.Content.End)
+    except Exception:
+        return False
+
+    need_insert = True
+    if payment_end < doc_end:
+        try:
+            next_char = doc.Range(payment_end, min(payment_end + 1, doc_end)).Text
+            if next_char == "\r":
+                need_insert = False
+        except Exception:
+            pass
+
+    if not need_insert:
+        return False
+
+    max_pos = min(doc_end, payment_end + max_scan_chars)
+    for pos in range(payment_end, max_pos + 1):
+        try:
+            probe_rng = doc.Range(pos, pos)
+            if _is_range_locked(probe_rng, doc):
+                continue
+            probe_rng.InsertBefore("\r")
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _restore_protected_field_paragraph_boundaries(
+    doc,
+    before_text: str,
+    before_end_pos: Optional[int],
+    log=_visible_log,
+) -> None:
+    """恢复删除后受保护字段周围的段落边界，避免字段与正文黏连触发重新分页。"""
+
+    refreshed_before = _find_anchor_fast(doc, before_text)
+    search_start = (
+        int(refreshed_before["end"])
+        if refreshed_before and refreshed_before.get("end") is not None
+        else int(before_end_pos or 0)
+    )
+
+    delivery_para_rng = _find_paragraph_containing_any(
+        doc, ("交付日期：", "交付日期:"), min_start=search_start
+    )
+    if delivery_para_rng is None:
+        print('[delete_tender_param] 提示: 未找到"交付日期"锚点，回退到删除起点补段落边界')
+        if log:
+            log('未找到"交付日期"字段，回退到删除起点补段落边界')
+    delivery_fixed = _insert_paragraph_break_before_delivery(
+        doc, delivery_para_rng, before_end_pos
+    )
+    if delivery_fixed:
+        print('[delete_tender_param] 已补齐"交付日期"前的段落边界')
+        if log:
+            log('已补齐"交付日期"前的段落边界')
+    else:
+        print('[delete_tender_param] 警告: 未能补齐"交付日期"前的段落边界')
+        if log:
+            log('未能补齐"交付日期"前的段落边界')
+
+    payment_para_rng = _find_paragraph_containing_any(
+        doc, ("付款方式：", "付款方式:"), min_start=search_start
+    )
+    if payment_para_rng is None:
+        print('[delete_tender_param] 提示: 未找到"付款方式"锚点，跳过补回车')
+        if log:
+            log('未找到"付款方式"字段，跳过补回车')
+        return
+
+    if _ensure_paragraph_break_after_payment(doc, payment_para_rng):
+        print('[delete_tender_param] 已补齐"付款方式"后的回车')
+        if log:
+            log('已补齐"付款方式"后的回车')
+    else:
+        print('[delete_tender_param] 提示: "付款方式"后已存在回车或未找到可编辑位置')
+        if log:
+            log('"付款方式"后已存在回车或未找到可编辑位置')
+
+
 def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     """
     根据前后锚点定位，删除文档中锚点之间的内容。
@@ -153,7 +315,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
 
     删除锚点之间的内容并保存文档。
     """
-    start_time = time.time()
+    start_time = time.monotonic()
     print(f"[delete_tender_param] 开始执行...")
     _visible_log("开始删除原始采购需求")
 
@@ -232,316 +394,321 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
         )
 
         if not before_hit:
-            print(f"[delete_tender_param] 警告: 未找到前置文本 '{before_text}'")
-            _visible_log(f"未找到前置锚点: {before_text}")
-        elif not after_hit:
-            print(f"[delete_tender_param] 警告: 未找到后置文本 '{after_text}'")
-            _visible_log(f"未找到后置锚点: {after_text}")
-        else:
-            before_page = before_hit["page"]
-            before_end_pos = before_hit["end"]
-            after_page = after_hit["page"]
-            after_start_pos = after_hit["start"]
-            after_end_pos = after_hit["end"]
+            msg = f"未找到前置锚点: {before_text}"
+            print(f"[delete_tender_param] 错误: {msg}")
+            _visible_log(msg)
+            raise ValueError(msg)
+        if not after_hit:
+            msg = f"未找到后置锚点: {after_text}"
+            print(f"[delete_tender_param] 错误: {msg}")
+            _visible_log(msg)
+            raise ValueError(msg)
 
-            print(
-                f"✅ 前置锚点: 页={before_page}, end={before_end_pos}, 字体={before_hit['font']}, 字号={before_hit['size']}"
+        before_page = before_hit["page"]
+        before_end_pos = before_hit["end"]
+        after_page = after_hit["page"]
+        after_start_pos = after_hit["start"]
+        after_end_pos = after_hit["end"]
+
+        print(
+            f"✅ 前置锚点: 页={before_page}, end={before_end_pos}, 字体={before_hit['font']}, 字号={before_hit['size']}"
+        )
+        print(
+            f"✅ 后置锚点: 页={after_page}, start={after_start_pos}, end={after_end_pos}, 字体={after_hit['font']}, 字号={after_hit['size']}"
+        )
+
+        if after_page <= before_page:
+            msg = (
+                f"后置锚点页码不大于前置锚点页码: "
+                f"before_page={before_page}, after_page={after_page}"
             )
-            print(
-                f"✅ 后置锚点: 页={after_page}, start={after_start_pos}, end={after_end_pos}, 字体={after_hit['font']}, 字号={after_hit['size']}"
+            print(f"[delete_tender_param] 错误: {msg}")
+            _visible_log(msg)
+            raise ValueError(msg)
+
+        # 将 before_end_pos 对齐到下一页起始
+        try:
+            selection = word.Selection
+            selection.GoTo(wdGoToPage, wdGoToAbsolute, before_page + 1)
+            next_page_start = selection.Start
+            if next_page_start > before_end_pos:
+                before_end_pos = next_page_start
+                print(f"将 before_end_pos 对齐到下一页起始: {before_end_pos}")
+        except Exception as adj_e:
+            print(f"警告: 无法对齐 before_end_pos 到下一页起始: {adj_e}")
+
+        # === 开始删除锚点之间的内容 ===
+        print("开始删除锚点之间的内容")
+        print(f"删除范围: {before_end_pos} -> {after_start_pos}")
+        _visible_log(
+            f"锚点定位完成，开始删除第 {before_page + 1} 至 {after_page - 1} 页内容"
+        )
+
+        # 合法性校验，避免 Range 越界
+        doc_end = doc.Content.End
+        if (
+            after_start_pos is None
+            or before_end_pos is None
+            or after_start_pos <= before_end_pos
+            or after_start_pos > doc_end
+            or before_end_pos < 0
+            or before_end_pos > doc_end
+        ):
+            msg = (
+                "锚点位置异常，无法执行删除: "
+                f"before_end_pos={before_end_pos}, after_start_pos={after_start_pos}, doc_end={doc_end}"
             )
+            print(f"[delete_tender_param] 错误: {msg}")
+            _visible_log(msg)
+            raise ValueError(msg)
 
-            if after_page <= before_page:
-                print(
-                    f"错误: 后置文本页码 ({after_page}) 小于等于前置文本页码 ({before_page})"
-                )
-                _visible_log("锚点页码异常，跳过删除")
-            else:
-                # 将 before_end_pos 对齐到下一页起始
-                try:
-                    selection = word.Selection
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, before_page + 1)
-                    next_page_start = selection.Start
-                    if next_page_start > before_end_pos:
-                        before_end_pos = next_page_start
-                        print(f"将 before_end_pos 对齐到下一页起始: {before_end_pos}")
-                except Exception as adj_e:
-                    print(f"警告: 无法对齐 before_end_pos 到下一页起始: {adj_e}")
+        print("采用优化策略：大块删除 + 失败时逐步缩小")
+        max_steps = 500  # 减少最大步数，因为新策略更高效
+        step_idx = 0
+        current_pos = before_end_pos
 
-                # === 开始删除锚点之间的内容 ===
-                print("开始删除锚点之间的内容")
-                print(f"删除范围: {before_end_pos} -> {after_start_pos}")
-                _visible_log(
-                    f"锚点定位完成，开始删除第 {before_page + 1} 至 {after_page - 1} 页内容"
-                )
+        # 性能监控
+        perf_stats = {
+            "refresh_time": 0,
+            "delete_time": 0,
+            "table_time": 0,
+            "para_time": 0,
+        }
+        last_heartbeat_at = time.monotonic()
 
-                # 合法性校验，避免 Range 越界
+        while step_idx < max_steps:
+            _check_cancelled(config)
+            step_idx += 1
+
+            # 每 50 步刷新一次文档末尾位置
+            if step_idx % 50 == 0:
                 doc_end = doc.Content.End
-                if (
-                    after_start_pos is None
-                    or before_end_pos is None
-                    or after_start_pos <= before_end_pos
-                    or after_start_pos > doc_end
-                    or before_end_pos < 0
-                    or before_end_pos > doc_end
-                ):
+
+            # 快速重新定位后置锚点（不获取页码）
+            t0 = time.time()
+            after_hit_refresh = _find_anchor_fast(doc, after_text, current_pos)
+            perf_stats["refresh_time"] += time.time() - t0
+
+            if not after_hit_refresh:
+                print("✅ 删除完成：未找到后置锚点（可能已被删除或到达目标）")
+                break
+
+            after_start_pos = after_hit_refresh["start"]
+            after_end_pos = after_hit_refresh["end"]
+            now = time.monotonic()
+            if now - last_heartbeat_at >= HEARTBEAT_INTERVAL_SECONDS:
+                elapsed = _calculate_elapsed_seconds(start_time, now)
+                _visible_log(
+                    f"仍在删除原始采购需求，已执行 {step_idx} 步，当前范围 {current_pos}->{after_start_pos}，耗时 {elapsed:.1f} 秒"
+                )
+                last_heartbeat_at = now
+
+            # 检查是否已到达锚点
+            if after_start_pos <= current_pos:
+                print("✅ 删除完成：已到达后置锚点")
+                break
+
+            # 边界检查
+            if after_start_pos > doc_end or current_pos < 0 or current_pos > doc_end:
+                print(
+                    f"⚠️ 位置异常，停止删除。current_pos={current_pos}, after_start_pos={after_start_pos}, doc_end={doc_end}"
+                )
+                break
+
+            delete_rng = doc.Range(current_pos, after_start_pos)
+
+            # 策略 1: 尝试大块删除整个范围
+            try:
+                if step_idx % 10 == 1:  # 每 10 步打印一次进度
                     print(
-                        f"错误: 锚点位置异常，放弃删除。before_end_pos={before_end_pos}, after_start_pos={after_start_pos}, doc_end={doc_end}"
+                        f"  步骤 {step_idx}: 尝试删除 {current_pos} -> {after_start_pos} (大小: {after_start_pos - current_pos})"
                     )
-                else:
-                    print("采用优化策略：大块删除 + 失败时逐步缩小")
-                    max_steps = 500  # 减少最大步数，因为新策略更高效
-                    step_idx = 0
-                    current_pos = before_end_pos
+                t0 = time.time()
+                delete_rng.Delete()
+                perf_stats["delete_time"] += time.time() - t0
+                # 成功删除，继续下一轮
+                continue
+            except Exception:
+                perf_stats["delete_time"] += time.time() - t0
+                # 大块删除失败，可能有锁定内容
+                if step_idx % 10 == 1:
+                    print("  大块删除失败，切换到逐元素删除")
 
-                    # 性能监控
-                    perf_stats = {
-                        "refresh_time": 0,
-                        "delete_time": 0,
-                        "table_time": 0,
-                        "para_time": 0,
-                    }
-                    last_heartbeat_at = time.monotonic()
+            # 策略 2: 逐元素删除（表格优先，然后段落）
+            deleted_something = False
 
-                    while step_idx < max_steps:
-                        _check_cancelled(config)
-                        step_idx += 1
+            # 2.1 尝试删除第一张表格
+            try:
+                t0 = time.time()
+                tables = delete_rng.Tables
+                if tables.Count > 0:
+                    tbl = tables(1)  # 使用索引而不是 list()
+                    tbl_rng = tbl.Range
 
-                        # 每 50 步刷新一次文档末尾位置
-                        if step_idx % 50 == 0:
-                            doc_end = doc.Content.End
-
-                        # 快速重新定位后置锚点（不获取页码）
-                        t0 = time.time()
-                        after_hit_refresh = _find_anchor_fast(
-                            doc, after_text, current_pos
-                        )
-                        perf_stats["refresh_time"] += time.time() - t0
-
-                        if not after_hit_refresh:
-                            print(
-                                "✅ 删除完成：未找到后置锚点（可能已被删除或到达目标）"
-                            )
-                            break
-
-                        after_start_pos = after_hit_refresh["start"]
-                        after_end_pos = after_hit_refresh["end"]
-                        now = time.monotonic()
-                        if now - last_heartbeat_at >= HEARTBEAT_INTERVAL_SECONDS:
-                            elapsed = now - start_time
-                            _visible_log(
-                                f"仍在删除原始采购需求，已执行 {step_idx} 步，当前范围 {current_pos}->{after_start_pos}，耗时 {elapsed:.1f} 秒"
-                            )
-                            last_heartbeat_at = now
-
-                        # 检查是否已到达锚点
-                        if after_start_pos <= current_pos:
-                            print("✅ 删除完成：已到达后置锚点")
-                            break
-
-                        # 边界检查
-                        if (
-                            after_start_pos > doc_end
-                            or current_pos < 0
-                            or current_pos > doc_end
-                        ):
-                            print(
-                                f"⚠️ 位置异常，停止删除。current_pos={current_pos}, after_start_pos={after_start_pos}, doc_end={doc_end}"
-                            )
-                            break
-
-                        delete_rng = doc.Range(current_pos, after_start_pos)
-
-                        # 策略 1: 尝试大块删除整个范围
-                        try:
-                            if step_idx % 10 == 1:  # 每 10 步打印一次进度
-                                print(
-                                    f"  步骤 {step_idx}: 尝试删除 {current_pos} -> {after_start_pos} (大小: {after_start_pos - current_pos})"
-                                )
-                            t0 = time.time()
-                            delete_rng.Delete()
-                            perf_stats["delete_time"] += time.time() - t0
-                            # 成功删除，继续下一轮
-                            continue
-                        except Exception as big_del_e:
-                            perf_stats["delete_time"] += time.time() - t0
-                            # 大块删除失败，可能有锁定内容
-                            if step_idx % 10 == 1:
-                                print(f"  大块删除失败，切换到逐元素删除")
-
-                        # 策略 2: 逐元素删除（表格优先，然后段落）
-                        deleted_something = False
-
-                        # 2.1 尝试删除第一张表格
-                        try:
-                            t0 = time.time()
-                            tables = delete_rng.Tables
-                            if tables.Count > 0:
-                                tbl = tables(1)  # 使用索引而不是 list()
-                                tbl_rng = tbl.Range
-
-                                # 检查表格是否超出删除范围（保护感知）
-                                if tbl_rng.End > after_start_pos:
-                                    # 只删除到锚点之前
-                                    safe_del_rng = doc.Range(
-                                        tbl_rng.Start, after_start_pos
-                                    )
-                                    if _is_range_locked(safe_del_rng, doc):
-                                        current_pos = after_start_pos
-                                    else:
-                                        try:
-                                            safe_del_rng.Delete()
-                                            current_pos = after_start_pos
-                                            deleted_something = True
-                                        except Exception:
-                                            current_pos = after_start_pos
-                                    perf_stats["table_time"] += time.time() - t0
-                                    continue
-
-                                # 检查表格是否受保护
-                                if _is_range_locked(tbl_rng, doc):
-                                    # 跳过受保护表格，移动指针到表格末尾继续
-                                    current_pos = min(tbl_rng.End, after_start_pos)
-                                    deleted_something = True
-                                    perf_stats["table_time"] += time.time() - t0
-                                    continue
-
-                                # 尝试删除表格
-                                try:
-                                    tbl.Delete()
-                                    deleted_something = True
-                                    perf_stats["table_time"] += time.time() - t0
-                                    continue
-                                except Exception:
-                                    # 删除失败，跳过这个表格
-                                    current_pos = min(tbl_rng.End, after_start_pos)
-                                    deleted_something = True
-                                    perf_stats["table_time"] += time.time() - t0
-                                    continue
-                            perf_stats["table_time"] += time.time() - t0
-                        except Exception:
-                            perf_stats["table_time"] += time.time() - t0
-
-                        # 2.2 尝试删除第一个段落
-                        if not deleted_something:
+                    # 检查表格是否超出删除范围（保护感知）
+                    if tbl_rng.End > after_start_pos:
+                        # 只删除到锚点之前
+                        safe_del_rng = doc.Range(tbl_rng.Start, after_start_pos)
+                        if _is_range_locked(safe_del_rng, doc):
+                            current_pos = after_start_pos
+                        else:
                             try:
-                                t0 = time.time()
-                                paras = delete_rng.Paragraphs
-                                if paras.Count > 0:
-                                    para_rng = paras(1).Range  # 使用索引而不是 list()
-
-                                    # 检查段落是否超出删除范围（保护感知）
-                                    if para_rng.End > after_start_pos:
-                                        safe_del_rng = doc.Range(
-                                            para_rng.Start, after_start_pos
-                                        )
-                                        if _is_range_locked(safe_del_rng, doc):
-                                            current_pos = after_start_pos
-                                        else:
-                                            try:
-                                                safe_del_rng.Delete()
-                                                current_pos = after_start_pos
-                                                deleted_something = True
-                                            except Exception:
-                                                current_pos = after_start_pos
-                                        perf_stats["para_time"] += time.time() - t0
-                                        continue
-
-                                    # 检查段落是否受保护
-                                    if _is_range_locked(para_rng, doc):
-                                        # 跳过受保护段落，移动指针到段末
-                                        current_pos = min(para_rng.End, after_start_pos)
-                                        deleted_something = True
-                                        perf_stats["para_time"] += time.time() - t0
-                                        continue
-
-                                    # 尝试删除段落
-                                    try:
-                                        para_rng.Delete()
-                                        deleted_something = True
-                                        perf_stats["para_time"] += time.time() - t0
-                                        continue
-                                    except Exception:
-                                        # 删除失败，跳过这个段落
-                                        current_pos = min(para_rng.End, after_start_pos)
-                                        deleted_something = True
-                                        perf_stats["para_time"] += time.time() - t0
-                                        continue
-                                perf_stats["para_time"] += time.time() - t0
+                                safe_del_rng.Delete()
+                                current_pos = after_start_pos
+                                deleted_something = True
                             except Exception:
-                                perf_stats["para_time"] += time.time() - t0
+                                current_pos = after_start_pos
+                        perf_stats["table_time"] += time.time() - t0
+                        continue
 
-                        # 策略 3: 尝试删除小块字符（50 字符）
-                        if not deleted_something:
-                            try:
-                                chunk_size = min(50, after_start_pos - current_pos)
-                                if chunk_size > 0:
-                                    chunk_end = current_pos + chunk_size
-                                    small_rng = doc.Range(current_pos, chunk_end)
-                                    # 检查保护
-                                    if _is_range_locked(small_rng, doc):
-                                        current_pos = chunk_end
-                                        deleted_something = True
-                                        continue
-                                    try:
-                                        t0 = time.time()
-                                        small_rng.Delete()
-                                        perf_stats["delete_time"] += time.time() - t0
-                                        deleted_something = True
-                                        continue
-                                    except Exception:
-                                        perf_stats["delete_time"] += time.time() - t0
-                                        # 字符块也删不掉，跳过
-                                        current_pos = chunk_end
-                                        continue
-                            except Exception:
-                                pass
+                    # 检查表格是否受保护
+                    if _is_range_locked(tbl_rng, doc):
+                        # 跳过受保护表格，移动指针到表格末尾继续
+                        current_pos = min(tbl_rng.End, after_start_pos)
+                        deleted_something = True
+                        perf_stats["table_time"] += time.time() - t0
+                        continue
 
-                        # 如果什么都删不掉，强制前进避免死循环
-                        if not deleted_something:
-                            print(
-                                f"  ⚠️ 步骤 {step_idx}: 无法删除任何内容，强制前进 1 个位置"
-                            )
-                            current_pos += 1
-                            if current_pos >= after_start_pos:
-                                print("✅ 已到达后置锚点")
-                                break
-
-                    # 打印性能统计
-                    print(f"\n性能统计 (总步数: {step_idx}):")
-                    print(f"  锚点刷新耗时: {perf_stats['refresh_time']:.2f}秒")
-                    print(f"  大块删除耗时: {perf_stats['delete_time']:.2f}秒")
-                    print(f"  表格处理耗时: {perf_stats['table_time']:.2f}秒")
-                    print(f"  段落处理耗时: {perf_stats['para_time']:.2f}秒")
-
-                    # 记录页码范围供后续节点参考
-                    start_page = before_page + 1
-                    end_page = after_page - 1
-                    print(
-                        f"[delete_tender_param] 内容删除完成，页码范围: {start_page} - {end_page}"
-                    )
-                    _visible_log(f"删除完成，页码范围 {start_page}-{end_page}，准备保存文档")
-
-                    # 保存清理后的文档
+                    # 尝试删除表格
                     try:
-                        print("  开始保存文档...")
-                        try:
-                            word.ScreenUpdating = False
-                        except Exception:
-                            pass
+                        tbl.Delete()
+                        deleted_something = True
+                        perf_stats["table_time"] += time.time() - t0
+                        continue
+                    except Exception:
+                        # 删除失败，跳过这个表格
+                        current_pos = min(tbl_rng.End, after_start_pos)
+                        deleted_something = True
+                        perf_stats["table_time"] += time.time() - t0
+                        continue
+                perf_stats["table_time"] += time.time() - t0
+            except Exception:
+                perf_stats["table_time"] += time.time() - t0
 
-                        print("  正在保存文档（这可能需要几秒钟）...")
-                        _visible_log("开始保存清理后的文档")
-                        save_document_with_retry(doc, node_name=NODE_NAME)
-                        print("  文档已保存（删除完成）")
-                        _visible_log("文档保存完成")
+            # 2.2 尝试删除第一个段落
+            if not deleted_something:
+                try:
+                    t0 = time.time()
+                    paras = delete_rng.Paragraphs
+                    if paras.Count > 0:
+                        para_rng = paras(1).Range  # 使用索引而不是 list()
 
+                        # 检查段落是否超出删除范围（保护感知）
+                        if para_rng.End > after_start_pos:
+                            safe_del_rng = doc.Range(para_rng.Start, after_start_pos)
+                            if _is_range_locked(safe_del_rng, doc):
+                                current_pos = after_start_pos
+                            else:
+                                try:
+                                    safe_del_rng.Delete()
+                                    current_pos = after_start_pos
+                                    deleted_something = True
+                                except Exception:
+                                    current_pos = after_start_pos
+                            perf_stats["para_time"] += time.time() - t0
+                            continue
+
+                        # 检查段落是否受保护
+                        if _is_range_locked(para_rng, doc):
+                            # 跳过受保护段落，移动指针到段末
+                            current_pos = min(para_rng.End, after_start_pos)
+                            deleted_something = True
+                            perf_stats["para_time"] += time.time() - t0
+                            continue
+
+                        # 尝试删除段落
                         try:
-                            word.ScreenUpdating = True
+                            para_rng.Delete()
+                            deleted_something = True
+                            perf_stats["para_time"] += time.time() - t0
+                            continue
                         except Exception:
-                            pass
-                    except Exception as save_e:
-                        print(f"  警告: 保存文档失败: {save_e}")
+                            # 删除失败，跳过这个段落
+                            current_pos = min(para_rng.End, after_start_pos)
+                            deleted_something = True
+                            perf_stats["para_time"] += time.time() - t0
+                            continue
+                    perf_stats["para_time"] += time.time() - t0
+                except Exception:
+                    perf_stats["para_time"] += time.time() - t0
+
+            # 策略 3: 尝试删除小块字符（50 字符）
+            if not deleted_something:
+                try:
+                    chunk_size = min(50, after_start_pos - current_pos)
+                    if chunk_size > 0:
+                        chunk_end = current_pos + chunk_size
+                        small_rng = doc.Range(current_pos, chunk_end)
+                        # 检查保护
+                        if _is_range_locked(small_rng, doc):
+                            current_pos = chunk_end
+                            deleted_something = True
+                            continue
+                        try:
+                            t0 = time.time()
+                            small_rng.Delete()
+                            perf_stats["delete_time"] += time.time() - t0
+                            deleted_something = True
+                            continue
+                        except Exception:
+                            perf_stats["delete_time"] += time.time() - t0
+                            # 字符块也删不掉，跳过
+                            current_pos = chunk_end
+                            continue
+                except Exception:
+                    pass
+
+            # 如果什么都删不掉，强制前进避免死循环
+            if not deleted_something:
+                print(f"  ⚠️ 步骤 {step_idx}: 无法删除任何内容，强制前进 1 个位置")
+                current_pos += 1
+                if current_pos >= after_start_pos:
+                    print("✅ 已到达后置锚点")
+                    break
+
+        # 打印性能统计
+        print(f"\n性能统计 (总步数: {step_idx}):")
+        print(f"  锚点刷新耗时: {perf_stats['refresh_time']:.2f}秒")
+        print(f"  大块删除耗时: {perf_stats['delete_time']:.2f}秒")
+        print(f"  表格处理耗时: {perf_stats['table_time']:.2f}秒")
+        print(f"  段落处理耗时: {perf_stats['para_time']:.2f}秒")
+
+        # 记录页码范围供后续节点参考
+        start_page = before_page + 1
+        end_page = after_page - 1
+        print(f"[delete_tender_param] 内容删除完成，页码范围: {start_page} - {end_page}")
+        _visible_log(f"删除完成，页码范围 {start_page}-{end_page}，准备保存文档")
+
+        try:
+            _restore_protected_field_paragraph_boundaries(
+                doc=doc,
+                before_text=before_text,
+                before_end_pos=before_end_pos,
+            )
+        except Exception as layout_e:
+            print(f"[delete_tender_param] 警告: 删除后段落边界修正失败: {layout_e}")
+            _visible_log(f"删除后段落边界修正失败: {layout_e}")
+
+        # 保存清理后的文档
+        try:
+            print("  开始保存文档...")
+            try:
+                word.ScreenUpdating = False
+            except Exception:
+                pass
+
+            print("  正在保存文档（这可能需要几秒钟）...")
+            _visible_log("开始保存清理后的文档")
+            save_document_with_retry(doc, node_name=NODE_NAME)
+            print("  文档已保存（删除完成）")
+            _visible_log("文档保存完成")
+
+            try:
+                word.ScreenUpdating = True
+            except Exception:
+                pass
+        except Exception as save_e:
+            print(f"  警告: 保存文档失败: {save_e}")
 
     except Exception as e:
         from backend.graphs.base_graph import TaskCancelledException
@@ -577,8 +744,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
     # 更新状态
     new_state_dict = dict(state)
 
-    end_time = time.time()
-    elapsed_time = end_time - start_time
+    elapsed_time = _calculate_elapsed_seconds(start_time)
     print(
         f"[delete_tender_param] 执行完成，耗时: {elapsed_time:.2f} 秒 ({elapsed_time * 1000:.0f} 毫秒)"
     )

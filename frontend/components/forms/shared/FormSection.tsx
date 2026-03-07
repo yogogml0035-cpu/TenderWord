@@ -37,25 +37,30 @@ export function FormSection({
 }: FormSectionProps) {
   const badgeStyles = {
     default: 'bg-[var(--secondary-bg)] text-[var(--text-muted)]',
-    required: 'bg-red-100 text-red-700',
-    optional: 'bg-amber-100 text-amber-700',
+    required: 'bg-red-100/90 text-red-700',
+    optional: 'bg-amber-100/90 text-amber-700',
   };
 
   return (
-    <div className={cn('card', className)}>
-      <div className="mb-4 flex items-center gap-3">
+    <div
+      className={cn(
+        'rounded-xl border border-[var(--border)]/80 bg-white px-5 py-4 shadow-[0_8px_22px_rgba(15,23,42,0.06)]',
+        className
+      )}
+    >
+      <div className="mb-3.5 flex items-center gap-2.5">
         {index !== undefined && (
-          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--primary)] text-sm font-bold text-white">
+          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-[var(--primary)] text-sm font-semibold text-white">
             {index}
           </div>
         )}
-        <h3 className="text-lg font-semibold text-[var(--foreground)]">
+        <h3 className="text-[17px] font-semibold text-[var(--foreground)]">
           {title}
         </h3>
         {badge && (
           <span
             className={cn(
-              'rounded-full px-2 py-0.5 text-xs font-medium',
+              'rounded-full px-2 py-0.5 text-[11px] font-semibold',
               badgeStyles[badgeVariant]
             )}
           >

@@ -155,72 +155,74 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
         )
 
         if not before_hit:
-            print(f"[extract_tender_params] 警告: 未找到前置文本 '{before_text}'")
-            _visible_log(f"未找到前置锚点: {before_text}")
-            extracted_content = ""
-        elif not after_hit:
-            print(f"[extract_tender_params] 警告: 未找到后置文本 '{after_text}'")
-            _visible_log(f"未找到后置锚点: {after_text}")
-            extracted_content = ""
-        else:
-            before_page = before_hit["page"]
-            before_end_pos = before_hit["end"]
-            after_page = after_hit["page"]
-            after_start_pos = after_hit["start"]
+            msg = f"未找到前置锚点: {before_text}"
+            print(f"[extract_tender_params] 错误: {msg}")
+            _visible_log(msg)
+            raise ValueError(msg)
+        if not after_hit:
+            msg = f"未找到后置锚点: {after_text}"
+            print(f"[extract_tender_params] 错误: {msg}")
+            _visible_log(msg)
+            raise ValueError(msg)
 
-            print(
-                f"[extract_tender_params] 前置锚点: 页={before_page}, end={before_end_pos}, 字体={before_hit['font']}, 字号={before_hit['size']}"
+        before_page = before_hit["page"]
+        before_end_pos = before_hit["end"]
+        after_page = after_hit["page"]
+        after_start_pos = after_hit["start"]
+
+        print(
+            f"[extract_tender_params] 前置锚点: 页={before_page}, end={before_end_pos}, 字体={before_hit['font']}, 字号={before_hit['size']}"
+        )
+        print(
+            f"[extract_tender_params] 后置锚点: 页={after_page}, start={after_start_pos}, 字体={after_hit['font']}, 字号={after_hit['size']}"
+        )
+
+        if after_page <= before_page:
+            msg = (
+                f"后置锚点页码不大于前置锚点页码: "
+                f"before_page={before_page}, after_page={after_page}"
             )
+            print(f"[extract_tender_params] 错误: {msg}")
+            _visible_log(msg)
+            raise ValueError(msg)
+
+        # 将 before_end_pos 对齐到下一页起始
+        try:
+            selection = wps.Selection
+            selection.GoTo(wdGoToPage, wdGoToAbsolute, before_page + 1)
+            next_page_start = selection.Start
+            if next_page_start > before_end_pos:
+                before_end_pos = next_page_start
+                print(
+                    f"[extract_tender_params] 将 before_end_pos 对齐到下一页起始: {before_end_pos}"
+                )
+        except Exception as adj_e:
             print(
-                f"[extract_tender_params] 后置锚点: 页={after_page}, start={after_start_pos}, 字体={after_hit['font']}, 字号={after_hit['size']}"
+                f"[extract_tender_params] 警告: 无法对齐 before_end_pos 到下一页起始: {adj_e}"
             )
 
-            if after_page <= before_page:
-                print(
-                    f"[extract_tender_params] 错误: 后置文本页码 ({after_page}) 小于等于前置文本页码 ({before_page})"
-                )
-                _visible_log("锚点页码异常，无法提取采购需求")
-                extracted_content = ""
-            else:
-                # 将 before_end_pos 对齐到下一页起始
-                try:
-                    selection = wps.Selection
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, before_page + 1)
-                    next_page_start = selection.Start
-                    if next_page_start > before_end_pos:
-                        before_end_pos = next_page_start
-                        print(
-                            f"[extract_tender_params] 将 before_end_pos 对齐到下一页起始: {before_end_pos}"
-                        )
-                except Exception as adj_e:
-                    print(
-                        f"[extract_tender_params] 警告: 无法对齐 before_end_pos 到下一页起始: {adj_e}"
-                    )
+        # 提取两个锚点之间的内容
+        _visible_log(f"锚点定位完成，开始提取第 {before_page + 1} 至 {after_page - 1} 页内容")
+        between_rng = doc.Range(before_end_pos, after_start_pos)
+        extracted_content = extract_content_with_tables(between_rng)
 
-                # 提取两个锚点之间的内容
-                _visible_log(f"锚点定位完成，开始提取第 {before_page + 1} 至 {after_page - 1} 页内容")
-                between_rng = doc.Range(before_end_pos, after_start_pos)
-                extracted_content = extract_content_with_tables(between_rng)
+        # 统计提取结果
+        total_chars = len(extracted_content)
+        non_whitespace_chars = len([c for c in extracted_content if not c.isspace()])
+        line_count = len(extracted_content.splitlines())
+        table_count = len(list(between_rng.Tables))
 
-                # 统计提取结果
-                total_chars = len(extracted_content)
-                non_whitespace_chars = len(
-                    [c for c in extracted_content if not c.isspace()]
-                )
-                line_count = len(extracted_content.splitlines())
-                table_count = len(list(between_rng.Tables))
+        print(
+            f"[extract_tender_params] 成功提取内容，总长度: {total_chars} 字符，非空白: {non_whitespace_chars} 字符，行数: {line_count}，表格: {table_count} 个"
+        )
 
-                print(
-                    f"[extract_tender_params] 成功提取内容，总长度: {total_chars} 字符，非空白: {non_whitespace_chars} 字符，行数: {line_count}，表格: {table_count} 个"
-                )
-
-                # 记录页码范围
-                start_page = before_page + 1
-                end_page = after_page - 1
-                print(f"[extract_tender_params] 页码范围: {start_page} - {end_page}")
-                _visible_log(
-                    f"原始采购需求提取完成，页码范围 {start_page}-{end_page}，非空白字符 {non_whitespace_chars}"
-                )
+        # 记录页码范围
+        start_page = before_page + 1
+        end_page = after_page - 1
+        print(f"[extract_tender_params] 页码范围: {start_page} - {end_page}")
+        _visible_log(
+            f"原始采购需求提取完成，页码范围 {start_page}-{end_page}，非空白字符 {non_whitespace_chars}"
+        )
 
     except Exception as e:
         from backend.graphs.base_graph import TaskCancelledException

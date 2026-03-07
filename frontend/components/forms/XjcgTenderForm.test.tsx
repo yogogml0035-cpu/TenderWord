@@ -13,11 +13,13 @@ jest.mock('./TenderNoInput', () => ({
     onChange,
     onDataFetched,
     required,
+    disabled,
   }: {
     value: string;
     onChange: (value: string) => void;
     onDataFetched?: (data: TenderData) => void;
     required?: boolean;
+    disabled?: boolean;
   }) => (
     <div data-testid="tender-no-input">
       <label>
@@ -30,9 +32,11 @@ jest.mock('./TenderNoInput', () => ({
         onChange={(e) => onChange(e.target.value)}
         placeholder="请输入招标编号"
         aria-label="招标编号输入框"
+        disabled={disabled}
       />
       <button
         type="button"
+        disabled={disabled}
         onClick={() => {
           if (onDataFetched) {
             onDataFetched({
@@ -55,9 +59,11 @@ jest.mock('./ModelSelector', () => ({
   ModelSelector: ({
     value,
     onChange,
+    disabled,
   }: {
     value: ModelType;
     onChange: (value: ModelType) => void;
+    disabled?: boolean;
   }) => (
     <div data-testid="model-selector">
       <label>选择模型</label>
@@ -65,6 +71,7 @@ jest.mock('./ModelSelector', () => ({
         value={value}
         onChange={(e) => onChange(e.target.value as ModelType)}
         aria-label="模型选择器"
+        disabled={disabled}
       >
         <option value="deepseek">DeepSeek</option>
         <option value="qwen">通义千问</option>
@@ -79,15 +86,18 @@ jest.mock('./FileUploader', () => ({
     label,
     onUpload,
     fileType,
+    disabled,
   }: {
     label: string;
     onUpload?: (files: UploadedFile[]) => void;
     fileType?: string;
+    disabled?: boolean;
   }) => (
     <div data-testid={`file-uploader-${fileType || 'default'}`}>
       <label>{label}</label>
       <button
         type="button"
+        disabled={disabled}
         onClick={() => {
           if (onUpload) {
             const mockFile: UploadedFile = {
@@ -438,6 +448,40 @@ describe('XjcgTenderForm', () => {
       render(<XjcgTenderForm onSubmit={mockOnSubmit} isSubmitting={true} />);
 
       expect(screen.getByText('提交中...')).toBeInTheDocument();
+    });
+
+    it('当 isSubmitting 为 true 时应该禁用表单交互控件', () => {
+      render(<XjcgTenderForm onSubmit={mockOnSubmit} isSubmitting={true} />);
+
+      expect(screen.getByLabelText('招标编号输入框')).toBeDisabled();
+      expect(screen.getByLabelText('模拟获取招标信息')).toBeDisabled();
+      expect(screen.getByLabelText('模型选择器')).toBeDisabled();
+      expect(screen.getByLabelText('上传清洁稿文件（可选）')).toBeDisabled();
+      expect(screen.getByLabelText('上传送审稿文件（可选）')).toBeDisabled();
+      expect(screen.getByLabelText('上传技术参数文件（必填）')).toBeDisabled();
+      expect(screen.getByPlaceholderText('插入位置前的章节标题')).toBeDisabled();
+      expect(screen.getByPlaceholderText('插入位置后的章节标题')).toBeDisabled();
+    });
+
+    it('当可取消时底部主按钮应该切换为取消生成', async () => {
+      const user = userEvent.setup();
+      const mockOnCancel = jest.fn();
+
+      render(
+        <XjcgTenderForm
+          onSubmit={mockOnSubmit}
+          isSubmitting={true}
+          canCancel={true}
+          onCancel={mockOnCancel}
+        />
+      );
+
+      const cancelButton = screen.getByRole('button', { name: '取消生成' });
+      expect(cancelButton).toBeEnabled();
+
+      await user.click(cancelButton);
+
+      expect(mockOnCancel).toHaveBeenCalledTimes(1);
     });
   });
 

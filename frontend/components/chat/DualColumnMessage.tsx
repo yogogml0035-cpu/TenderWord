@@ -1,9 +1,43 @@
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { FileText, Bot, Loader2, CheckCircle2, XCircle, Download, RefreshCw } from 'lucide-react';
+import {
+  FileText,
+  Bot,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Download,
+  RefreshCw,
+  Copy,
+} from 'lucide-react';
 import type { Message, LogEntry } from '@/types/chat';
 import { isDualColumnContent } from '@/types/chat';
+
+function formatLogTime(timestamp: number) {
+  return new Date(timestamp).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+async function copyPlainText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'absolute';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+}
 
 interface DualColumnMessageProps {
   message: Message;
@@ -28,6 +62,9 @@ export function DualColumnMessage({
 
   const logs = dualContent?.logs || [];
   const aiContent = dualContent?.aiContent?.text || '';
+  const logsCopyText = logs
+    .map((log) => `${formatLogTime(log.timestamp)} [${log.level.toUpperCase()}] ${log.message}`)
+    .join('\n');
 
   const handleLeftScroll = useCallback(() => {
     const el = leftScrollRef.current;
@@ -87,29 +124,39 @@ export function DualColumnMessage({
     }
   };
 
+  const handleCopyLogs = useCallback(() => {
+    void copyPlainText(logsCopyText);
+  }, [logsCopyText]);
+
+  const handleCopyAiContent = useCallback(() => {
+    void copyPlainText(aiContent);
+  }, [aiContent]);
+
   return (
     <div className={`rounded border ${getBorderColor()} overflow-hidden bg-white shadow-sm`}>
       {/* Header */}
       <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2">
-        <div className="flex items-center gap-2">
-          {getStatusIcon()}
-          <span className="text-sm font-medium text-gray-700">
-            {message.status === 'generating' && '生成中...'}
-            {message.status === 'completed' && '已完成'}
-            {message.status === 'error' && '生成失败'}
-            {message.status === 'cancelled' && '已取消'}
-          </span>
-        </div>
+        <div className="flex items-center gap-3">
+          {message.status === 'completed' && message.metadata?.outputFile && (
+            <button
+              onClick={handleDownload}
+              className="flex items-center gap-1 rounded bg-blue-500 px-3 py-1 text-sm text-white shadow-sm transition-colors duration-200 hover:bg-blue-600"
+            >
+              <Download className="h-4 w-4" />
+              下载文件
+            </button>
+          )}
 
-        {message.status === 'completed' && message.metadata?.outputFile && (
-          <button
-            onClick={handleDownload}
-            className="flex items-center gap-1 rounded bg-blue-500 px-3 py-1 text-sm text-white shadow-sm transition-colors duration-200 hover:bg-blue-600"
-          >
-            <Download className="h-4 w-4" />
-            下载文件
-          </button>
-        )}
+          <div className="flex items-center gap-2">
+            {getStatusIcon()}
+            <span className="text-sm font-medium text-gray-700">
+              {message.status === 'generating' && '生成中...'}
+              {message.status === 'completed' && '已完成'}
+              {message.status === 'error' && '生成失败'}
+              {message.status === 'cancelled' && '已取消'}
+            </span>
+          </div>
+        </div>
 
         {message.status === 'error' && onRetry && (
           <button
@@ -130,18 +177,30 @@ export function DualColumnMessage({
       )}
 
       {/* Dual Column Content */}
-      <div className="flex" style={{ maxHeight: `${maxHeight}px` }}>
+      <div className="flex min-w-0" style={{ maxHeight: `${maxHeight}px` }}>
         {/* Left Column - Logs */}
-        <div className="flex w-1/2 flex-col border-r border-gray-200">
-          <div className="flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2">
-            <FileText className="h-4 w-4 text-gray-500" />
-            <span className="text-xs font-medium text-gray-600">进度日志</span>
+        <div className="flex min-w-0 w-1/2 flex-col border-r border-gray-200">
+          <div className="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-gray-500" />
+              <span className="text-xs font-medium text-gray-600">进度日志</span>
+            </div>
+            <button
+              type="button"
+              aria-label="复制进度日志"
+              title="复制进度日志"
+              onClick={handleCopyLogs}
+              disabled={!logsCopyText}
+              className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 transition-colors duration-200 hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </button>
           </div>
 
           <div
             ref={leftScrollRef}
             onScroll={handleLeftScroll}
-            className="flex-1 space-y-2 overflow-y-auto p-3"
+            className="flex-1 space-y-2 overflow-x-hidden overflow-y-auto p-3"
           >
             {logs.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-gray-400">
@@ -160,19 +219,33 @@ export function DualColumnMessage({
         </div>
 
         {/* Right Column - AI Content */}
-        <div className="flex w-1/2 flex-col">
-          <div className="flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2">
-            <Bot className="h-4 w-4 text-gray-500" />
-            <span className="text-xs font-medium text-gray-600">AI 生成内容</span>
+        <div className="flex min-w-0 w-1/2 flex-col">
+          <div className="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <Bot className="h-4 w-4 text-gray-500" />
+              <span className="text-xs font-medium text-gray-600">AI 生成内容</span>
+            </div>
+            <button
+              type="button"
+              aria-label="复制AI内容"
+              title="复制AI内容"
+              onClick={handleCopyAiContent}
+              disabled={!aiContent}
+              className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 transition-colors duration-200 hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </button>
           </div>
 
           <div
             ref={rightScrollRef}
             onScroll={handleRightScroll}
-            className="flex-1 overflow-y-auto p-3"
+            className="flex-1 overflow-x-hidden overflow-y-auto p-3"
           >
             {aiContent ? (
-              <pre className="font-mono text-sm whitespace-pre-wrap text-gray-700">{aiContent}</pre>
+              <pre className="min-w-0 break-all whitespace-pre-wrap font-mono text-sm text-gray-700">
+                {aiContent}
+              </pre>
             ) : (
               <div className="flex flex-col items-center justify-center py-8 text-gray-400">
                 <div className="relative mb-3">
@@ -207,20 +280,16 @@ function LogEntryItem({ log }: { log: LogEntry }) {
   };
 
   const formatTime = (timestamp: number) => {
-    return new Date(timestamp).toLocaleTimeString('zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
+    return formatLogTime(timestamp);
   };
 
   return (
-    <div className="flex items-start gap-2 text-xs">
+    <div className="flex min-w-0 items-start gap-2 text-xs">
       <span className="shrink-0 text-gray-400">{formatTime(log.timestamp)}</span>
       <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${getLevelColor(log.level)}`}>
         {log.level.toUpperCase()}
       </span>
-      <span className="text-gray-700">{log.message}</span>
+      <span className="min-w-0 break-all whitespace-pre-wrap text-gray-700">{log.message}</span>
     </div>
   );
 }

@@ -57,13 +57,13 @@ export function ModelSelector({
 }: ModelSelectorProps) {
   if (showCards) {
     return (
-      <div className={cn('space-y-3', className)}>
-        <label className="block text-sm font-medium text-[var(--foreground)]">
+      <div className={cn('space-y-2.5', className)}>
+        <label className="block text-sm font-semibold text-[var(--foreground)]">
           {label}
           {required && <span className="ml-1 text-[var(--error)]">*</span>}
         </label>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
           {MODEL_OPTIONS.map((model) => (
             <button
               key={model.value}
@@ -71,22 +71,17 @@ export function ModelSelector({
               onClick={() => !disabled && onChange(model.value)}
               disabled={disabled}
               className={cn(
-                'relative overflow-visible rounded-lg border p-4 text-left transition-all',
+                'relative min-h-[96px] overflow-hidden rounded-xl border px-3.5 py-3 text-left transition-all',
                 value === model.value
-                  ? 'border-[var(--primary)] bg-[var(--primary)]/5 ring-1 ring-[var(--primary)]'
-                  : 'border-[var(--border)] hover:border-[var(--primary)]/50 hover:bg-gray-50',
+                  ? 'border-[var(--primary)] bg-[var(--primary)]/5 shadow-sm ring-1 ring-[var(--primary)]/30'
+                  : 'border-[var(--border)] bg-white hover:border-[var(--primary)]/40 hover:bg-slate-50',
                 disabled && 'cursor-not-allowed opacity-50'
               )}
             >
-              {model.recommended && (
-                <span className="absolute -top-2 -right-2 rounded-full bg-[var(--primary)] px-2 py-0.5 text-xs font-medium text-white">
-                  推荐
-                </span>
-              )}
-              <div className="flex items-start gap-3">
+              <div className="flex items-start gap-2.5">
                 <div
                   className={cn(
-                    'rounded-lg p-2',
+                    'rounded-xl p-2.5',
                     value === model.value
                       ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
                       : 'bg-[var(--secondary-bg)] text-[var(--text-muted)]'
@@ -97,13 +92,15 @@ export function ModelSelector({
                 <div className="min-w-0 flex-1">
                   <p
                     className={cn(
-                      'font-medium',
+                      'text-base font-semibold',
                       value === model.value ? 'text-[var(--primary)]' : 'text-[var(--foreground)]'
                     )}
                   >
                     {model.label}
                   </p>
-                  <p className="mt-0.5 text-xs text-[var(--text-muted)]">{model.description}</p>
+                  <p className="mt-1 text-[13px] leading-5 text-[var(--text-muted)]">
+                    {model.description}
+                  </p>
                 </div>
               </div>
             </button>
@@ -116,7 +113,7 @@ export function ModelSelector({
   // Simple select version
   return (
     <div className={cn('space-y-2', className)}>
-      <label className="block text-sm font-medium text-[var(--foreground)]">
+      <label className="block text-sm font-semibold text-[var(--foreground)]">
         {label}
         {required && <span className="ml-1 text-[var(--error)]">*</span>}
       </label>
@@ -128,7 +125,7 @@ export function ModelSelector({
       >
         {MODEL_OPTIONS.map((model) => (
           <option key={model.value} value={model.value}>
-            {model.label} {model.recommended ? '（推荐）' : ''}
+            {model.label}
           </option>
         ))}
       </select>

@@ -72,14 +72,14 @@ export function FormField({
     onChange?.(e.target.value);
   };
 
-  const inputWrapperClass = 'relative';
-  const labelClass = 'mb-1 block text-sm font-medium text-[var(--foreground)]';
+  const inputWrapperClass = 'space-y-1.5';
+  const labelClass = 'block text-sm font-semibold text-[var(--foreground)]';
   const requiredMarkerClass = 'ml-1 text-[var(--error)]';
-  const helperClass = 'mt-1 text-xs text-[var(--text-muted)]';
-  const errorClass = 'mt-1 text-xs text-[var(--error)]';
+  const helperClass = 'text-xs leading-5 text-[var(--text-muted)]';
+  const errorClass = 'text-xs leading-5 text-[var(--error)]';
 
   const baseInputClass = cn(
-    'input-field w-full',
+    'input-field w-full rounded-xl px-3.5 py-2.5 text-sm leading-5 shadow-none',
     error && 'border-[var(--error)] focus:border-[var(--error)] focus:ring-[var(--error)]/20',
     disabled && 'cursor-not-allowed opacity-60',
     inputClassName

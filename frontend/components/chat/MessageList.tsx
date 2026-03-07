@@ -3,8 +3,9 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { User, Bot, Info } from 'lucide-react';
 import type { Message } from '@/types/chat';
-import { isDualColumnContent } from '@/types/chat';
-import { DualColumnMessage } from './DualColumnMessage';
+import { TaskLogMessage } from './TaskLogMessage';
+import { TaskContentMessage } from './TaskContentMessage';
+import { TaskDownloadMessage } from './TaskDownloadMessage';
 
 interface MessageListProps {
   messages: Message[];
@@ -79,7 +80,7 @@ export function MessageList({
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="h-full space-y-4 overflow-y-auto p-4"
+        className="h-full space-y-4 overflow-x-hidden overflow-y-auto p-4"
       >
         {messages.map((message, index) => (
           <div
@@ -127,18 +128,28 @@ interface MessageItemProps {
 }
 
 function MessageItem({ message, onDownload, onRetry }: MessageItemProps) {
-  const isDualColumn = isDualColumnContent(message.content);
+  if (message.type === 'ai') {
+    const messageKind = message.metadata?.messageKind;
 
-  // Render AI message with dual columns
-  if (message.type === 'ai' && isDualColumn) {
     return (
       <div className="animate-fade-in-up flex gap-3">
         <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded bg-blue-100 shadow-sm">
           <Bot className="h-5 w-5 text-blue-600" />
         </div>
 
-        <div className="flex-1">
-          <DualColumnMessage message={message} onDownload={onDownload} onRetry={onRetry} />
+        <div className="min-w-0 flex-1">
+          {messageKind === 'task-log' && <TaskLogMessage message={message} />}
+          {messageKind === 'task-content' && <TaskContentMessage message={message} onRetry={onRetry} />}
+          {messageKind === 'task-download' && (
+            <TaskDownloadMessage message={message} onDownload={onDownload} />
+          )}
+          {!messageKind && (
+            <div className="rounded border border-gray-200 bg-white px-4 py-3 shadow-sm">
+              <p className="text-sm text-gray-700">
+                {typeof message.content === 'string' ? message.content : '...'}
+              </p>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -148,9 +159,9 @@ function MessageItem({ message, onDownload, onRetry }: MessageItemProps) {
   if (message.type === 'user') {
     return (
       <div className="animate-fade-in-up flex justify-end gap-3">
-        <div className="max-w-[80%] flex-1">
+        <div className="min-w-0 max-w-[80%] flex-1">
           <div className="rounded rounded-tr-sm bg-blue-500 px-4 py-2.5 text-white shadow-sm">
-            <p className="text-sm">
+            <p className="break-all text-sm">
               {typeof message.content === 'string' ? message.content : '...'}
             </p>
           </div>

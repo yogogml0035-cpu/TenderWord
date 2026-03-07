@@ -1,9 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { createEmptyDualColumnContent } from '@/lib/chat-utils';
 import { useChatSSE } from '@/hooks/useChatSSE';
 import { useSSE } from '@/hooks/useSSE';
 import { getTaskStatus } from '@/lib/api';
-import { isDualColumnContent } from '@/types/chat';
 import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
@@ -52,20 +50,28 @@ function resetStores() {
         updatedAt: 1,
         messages: [
           {
-            id: 'msg-1',
+            id: 'msg-log-1',
             conversationId: 'conv-1',
             type: 'ai',
-            content: createEmptyDualColumnContent(),
+            content: '',
             timestamp: 1,
             status: 'generating',
             taskId: 'task-1',
+            metadata: {
+              messageKind: 'task-log',
+              logs: [],
+            },
           },
         ],
       },
     ],
     currentConversationId: 'conv-1',
     activeTaskIds: ['task-1'],
-    taskMessageMap: { 'task-1': 'msg-1' },
+    taskMessageMap: {
+      'task-1': {
+        logMessageId: 'msg-log-1',
+      },
+    },
     isLoading: false,
     error: null,
     concurrentTaskWarning: false,
@@ -76,12 +82,18 @@ function resetStores() {
   useChatTaskSessionStore.setState({ sessions: {} });
 }
 
+function getTaskGroup() {
+  return useChatStore.getState().findTaskMessageGroup('task-1');
+}
+
 describe('useChatSSE', () => {
   let latestOptions: MockSSEOptions | null;
+  let latestCloseMock: jest.Mock;
 
   beforeEach(() => {
     resetStores();
     latestOptions = null;
+    latestCloseMock = jest.fn();
     mockUseSSE.mockImplementation((options) => {
       latestOptions = options;
       return {
@@ -89,7 +101,7 @@ describe('useChatSSE', () => {
         isReconnecting: false,
         reconnectAttempts: 0,
         error: null,
-        close: jest.fn(),
+        close: latestCloseMock,
         reconnect: jest.fn(),
         lastMessage: null,
         messages: [],
@@ -109,7 +121,6 @@ describe('useChatSSE', () => {
       useChatSSE({
         taskId: 'task-1',
         conversationId: 'conv-1',
-        messageId: 'msg-1',
       })
     );
 
@@ -125,6 +136,7 @@ describe('useChatSSE', () => {
         data: {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
+          node: 'generate_polished_text',
           content: '你',
           content_mode: 'snapshot',
           is_complete: false,
@@ -136,6 +148,7 @@ describe('useChatSSE', () => {
         data: {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
+          node: 'generate_polished_text',
           content: '你好',
           content_mode: 'snapshot',
           is_complete: false,
@@ -147,6 +160,7 @@ describe('useChatSSE', () => {
         data: {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
+          node: 'generate_polished_text',
           content: '你好啊',
           content_mode: 'snapshot',
           is_complete: false,
@@ -154,13 +168,11 @@ describe('useChatSSE', () => {
       });
     });
 
-    expect(useChatStreamStore.getState().streams['task-1']?.content.aiContent.text).toBe('你好啊');
+    expect(useChatStreamStore.getState().streams['task-1']?.aiText).toBe('你好啊');
 
-    const generatingMessage = useChatStore.getState().findMessageByTaskId('task-1')?.message;
-    expect(generatingMessage?.status).toBe('generating');
-    expect(isDualColumnContent(generatingMessage?.content) ? generatingMessage.content.aiContent.text : '').toBe(
-      ''
-    );
+    const generatingGroup = getTaskGroup();
+    expect(generatingGroup?.contentMessage?.status).toBe('generating');
+    expect(generatingGroup?.contentMessage?.content).toBe('');
 
     act(() => {
       latestOptions?.onMessage?.({
@@ -177,13 +189,169 @@ describe('useChatSSE', () => {
       });
     });
 
-    const completedMessage = useChatStore.getState().findMessageByTaskId('task-1')?.message;
-    expect(completedMessage?.status).toBe('completed');
-    expect(isDualColumnContent(completedMessage?.content) ? completedMessage.content.aiContent.text : '').toBe(
-      '你好啊'
-    );
+    const completedGroup = getTaskGroup();
+    expect(completedGroup?.logMessage?.status).toBe('completed');
+    expect(completedGroup?.contentMessage?.status).toBe('completed');
+    expect(completedGroup?.contentMessage?.content).toBe('你好啊');
+    expect(completedGroup?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
     expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
+  });
+
+  it('routes log and progress events only to stream runtime state', async () => {
+    mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'log',
+        id: '1',
+        data: {
+          timestamp: new Date('2026-03-06T13:30:23+08:00').toISOString(),
+          task_id: 'task-1',
+          level: 'INFO',
+          message: '[replace_content] 替换最新项目信息 完成 (6/7)',
+          node: 'replace_content',
+        },
+      });
+
+      latestOptions?.onMessage?.({
+        event: 'progress',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          status: 'running',
+          progress_text: '正在替换项目信息',
+          current_node: 'replace_content',
+          completed_count: 6,
+          total_nodes: 7,
+          progress_percent: 85.7,
+          current_node_display: '替换最新项目信息',
+        },
+      });
+    });
+
+    const runtime = useChatStreamStore.getState().streams['task-1'];
+    expect(runtime?.logs).toHaveLength(1);
+    expect(runtime?.aiText).toBe('');
+    expect(runtime?.progressPercent).toBe(85.7);
+    expect(runtime?.progressText).toBe('正在替换项目信息');
+
+    const group = getTaskGroup();
+    expect(group?.logMessage?.status).toBe('generating');
+    expect(group?.contentMessage).toBeUndefined();
+  });
+
+  it('creates task-content message only when progress reaches generate_polished_text', async () => {
+    mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    expect(getTaskGroup()?.contentMessage).toBeUndefined();
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'progress',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          status: 'running',
+          progress_text: 'AI处理中',
+          current_node: 'generate_polished_text',
+          completed_count: 6,
+          total_nodes: 7,
+          progress_percent: 85.7,
+          current_node_display: 'AI生成采购需求',
+        },
+      });
+    });
+
+    expect(getTaskGroup()?.contentMessage?.status).toBe('generating');
+  });
+
+  it('marks task-content as completed when generate_polished_text completion log arrives', async () => {
+    mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'progress',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          status: 'running',
+          progress_text: 'AI处理中',
+          current_node: 'generate_polished_text',
+          completed_count: 6,
+          total_nodes: 7,
+          progress_percent: 85.7,
+          current_node_display: 'AI生成采购需求',
+        },
+      });
+    });
+
+    expect(getTaskGroup()?.contentMessage?.status).toBe('generating');
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'llm',
+        id: '3',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          node: 'generate_polished_text',
+          content: '这是最终 AI 内容',
+          content_mode: 'snapshot',
+          is_complete: true,
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'log',
+        id: '4',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          level: 'INFO',
+          message: '[generate_polished_text] AI生成采购需求 完成 (6/7)',
+        },
+      });
+    });
+
+    const group = getTaskGroup();
+    expect(group?.contentMessage?.status).toBe('completed');
+    expect(group?.contentMessage?.content).toBe('这是最终 AI 内容');
   });
 
   it('replays from the beginning after refresh when only lastEventId is persisted', async () => {
@@ -194,7 +362,6 @@ describe('useChatSSE', () => {
       useChatSSE({
         taskId: 'task-1',
         conversationId: 'conv-1',
-        messageId: 'msg-1',
       })
     );
 
@@ -220,14 +387,16 @@ describe('useChatSSE', () => {
     });
 
     useChatStreamStore.getState().replaceStream('task-1', {
-      content: {
-        ...createEmptyDualColumnContent(),
-        aiContent: {
-          text: '最终内容',
+      logs: [
+        {
+          id: 'log-1',
           timestamp: Date.now(),
-          isComplete: false,
+          level: 'info',
+          message: '日志完成',
         },
-      },
+      ],
+      aiText: '最终内容',
+      aiComplete: false,
       lastEventId: '100',
     });
 
@@ -235,19 +404,18 @@ describe('useChatSSE', () => {
       useChatSSE({
         taskId: 'task-1',
         conversationId: 'conv-1',
-        messageId: 'msg-1',
       })
     );
 
     await waitFor(() => {
-      const message = useChatStore.getState().findMessageByTaskId('task-1')?.message;
-      expect(message?.status).toBe('completed');
+      const group = getTaskGroup();
+      expect(group?.contentMessage?.status).toBe('completed');
     });
 
-    const message = useChatStore.getState().findMessageByTaskId('task-1')?.message;
-    expect(isDualColumnContent(message?.content) ? message.content.aiContent.text : '').toBe(
-      '最终内容'
-    );
+    const group = getTaskGroup();
+    expect(group?.logMessage?.metadata?.logs).toHaveLength(1);
+    expect(group?.contentMessage?.content).toBe('最终内容');
+    expect(group?.downloadMessage?.metadata?.fileName).toBe('output.docx');
     expect(latestOptions?.endpoint).toBe('');
   });
 
@@ -264,12 +432,11 @@ describe('useChatSSE', () => {
       useChatSSE({
         taskId: 'task-1',
         conversationId: 'conv-1',
-        messageId: 'msg-1',
       })
     );
 
     await waitFor(() => {
-      expect(useChatStore.getState().findMessageByTaskId('task-1')).toBeNull();
+      expect(useChatStore.getState().findTaskMessageGroup('task-1')).toBeNull();
     });
 
     expect(useChatStore.getState().hasActiveTasks()).toBe(false);
@@ -289,7 +456,6 @@ describe('useChatSSE', () => {
         useChatSSE({
           taskId: 'task-1',
           conversationId: 'conv-1',
-          messageId: 'msg-1',
           onComplete,
         }),
       {
@@ -308,5 +474,103 @@ describe('useChatSSE', () => {
     });
 
     expect(mockGetTaskStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the active SSE connection when a done event arrives', async () => {
+    mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'done',
+        id: '4',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          success: true,
+          message: '任务完成',
+          output_file: 'D:/UploadFiles/output.docx',
+          processing_time: 12.5,
+        },
+      });
+    });
+
+    expect(latestCloseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the active SSE connection when a fatal error arrives', async () => {
+    const onError = jest.fn();
+    mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+        onError,
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'error',
+        id: '4',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          error: '生成失败',
+          is_fatal: true,
+        },
+      });
+    });
+
+    expect(latestCloseMock).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith('生成失败');
+  });
+
+  it('closes the active SSE connection when a non-fatal cancel event arrives', async () => {
+    const onComplete = jest.fn();
+    mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+        onComplete,
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'error',
+        id: '4',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          error: '任务已取消',
+          is_fatal: false,
+        },
+      });
+    });
+
+    expect(latestCloseMock).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledTimes(1);
   });
 });

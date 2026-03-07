@@ -28,6 +28,8 @@ export interface GngkTenderFormProps {
   initialTenderNo?: string;
   initialTenderData?: TenderData | null;
   isSubmitting?: boolean;
+  canCancel?: boolean;
+  onCancel?: () => Promise<void> | void;
 }
 
 export function GngkTenderForm({
@@ -36,6 +38,8 @@ export function GngkTenderForm({
   initialTenderNo = '',
   initialTenderData,
   isSubmitting = false,
+  canCancel = false,
+  onCancel,
 }: GngkTenderFormProps) {
   const [tenderNo, setTenderNo] = useState(initialTenderNo);
   const [tenderData, setTenderData] = useState<TenderData | null>(initialTenderData || null);
@@ -44,7 +48,7 @@ export function GngkTenderForm({
   const [cleanDraftFile, setCleanDraftFile] = useState<UploadedFile | null>(null);
   const [paramFiles, setParamFiles] = useState<UploadedFile[]>([]);
   const [insertionConfig, setInsertionConfig] = useState({
-    before_text: '第三章 采购需求',
+    before_text: '第三章 招标内容及要求',
     after_text: '第四章 投标文件有关格式', // GNGK特有
   });
   const [error, setError] = useState<string | null>(null);
@@ -140,15 +144,17 @@ export function GngkTenderForm({
         { label: '服务费', value: tenderData.service_fee, key: 'service_fee' },
       ]
     : [];
+  const showCancelAction = isSubmitting && canCancel && typeof onCancel === 'function';
 
   return (
-    <form onSubmit={handleSubmit} className={cn('form-section space-y-6', className)}>
+    <form onSubmit={handleSubmit} className={cn('form-section space-y-5', className)}>
       {/* Section 1: Tender Info */}
       <FormSection title="招标信息" index={1}>
         <TenderNoInput
           value={tenderNo}
           onChange={setTenderNo}
           onDataFetched={handleTenderDataFetched}
+          disabled={isSubmitting}
           required
         />
         {tenderData && <InfoCard items={tenderInfoItems} columns={2} />}
@@ -163,6 +169,7 @@ export function GngkTenderForm({
             accept=".doc,.docx"
             multiple={false}
             autoUpload={true}
+            disabled={isSubmitting}
             fileType="clean_draft"
             onUpload={(files) => setCleanDraftFile(files[0] || null)}
           />
@@ -173,6 +180,7 @@ export function GngkTenderForm({
             accept=".doc,.docx"
             multiple={false}
             autoUpload={true}
+            disabled={isSubmitting}
             fileType="origin_tender"
             onUpload={(files) => setOriginFile(files[0] || null)}
           />
@@ -184,6 +192,7 @@ export function GngkTenderForm({
             multiple={true}
             maxFiles={5}
             autoUpload={true}
+            disabled={isSubmitting}
             fileType="params"
             onUpload={(files) => setParamFiles((prev) => [...prev, ...files])}
           />
@@ -192,12 +201,12 @@ export function GngkTenderForm({
 
       {/* Section 3: Model Selection */}
       <FormSection title="模型选择" index={3}>
-        <ModelSelector value={model} onChange={setModel} />
+        <ModelSelector value={model} onChange={setModel} disabled={isSubmitting} />
       </FormSection>
 
       {/* Section 4: Advanced Settings */}
-      <FormSection title="高级设置（可选）" index={4} badge="可选" badgeVariant="optional">
-        <div className="space-y-4">
+      <FormSection title="高级设置（可选）" index={4}>
+        <div className="grid gap-4 md:grid-cols-2">
           <FormField
             label="插入位置前文本"
             name="before_text"
@@ -206,6 +215,7 @@ export function GngkTenderForm({
             onChange={(value) =>
               setInsertionConfig((prev) => ({ ...prev, before_text: value }))
             }
+            disabled={isSubmitting}
             placeholder="插入位置前的章节标题"
             helperText="系统将在该文本位置之后插入生成的内容"
           />
@@ -218,6 +228,7 @@ export function GngkTenderForm({
             onChange={(value) =>
               setInsertionConfig((prev) => ({ ...prev, after_text: value }))
             }
+            disabled={isSubmitting}
             placeholder="插入位置后的章节标题"
             helperText="系统将在该文本位置之前插入生成的内容"
           />
@@ -231,17 +242,40 @@ export function GngkTenderForm({
 
       {/* Submit Button */}
       <button
-        type="submit"
-        disabled={isSubmitting}
-        className="group relative w-full transform overflow-hidden rounded-xl bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 px-6 py-3.5 text-lg font-semibold text-white shadow-lg shadow-blue-500/30 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:from-blue-700 hover:via-blue-600 hover:to-cyan-600 hover:shadow-xl hover:shadow-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:transform-none disabled:hover:shadow-lg"
+        type={showCancelAction ? 'button' : 'submit'}
+        onClick={showCancelAction ? () => void onCancel?.() : undefined}
+        disabled={isSubmitting && !showCancelAction}
+        className={cn(
+          'group relative w-full transform overflow-hidden rounded-xl px-5 py-2.5 text-[15px] font-semibold text-white transition-all duration-200 ease-out',
+          showCancelAction
+            ? 'bg-gradient-to-r from-red-500 via-red-500 to-orange-500 shadow-md shadow-red-500/25 hover:-translate-y-0.5 hover:from-red-600 hover:via-red-600 hover:to-orange-600 hover:shadow-lg hover:shadow-red-500/30'
+            : 'bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 shadow-md shadow-blue-500/25 hover:-translate-y-0.5 hover:from-blue-700 hover:via-blue-600 hover:to-cyan-600 hover:shadow-lg hover:shadow-blue-500/30 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:transform-none disabled:hover:shadow-md'
+        )}
       >
         {/* Shimmer effect */}
-        <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-1000 ease-out group-hover:translate-x-full" />
-        
-        <span className="relative flex items-center justify-center gap-3">
-          {isSubmitting ? (
+        {!showCancelAction && (
+          <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-1000 ease-out group-hover:translate-x-full" />
+        )}
+
+        <span className="relative flex items-center justify-center gap-2">
+          {showCancelAction ? (
             <>
-              <svg className="h-5 w-5 animate-spin" width={20} height={20} viewBox="0 0 24 24">
+              <svg
+                className="h-4.5 w-4.5 transition-transform duration-200 group-hover:rotate-90"
+                width={20}
+                height={20}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M18 6L6 18" />
+              </svg>
+              <span>取消生成</span>
+            </>
+          ) : isSubmitting ? (
+            <>
+              <svg className="h-4.5 w-4.5 animate-spin" width={20} height={20} viewBox="0 0 24 24">
                 <circle
                   className="opacity-25"
                   cx="12"
@@ -263,7 +297,7 @@ export function GngkTenderForm({
             <>
               {/* Sparkles icon */}
               <svg
-                className="h-5 w-5 transition-transform group-hover:scale-110"
+                className="h-4.5 w-4.5 transition-transform group-hover:scale-110"
                 width={20}
                 height={20}
                 fill="none"
@@ -279,7 +313,7 @@ export function GngkTenderForm({
               </svg>
               <span>开始生成</span>
               <svg
-                className="h-5 w-5 transition-transform group-hover:translate-x-1"
+                className="h-4.5 w-4.5 transition-transform group-hover:translate-x-1"
                 width={20}
                 height={20}
                 fill="none"

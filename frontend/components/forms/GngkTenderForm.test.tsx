@@ -12,11 +12,13 @@ jest.mock('./TenderNoInput', () => ({
     onChange,
     onDataFetched,
     required,
+    disabled,
   }: {
     value: string;
     onChange: (value: string) => void;
     onDataFetched?: (data: TenderData) => void;
     required?: boolean;
+    disabled?: boolean;
   }) => (
     <div data-testid="tender-no-input">
       <label>
@@ -29,9 +31,11 @@ jest.mock('./TenderNoInput', () => ({
         onChange={(e) => onChange(e.target.value)}
         placeholder="请输入招标编号"
         data-testid="tender-no-input-field"
+        disabled={disabled}
       />
       <button
         type="button"
+        disabled={disabled}
         onClick={() => {
           if (onDataFetched) {
             onDataFetched({
@@ -60,10 +64,23 @@ jest.mock('./TenderNoInput', () => ({
 }));
 
 jest.mock('./ModelSelector', () => ({
-  ModelSelector: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
+  ModelSelector: ({
+    value,
+    onChange,
+    disabled,
+  }: {
+    value: string;
+    onChange: (value: string) => void;
+    disabled?: boolean;
+  }) => (
     <div data-testid="model-selector">
       <label>选择模型</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)} data-testid="model-select">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        data-testid="model-select"
+        disabled={disabled}
+      >
         <option value="deepseek">DeepSeek</option>
         <option value="qwen">通义千问</option>
         <option value="doubao">豆包</option>
@@ -78,11 +95,13 @@ jest.mock('./FileUploader', () => ({
     onUpload,
     multiple,
     fileType,
+    disabled,
   }: {
     label: string;
     onUpload?: (files: { file_path: string; original_name: string }[]) => void;
     multiple?: boolean;
     fileType?: string;
+    disabled?: boolean;
   }) => (
     <div data-testid={`file-uploader-${fileType || 'default'}`}>
       <span>{label}</span>
@@ -90,6 +109,7 @@ jest.mock('./FileUploader', () => ({
         type="file"
         multiple={multiple}
         data-testid={`file-input-${fileType || 'default'}`}
+        disabled={disabled}
         onChange={(e) => {
           if (onUpload && e.target.files) {
             const files = Array.from(e.target.files).map((file, index) => ({
@@ -201,7 +221,7 @@ describe('GngkTenderForm', () => {
       const beforeInput = inputs.find((input) => input.getAttribute('value')?.includes('第三章'));
       const afterInput = inputs.find((input) => input.getAttribute('value')?.includes('第四章'));
 
-      expect(beforeInput).toHaveValue('第三章 采购需求');
+      expect(beforeInput).toHaveValue('第三章 招标内容及要求');
       expect(afterInput).toHaveValue('第四章 投标文件有关格式');
     });
 
@@ -457,7 +477,7 @@ describe('GngkTenderForm', () => {
 
       const submittedData = mockOnSubmit.mock.calls[0][0] as GngkTenderFormData;
       expect(submittedData.insertion_config).toEqual({
-        before_text: '第三章 采购需求',
+        before_text: '第三章 招标内容及要求',
         after_text: '第四章 投标文件有关格式',
       });
     });
@@ -528,6 +548,40 @@ describe('GngkTenderForm', () => {
       const buttons = screen.getAllByRole('button');
       const submitButton = buttons.find((btn) => btn.getAttribute('type') === 'submit');
       expect(submitButton).toBeDisabled();
+    });
+
+    it('should disable form controls when isSubmitting is true', () => {
+      render(<GngkTenderForm onSubmit={mockOnSubmit} isSubmitting={true} />);
+
+      expect(screen.getByTestId('tender-no-input-field')).toBeDisabled();
+      expect(screen.getByTestId('fetch-tender-btn')).toBeDisabled();
+      expect(screen.getByTestId('model-select')).toBeDisabled();
+      expect(screen.getByTestId('file-input-origin_tender')).toBeDisabled();
+      expect(screen.getByTestId('file-input-clean_draft')).toBeDisabled();
+      expect(screen.getByTestId('file-input-params')).toBeDisabled();
+      expect(screen.getByPlaceholderText('插入位置前的章节标题')).toBeDisabled();
+      expect(screen.getByPlaceholderText('插入位置后的章节标题')).toBeDisabled();
+    });
+
+    it('should switch the primary button to cancel generation when cancellation is available', async () => {
+      const user = userEvent.setup();
+      const mockOnCancel = jest.fn();
+
+      render(
+        <GngkTenderForm
+          onSubmit={mockOnSubmit}
+          isSubmitting={true}
+          canCancel={true}
+          onCancel={mockOnCancel}
+        />
+      );
+
+      const cancelButton = screen.getByRole('button', { name: '取消生成' });
+      expect(cancelButton).toBeEnabled();
+
+      await user.click(cancelButton);
+
+      expect(mockOnCancel).toHaveBeenCalledTimes(1);
     });
   });
 

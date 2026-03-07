@@ -7,7 +7,7 @@ import { useHydrated } from '@/hooks/useHydrated';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { downloadFile } from '@/lib/api';
-import { isDualColumnContent, type Message } from '@/types/chat';
+import type { Message } from '@/types/chat';
 
 interface ChatPanelProps {
   className?: string;
@@ -26,21 +26,44 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     }
 
     const stream = streams[message.taskId];
-    if (!stream || !isDualColumnContent(message.content)) {
+    if (!stream) {
       return message;
+    }
+
+    const kind = message.metadata?.messageKind;
+    if (kind === 'task-download') {
+      return message;
+    }
+
+    const mergedMetadata = {
+      ...(message.metadata || {}),
+      ...(kind === 'task-log' ? { logs: stream.logs } : {}),
+      progressPercent: stream.progressPercent,
+      progressText: stream.progressText,
+      currentNode: stream.currentNode,
+      currentNodeDisplay: stream.currentNodeDisplay,
+      lastEventId: stream.lastEventId,
+    };
+
+    if (kind === 'task-content') {
+      return {
+        ...message,
+        content: stream.aiText,
+        metadata: mergedMetadata,
+      };
+    }
+
+    if (kind === 'task-log') {
+      return {
+        ...message,
+        metadata: mergedMetadata,
+      };
     }
 
     return {
       ...message,
-      content: stream.content,
-      metadata: {
-        ...(message.metadata || {}),
-        progressPercent: stream.progressPercent,
-        progressText: stream.progressText,
-        currentNode: stream.currentNode,
-        currentNodeDisplay: stream.currentNodeDisplay,
-        lastEventId: stream.lastEventId,
-      },
+      content: stream.aiText,
+      metadata: mergedMetadata,
     };
   });
   const isLoading = hasActiveTasks();

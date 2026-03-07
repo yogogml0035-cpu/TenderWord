@@ -1,9 +1,10 @@
 import { create } from 'zustand';
-import type { DualColumnContent, LogEntry } from '@/types/chat';
-import { createEmptyDualColumnContent } from '@/lib/chat-utils';
+import type { LogEntry } from '@/types/chat';
 
 export interface TaskStreamState {
-  content: DualColumnContent;
+  logs: LogEntry[];
+  aiText: string;
+  aiComplete: boolean;
   lastEventId?: string;
   progressPercent?: number;
   progressText?: string;
@@ -30,7 +31,9 @@ interface ChatStreamStore {
 
 function createStreamState(overrides?: Partial<TaskStreamState>): TaskStreamState {
   return {
-    content: createEmptyDualColumnContent(),
+    logs: [],
+    aiText: '',
+    aiComplete: false,
     ...overrides,
   };
 }
@@ -67,10 +70,7 @@ export const useChatStreamStore = create<ChatStreamStore>()((set) => ({
           ...state.streams,
           [taskId]: {
             ...current,
-            content: {
-              ...current.content,
-              logs: [...current.content.logs, log],
-            },
+            logs: [...current.logs, log],
           },
         },
       };
@@ -84,14 +84,8 @@ export const useChatStreamStore = create<ChatStreamStore>()((set) => ({
           ...state.streams,
           [taskId]: {
             ...current,
-            content: {
-              ...current.content,
-              aiContent: {
-                text,
-                timestamp: Date.now(),
-                isComplete,
-              },
-            },
+            aiText: text,
+            aiComplete: isComplete,
           },
         },
       };

@@ -45,6 +45,7 @@ interface SSEState {
   reconnectTimer: NodeJS.Timeout | null;
   heartbeatTimer: NodeJS.Timeout | null;
   isClosed: boolean;
+  closeNotified: boolean;
 }
 
 const MAX_SEEN_EVENT_IDS = 5000;
@@ -81,6 +82,7 @@ export function createSSEConnection(endpoint: string, options: SSEOptions = {}):
     reconnectTimer: null,
     heartbeatTimer: null,
     isClosed: false,
+    closeNotified: false,
   };
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -94,6 +96,14 @@ export function createSSEConnection(endpoint: string, options: SSEOptions = {}):
       clearTimeout(state.heartbeatTimer);
       state.heartbeatTimer = null;
     }
+  };
+
+  const notifyClose = () => {
+    if (state.closeNotified) {
+      return;
+    }
+    state.closeNotified = true;
+    opts.onClose?.();
   };
 
   const setupHeartbeat = () => {
@@ -113,6 +123,7 @@ export function createSSEConnection(endpoint: string, options: SSEOptions = {}):
     if (state.isClosed) return;
 
     clearTimers();
+    state.closeNotified = false;
     if (state.eventSource) {
       state.eventSource.close();
       state.eventSource = null;
@@ -220,14 +231,12 @@ export function createSSEConnection(endpoint: string, options: SSEOptions = {}):
     });
 
     eventSource.onerror = (error) => {
-      console.error('[SSE] Connection error:', error);
-
-      // Don't treat normal close as error
-      if (eventSource.readyState === EventSource.CLOSED) {
-        opts.onClose?.();
+      if (state.isClosed || eventSource.readyState === EventSource.CLOSED) {
+        notifyClose();
         return;
       }
 
+      console.error('[SSE] Connection error:', error);
       opts.onError?.(error);
 
       // Auto-reconnect logic
@@ -265,7 +274,7 @@ export function createSSEConnection(endpoint: string, options: SSEOptions = {}):
       state.eventSource.close();
       state.eventSource = null;
     }
-    opts.onClose?.();
+    notifyClose();
   };
 
   const reconnect = () => {

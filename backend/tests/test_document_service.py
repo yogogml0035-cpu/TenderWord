@@ -1,6 +1,10 @@
+import asyncio
+import importlib
 from unittest.mock import Mock
 
-from backend.services.document_service import _LLMSnapshotRelay
+import pytest
+
+from backend.services.document_service import DocumentService, _LLMSnapshotRelay
 
 
 def test_llm_snapshot_relay_throttles_intermediate_snapshots_and_flushes_final_state():
@@ -62,3 +66,28 @@ def test_llm_snapshot_relay_does_not_emit_duplicate_completed_snapshots():
         model="deepseek",
         is_complete=True,
     )
+
+
+def test_document_service_invoke_graph_async_fail_fast_error_propagates(monkeypatch):
+    service = DocumentService()
+    callback = Mock()
+
+    async def _raise_fail_fast(*_args, **_kwargs):
+        raise RuntimeError("未找到前置锚点: 第三章 采购需求")
+
+    async def _invoke_with_fail_fast(*_args, **_kwargs):
+        return await _raise_fail_fast()
+
+    graphs_module = importlib.import_module("backend.graphs")
+    monkeypatch.setattr(graphs_module, "invoke_with_timing_async", _invoke_with_fail_fast)
+
+    with pytest.raises(RuntimeError, match="未找到前置锚点"):
+        asyncio.run(
+            service._invoke_graph_async(
+                compiled_graph=Mock(),
+                initial_state={},
+                task_id="task-1",
+                callback=callback,
+                model_provider="deepseek",
+            )
+        )
