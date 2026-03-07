@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { TenderNoInput, type TenderData } from './TenderNoInput';
 import { ModelSelector, type ModelType } from './ModelSelector';
 import { FileUploader, type UploadedFile } from './FileUploader';
 import { FormSection, FormField, ErrorDisplay, InfoCard, type TenderInfoItem } from './shared';
+import type { ConversationDraftFile, ConversationFormDraft } from '@/stores/chatStore';
 
 export interface XjcgTenderFormData {
   tender_no: string;
@@ -27,43 +28,128 @@ export interface XjcgTenderFormProps {
   className?: string;
   initialTenderNo?: string;
   initialTenderData?: TenderData | null;
+  initialDraft?: ConversationFormDraft | null;
+  onDraftChange?: (updates: Partial<ConversationFormDraft>) => void;
   isSubmitting?: boolean;
   canCancel?: boolean;
   onCancel?: () => Promise<void> | void;
 }
+
+function toDraftFile(file: UploadedFile | null | undefined): ConversationDraftFile | undefined {
+  if (!file) {
+    return undefined;
+  }
+  return {
+    id: file.id,
+    file_path: file.file_path,
+    file_name: file.file_name,
+    original_name: file.original_name,
+    size: file.size,
+    upload_time: file.upload_time,
+    ...(file.file_type ? { file_type: file.file_type } : {}),
+  };
+}
+
 export function XjcgTenderForm({
   onSubmit,
   className,
   initialTenderNo = '',
   initialTenderData,
+  initialDraft,
+  onDraftChange,
   isSubmitting = false,
   canCancel = false,
   onCancel,
 }: XjcgTenderFormProps) {
-  const [tenderNo, setTenderNo] = useState(initialTenderNo);
-  const [tenderData, setTenderData] = useState<TenderData | null>(initialTenderData || null);
-  const [model, setModel] = useState<ModelType>('deepseek');
-  const [originFile, setOriginFile] = useState<UploadedFile | null>(null);
-  const [cleanDraftFile, setCleanDraftFile] = useState<UploadedFile | null>(null);
-  const [paramFiles, setParamFiles] = useState<UploadedFile[]>([]);
+  const [tenderNo, setTenderNo] = useState(initialDraft?.tender_no || initialTenderNo);
+  const [tenderData, setTenderData] = useState<TenderData | null>(
+    initialDraft?.tender_data || initialTenderData || null
+  );
+  const [model, setModel] = useState<ModelType>(initialDraft?.model || 'deepseek');
+  const [originFile, setOriginFile] = useState<UploadedFile | null>(
+    (initialDraft?.files?.origin_tender as UploadedFile | undefined) || null
+  );
+  const [cleanDraftFile, setCleanDraftFile] = useState<UploadedFile | null>(
+    (initialDraft?.files?.clean_draft as UploadedFile | undefined) || null
+  );
+  const [paramFiles, setParamFiles] = useState<UploadedFile[]>(
+    (initialDraft?.files?.tender_params as UploadedFile[] | undefined) || []
+  );
   const [insertionConfig, setInsertionConfig] = useState({
-    before_text: '第三章  采购需求',
-    after_text: '第四章  响应文件有关格式',
+    before_text: initialDraft?.insertion_config?.before_text || '第三章  采购需求',
+    after_text: initialDraft?.insertion_config?.after_text || '第四章  响应文件有关格式',
   });
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setTenderNo(initialTenderNo || '');
-  }, [initialTenderNo]);
-
-  useEffect(() => {
-    setTenderData(initialTenderData || null);
-  }, [initialTenderData]);
+  const syncDraftFiles = useCallback(
+    (nextOriginFile: UploadedFile | null, nextCleanDraftFile: UploadedFile | null, nextParamFiles: UploadedFile[]) => {
+      if (!onDraftChange) {
+        return;
+      }
+      onDraftChange({
+        files: {
+          ...(toDraftFile(nextOriginFile) ? { origin_tender: toDraftFile(nextOriginFile) } : {}),
+          ...(toDraftFile(nextCleanDraftFile)
+            ? { clean_draft: toDraftFile(nextCleanDraftFile) }
+            : {}),
+          tender_params: nextParamFiles
+            .map((file) => toDraftFile(file))
+            .filter((file): file is ConversationDraftFile => !!file),
+        },
+      });
+    },
+    [onDraftChange]
+  );
 
   const handleTenderDataFetched = useCallback((data: TenderData) => {
     setTenderData(data);
     setError(null);
-  }, []);
+    onDraftChange?.({ tender_data: data });
+  }, [onDraftChange]);
+
+  const handleTenderNoChange = useCallback(
+    (value: string) => {
+      setTenderNo(value);
+      onDraftChange?.({ tender_no: value });
+    },
+    [onDraftChange]
+  );
+
+  const handleModelChange = useCallback(
+    (value: ModelType) => {
+      setModel(value);
+      onDraftChange?.({ model: value });
+    },
+    [onDraftChange]
+  );
+
+  const handleBeforeTextChange = useCallback(
+    (value: string) => {
+      setInsertionConfig((prev) => {
+        const next = { ...prev, before_text: value };
+        onDraftChange?.({ insertion_config: next });
+        return next;
+      });
+    },
+    [onDraftChange]
+  );
+
+  const handleAfterTextChange = useCallback(
+    (value: string) => {
+      setInsertionConfig((prev) => {
+        const next = { ...prev, after_text: value };
+        onDraftChange?.({ insertion_config: next });
+        return next;
+      });
+    },
+    [onDraftChange]
+  );
+
+  const originUploaderFiles = useMemo(() => (originFile ? [originFile] : []), [originFile]);
+  const cleanDraftUploaderFiles = useMemo(
+    () => (cleanDraftFile ? [cleanDraftFile] : []),
+    [cleanDraftFile]
+  );
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -135,7 +221,7 @@ export function XjcgTenderForm({
       <FormSection title="招标信息" index={1}>
         <TenderNoInput
           value={tenderNo}
-          onChange={setTenderNo}
+          onChange={handleTenderNoChange}
           onDataFetched={handleTenderDataFetched}
           disabled={isSubmitting}
           required
@@ -154,7 +240,12 @@ export function XjcgTenderForm({
             autoUpload={true}
             disabled={isSubmitting}
             fileType="clean_draft"
-            onUpload={(files) => setCleanDraftFile(files[0] || null)}
+            initialFiles={cleanDraftUploaderFiles}
+            onFilesChange={(files) => {
+              const nextCleanDraftFile = files[0] || null;
+              setCleanDraftFile(nextCleanDraftFile);
+              syncDraftFiles(originFile, nextCleanDraftFile, paramFiles);
+            }}
           />
 
           <FileUploader
@@ -165,7 +256,12 @@ export function XjcgTenderForm({
             autoUpload={true}
             disabled={isSubmitting}
             fileType="origin_tender"
-            onUpload={(files) => setOriginFile(files[0] || null)}
+            initialFiles={originUploaderFiles}
+            onFilesChange={(files) => {
+              const nextOriginFile = files[0] || null;
+              setOriginFile(nextOriginFile);
+              syncDraftFiles(nextOriginFile, cleanDraftFile, paramFiles);
+            }}
           />
 
           <FileUploader
@@ -177,14 +273,18 @@ export function XjcgTenderForm({
             autoUpload={true}
             disabled={isSubmitting}
             fileType="params"
-            onUpload={(files) => setParamFiles((prev) => [...prev, ...files])}
+            initialFiles={paramFiles}
+            onFilesChange={(files) => {
+              setParamFiles(files);
+              syncDraftFiles(originFile, cleanDraftFile, files);
+            }}
           />
         </div>
       </FormSection>
 
       {/* Section 3: Model Selection */}
       <FormSection title="模型选择" index={3}>
-        <ModelSelector value={model} onChange={setModel} disabled={isSubmitting} />
+        <ModelSelector value={model} onChange={handleModelChange} disabled={isSubmitting} />
       </FormSection>
 
       {/* Section 4: Advanced Settings */}
@@ -195,9 +295,7 @@ export function XjcgTenderForm({
             name="before_text"
             variant="text"
             value={insertionConfig.before_text}
-            onChange={(value) =>
-              setInsertionConfig((prev) => ({ ...prev, before_text: value }))
-            }
+            onChange={handleBeforeTextChange}
             disabled={isSubmitting}
             placeholder="插入位置前的章节标题"
             helperText="系统将在该文本位置之后插入生成的内容"
@@ -208,9 +306,7 @@ export function XjcgTenderForm({
             name="after_text"
             variant="text"
             value={insertionConfig.after_text}
-            onChange={(value) =>
-              setInsertionConfig((prev) => ({ ...prev, after_text: value }))
-            }
+            onChange={handleAfterTextChange}
             disabled={isSubmitting}
             placeholder="插入位置后的章节标题"
             helperText="系统将在该文本位置之前插入生成的内容"

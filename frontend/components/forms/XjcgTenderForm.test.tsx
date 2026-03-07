@@ -85,11 +85,13 @@ jest.mock('./FileUploader', () => ({
   FileUploader: ({
     label,
     onUpload,
+    onFilesChange,
     fileType,
     disabled,
   }: {
     label: string;
     onUpload?: (files: UploadedFile[]) => void;
+    onFilesChange?: (files: UploadedFile[]) => void;
     fileType?: string;
     disabled?: boolean;
   }) => (
@@ -99,7 +101,7 @@ jest.mock('./FileUploader', () => ({
         type="button"
         disabled={disabled}
         onClick={() => {
-          if (onUpload) {
+          if (onUpload || onFilesChange) {
             const mockFile: UploadedFile = {
               id: `test-id-${fileType}`,
               file: new File(['test'], 'test.docx', {
@@ -112,7 +114,8 @@ jest.mock('./FileUploader', () => ({
               upload_time: new Date().toISOString(),
               file_type: 'application/docx',
             };
-            onUpload([mockFile]);
+            onUpload?.([mockFile]);
+            onFilesChange?.([mockFile]);
           }
         }}
         aria-label={`上传${label}`}

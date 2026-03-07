@@ -93,12 +93,14 @@ jest.mock('./FileUploader', () => ({
   FileUploader: ({
     label,
     onUpload,
+    onFilesChange,
     multiple,
     fileType,
     disabled,
   }: {
     label: string;
     onUpload?: (files: { file_path: string; original_name: string }[]) => void;
+    onFilesChange?: (files: { file_path: string; original_name: string }[]) => void;
     multiple?: boolean;
     fileType?: string;
     disabled?: boolean;
@@ -111,7 +113,7 @@ jest.mock('./FileUploader', () => ({
         data-testid={`file-input-${fileType || 'default'}`}
         disabled={disabled}
         onChange={(e) => {
-          if (onUpload && e.target.files) {
+          if ((onUpload || onFilesChange) && e.target.files) {
             const files = Array.from(e.target.files).map((file, index) => ({
               file_path: `/uploads/${file.name}`,
               original_name: file.name,
@@ -121,7 +123,8 @@ jest.mock('./FileUploader', () => ({
               size: file.size,
               upload_time: new Date().toISOString(),
             }));
-            onUpload(files);
+            onUpload?.(files);
+            onFilesChange?.(files);
           }
         }}
       />

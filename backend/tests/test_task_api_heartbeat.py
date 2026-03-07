@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import sys
 import types
 
@@ -70,6 +69,14 @@ from fastapi import HTTPException
 import backend.api.tasks as tasks_api
 
 
+def run_async_endpoint(coro):
+    try:
+        coro.send(None)
+    except StopIteration as exc:
+        return exc.value
+    raise AssertionError("Endpoint coroutine yielded unexpectedly during test execution")
+
+
 class DummyTaskService:
     def __init__(self, response):
         self.response = response
@@ -91,7 +98,7 @@ def test_heartbeat_task_returns_alive_status(monkeypatch):
     )
     monkeypatch.setattr(tasks_api, "get_task_service", lambda: service)
 
-    result = asyncio.run(tasks_api.heartbeat_task(task_id="task-1"))
+    result = run_async_endpoint(tasks_api.heartbeat_task(task_id="task-1"))
 
     assert result.task_id == "task-1"
     assert result.alive is True
@@ -104,7 +111,7 @@ def test_heartbeat_task_returns_404_for_missing_task(monkeypatch):
     monkeypatch.setattr(tasks_api, "get_task_service", lambda: service)
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(tasks_api.heartbeat_task(task_id="missing-task"))
+        run_async_endpoint(tasks_api.heartbeat_task(task_id="missing-task"))
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail["error"]["code"] == "TASK_NOT_FOUND"

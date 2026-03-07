@@ -9,6 +9,7 @@ import type {
   SSELLMEvent,
   SSEProgressEvent,
   TaskData,
+  TaskStatus,
 } from '@/types/api';
 import type { LogEntry } from '@/types/chat';
 import { useChatStore, type TaskMessageSnapshot } from '@/stores/chatStore';
@@ -18,6 +19,7 @@ import { useSSE } from './useSSE';
 
 interface UseChatSSEOptions {
   taskId: string | null;
+  taskStatus?: TaskStatus | null;
   conversationId: string | null;
   onComplete?: () => void;
   onError?: (error: string) => void;
@@ -42,11 +44,18 @@ function isGenerateNodeCompletedLog(message: string, node?: unknown): boolean {
 /**
  * Hook that maps SSE events to task-log/task-content/task-download messages.
  */
-export function useChatSSE({ taskId, conversationId, onComplete, onError }: UseChatSSEOptions) {
+export function useChatSSE({
+  taskId,
+  taskStatus = null,
+  conversationId,
+  onComplete,
+  onError,
+}: UseChatSSEOptions) {
   void conversationId;
   const completeTask = useChatStore((state) => state.completeTask);
   const failTask = useChatStore((state) => state.failTask);
   const cancelTask = useChatStore((state) => state.cancelTask);
+  const ensureTaskLogMessage = useChatStore((state) => state.ensureTaskLogMessage);
   const ensureTaskContentMessage = useChatStore((state) => state.ensureTaskContentMessage);
   const markTaskContentReady = useChatStore((state) => state.markTaskContentReady);
   const discardStaleTask = useChatStore((state) => state.discardStaleTask);
@@ -193,6 +202,7 @@ export function useChatSSE({ taskId, conversationId, onComplete, onError }: UseC
 
       const { event, data, id } = sseMessage;
       rememberEventId(taskId, id);
+      ensureTaskLogMessage(taskId, { status: 'generating' });
 
       switch (event) {
         case 'log':
@@ -316,6 +326,7 @@ export function useChatSSE({ taskId, conversationId, onComplete, onError }: UseC
       cancelTask,
       clearTaskRuntime,
       completeTask,
+      ensureTaskLogMessage,
       ensureTaskContentMessage,
       failTask,
       getCurrentContent,
@@ -333,65 +344,93 @@ export function useChatSSE({ taskId, conversationId, onComplete, onError }: UseC
   useEffect(() => {
     let isActive = true;
 
+    const disconnect = () => {
+      if (!isActive) {
+        return;
+      }
+      setConnectionTaskId(null);
+      setConnectionLastEventId(null);
+    };
+
     if (!taskId) {
-      queueMicrotask(() => {
-        if (!isActive) {
-          return;
-        }
-        setConnectionTaskId(null);
-        setConnectionLastEventId(null);
-      });
+      queueMicrotask(disconnect);
       return () => {
         isActive = false;
       };
     }
 
-    const locatedGroup = useChatStore.getState().findTaskMessageGroup(taskId);
-    if (!locatedGroup) {
-      queueMicrotask(() => {
-        if (isActive) {
-          discardStaleTaskRuntime(taskId);
-        }
-      });
-      return () => {
-        isActive = false;
-      };
-    }
-
-    const isGenerating =
-      locatedGroup.logMessage?.status === 'generating' ||
-      locatedGroup.contentMessage?.status === 'generating';
-
-    if (!isGenerating) {
-      clearTaskRuntime(taskId);
-      return () => {
-        isActive = false;
-      };
-    }
-
-    useChatStreamStore.getState().ensureStream(taskId);
-    useChatTaskSessionStore.getState().upsertSession(taskId);
-
-    const hydrateConnection = async () => {
-      if (isActive) {
-        setConnectionTaskId(null);
-        setConnectionLastEventId(null);
+    const connectRunningTask = () => {
+      const logMessageId = ensureTaskLogMessage(taskId, { status: 'generating' });
+      if (!logMessageId) {
+        discardStaleTaskRuntime(taskId);
+        return;
       }
 
+      useChatStreamStore.getState().ensureStream(taskId);
+      useChatTaskSessionStore.getState().upsertSession(taskId);
       const stream = useChatStreamStore.getState().streams[taskId];
       const session = useChatTaskSessionStore.getState().sessions[taskId];
       const streamIsEmpty = !stream || (stream.logs.length === 0 && !stream.aiText.trim());
 
-      const connectWith = (lastEventId: string | null) => {
+      if (streamIsEmpty) {
+        useChatStreamStore.getState().replaceStream(taskId);
+      }
+
+      if (!isActive) {
+        return;
+      }
+
+      setConnectionLastEventId(streamIsEmpty ? null : stream?.lastEventId || session?.lastEventId || null);
+      setConnectionTaskId(taskId);
+    };
+
+    const finalizeWithFallback = async (status: TaskStatus) => {
+      try {
+        const task = await getTaskStatus(taskId);
         if (!isActive) {
           return;
         }
-        setConnectionLastEventId(lastEventId);
-        setConnectionTaskId(taskId);
-      };
+        finalizeFromTaskStatus(taskId, task);
+        disconnect();
+        return;
+      } catch {
+        if (!isActive) {
+          return;
+        }
+      }
 
-      if (streamIsEmpty) {
-        useChatStreamStore.getState().replaceStream(taskId);
+      const finalContent = getCurrentContent(taskId, status === 'completed');
+      if (status === 'completed') {
+        completeTask(taskId, undefined, undefined, finalContent);
+        clearTaskRuntime(taskId);
+        onCompleteRef.current?.();
+      } else if (status === 'failed') {
+        const fallbackError = '生成失败';
+        failTask(taskId, fallbackError, finalContent);
+        clearTaskRuntime(taskId);
+        onErrorRef.current?.(fallbackError);
+      } else if (status === 'cancelled') {
+        cancelTask(taskId, finalContent);
+        clearTaskRuntime(taskId);
+        onCompleteRef.current?.();
+      }
+      disconnect();
+    };
+
+    const hydrateConnection = async () => {
+      if (taskStatus === 'queued') {
+        disconnect();
+        return;
+      }
+
+      if (taskStatus === 'completed' || taskStatus === 'failed' || taskStatus === 'cancelled') {
+        await finalizeWithFallback(taskStatus);
+        return;
+      }
+
+      if (taskStatus === 'running') {
+        connectRunningTask();
+        return;
       }
 
       try {
@@ -405,15 +444,17 @@ export function useChatSSE({ taskId, conversationId, onComplete, onError }: UseC
           task.status === 'failed' ||
           task.status === 'cancelled'
         ) {
-          if (streamIsEmpty) {
-            connectWith(null);
-          } else {
-            finalizeFromTaskStatus(taskId, task);
-          }
+          finalizeFromTaskStatus(taskId, task);
+          disconnect();
           return;
         }
 
-        connectWith(streamIsEmpty ? null : stream?.lastEventId || session?.lastEventId || null);
+        if (task.status === 'queued') {
+          disconnect();
+          return;
+        }
+
+        connectRunningTask();
       } catch (error) {
         if (!isActive) {
           return;
@@ -427,7 +468,7 @@ export function useChatSSE({ taskId, conversationId, onComplete, onError }: UseC
           discardStaleTaskRuntime(taskId);
           return;
         }
-        connectWith(streamIsEmpty ? null : stream?.lastEventId || session?.lastEventId || null);
+        disconnect();
       }
     };
 
@@ -436,7 +477,18 @@ export function useChatSSE({ taskId, conversationId, onComplete, onError }: UseC
     return () => {
       isActive = false;
     };
-  }, [clearTaskRuntime, discardStaleTaskRuntime, finalizeFromTaskStatus, taskId]);
+  }, [
+    cancelTask,
+    clearTaskRuntime,
+    completeTask,
+    discardStaleTaskRuntime,
+    ensureTaskLogMessage,
+    failTask,
+    finalizeFromTaskStatus,
+    getCurrentContent,
+    taskId,
+    taskStatus,
+  ]);
 
   const { isConnected, error, close, reconnect } = useSSE({
     endpoint: connectionTaskId ? `/api/stream/${connectionTaskId}` : '',

@@ -12,9 +12,10 @@ function resetStores() {
     currentConversationId: null,
     activeTaskIds: [],
     taskMessageMap: {},
+    conversationDrafts: {},
+    taskSummaries: {},
     isLoading: false,
     error: null,
-    concurrentTaskWarning: false,
     selectedTenderType: null,
   });
   useHistoryStore.setState({ history: [] });

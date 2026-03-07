@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FileText } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
+import { useHydrated } from '@/hooks/useHydrated';
 import { cn } from '@/lib/utils';
 import { NewChatPopup } from '@/components/chat/NewChatPopup';
 
@@ -34,14 +35,9 @@ interface TenderTypeSidebarProps {
 
 export function TenderTypeSidebar({ onNewChat }: TenderTypeSidebarProps) {
   const [hoveredType, setHoveredType] = useState<TenderType['id'] | null>(null);
-  const [mounted, setMounted] = useState(false);
+  const hydrated = useHydrated();
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { createConversation, currentConversationId, conversations, setCurrentConversation } = useChatStore();
-
-  // Fix hydration: wait for client mount before accessing persisted store
-  useEffect(() => {
-    setMounted(true);
-  }, []);
   const clearCloseTimer = () => {
     if (closeTimerRef.current) {
       clearTimeout(closeTimerRef.current);
@@ -86,7 +82,9 @@ export function TenderTypeSidebar({ onNewChat }: TenderTypeSidebarProps) {
   };
 
   // Get current conversation's tender type for highlighting (only after mount)
-  const currentConversation = mounted ? conversations.find((conv) => conv.id === currentConversationId) : null;
+  const currentConversation = hydrated
+    ? conversations.find((conv) => conv.id === currentConversationId)
+    : null;
   const currentType = currentConversation?.tenderType;
 
   useEffect(() => {

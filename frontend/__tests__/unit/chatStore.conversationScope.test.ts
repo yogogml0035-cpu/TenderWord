@@ -1,0 +1,133 @@
+import { act } from '@testing-library/react';
+import { useChatStore } from '@/stores/chatStore';
+
+function resetStore() {
+  window.localStorage.clear();
+  window.sessionStorage.clear();
+
+  useChatStore.setState((state) => ({
+    ...state,
+    conversations: [],
+    currentConversationId: null,
+    activeTaskIds: [],
+    taskMessageMap: {},
+    conversationDrafts: {},
+    taskSummaries: {},
+    selectedTenderType: null,
+    error: null,
+    isLoading: false,
+  }));
+}
+
+describe('chatStore conversation scoped selectors', () => {
+  beforeEach(() => {
+    resetStore();
+  });
+
+  it('does not lock current conversation when only other conversations have active tasks', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          id: 'conv-current',
+          title: 'CURRENT',
+          tenderType: 'xjcg',
+          createdAt: 1,
+          updatedAt: 1,
+          messages: [],
+        },
+        {
+          id: 'conv-other',
+          title: 'OTHER',
+          tenderType: 'xjcg',
+          createdAt: 2,
+          updatedAt: 2,
+          messages: [],
+          currentTaskId: 'task-2',
+        },
+      ],
+      currentConversationId: 'conv-current',
+      activeTaskIds: ['task-2'],
+    }));
+
+    const store = useChatStore.getState();
+    expect(store.currentConversationActiveTask()).toBeNull();
+    expect(store.currentConversationIsBusy()).toBe(false);
+    expect(store.latestActiveTaskId()).toBe('task-2');
+    expect(store.otherActiveTaskCount()).toBe(0);
+  });
+
+  it('reports current conversation busy only for its own bound task', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          id: 'conv-current',
+          title: 'CURRENT',
+          tenderType: 'xjcg',
+          createdAt: 1,
+          updatedAt: 1,
+          messages: [],
+          currentTaskId: 'task-1',
+        },
+        {
+          id: 'conv-other',
+          title: 'OTHER',
+          tenderType: 'xjcg',
+          createdAt: 2,
+          updatedAt: 2,
+          messages: [],
+          currentTaskId: 'task-2',
+        },
+      ],
+      currentConversationId: 'conv-current',
+      activeTaskIds: ['task-1', 'task-2'],
+    }));
+
+    const store = useChatStore.getState();
+    expect(store.currentConversationActiveTask()).toBe('task-1');
+    expect(store.currentConversationIsBusy()).toBe(true);
+    expect(store.latestActiveTaskId()).toBe('task-2');
+    expect(store.otherActiveTaskCount()).toBe(1);
+  });
+
+  it('keeps drafts isolated per conversation when switching', () => {
+    let convA = '';
+    let convB = '';
+
+    act(() => {
+      convA = useChatStore.getState().createConversation('TN-001', 'xjcg');
+      convB = useChatStore.getState().createConversation('TN-002', 'xjcg');
+    });
+
+    act(() => {
+      useChatStore.getState().updateConversationDraft(convA, {
+        tender_no: 'TN-001',
+        model: 'deepseek',
+      });
+      useChatStore.getState().updateConversationDraft(convB, {
+        tender_no: 'TN-002',
+        model: 'qwen',
+      });
+    });
+
+    expect(useChatStore.getState().getConversationDraft(convA)?.tender_no).toBe('TN-001');
+    expect(useChatStore.getState().getConversationDraft(convA)?.model).toBe('deepseek');
+    expect(useChatStore.getState().getConversationDraft(convB)?.tender_no).toBe('TN-002');
+    expect(useChatStore.getState().getConversationDraft(convB)?.model).toBe('qwen');
+  });
+
+  it('allows multiple independent conversations with same type and tender number', () => {
+    let convA = '';
+    let convB = '';
+
+    act(() => {
+      convA = useChatStore.getState().createConversation('TN-SAME', 'xjcg');
+      convB = useChatStore.getState().createConversation('TN-SAME', 'xjcg');
+    });
+
+    const conversations = useChatStore.getState().conversations;
+    expect(convA).not.toBe(convB);
+    expect(conversations.filter((conversation) => conversation.title === 'TN-SAME')).toHaveLength(2);
+  });
+});

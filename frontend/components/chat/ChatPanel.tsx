@@ -15,10 +15,14 @@ interface ChatPanelProps {
 
 export function ChatPanel({ className = '' }: ChatPanelProps) {
   const mounted = useHydrated();
-  const { getCurrentConversation, addMessage, hasActiveTasks } = useChatStore();
+  const { getCurrentConversation, addMessage, currentConversationIsBusy, taskSummaries } =
+    useChatStore();
   const streams = useChatStreamStore((state) => state.streams);
 
   const conversation = getCurrentConversation();
+  const currentTaskId = conversation?.currentTaskId;
+  const currentTaskStatus = currentTaskId ? taskSummaries[currentTaskId]?.status : null;
+  const isCurrentTaskQueued = currentTaskStatus === 'queued';
   const messages = conversation?.messages || [];
   const mergedMessages: Message[] = messages.map((message) => {
     if (!message.taskId) {
@@ -66,7 +70,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       metadata: mergedMetadata,
     };
   });
-  const isLoading = hasActiveTasks();
+  const isLoading = currentConversationIsBusy();
 
   const handleSendMessage = (content: string) => {
     if (!conversation) return;
@@ -144,13 +148,11 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
             {/* Welcome Text */}
             <h3 className="mb-3 text-2xl font-semibold tracking-tight text-gray-800">
-              欢迎使用 TenderWord
+              欢迎使用体验
             </h3>
             <p className="mb-6 leading-relaxed text-gray-500">
               智能招标文档生成助手，让文档创建更高效
             </p>
-
-            {/* Instructions */}
             <div className="rounded-xl border border-gray-200/50 bg-white/70 p-4 shadow-sm backdrop-blur-sm">
               <p className="mb-3 text-sm font-medium text-gray-600">开始新对话：</p>
               <div className="space-y-2">
@@ -195,12 +197,19 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         </div>
       </div>
 
+      {isCurrentTaskQueued && (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
+          排队中，轮到当前任务后将开始显示进度日志
+        </div>
+      )}
+
       {/* Message List */}
       <div className="flex-1 overflow-hidden">
         <MessageList
           messages={mergedMessages}
           onDownload={handleDownload}
           onRetry={handleRetry}
+          emptyState={isCurrentTaskQueued ? <div className="h-full" /> : undefined}
         />
       </div>
 

@@ -74,6 +74,8 @@ export interface TaskProgress {
   completed_nodes: string[];
   running_nodes: string[];
   current_node?: string;
+  current_node_display?: string;
+  progress_text?: string;
   completed_count: number;
   total_nodes: number;
   progress_percent: number;
@@ -147,6 +149,7 @@ export interface TaskData {
   estimated_wait_seconds?: number;
   waiting_count?: number;
   progress: TaskProgress;
+  current_running_progress?: TaskProgress | null;
   result?: TaskResult | string;
   error?: string;
 }
@@ -158,30 +161,25 @@ export interface TaskListItem {
   status: TaskStatus;
   created_at: string;
   started_at?: string;
+  completed_at?: string;
+  elapsed_time?: number;
   user_session_id?: string;
   queue_position?: number;
+  waiting_count?: number;
   progress: TaskProgress;
+  current_running_progress?: TaskProgress | null;
+  result?: TaskResult | string;
+  error?: string;
 }
 
 export interface TaskListData {
+  success: boolean;
+  total: number;
   tasks: TaskListItem[];
-  pagination: {
-    page: number;
-    page_size: number;
-    total: number;
-    total_pages: number;
-  };
-  summary: {
-    total: number;
-    queued: number;
-    running: number;
-    completed: number;
-    failed: number;
-    cancelled: number;
-  };
+  message?: string;
 }
 
-export type TaskListResponse = ApiResponse<TaskListData>;
+export type TaskListResponse = TaskListData;
 
 export interface CancelTaskData {
   success: boolean;
@@ -207,11 +205,11 @@ export type TaskHeartbeatResponse = ApiResponse<TaskHeartbeatData>;
 
 export interface CreateTaskData {
   task_id: string;
-  status: TaskStatus;
-  created_at: string;
-  user_session_id: string;
-  queue_position: number;
-  estimated_wait_seconds: number;
+  status?: TaskStatus;
+  created_at?: string;
+  user_session_id?: string;
+  queue_position?: number;
+  estimated_wait_seconds?: number;
 }
 
 export type CreateTaskResponse = ApiResponse<CreateTaskData>;

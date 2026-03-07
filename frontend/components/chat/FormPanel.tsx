@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useRef } from 'react';
 import { Loader2 } from 'lucide-react';
-import { useChatStore } from '@/stores/chatStore';
+import { useChatStore, type ConversationFormDraft } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
 import { useHydrated } from '@/hooks/useHydrated';
@@ -11,6 +11,7 @@ import { GngkTenderForm, type GngkTenderFormData } from '../forms/GngkTenderForm
 import { cancelTask, createGenerateTask, getTaskStatus } from '@/lib/api';
 import { useChatSSE } from '@/hooks/useChatSSE';
 import { useTaskHeartbeat } from '@/hooks/useTaskHeartbeat';
+import { useCurrentConversationTaskStatus } from '@/hooks/useCurrentConversationTaskStatus';
 import { convertGngkFormToApiRequest, convertXjcgFormToApiRequest } from '@/lib/formDataConverter';
 import { inferTenderNoFromConversationTitle } from '@/lib/chat-utils';
 import type { TenderData } from '@/types/api';
@@ -29,38 +30,52 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
   const mounted = useHydrated();
   const {
     getCurrentConversation,
-    concurrentTaskWarning,
-    dismissConcurrentWarning,
     cancelTask: cancelChatTask,
     completeTask: completeChatTask,
     failTask: failChatTask,
     startTask,
+    upsertTaskSummary,
+    getConversationDraft,
+    updateConversationDraft,
     activeTaskIds,
-    hasActiveTasks,
   } = useChatStore();
+  const {
+    currentTaskId: effectiveTaskId,
+    currentTaskStatus,
+    waitingCount,
+    isCurrentTaskQueued,
+    isCurrentTaskRunning,
+    runningTaskProgress,
+  } = useCurrentConversationTaskStatus();
   const conversation = getCurrentConversation();
+  const conversationDraft = getConversationDraft(conversation?.id || null);
   const inferredTenderNo = conversation
     ? inferTenderNoFromConversationTitle(conversation.title)
     : null;
-  const hasActiveTask = hasActiveTasks();
-  const currentGeneratingMessage =
-    [...(conversation?.messages || [])]
-      .reverse()
-      .find((msg) => msg.status === 'generating' && typeof msg.taskId === 'string') || null;
-  const effectiveTaskId = currentGeneratingMessage?.taskId || null;
-  const hasCancelableCurrentTask = !!effectiveTaskId;
-  const formIsBusy = isSubmitting || hasActiveTask;
+  const conversationBusy =
+    typeof effectiveTaskId === 'string' &&
+    currentTaskStatus !== 'completed' &&
+    currentTaskStatus !== 'failed' &&
+    currentTaskStatus !== 'cancelled';
+  const hasCancelableCurrentTask = Boolean(effectiveTaskId && conversationBusy);
+  const formIsBusy = isSubmitting || conversationBusy;
   const syncingTerminalTasksRef = useRef<Set<string>>(new Set());
   const heartbeatTaskIds =
-    activeTaskIds.length > 0 ? activeTaskIds : effectiveTaskId ? [effectiveTaskId] : null;
+    activeTaskIds.length > 0
+      ? activeTaskIds
+      : conversationBusy && effectiveTaskId
+        ? [effectiveTaskId]
+        : null;
 
   const syncTaskTerminalState = useCallback(
     async (taskId: string, fallbackStatus?: 'cancelled' | 'failed') => {
-      const locatedGroup = useChatStore.getState().findTaskMessageGroup(taskId);
-      const isGenerating =
-        locatedGroup?.logMessage?.status === 'generating' ||
-        locatedGroup?.contentMessage?.status === 'generating';
-      if (!locatedGroup || !isGenerating) {
+      const state = useChatStore.getState();
+      const hasTrackedTask =
+        state.activeTaskIds.includes(taskId) ||
+        state.conversations.some((item) => item.currentTaskId === taskId) ||
+        !!state.taskSummaries[taskId] ||
+        !!state.findTaskMessageGroup(taskId);
+      if (!hasTrackedTask) {
         return;
       }
 
@@ -133,6 +148,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
   // Use SSE for current task
   useChatSSE({
     taskId: effectiveTaskId,
+    taskStatus: currentTaskStatus,
     conversationId: conversation?.id || null,
     onComplete: () => {
       setIsSubmitting(false);
@@ -198,9 +214,26 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
             : convertGngkFormToApiRequest(formData as GngkTenderFormData);
 
         const result = await createGenerateTask(request);
-        startTask(conversation.id, result.task_id);
-        useChatTaskSessionStore.getState().upsertSession(result.task_id);
-        useChatStreamStore.getState().replaceStream(result.task_id);
+        startTask(conversation.id, result.task_id, {
+          status: result.status || 'queued',
+          queue_position: result.queue_position,
+        });
+
+        // 任务创建后立即补拉一次，拿到排队摘要（waiting_count / queue_position 等）
+        try {
+          const task = await getTaskStatus(result.task_id);
+          upsertTaskSummary(result.task_id, {
+            status: task.status,
+            queue_position: task.queue_position,
+            waiting_count: task.waiting_count,
+            progress_percent: task.progress.progress_percent,
+            progress_text: task.progress.progress_text || '',
+            current_node_display: task.progress.current_node_display || task.progress.current_node || '',
+          });
+        } catch {
+          // 摘要补拉失败不阻断提交流程
+        }
+
         setIsSubmitting(false);
       } catch (error) {
         console.error('Failed to create task:', error);
@@ -208,8 +241,28 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         alert('创建任务失败，请重试');
       }
     },
-    [conversation, startTask]
+    [conversation, startTask, upsertTaskSummary]
   );
+
+  const handleDraftChange = useCallback(
+    (updates: Partial<ConversationFormDraft>) => {
+      if (!conversation) {
+        return;
+      }
+      updateConversationDraft(conversation.id, updates);
+    },
+    [conversation, updateConversationDraft]
+  );
+
+  const runningProgressText = runningTaskProgress
+    ? `${runningTaskProgress.completed_count}/${runningTaskProgress.total_nodes}（${Math.round(
+        runningTaskProgress.progress_percent
+      )}%）`
+    : null;
+  const waitingCountText = typeof waitingCount === 'number' ? `${waitingCount}` : '...';
+  const runningProgressPercent = runningTaskProgress
+    ? Math.max(0, Math.min(100, Math.round(runningTaskProgress.progress_percent)))
+    : 0;
 
   // Empty state when no conversation or during hydration
   if (!mounted || !conversation) {
@@ -219,9 +272,9 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
       >
         <div className="max-w-sm text-center">
           {/* Animated Document Icon */}
-          <div className="relative mb-8">
+          <div className="relative mb-8 inline-flex">
             <div className="absolute inset-0 animate-pulse rounded-full bg-indigo-100 opacity-50" />
-            <div className="relative rounded-full border border-indigo-100 bg-white p-6 shadow-lg">
+            <div className="relative flex h-28 w-28 items-center justify-center rounded-full border border-indigo-100 bg-white shadow-lg">
               <svg
                 className="h-16 w-16 text-indigo-500"
                 width={64}
@@ -298,33 +351,42 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         </div>
       </div>
 
-      {/* Concurrent Task Warning */}
-      {concurrentTaskWarning && (
-        <div className="animate-fade-in-up mx-4 mt-4 rounded border border-yellow-200 bg-yellow-50 p-3 shadow-sm">
-          <div className="flex items-start gap-2">
-            <svg
-              className="mt-0.5 h-5 w-5 text-yellow-500"
-              width={20}
-              height={20}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-              />
-            </svg>
-            <div className="flex-1">
-              <p className="text-sm text-yellow-800">当前有其他任务在运行，将排队等待</p>
-              <button
-                onClick={dismissConcurrentWarning}
-                className="mt-1 text-xs text-yellow-600 transition-colors duration-200 hover:text-yellow-800"
+      {isCurrentTaskQueued && (
+        <div className="mx-4 mt-4 rounded-lg border border-amber-300 bg-gradient-to-r from-amber-50 to-orange-50 px-4 py-3 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 rounded bg-amber-200/80 p-1.5 text-amber-700">
+              <svg
+                className="h-4 w-4"
+                width={16}
+                height={16}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
               >
-                我知道了
-              </button>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-amber-900">任务排队中</p>
+              <p className="mt-1 text-sm text-amber-900">
+                前方等待{waitingCountText}个任务（含当前执行任务）
+              </p>
+              <p className="mt-1 text-sm text-amber-900">
+                {runningProgressText
+                  ? `当前执行任务进度：${runningProgressText}`
+                  : '当前暂无执行任务，即将开始下一任务'}
+              </p>
+              <div className="mt-2 h-1.5 w-full rounded-full bg-amber-200">
+                <div
+                  className="h-full rounded-full bg-amber-500 transition-[width] duration-500"
+                  style={{ width: `${runningProgressPercent}%` }}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -339,8 +401,10 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
             isSubmitting={formIsBusy}
             canCancel={hasCancelableCurrentTask}
             onCancel={handleCancelTask}
-            initialTenderNo={inferredTenderNo ?? undefined}
-            initialTenderData={initialTenderData ?? undefined}
+            initialTenderNo={conversationDraft?.tender_no || inferredTenderNo || undefined}
+            initialTenderData={conversationDraft?.tender_data || initialTenderData || undefined}
+            initialDraft={conversationDraft}
+            onDraftChange={handleDraftChange}
           />
         ) : (
           <GngkTenderForm
@@ -349,13 +413,15 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
             isSubmitting={formIsBusy}
             canCancel={hasCancelableCurrentTask}
             onCancel={handleCancelTask}
-            initialTenderNo={inferredTenderNo ?? undefined}
-            initialTenderData={initialTenderData ?? undefined}
+            initialTenderNo={conversationDraft?.tender_no || inferredTenderNo || undefined}
+            initialTenderData={conversationDraft?.tender_data || initialTenderData || undefined}
+            initialDraft={conversationDraft}
+            onDraftChange={handleDraftChange}
           />
         )}
       </div>
 
-      {hasActiveTask && (
+      {isCurrentTaskRunning && (
         <div
           role="status"
           aria-live="polite"

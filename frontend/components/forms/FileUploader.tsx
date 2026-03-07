@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { cn, formatFileSize } from '@/lib/utils';
 import { Upload, X, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { uploadFile, ApiError } from '@/lib/api';
@@ -8,7 +8,7 @@ import type { FileType } from '@/types/api';
 
 export interface UploadedFile {
   id: string;
-  file: File;
+  file?: File;
   file_path: string;
   file_name: string;
   original_name: string;
@@ -19,7 +19,9 @@ export interface UploadedFile {
 
 export interface FileUploaderProps {
   onUpload?: (files: UploadedFile[]) => void;
+  onFilesChange?: (files: UploadedFile[]) => void;
   onFileSelect?: (files: File[]) => void;
+  initialFiles?: UploadedFile[];
   multiple?: boolean;
   accept?: string;
   maxFiles?: number;
@@ -34,7 +36,9 @@ export interface FileUploaderProps {
 
 export function FileUploader({
   onUpload,
+  onFilesChange,
   onFileSelect,
+  initialFiles,
   multiple = false,
   accept = '.doc,.docx',
   maxFiles = 10,
@@ -49,6 +53,23 @@ export function FileUploader({
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const shouldNotifyFilesChangeRef = useRef(false);
+
+  useEffect(() => {
+    if (!initialFiles) {
+      return;
+    }
+    setFiles(initialFiles);
+  }, [initialFiles]);
+
+  useEffect(() => {
+    if (!shouldNotifyFilesChangeRef.current) {
+      return;
+    }
+
+    shouldNotifyFilesChangeRef.current = false;
+    onFilesChange?.(files);
+  }, [files, onFilesChange]);
 
   const handleDragOver = useCallback(
     (e: React.DragEvent) => {
@@ -107,6 +128,7 @@ export function FileUploader({
       }
 
       if (uploadedFiles.length > 0) {
+        shouldNotifyFilesChangeRef.current = true;
         setFiles((prev) => (multiple ? [...prev, ...uploadedFiles] : uploadedFiles));
         onUpload?.(uploadedFiles);
       }
@@ -182,9 +204,10 @@ export function FileUploader({
 
   const removeFile = useCallback(
     (id: string) => {
+      shouldNotifyFilesChangeRef.current = true;
       setFiles((prev) => prev.filter((f) => f.id !== id));
     },
-    [setFiles]
+    []
   );
   const selectionHint = multiple ? `最多 ${maxFiles} 个文件` : '单文件上传';
 

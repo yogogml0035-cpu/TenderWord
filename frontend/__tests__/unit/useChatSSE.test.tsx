@@ -48,6 +48,7 @@ function resetStores() {
         tenderType: 'xjcg',
         createdAt: 1,
         updatedAt: 1,
+        currentTaskId: 'task-1',
         messages: [
           {
             id: 'msg-log-1',
@@ -74,7 +75,6 @@ function resetStores() {
     },
     isLoading: false,
     error: null,
-    concurrentTaskWarning: false,
     selectedTenderType: 'xjcg',
   }));
 
@@ -84,6 +84,28 @@ function resetStores() {
 
 function getTaskGroup() {
   return useChatStore.getState().findTaskMessageGroup('task-1');
+}
+
+function setQueueOnlyTaskState() {
+  useChatStore.setState((state) => ({
+    ...state,
+    conversations: [
+      {
+        id: 'conv-1',
+        title: '0811-DSITC253505',
+        tenderType: 'xjcg',
+        createdAt: 1,
+        updatedAt: 1,
+        currentTaskId: 'task-1',
+        messages: [],
+      },
+    ],
+    currentConversationId: 'conv-1',
+    activeTaskIds: ['task-1'],
+    taskMessageMap: {},
+  }));
+  useChatStreamStore.setState({ streams: {} });
+  useChatTaskSessionStore.setState({ sessions: {} });
 }
 
 describe('useChatSSE', () => {
@@ -196,6 +218,63 @@ describe('useChatSSE', () => {
     expect(completedGroup?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
     expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
+  });
+
+  it('keeps SSE disconnected while queued and creates task-log only when running', async () => {
+    setQueueOnlyTaskState();
+
+    const { rerender } = renderHook(
+      ({ status }: { status: 'queued' | 'running' }) =>
+        useChatSSE({
+          taskId: 'task-1',
+          taskStatus: status,
+          conversationId: 'conv-1',
+        }),
+      {
+        initialProps: { status: 'queued' as 'queued' | 'running' },
+      }
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(latestOptions?.endpoint).toBe('');
+    expect(getTaskGroup()).toBeNull();
+
+    rerender({ status: 'running' as const });
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+    expect(getTaskGroup()?.logMessage?.metadata?.messageKind).toBe('task-log');
+  });
+
+  it('clears queued cancelled task without creating any chat cards', async () => {
+    setQueueOnlyTaskState();
+    mockGetTaskStatus.mockResolvedValue({
+      task_id: 'task-1',
+      status: 'cancelled',
+      created_at: new Date().toISOString(),
+      progress: createRunningTaskStatus().progress,
+    });
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        taskStatus: 'cancelled',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(useChatStore.getState().activeTaskIds).toHaveLength(0);
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    expect(conversation?.currentTaskId).toBeUndefined();
+    expect(conversation?.messages).toHaveLength(0);
+    expect(useChatStore.getState().findTaskMessageGroup('task-1')).toBeNull();
   });
 
   it('routes log and progress events only to stream runtime state', async () => {

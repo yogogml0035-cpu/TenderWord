@@ -15,6 +15,12 @@ jest.mock('@/hooks/useTaskHeartbeat', () => ({
   useTaskHeartbeat: (...args: unknown[]) => mockUseTaskHeartbeat(...args),
 }));
 
+const mockUseCurrentConversationTaskStatus = jest.fn();
+jest.mock('@/hooks/useCurrentConversationTaskStatus', () => ({
+  useCurrentConversationTaskStatus: (...args: unknown[]) =>
+    mockUseCurrentConversationTaskStatus(...args),
+}));
+
 jest.mock('@/components/forms/XjcgTenderForm', () => ({
   XjcgTenderForm: ({
     isSubmitting,
@@ -56,6 +62,16 @@ describe('FormPanel', () => {
     window.localStorage.clear();
     window.sessionStorage.clear();
     mockUseTaskHeartbeat.mockClear();
+    mockUseCurrentConversationTaskStatus.mockReset();
+    mockUseCurrentConversationTaskStatus.mockReturnValue({
+      currentTaskId: null,
+      currentTaskSummary: null,
+      currentTaskStatus: null,
+      waitingCount: undefined,
+      isCurrentTaskQueued: false,
+      isCurrentTaskRunning: false,
+      runningTaskProgress: null,
+    });
 
     useChatStore.setState((state) => ({
       ...state,
@@ -72,60 +88,120 @@ describe('FormPanel', () => {
       currentConversationId: 'conv-1',
       activeTaskIds: ['task-queued', 'task-running'],
       taskMessageMap: {},
-      concurrentTaskWarning: false,
       selectedTenderType: 'xjcg',
       isLoading: false,
       error: null,
     }));
   });
 
-  it('keeps heartbeats alive for all active tasks even when the current conversation has no generating message', () => {
+  it('keeps heartbeats alive for all active tasks even when the current conversation has no active task', () => {
     render(<FormPanel />);
 
     expect(screen.getByText('XjcgTenderForm')).toBeInTheDocument();
     expect(mockUseTaskHeartbeat.mock.calls[0]?.[0]).toEqual(['task-queued', 'task-running']);
   });
 
-  it('shows a non-blocking loading status and keeps the form in submitting state while tasks are active', () => {
-    render(<FormPanel />);
-
-    const status = screen.getByRole('status');
-    expect(status).toHaveTextContent('正在生成招标文档...');
-    expect(status).toHaveClass(
-      'pointer-events-none',
-      'absolute',
-      'inset-x-0',
-      'top-1/2',
-      '-translate-y-1/2'
-    );
-    expect(screen.getByTestId('xjcg-form')).toHaveAttribute('data-submitting', 'true');
-    expect(screen.queryByRole('button', { name: '取消生成' })).not.toBeInTheDocument();
-  });
-
-  it('passes cancel capability to the current form when the current conversation has a generating task', () => {
+  it('shows queue status card and keeps form locked/cancellable when current task is queued', () => {
     useChatStore.setState((state) => ({
       ...state,
       conversations: [
         {
           ...state.conversations[0],
-          messages: [
-            {
-              id: 'msg-1',
-              conversationId: 'conv-1',
-              type: 'ai',
-              content: '正在生成',
-              timestamp: Date.now(),
-              status: 'generating',
-              taskId: 'task-running',
-            },
-          ],
+          currentTaskId: 'task-queued',
+        },
+      ],
+      activeTaskIds: ['task-queued'],
+    }));
+    mockUseCurrentConversationTaskStatus.mockReturnValue({
+      currentTaskId: 'task-queued',
+      currentTaskSummary: {
+        task_id: 'task-queued',
+        status: 'queued',
+        waiting_count: 2,
+        updated_at: Date.now(),
+      },
+      currentTaskStatus: 'queued',
+      waitingCount: 2,
+      isCurrentTaskQueued: true,
+      isCurrentTaskRunning: false,
+      runningTaskProgress: {
+        completed_count: 1,
+        total_nodes: 10,
+        progress_percent: 10,
+      },
+    });
+
+    render(<FormPanel />);
+
+    expect(screen.getByText('任务排队中')).toBeInTheDocument();
+    expect(screen.getByText('前方等待2个任务（含当前执行任务）')).toBeInTheDocument();
+    expect(screen.getByText('当前执行任务进度：1/10（10%）')).toBeInTheDocument();
+    expect(screen.getByTestId('xjcg-form')).toHaveAttribute('data-submitting', 'true');
+    expect(screen.getByTestId('xjcg-form')).toHaveAttribute('data-can-cancel', 'true');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('shows queue fallback copy when there is no active running progress snapshot yet', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: 'task-queued',
+        },
+      ],
+      activeTaskIds: ['task-queued'],
+    }));
+    mockUseCurrentConversationTaskStatus.mockReturnValue({
+      currentTaskId: 'task-queued',
+      currentTaskSummary: {
+        task_id: 'task-queued',
+        status: 'queued',
+        waiting_count: 1,
+        updated_at: Date.now(),
+      },
+      currentTaskStatus: 'queued',
+      waitingCount: 1,
+      isCurrentTaskQueued: true,
+      isCurrentTaskRunning: false,
+      runningTaskProgress: null,
+    });
+
+    render(<FormPanel />);
+
+    expect(screen.getByText('当前暂无执行任务，即将开始下一任务')).toBeInTheDocument();
+    expect(screen.queryByText(/获取中/)).not.toBeInTheDocument();
+  });
+
+  it('shows running overlay when current task is running', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: 'task-running',
         },
       ],
       activeTaskIds: ['task-running'],
     }));
+    mockUseCurrentConversationTaskStatus.mockReturnValue({
+      currentTaskId: 'task-running',
+      currentTaskSummary: {
+        task_id: 'task-running',
+        status: 'running',
+        updated_at: Date.now(),
+      },
+      currentTaskStatus: 'running',
+      waitingCount: undefined,
+      isCurrentTaskQueued: false,
+      isCurrentTaskRunning: true,
+      runningTaskProgress: null,
+    });
 
     render(<FormPanel />);
 
+    expect(screen.getByRole('status')).toHaveTextContent('正在生成招标文档...');
+    expect(screen.getByTestId('xjcg-form')).toHaveAttribute('data-submitting', 'true');
     expect(screen.getByTestId('xjcg-form')).toHaveAttribute('data-can-cancel', 'true');
   });
 });

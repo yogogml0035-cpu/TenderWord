@@ -186,6 +186,35 @@ class TaskService:
         }
         return status_map.get(status, TaskStatus.QUEUED)
 
+    def _build_progress_snapshot(
+        self,
+        task: InternalTask,
+        *,
+        status: Optional[TaskStatus] = None,
+    ) -> TaskProgress:
+        """构建可序列化的进度快照。"""
+        current_node = None
+        current_node_display = None
+        if task.progress.running_nodes:
+            current_node = task.progress.running_nodes[0]
+            current_node_display = self._get_node_display_name(current_node)
+
+        total_nodes = max(1, task.progress.total_nodes)
+        completed_count = task.progress.completed_count
+        progress_percent = round((completed_count / total_nodes) * 100, 1)
+
+        return TaskProgress(
+            task_id=task.task_id,
+            status=status or self._convert_status(task.status),
+            completed_count=completed_count,
+            total_nodes=total_nodes,
+            progress_text=f"{completed_count}/{total_nodes}",
+            progress_percent=progress_percent,
+            current_node=current_node,
+            current_node_display=current_node_display,
+            completed_nodes=task.progress.completed_nodes,
+        )
+
     def _convert_to_task_info(self, task: InternalTask) -> TaskInfo:
         """将内部任务转换为 TaskInfo.
 
@@ -195,27 +224,20 @@ class TaskService:
         Returns:
             TaskInfo: API 任务信息
         """
-        # 获取当前运行的节点
-        current_node = None
-        current_node_display = None
-        if task.progress.running_nodes:
-            current_node = task.progress.running_nodes[0]
-            current_node_display = self._get_node_display_name(current_node)
-
-        # 构建进度信息
-        progress = TaskProgress(
-            task_id=task.task_id,
-            status=self._convert_status(task.status),
-            completed_count=task.progress.completed_count,
-            total_nodes=task.progress.total_nodes,
-            current_node=current_node,
-            current_node_display=current_node_display,
-            completed_nodes=task.progress.completed_nodes,
-        )
+        progress = self._build_progress_snapshot(task)
 
         # 获取队列位置
         queue_position = self._task_queue.get_queue_position(task.task_id)
         waiting_count = self._task_queue.get_waiting_count(task.task_id)
+
+        current_running_progress = None
+        if task.status == InternalTaskStatus.QUEUED:
+            current_running_task = self._task_queue.get_current_running_task()
+            if current_running_task and current_running_task.task_id != task.task_id:
+                current_running_progress = self._build_progress_snapshot(
+                    current_running_task,
+                    status=TaskStatus.RUNNING,
+                )
 
         return TaskInfo(
             task_id=task.task_id,
@@ -230,6 +252,7 @@ class TaskService:
             result=task.result,
             error=task.error,
             progress=progress,
+            current_running_progress=current_running_progress,
         )
 
     def _get_node_display_name(self, node_name: str) -> str:

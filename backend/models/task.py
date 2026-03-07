@@ -59,6 +59,8 @@ class TaskProgress(BaseModel):
     status: TaskStatus = Field(..., description="任务当前状态")
     completed_count: int = Field(default=0, description="已完成节点数", ge=0)
     total_nodes: int = Field(default=7, description="总节点数", ge=1)
+    progress_text: str = Field(default="0/7", description="进度文本")
+    progress_percent: float = Field(default=0.0, description="进度百分比")
     current_node: Optional[str] = Field(
         default=None, description="当前正在执行的节点名称"
     )
@@ -68,18 +70,6 @@ class TaskProgress(BaseModel):
     completed_nodes: List[str] = Field(
         default_factory=list, description="已完成的节点名称列表"
     )
-
-    @property
-    def progress_text(self) -> str:
-        """进度文本，如 '3/7'"""
-        return f"{self.completed_count}/{self.total_nodes}"
-
-    @property
-    def progress_percent(self) -> float:
-        """进度百分比"""
-        if self.total_nodes == 0:
-            return 0.0
-        return (self.completed_count / self.total_nodes) * 100
 
     def to_progress_dict(self) -> Dict[str, Any]:
         """转换为进度字典，用于 SSE 推送"""
@@ -119,6 +109,10 @@ class TaskInfo(BaseModel):
     progress: TaskProgress = Field(
         default_factory=lambda: TaskProgress(task_id="", status=TaskStatus.QUEUED),
         description="任务进度",
+    )
+    current_running_progress: Optional[TaskProgress] = Field(
+        default=None,
+        description="当前正在执行任务的进度快照（仅排队任务需要）",
     )
 
 

@@ -1,16 +1,14 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, Suspense } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useEffect, useState, useCallback, Suspense, useRef } from 'react';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { TenderTypeSidebar } from '@/components/chat/TenderTypeSidebar';
 import { FormPanel } from '@/components/chat/FormPanel';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { useUrlParams } from '@/hooks/useUrlParams';
+import { useHydrated } from '@/hooks/useHydrated';
 import { useChatStore } from '@/stores/chatStore';
 import { fetchTenderData } from '@/lib/api';
-import type { TenderData } from '@/types/api';
-import type { TenderType } from '@/types';
 
 /**
  * URL参数处理状态
@@ -18,7 +16,6 @@ import type { TenderType } from '@/types';
 interface UrlProcessingState {
   isProcessing: boolean;
   error: string | null;
-  tenderData: TenderData | null;
 }
 
 /**
@@ -26,59 +23,62 @@ interface UrlProcessingState {
  * 需要被Suspense包裹
  */
 function ChatPageContent() {
-  const router = useRouter();
   const { tenderno, tenderType, isValid, hasParams } = useUrlParams();
+  const hydrated = useHydrated();
+  const processedUrlConversationKeyRef = useRef<string | null>(null);
 
   const {
-    findConversationByTenderNo,
     createConversation,
     setCurrentConversation,
     setSelectedTenderType,
+    updateConversationDraft,
   } = useChatStore();
-  const [mounted, setMounted] = useState(false);
-
   // URL参数处理状态
   const [urlState, setUrlState] = useState<UrlProcessingState>({
     isProcessing: false,
     error: null,
-    tenderData: null,
   });
-
-  // Fix hydration: wait for client mount before accessing persisted store
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   /**
    * 处理URL参数 - 获取招标数据
    */
   const handleUrlParams = useCallback(async () => {
-    if (!mounted || !hasParams || !tenderno) return;
+    if (!hydrated || !hasParams || !isValid) return;
+
+    if (tenderType) {
+      setSelectedTenderType(tenderType);
+    }
+
+    if (!tenderType || !tenderno) {
+      return;
+    }
+
+    const urlConversationKey = `${tenderType}:${tenderno}`;
+    if (processedUrlConversationKeyRef.current === urlConversationKey) {
+      return;
+    }
+    processedUrlConversationKeyRef.current = urlConversationKey;
 
     setUrlState((prev) => ({ ...prev, isProcessing: true, error: null }));
 
     try {
       const data = await fetchTenderData(tenderno);
+      const newConversationId = createConversation(tenderno, tenderType);
+      setCurrentConversation(newConversationId);
+      updateConversationDraft(newConversationId, {
+        tender_no: tenderno,
+        tender_data: data,
+      });
+
       setUrlState((prev) => ({
         ...prev,
         isProcessing: false,
-        tenderData: data,
       }));
-
-      // 设置招标类型
-      if (tenderType) {
-        setSelectedTenderType(tenderType);
-      }
-
-      // 查找或创建会话
-      const existingConv = findConversationByTenderNo(tenderno);
-      if (existingConv) {
-        setCurrentConversation(existingConv.id);
-      } else if (tenderType) {
-        const newConvId = createConversation(tenderno, tenderType);
-        setCurrentConversation(newConvId);
-      }
     } catch (err) {
+      const newConversationId = createConversation(tenderno, tenderType);
+      setCurrentConversation(newConversationId);
+      updateConversationDraft(newConversationId, { tender_no: tenderno });
+
       const errorMessage = err instanceof Error ? err.message : '获取招标数据失败';
       setUrlState((prev) => ({
         ...prev,
@@ -86,21 +86,38 @@ function ChatPageContent() {
         error: errorMessage,
       }));
     }
-  }, [mounted, hasParams, tenderno, tenderType, findConversationByTenderNo, createConversation, setCurrentConversation, setSelectedTenderType]);
+  }, [
+    hydrated,
+    hasParams,
+    isValid,
+    tenderType,
+    tenderno,
+    createConversation,
+    setCurrentConversation,
+    setSelectedTenderType,
+    updateConversationDraft,
+  ]);
 
   // 处理URL参数（只执行一次，且在mounted后）
   useEffect(() => {
-    if (!mounted) return;
-    handleUrlParams();
-  }, [mounted, hasParams, isValid, handleUrlParams]);
+    if (!hydrated) return;
+
+    const timer = window.setTimeout(() => {
+      void handleUrlParams();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [hydrated, hasParams, isValid, handleUrlParams]);
 
   /**
    * 清除错误提示
    */
   const clearError = useCallback(() => {
-    if (!mounted) return;
+    if (!hydrated) return;
     setUrlState((prev) => ({ ...prev, error: null }));
-  }, [mounted]);
+  }, [hydrated]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100">
@@ -111,7 +128,7 @@ function ChatPageContent() {
 
       {/* Middle Column - Form Panel */}
       <div className="min-w-0 flex-1 border-r border-gray-200">
-        <FormPanel initialTenderData={urlState.tenderData} />
+        <FormPanel />
       </div>
 
       {/* Right Column - Chat Panel */}
