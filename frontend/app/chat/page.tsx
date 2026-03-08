@@ -120,19 +120,19 @@ function ChatPageContent() {
   }, [hydrated]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-100">
+    <div className="grid h-screen grid-cols-[auto_minmax(0,2fr)_minmax(0,3fr)] overflow-hidden bg-gray-100">
       {/* Left Sidebar - Tender Types */}
       <div className="flex-shrink-0">
         <TenderTypeSidebar />
       </div>
 
       {/* Middle Column - Form Panel */}
-      <div className="min-w-0 flex-1 border-r border-gray-200">
+      <div className="min-h-0 min-w-0 border-r border-gray-200">
         <FormPanel />
       </div>
 
       {/* Right Column - Chat Panel */}
-      <div className="min-w-0 flex-1">
+      <div className="min-h-0 min-w-0">
         <ChatPanel />
       </div>
 

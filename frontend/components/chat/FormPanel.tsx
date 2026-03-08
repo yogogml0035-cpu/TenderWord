@@ -268,7 +268,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
   if (!mounted || !conversation) {
     return (
       <div
-        className={`flex h-full flex-col items-center justify-center bg-gradient-to-br from-slate-50 to-gray-100 p-8 ${className}`}
+        className={`flex h-full min-h-0 flex-col items-center justify-center bg-gradient-to-br from-slate-50 to-gray-100 p-8 ${className}`}
       >
         <div className="max-w-sm text-center">
           {/* Animated Document Icon */}
@@ -340,7 +340,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
   }
 
   return (
-    <div className={`relative flex h-full flex-col bg-white shadow-sm ${className}`}>
+    <div className={`relative flex h-full min-h-0 flex-col bg-white shadow-sm ${className}`}>
       {/* Header */}
       <div className="relative z-20 border-b border-gray-200 bg-white px-4 py-3">
         <div>

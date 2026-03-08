@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { TenderNoInput, type TenderData } from './TenderNoInput';
-import { ModelSelector, type ModelType } from './ModelSelector';
+import type { ModelType } from './ModelSelector';
 import { FileUploader, type UploadedFile } from './FileUploader';
 import { FormSection, FormField, ErrorDisplay, InfoCard, type TenderInfoItem } from './shared';
 import type { ConversationDraftFile, ConversationFormDraft } from '@/stores/chatStore';
@@ -65,7 +65,6 @@ export function XjcgTenderForm({
   const [tenderData, setTenderData] = useState<TenderData | null>(
     initialDraft?.tender_data || initialTenderData || null
   );
-  const [model, setModel] = useState<ModelType>(initialDraft?.model || 'deepseek');
   const [originFile, setOriginFile] = useState<UploadedFile | null>(
     (initialDraft?.files?.origin_tender as UploadedFile | undefined) || null
   );
@@ -80,6 +79,7 @@ export function XjcgTenderForm({
     after_text: initialDraft?.insertion_config?.after_text || '第四章  响应文件有关格式',
   });
   const [error, setError] = useState<string | null>(null);
+  const selectedModel: ModelType = initialDraft?.model || 'deepseek';
 
   const syncDraftFiles = useCallback(
     (nextOriginFile: UploadedFile | null, nextCleanDraftFile: UploadedFile | null, nextParamFiles: UploadedFile[]) => {
@@ -111,14 +111,6 @@ export function XjcgTenderForm({
     (value: string) => {
       setTenderNo(value);
       onDraftChange?.({ tender_no: value });
-    },
-    [onDraftChange]
-  );
-
-  const handleModelChange = useCallback(
-    (value: ModelType) => {
-      setModel(value);
-      onDraftChange?.({ model: value });
     },
     [onDraftChange]
   );
@@ -181,7 +173,7 @@ export function XjcgTenderForm({
       const formData: XjcgTenderFormData = {
         tender_no: tenderNo,
         tender_data: tenderData,
-        model,
+        model: selectedModel,
         files: {
           origin_tender: originFile || undefined,
           clean_draft: cleanDraftFile || undefined,
@@ -192,7 +184,16 @@ export function XjcgTenderForm({
 
       await onSubmit(formData);
     },
-    [tenderNo, tenderData, model, originFile, cleanDraftFile, paramFiles, insertionConfig, onSubmit]
+    [
+      tenderNo,
+      tenderData,
+      selectedModel,
+      originFile,
+      cleanDraftFile,
+      paramFiles,
+      insertionConfig,
+      onSubmit,
+    ]
   );
 
   // Prepare tender data for InfoCard
@@ -282,14 +283,9 @@ export function XjcgTenderForm({
         </div>
       </FormSection>
 
-      {/* Section 3: Model Selection */}
-      <FormSection title="模型选择" index={3}>
-        <ModelSelector value={model} onChange={handleModelChange} disabled={isSubmitting} />
-      </FormSection>
-
-      {/* Section 4: Advanced Settings */}
-      <FormSection title="高级设置（可选）" index={4}>
-        <div className="grid gap-4 md:grid-cols-2">
+      {/* Section 3: Advanced Settings */}
+      <FormSection title="高级设置（可选）" index={3}>
+        <div className="space-y-4">
           <FormField
             label="插入位置前文本"
             name="before_text"

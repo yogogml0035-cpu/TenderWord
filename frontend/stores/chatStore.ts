@@ -362,7 +362,9 @@ export const useChatStore = create<ChatStore>()(
             selectedTenderType: tenderType,
             conversationDrafts: {
               ...state.conversationDrafts,
-              [conversation.id]: {},
+              [conversation.id]: {
+                model: 'deepseek',
+              },
             },
           }));
           return conversation.id;

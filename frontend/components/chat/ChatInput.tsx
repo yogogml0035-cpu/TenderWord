@@ -1,10 +1,18 @@
 'use client';
 
 import React, { useState, useRef, useCallback } from 'react';
-import { Send, Loader2 } from 'lucide-react';
+import { Loader2, Send } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import type { ModelType } from '@/components/forms/ModelSelector';
+import { ChatModelPicker } from './ChatModelPicker';
+
+const MIN_TEXTAREA_HEIGHT = 112;
+const MAX_TEXTAREA_HEIGHT = 180;
 
 interface ChatInputProps {
   onSend: (message: string) => void;
+  selectedModel: ModelType;
+  onModelChange: (model: ModelType) => void;
   disabled?: boolean;
   placeholder?: string;
   loading?: boolean;
@@ -12,25 +20,28 @@ interface ChatInputProps {
 
 export function ChatInput({
   onSend,
+  selectedModel,
+  onModelChange,
   disabled = false,
   placeholder = '输入消息...',
   loading = false,
 }: ChatInputProps) {
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const inputLocked = disabled || loading;
 
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
-    if (!trimmed || disabled || loading) return;
+    if (!trimmed || inputLocked) return;
 
     onSend(trimmed);
     setInput('');
 
     // Reset textarea height
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${MIN_TEXTAREA_HEIGHT}px`;
     }
-  }, [input, onSend, disabled, loading]);
+  }, [input, inputLocked, onSend]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -45,40 +56,65 @@ export function ChatInput({
 
     // Auto-resize
     target.style.height = 'auto';
-    target.style.height = Math.min(target.scrollHeight, 120) + 'px';
+    target.style.height =
+      Math.min(Math.max(target.scrollHeight, MIN_TEXTAREA_HEIGHT), MAX_TEXTAREA_HEIGHT) + 'px';
   };
 
   const isEmpty = !input.trim();
 
   return (
-    <div className="flex items-end gap-2 border-t border-gray-200 bg-white p-3">
-      <div className="relative flex-1">
-        <textarea
-          ref={textareaRef}
-          value={input}
-          onChange={handleInput}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          disabled={disabled || loading}
-          rows={1}
-          className={`w-full resize-none rounded border px-4 py-2 pr-10 transition-colors duration-200 focus:border-transparent focus:ring-2 focus:ring-blue-500 focus:outline-none ${disabled || loading ? 'cursor-not-allowed bg-gray-100' : 'bg-white'} ${isEmpty ? 'border-gray-300' : 'border-blue-300'} `}
-        />
-        <div className="absolute right-3 bottom-2.5 text-xs text-gray-400">
-          {input.length > 0 && `${input.length} 字符`}
+    <div className="border-t border-slate-200 bg-gradient-to-b from-white via-slate-50/60 to-white px-4 py-4">
+      <div
+        className={cn(
+          'rounded-[30px] border border-slate-200 bg-white shadow-lg shadow-slate-200/70 transition-all duration-200',
+          inputLocked && 'opacity-90'
+        )}
+      >
+        <div className="px-3 pt-3">
+          <ChatModelPicker
+            value={selectedModel}
+            onChange={onModelChange}
+            disabled={inputLocked}
+          />
+        </div>
+
+        <div className="px-3 pb-2 pt-3">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            disabled={inputLocked}
+            rows={1}
+            className={cn(
+              'w-full resize-none bg-transparent px-2 py-1 text-[15px] leading-7 text-slate-800 transition-colors duration-200 placeholder:text-slate-400 focus:outline-none',
+              inputLocked && 'cursor-not-allowed text-slate-500'
+            )}
+            style={{ minHeight: `${MIN_TEXTAREA_HEIGHT}px` }}
+          />
+        </div>
+
+        <div className="flex justify-end border-t border-slate-100 px-4 pb-4 pt-3">
+          <button
+            onClick={handleSend}
+            disabled={isEmpty || inputLocked}
+            aria-label={loading ? '发送中' : '发送消息'}
+            className={cn(
+              'flex h-11 w-11 items-center justify-center rounded-2xl transition-all duration-200',
+              isEmpty || inputLocked
+                ? 'cursor-not-allowed bg-slate-200 text-slate-400'
+                : 'bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-200 hover:-translate-y-0.5 hover:from-blue-600 hover:to-blue-700'
+            )}
+          >
+            {loading ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <Send className="h-5 w-5" />
+            )}
+          </button>
         </div>
       </div>
-
-      <button
-        onClick={handleSend}
-        disabled={isEmpty || disabled || loading}
-        className={`flex h-11 w-11 items-center justify-center rounded transition-colors duration-200 ${
-          isEmpty || disabled || loading
-            ? 'cursor-not-allowed bg-gray-200 text-gray-400'
-            : 'bg-blue-500 text-white shadow-sm hover:bg-blue-600 hover:shadow-md'
-        } `}
-      >
-        {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-      </button>
     </div>
   );
 }

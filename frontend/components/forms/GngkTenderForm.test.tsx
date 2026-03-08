@@ -63,32 +63,6 @@ jest.mock('./TenderNoInput', () => ({
   ),
 }));
 
-jest.mock('./ModelSelector', () => ({
-  ModelSelector: ({
-    value,
-    onChange,
-    disabled,
-  }: {
-    value: string;
-    onChange: (value: string) => void;
-    disabled?: boolean;
-  }) => (
-    <div data-testid="model-selector">
-      <label>选择模型</label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        data-testid="model-select"
-        disabled={disabled}
-      >
-        <option value="deepseek">DeepSeek</option>
-        <option value="qwen">通义千问</option>
-        <option value="doubao">豆包</option>
-      </select>
-    </div>
-  ),
-}));
-
 jest.mock('./FileUploader', () => ({
   FileUploader: ({
     label,
@@ -168,7 +142,6 @@ describe('GngkTenderForm', () => {
 
       expect(screen.getByText('招标信息')).toBeInTheDocument();
       expect(screen.getByText('文件上传')).toBeInTheDocument();
-      expect(screen.getByText('模型选择')).toBeInTheDocument();
       expect(screen.getByText('高级设置（可选）')).toBeInTheDocument();
     });
 
@@ -177,9 +150,9 @@ describe('GngkTenderForm', () => {
       expect(screen.getByTestId('tender-no-input')).toBeInTheDocument();
     });
 
-    it('should render ModelSelector component', () => {
+    it('should not render the model selector inside the form panel', () => {
       render(<GngkTenderForm onSubmit={mockOnSubmit} />);
-      expect(screen.getByTestId('model-selector')).toBeInTheDocument();
+      expect(screen.queryByTestId('model-select')).not.toBeInTheDocument();
     });
 
     it('should render all file uploaders', () => {
@@ -486,7 +459,7 @@ describe('GngkTenderForm', () => {
     });
 
     it('should include model selection in submission data', async () => {
-      render(<GngkTenderForm onSubmit={mockOnSubmit} />);
+      render(<GngkTenderForm onSubmit={mockOnSubmit} initialDraft={{ model: 'qwen' }} />);
 
       // Fill tender info
       const input = screen.getByTestId('tender-no-input-field');
@@ -497,10 +470,6 @@ describe('GngkTenderForm', () => {
       await waitFor(() => {
         expect(screen.getByText('测试项目')).toBeInTheDocument();
       });
-
-      // Select different model
-      const modelSelect = screen.getByTestId('model-select');
-      fireEvent.change(modelSelect, { target: { value: 'qwen' } });
 
       // Upload param file
       const paramInput = screen.getByTestId('file-input-params');
@@ -558,7 +527,6 @@ describe('GngkTenderForm', () => {
 
       expect(screen.getByTestId('tender-no-input-field')).toBeDisabled();
       expect(screen.getByTestId('fetch-tender-btn')).toBeDisabled();
-      expect(screen.getByTestId('model-select')).toBeDisabled();
       expect(screen.getByTestId('file-input-origin_tender')).toBeDisabled();
       expect(screen.getByTestId('file-input-clean_draft')).toBeDisabled();
       expect(screen.getByTestId('file-input-params')).toBeDisabled();
@@ -681,7 +649,7 @@ describe('GngkTenderForm', () => {
   describe('Integration', () => {
     it('should complete full form submission flow', async () => {
       const mockSubmit = jest.fn().mockResolvedValue(undefined);
-      render(<GngkTenderForm onSubmit={mockSubmit} />);
+      render(<GngkTenderForm onSubmit={mockSubmit} initialDraft={{ model: 'doubao' }} />);
 
       // Step 1: Enter tender number
       const tenderInput = screen.getByTestId('tender-no-input-field');
@@ -707,11 +675,7 @@ describe('GngkTenderForm', () => {
       });
       fireEvent.change(cleanInput, { target: { files: [cleanFile] } });
 
-      // Step 4: Select model
-      const modelSelect = screen.getByTestId('model-select');
-      fireEvent.change(modelSelect, { target: { value: 'doubao' } });
-
-      // Step 5: Submit
+      // Step 4: Submit
       const submitButtons = screen.getAllByRole('button', { name: /开始生成/i });
       fireEvent.click(submitButtons[0]);
 

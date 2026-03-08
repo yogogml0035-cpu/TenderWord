@@ -8,6 +8,7 @@ import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { downloadFile } from '@/lib/api';
 import type { Message } from '@/types/chat';
+import type { ModelType } from '@/components/forms/ModelSelector';
 
 interface ChatPanelProps {
   className?: string;
@@ -15,14 +16,23 @@ interface ChatPanelProps {
 
 export function ChatPanel({ className = '' }: ChatPanelProps) {
   const mounted = useHydrated();
-  const { getCurrentConversation, addMessage, currentConversationIsBusy, taskSummaries } =
+  const {
+    getCurrentConversation,
+    getConversationDraft,
+    updateConversationDraft,
+    addMessage,
+    currentConversationIsBusy,
+    taskSummaries,
+  } =
     useChatStore();
   const streams = useChatStreamStore((state) => state.streams);
 
   const conversation = getCurrentConversation();
+  const conversationDraft = getConversationDraft(conversation?.id || null);
   const currentTaskId = conversation?.currentTaskId;
   const currentTaskStatus = currentTaskId ? taskSummaries[currentTaskId]?.status : null;
   const isCurrentTaskQueued = currentTaskStatus === 'queued';
+  const selectedModel: ModelType = conversationDraft?.model || 'deepseek';
   const messages = conversation?.messages || [];
   const mergedMessages: Message[] = messages.map((message) => {
     if (!message.taskId) {
@@ -88,6 +98,14 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     // For this version, we'll just add the message
   };
 
+  const handleModelChange = (model: ModelType) => {
+    if (!conversation) {
+      return;
+    }
+
+    updateConversationDraft(conversation.id, { model });
+  };
+
   const handleRetry = () => {
     if (!conversation) return;
 
@@ -120,7 +138,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   if (!mounted || !conversation) {
     return (
       <div
-        className={`flex h-full flex-col bg-gradient-to-br from-slate-50 to-gray-100 ${className}`}
+        className={`flex h-full min-h-0 flex-col bg-gradient-to-br from-slate-50 to-gray-100 ${className}`}
       >
         <div className="flex flex-1 items-center justify-center p-8">
           <div className="max-w-md text-center">
@@ -183,7 +201,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   }
 
   return (
-    <div className={`flex h-full flex-col bg-white shadow-sm ${className}`}>
+    <div className={`flex h-full min-h-0 flex-col bg-white shadow-sm ${className}`}>
       {/* Header */}
       <div className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
         <div>
@@ -216,6 +234,8 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       {/* Input */}
       <ChatInput
         onSend={handleSendMessage}
+        selectedModel={selectedModel}
+        onModelChange={handleModelChange}
         disabled={isLoading}
         loading={isLoading}
         placeholder={isLoading ? '生成中，请稍候...' : '输入消息...'}

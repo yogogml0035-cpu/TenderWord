@@ -10,6 +10,8 @@ export interface ModelOption {
   value: ModelType;
   label: string;
   description: string;
+  detail: string;
+  badge: string;
   icon: React.ReactNode;
   recommended?: boolean;
 }
@@ -18,23 +20,33 @@ export const MODEL_OPTIONS: ModelOption[] = [
   {
     value: 'deepseek',
     label: 'DeepSeek',
-    description: '深度求索大模型，擅长长文本理解',
+    description: '深度推理与长文本生成',
+    detail: '适合复杂条款分析、结构化写作和长篇内容扩写。',
+    badge: '默认推荐',
     icon: <Brain className="h-5 w-5" />,
     recommended: true,
   },
   {
     value: 'qwen',
     label: '通义千问',
-    description: '阿里云通义千问，中文理解能力强',
+    description: '中文理解稳定，表达更均衡',
+    detail: '适合商务措辞优化、条文总结和通用问答。',
+    badge: '均衡通用',
     icon: <Cpu className="h-5 w-5" />,
   },
   {
     value: 'doubao',
     label: '豆包',
-    description: '字节跳动豆包模型，响应速度快',
+    description: '响应更快，轻量交互顺手',
+    detail: '适合快速追问、短内容生成和改写润色。',
+    badge: '快速响应',
     icon: <Zap className="h-5 w-5" />,
   },
 ];
+
+export function getModelOption(value: ModelType): ModelOption {
+  return MODEL_OPTIONS.find((model) => model.value === value) ?? MODEL_OPTIONS[0];
+}
 
 export interface ModelSelectorProps {
   value: ModelType;

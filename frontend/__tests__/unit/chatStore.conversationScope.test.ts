@@ -130,4 +130,14 @@ describe('chatStore conversation scoped selectors', () => {
     expect(convA).not.toBe(convB);
     expect(conversations.filter((conversation) => conversation.title === 'TN-SAME')).toHaveLength(2);
   });
+
+  it('initializes new conversations with deepseek as the draft model', () => {
+    let conversationId = '';
+
+    act(() => {
+      conversationId = useChatStore.getState().createConversation('TN-DEFAULT', 'xjcg');
+    });
+
+    expect(useChatStore.getState().getConversationDraft(conversationId)?.model).toBe('deepseek');
+  });
 });

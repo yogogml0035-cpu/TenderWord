@@ -3,7 +3,6 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { XjcgTenderForm, type XjcgTenderFormData } from './XjcgTenderForm';
 import type { TenderData } from './TenderNoInput';
-import type { ModelType } from './ModelSelector';
 import type { UploadedFile } from './FileUploader';
 
 // Mock child components
@@ -51,32 +50,6 @@ jest.mock('./TenderNoInput', () => ({
       >
         获取信息
       </button>
-    </div>
-  ),
-}));
-
-jest.mock('./ModelSelector', () => ({
-  ModelSelector: ({
-    value,
-    onChange,
-    disabled,
-  }: {
-    value: ModelType;
-    onChange: (value: ModelType) => void;
-    disabled?: boolean;
-  }) => (
-    <div data-testid="model-selector">
-      <label>选择模型</label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value as ModelType)}
-        aria-label="模型选择器"
-        disabled={disabled}
-      >
-        <option value="deepseek">DeepSeek</option>
-        <option value="qwen">通义千问</option>
-        <option value="doubao">豆包</option>
-      </select>
     </div>
   ),
 }));
@@ -141,7 +114,6 @@ describe('XjcgTenderForm', () => {
       // 验证四个主要区块存在
       expect(screen.getByText('招标信息')).toBeInTheDocument();
       expect(screen.getByText('文件上传')).toBeInTheDocument();
-      expect(screen.getByText('模型选择')).toBeInTheDocument();
       expect(screen.getByText('高级设置（可选）')).toBeInTheDocument();
     });
 
@@ -160,11 +132,10 @@ describe('XjcgTenderForm', () => {
       expect(screen.getByTestId('file-uploader-params')).toBeInTheDocument();
     });
 
-    it('应该渲染模型选择器', () => {
+    it('应该不在表单区渲染模型选择器', () => {
       render(<XjcgTenderForm onSubmit={mockOnSubmit} />);
 
-      expect(screen.getByTestId('model-selector')).toBeInTheDocument();
-      expect(screen.getByLabelText('模型选择器')).toBeInTheDocument();
+      expect(screen.queryByLabelText('模型选择器')).not.toBeInTheDocument();
     });
 
     it('应该渲染提交按钮', () => {
@@ -251,25 +222,6 @@ describe('XjcgTenderForm', () => {
       await user.click(uploadButton);
 
       expect(screen.getByTestId('file-uploader-params')).toBeInTheDocument();
-    });
-  });
-
-  describe('模型选择器', () => {
-    it('应该默认选择 deepseek 模型', () => {
-      render(<XjcgTenderForm onSubmit={mockOnSubmit} />);
-
-      const selector = screen.getByLabelText('模型选择器');
-      expect(selector).toHaveValue('deepseek');
-    });
-
-    it('应该允许切换模型', async () => {
-      const user = userEvent.setup();
-      render(<XjcgTenderForm onSubmit={mockOnSubmit} />);
-
-      const selector = screen.getByLabelText('模型选择器');
-      await user.selectOptions(selector, 'qwen');
-
-      expect(selector).toHaveValue('qwen');
     });
   });
 
@@ -399,7 +351,7 @@ describe('XjcgTenderForm', () => {
 
     it('提交数据应该包含所有表单字段', async () => {
       const user = userEvent.setup();
-      render(<XjcgTenderForm onSubmit={mockOnSubmit} />);
+      render(<XjcgTenderForm onSubmit={mockOnSubmit} initialDraft={{ model: 'qwen' }} />);
 
       // 填写表单
       const input = screen.getByLabelText('招标编号输入框');
@@ -407,10 +359,6 @@ describe('XjcgTenderForm', () => {
 
       const fetchButton = screen.getByLabelText('模拟获取招标信息');
       await user.click(fetchButton);
-
-      // 切换模型
-      const selector = screen.getByLabelText('模型选择器');
-      await user.selectOptions(selector, 'qwen');
 
       // 上传文件
       const uploadButton = screen.getByLabelText('上传技术参数文件（必填）');
@@ -458,7 +406,6 @@ describe('XjcgTenderForm', () => {
 
       expect(screen.getByLabelText('招标编号输入框')).toBeDisabled();
       expect(screen.getByLabelText('模拟获取招标信息')).toBeDisabled();
-      expect(screen.getByLabelText('模型选择器')).toBeDisabled();
       expect(screen.getByLabelText('上传清洁稿文件（可选）')).toBeDisabled();
       expect(screen.getByLabelText('上传送审稿文件（可选）')).toBeDisabled();
       expect(screen.getByLabelText('上传技术参数文件（必填）')).toBeDisabled();
@@ -550,7 +497,7 @@ describe('XjcgTenderForm', () => {
       expect(form).toBeInTheDocument();
 
       const headings = container.querySelectorAll('h3');
-      expect(headings.length).toBe(4); // 四个区块标题
+      expect(headings.length).toBe(3); // 三个区块标题
     });
 
     it('应该有高级设置标签文本', () => {

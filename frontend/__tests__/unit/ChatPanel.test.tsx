@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
@@ -34,17 +34,26 @@ jest.mock('@/components/chat/ChatInput', () => ({
     disabled,
     loading,
     placeholder,
+    selectedModel,
+    onModelChange,
   }: {
     disabled?: boolean;
     loading?: boolean;
     placeholder?: string;
+    selectedModel?: string;
+    onModelChange?: (model: string) => void;
   }) => (
     <div
       data-testid="chat-input"
       data-disabled={disabled ? 'true' : 'false'}
       data-loading={loading ? 'true' : 'false'}
       data-placeholder={placeholder || ''}
-    />
+      data-model={selectedModel || ''}
+    >
+      <button type="button" data-testid="change-model-button" onClick={() => onModelChange?.('qwen')}>
+        change model
+      </button>
+    </div>
   ),
 }));
 
@@ -69,6 +78,7 @@ describe('ChatPanel', () => {
       currentConversationId: 'conv-1',
       activeTaskIds: ['task-1'],
       taskMessageMap: {},
+      conversationDrafts: {},
       taskSummaries: {
         'task-1': {
           task_id: 'task-1',
@@ -90,6 +100,7 @@ describe('ChatPanel', () => {
     expect(screen.getByText('排队中，轮到当前任务后将开始显示进度日志')).toBeInTheDocument();
     expect(screen.getByTestId('custom-empty')).toBeInTheDocument();
     expect(screen.queryByTestId('default-empty')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-model', 'deepseek');
   });
 
   it('does not show queue status bar for running conversation', () => {
@@ -109,5 +120,28 @@ describe('ChatPanel', () => {
     expect(
       screen.queryByText('排队中，轮到当前任务后将开始显示进度日志')
     ).not.toBeInTheDocument();
+  });
+
+  it('uses the conversation draft model when present', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversationDrafts: {
+        'conv-1': {
+          model: 'doubao',
+        },
+      },
+    }));
+
+    render(<ChatPanel />);
+
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-model', 'doubao');
+  });
+
+  it('updates the current conversation draft when model changes from chat input', () => {
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('change-model-button'));
+
+    expect(useChatStore.getState().getConversationDraft('conv-1')?.model).toBe('qwen');
   });
 });
