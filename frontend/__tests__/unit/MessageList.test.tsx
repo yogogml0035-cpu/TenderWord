@@ -116,8 +116,7 @@ describe('MessageList', () => {
   it('renders user messages in a content-sized bubble capped at 40 percent width', () => {
     render(<MessageList messages={createUserMessage()} />);
 
-    expect(screen.getByTestId('user-message-stack')).toHaveClass('flex-col', 'items-end', 'max-w-[40%]');
-    expect(screen.getByTestId('user-message-frame')).toHaveClass('-translate-x-6', 'w-fit', 'max-w-full');
+    expect(screen.getByTestId('user-message-frame')).toHaveClass('w-fit', 'max-w-[40%]');
     expect(screen.getByTestId('user-message-bubble')).toHaveClass('w-fit', 'max-w-full');
   });
 
@@ -128,13 +127,12 @@ describe('MessageList', () => {
     expect(screen.getByTestId('user-message-text').textContent).toBe('第一行\n第二行');
   });
 
-  it('renders the user avatar above the message bubble', () => {
+  it('renders the user message before the avatar', () => {
     render(<MessageList messages={createUserMessage()} />);
 
-    const stack = screen.getByTestId('user-message-stack');
-    expect(stack.firstElementChild).toBe(screen.getByTestId('user-message-avatar'));
-    expect(screen.getByTestId('user-message-avatar').nextElementSibling).toBe(
-      screen.getByTestId('user-message-frame')
-    );
+    const frame = screen.getByTestId('user-message-frame');
+    const avatar = screen.getByTestId('user-message-avatar');
+
+    expect(frame.nextElementSibling).toBe(avatar);
   });
 });

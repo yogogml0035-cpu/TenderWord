@@ -376,10 +376,18 @@ class DocumentService:
 
         logger.info(f"创建文档生成任务: task_id={task_id}, form_type={form_type}")
 
+        task_snapshot = self._task_queue.get_task(task_id)
+        task_status = task_snapshot.status.value if task_snapshot else None
+        queue_position = self._task_queue.get_queue_position(task_id)
+        waiting_count = self._task_queue.get_waiting_count(task_id)
+
         return GenerateResponse(
             success=True,
             task_id=task_id,
             message="任务已创建，正在后台执行",
+            status=task_status,
+            queue_position=queue_position,
+            waiting_count=waiting_count,
         )
 
     def _build_initial_state(self, request: GenerateRequest, task_id: str) -> Dict[str, Any]:

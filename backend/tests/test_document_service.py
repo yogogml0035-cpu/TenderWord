@@ -4,7 +4,11 @@ from unittest.mock import Mock
 
 import pytest
 
+import backend.services.document_service as document_service_module
+from backend.models.generate import FormType, GenerateRequest, LLMModel
+from backend.models.tender import TenderData
 from backend.services.document_service import DocumentService, _LLMSnapshotRelay
+from backend.task.task_queue_manager import TaskQueueManager
 
 
 def test_llm_snapshot_relay_throttles_intermediate_snapshots_and_flushes_final_state():
@@ -91,3 +95,41 @@ def test_document_service_invoke_graph_async_fail_fast_error_propagates(monkeypa
                 model_provider="deepseek",
             )
         )
+
+
+def test_document_service_create_task_returns_queue_snapshot(monkeypatch):
+    original_instance = TaskQueueManager._instance
+    TaskQueueManager._instance = None
+    queue = TaskQueueManager()
+
+    class DummyExecutor:
+        def submit(self, *_args, **_kwargs):
+            return Mock()
+
+    monkeypatch.setattr(document_service_module, "GRAPH_REGISTRY", {"xjcg_tender": Mock()})
+    monkeypatch.setattr(document_service_module, "_executor", DummyExecutor())
+
+    try:
+        service = DocumentService()
+        request = GenerateRequest(
+            form_type=FormType.XJCG_TENDER,
+            tender_data=TenderData(
+                project_name="示例项目",
+                project_number="ZBGG-2026-001",
+                project_content="采购示例内容",
+                buyer_name="示例单位",
+            ),
+            file_paths={"template": "D:/UploadFiles/template.docx", "params": []},
+            model=LLMModel.DEEPSEEK,
+        )
+
+        response = service.create_task(request)
+
+        assert response.success is True
+        assert response.status == "queued"
+        assert response.queue_position == 0
+        assert response.waiting_count == 0
+    finally:
+        queue._cleanup_thread_stop.set()
+        queue._cleanup_thread.join(timeout=1)
+        TaskQueueManager._instance = original_instance

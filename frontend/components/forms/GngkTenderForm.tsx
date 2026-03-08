@@ -241,8 +241,8 @@ export function GngkTenderForm({
       <FormSection title="文件上传" index={2}>
         <div className="space-y-5">
           <FileUploader
-            label="清洁稿文件（可选）"
-            description="上传清洁稿 Word 文件，如上传则优先使用"
+            label="模板文件（可选）"
+            description="上传则优先使用，若未上传则使用送审稿文件作为模板"
             accept=".doc,.docx"
             multiple={false}
             autoUpload={true}
@@ -258,7 +258,7 @@ export function GngkTenderForm({
 
           <FileUploader
             label="送审稿文件（可选）"
-            description="上传送审稿 Word 文件"
+            description="若上传则最终文件将生成批注"
             accept=".doc,.docx"
             multiple={false}
             autoUpload={true}
@@ -329,6 +329,7 @@ export function GngkTenderForm({
         disabled={isSubmitting && !showCancelAction}
         className={cn(
           'group relative w-full transform overflow-hidden rounded-xl px-5 py-2.5 text-[15px] font-semibold text-white transition-all duration-200 ease-out',
+          showCancelAction && 'z-40',
           showCancelAction
             ? 'bg-gradient-to-r from-red-500 via-red-500 to-orange-500 shadow-md shadow-red-500/25 hover:-translate-y-0.5 hover:from-red-600 hover:via-red-600 hover:to-orange-600 hover:shadow-lg hover:shadow-red-500/30'
             : 'bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 shadow-md shadow-blue-500/25 hover:-translate-y-0.5 hover:from-blue-700 hover:via-blue-600 hover:to-cyan-600 hover:shadow-lg hover:shadow-blue-500/30 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:transform-none disabled:hover:shadow-md'

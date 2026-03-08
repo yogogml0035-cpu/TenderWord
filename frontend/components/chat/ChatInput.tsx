@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useCallback } from 'react';
-import { Loader2, Send } from 'lucide-react';
+import { ArrowUp, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ModelType } from '@/components/forms/ModelSelector';
 import { ChatModelPicker } from './ChatModelPicker';
@@ -80,53 +80,63 @@ export function ChatInput({
           inputLocked && 'opacity-90'
         )}
       >
-        <div className="pb-1.5">
-          <ChatModelPicker
-            value={selectedModel}
-            onChange={onModelChange}
-            disabled={inputLocked}
-          />
-        </div>
+        <div className="flex flex-col gap-3">
+          <div>
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={handleInput}
+              onKeyDown={handleKeyDown}
+              placeholder={placeholder}
+              disabled={inputLocked}
+              rows={1}
+              className={cn(
+                'block w-full resize-none bg-transparent px-2 py-2.5 text-[15px] leading-6 text-slate-800 transition-colors duration-200 placeholder:text-slate-400 focus:outline-none',
+                inputLocked && 'cursor-not-allowed text-slate-500'
+              )}
+              style={{
+                boxSizing: 'border-box',
+                minHeight: `${MIN_TEXTAREA_HEIGHT}px`,
+                height: `${MIN_TEXTAREA_HEIGHT}px`,
+                maxHeight: `${MAX_TEXTAREA_HEIGHT}px`,
+                overflowY: 'hidden',
+              }}
+            />
+          </div>
 
-        <div className="relative">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={handleInput}
-            onKeyDown={handleKeyDown}
-            placeholder={placeholder}
-            disabled={inputLocked}
-            rows={1}
-            className={cn(
-              'block w-full resize-none bg-transparent px-2 py-2.5 pr-14 text-[15px] leading-6 text-slate-800 transition-colors duration-200 placeholder:text-slate-400 focus:outline-none',
-              inputLocked && 'cursor-not-allowed text-slate-500'
-            )}
-            style={{
-              boxSizing: 'border-box',
-              minHeight: `${MIN_TEXTAREA_HEIGHT}px`,
-              height: `${MIN_TEXTAREA_HEIGHT}px`,
-              maxHeight: `${MAX_TEXTAREA_HEIGHT}px`,
-              overflowY: 'hidden',
-            }}
-          />
-          <button
-            type="button"
-            onClick={handleSend}
-            disabled={isEmpty || inputLocked}
-            aria-label={loading ? '发送中' : '发送消息'}
-            className={cn(
-              'absolute right-1.5 bottom-1.5 flex h-10 w-10 items-center justify-center rounded-2xl transition-all duration-200',
-              isEmpty || inputLocked
-                ? 'cursor-not-allowed bg-slate-200 text-slate-400'
-                : 'bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-200 hover:-translate-y-0.5 hover:from-blue-600 hover:to-blue-700'
-            )}
-          >
-            {loading ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <Send className="h-5 w-5" />
-            )}
-          </button>
+          <div className="flex items-end justify-between px-2 pb-0.5">
+            <ChatModelPicker
+              value={selectedModel}
+              onChange={onModelChange}
+              disabled={inputLocked}
+              triggerClassName={cn(
+                'h-10 rounded-[18px] bg-slate-50/90 px-4 py-0 shadow-sm shadow-slate-200/70',
+                !inputLocked && 'hover:bg-white'
+              )}
+              menuClassName="left-0 right-auto"
+            />
+
+            <div className="flex shrink-0 items-center">
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={isEmpty || inputLocked}
+                aria-label={loading ? '发送中' : '发送消息'}
+                className={cn(
+                  'flex h-10 w-10 items-center justify-center rounded-[18px] border transition-all duration-200',
+                  isEmpty || inputLocked
+                    ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+                    : 'border-blue-500 bg-blue-500 text-white shadow-sm shadow-blue-200 hover:-translate-y-0.5 hover:bg-blue-600'
+                )}
+              >
+                {loading ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <ArrowUp className="h-5 w-5" strokeWidth={2.4} />
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

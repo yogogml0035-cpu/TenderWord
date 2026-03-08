@@ -12,8 +12,6 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from .tender import TenderData
-
-from .tender import TenderData
 from .task import TaskProgress, TaskStatus
 
 
@@ -118,6 +116,12 @@ class GenerateResponse(BaseModel):
     success: bool = Field(..., description="是否成功")
     task_id: str = Field(..., description="任务ID")
     message: str = Field(default="", description="消息说明")
+    status: Optional[TaskStatus] = Field(default=None, description="任务当前状态")
+    queue_position: Optional[int] = Field(
+        default=None,
+        description="队列位置（0=正在执行, -1=不在队列中）",
+    )
+    waiting_count: Optional[int] = Field(default=None, description="前方等待任务数")
     output_file: Optional[str] = Field(default=None, description="输出文件路径")
     download_url: Optional[str] = Field(default=None, description="文件下载链接")
     progress: Optional[TaskProgress] = Field(default=None, description="任务进度信息")

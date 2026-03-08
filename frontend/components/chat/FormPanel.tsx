@@ -19,6 +19,134 @@ import type { TenderData } from '@/types/api';
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
 }
+
+function parseProgressFraction(progressText: string | null): {
+  completed: number;
+  total: number;
+} | null {
+  if (!progressText) {
+    return null;
+  }
+
+  const match = progressText.match(/(\d+)\s*\/\s*(\d+)/);
+  if (!match) {
+    return null;
+  }
+
+  const completed = Number.parseInt(match[1], 10);
+  const total = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(completed) || !Number.isFinite(total) || total <= 0) {
+    return null;
+  }
+
+  return { completed, total };
+}
+
+type TaskStatusTone = 'blue' | 'amber';
+
+const taskStatusThemes: Record<
+  TaskStatusTone,
+  {
+    card: string;
+    iconFrame: string;
+    iconAccent: string;
+    badge: string;
+    progressBar: string;
+    footerDot: string;
+  }
+> = {
+  blue: {
+    card: 'border-blue-400/90 shadow-blue-100/80',
+    iconFrame: 'border-blue-200/80 text-blue-700 shadow-blue-100/80',
+    iconAccent: 'bg-blue-100/80',
+    badge: 'border-blue-200/80 bg-blue-50 text-blue-700',
+    progressBar: 'bg-blue-500/90',
+    footerDot: 'bg-blue-500 shadow-[0_0_0_4px_rgba(59,130,246,0.14)]',
+  },
+  amber: {
+    card: 'border-amber-300/90 shadow-amber-100/80',
+    iconFrame: 'border-amber-200/80 text-amber-700 shadow-amber-100/80',
+    iconAccent: 'bg-amber-100/75',
+    badge: 'border-amber-200/80 bg-amber-50 text-amber-700',
+    progressBar: 'bg-amber-500/90',
+    footerDot: 'bg-amber-400 shadow-[0_0_0_4px_rgba(251,191,36,0.18)]',
+  },
+};
+
+interface TaskStatusCardProps {
+  tone: TaskStatusTone;
+  label: string;
+  title: string;
+  detail: string;
+  progressSummary: string;
+  progressLabel: string;
+  progressBarPercent: number;
+  footer: string;
+  icon: React.ReactNode;
+  className?: string;
+  testId?: string;
+}
+
+function TaskStatusCard({
+  tone,
+  label,
+  title,
+  detail,
+  progressSummary,
+  progressLabel,
+  progressBarPercent,
+  footer,
+  icon,
+  className = '',
+  testId,
+}: TaskStatusCardProps) {
+  const theme = taskStatusThemes[tone];
+
+  return (
+    <div
+      data-testid={testId}
+      className={`relative w-full overflow-hidden rounded-[28px] border bg-white/90 p-6 shadow-xl backdrop-blur-sm ${theme.card} ${className}`}
+    >
+      <div className="flex items-start gap-4">
+        <div
+          className={`relative mt-1 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border bg-white shadow-sm ${theme.iconFrame}`}
+        >
+          <span className={`absolute inset-0 rounded-2xl ${theme.iconAccent}`} />
+          <div className="relative">{icon}</div>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <span
+            className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold tracking-[0.18em] shadow-sm ${theme.badge}`}
+          >
+            {label}
+          </span>
+          <h3 className="mt-3 text-xl font-semibold tracking-tight text-slate-900">{title}</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{detail}</p>
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <div className="mb-2 flex items-center justify-between gap-3 text-xs font-medium text-slate-500">
+          <span>{progressSummary}</span>
+          <span>{progressLabel}</span>
+        </div>
+        <div className="h-2.5 overflow-hidden rounded-full bg-slate-200/80">
+          <div
+            className={`h-full rounded-full transition-[width] duration-500 ${theme.progressBar}`}
+            style={{ width: `${Math.max(0, Math.min(100, progressBarPercent))}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 flex items-center gap-2 text-xs text-slate-500">
+        <span className={`h-2 w-2 rounded-full ${theme.footerDot}`} />
+        <span>{footer}</span>
+      </div>
+    </div>
+  );
+}
+
 interface FormPanelProps {
   className?: string;
   /** Initial tender data from URL params (auto-fetched) */
@@ -41,6 +169,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
   } = useChatStore();
   const {
     currentTaskId: effectiveTaskId,
+    currentTaskSummary,
     currentTaskStatus,
     waitingCount,
     isCurrentTaskQueued,
@@ -217,6 +346,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         startTask(conversation.id, result.task_id, {
           status: result.status || 'queued',
           queue_position: result.queue_position,
+          waiting_count: result.waiting_count,
         });
 
         // 任务创建后立即补拉一次，拿到排队摘要（waiting_count / queue_position 等）
@@ -259,10 +389,92 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         runningTaskProgress.progress_percent
       )}%）`
     : null;
+  const hasQueueAhead =
+    isCurrentTaskQueued && typeof waitingCount === 'number' ? waitingCount > 0 : false;
+  const isCurrentTaskStarting = isCurrentTaskQueued && !hasQueueAhead;
   const waitingCountText = typeof waitingCount === 'number' ? `${waitingCount}` : '...';
+  const runningProgressNote =
+    (typeof currentTaskSummary?.progress_text === 'string'
+      ? currentTaskSummary.progress_text.trim()
+      : '') || null;
+  const runningProgressFraction = parseProgressFraction(runningProgressNote);
   const runningProgressPercent = runningTaskProgress
     ? Math.max(0, Math.min(100, Math.round(runningTaskProgress.progress_percent)))
-    : 0;
+    : typeof currentTaskSummary?.progress_percent === 'number'
+      ? Math.max(0, Math.min(100, Math.round(currentTaskSummary.progress_percent)))
+      : runningProgressFraction
+        ? Math.max(0, Math.min(100, Math.round((runningProgressFraction.completed / runningProgressFraction.total) * 100)))
+        : 0;
+  const runningOverlayPercent = runningProgressPercent > 0 ? Math.max(runningProgressPercent, 8) : 18;
+  const runningCurrentNodeDisplay =
+    typeof currentTaskSummary?.current_node_display === 'string'
+      ? currentTaskSummary.current_node_display.trim()
+      : '';
+  const runningStepSummary = isCurrentTaskStarting
+    ? '系统正在建立任务与进度流'
+    : runningTaskProgress
+      ? `已完成 ${runningTaskProgress.completed_count}/${runningTaskProgress.total_nodes} 个步骤`
+      : runningProgressFraction
+        ? `已完成 ${runningProgressFraction.completed}/${runningProgressFraction.total} 个步骤`
+        : '系统正在启动生成流程';
+  const runningStatusDetail = runningCurrentNodeDisplay
+    || (isCurrentTaskStarting
+      ? '当前没有前置任务，系统正在获取执行权并初始化 Word 与进度流。'
+      : '系统正在整理章节、参数与格式，请稍候，不建议关闭当前页面。');
+  const runningStatusTitle = isCurrentTaskStarting ? '正在启动生成流程...' : '正在生成招标文档...';
+  const runningStatusLabel = isCurrentTaskStarting ? '准备执行中' : '文档生成中';
+  const runningProgressLabel = runningTaskProgress
+    ? `${runningProgressPercent}%`
+    : runningProgressNote || (isCurrentTaskStarting ? '启动中' : '处理中');
+  const queueProgressSummary = runningProgressText
+    ? `当前执行任务进度：${runningProgressText}`
+    : '当前暂无执行任务，即将开始下一任务';
+  const queueProgressLabel = runningProgressText ? `${runningProgressPercent}%` : '等待中';
+  const statusOverlayCard = hasQueueAhead
+    ? {
+        backdropTestId: 'queue-overlay-backdrop',
+        cardTestId: 'queue-status-card',
+        tone: 'amber' as const,
+        label: '排队等待',
+        title: '任务排队中',
+        detail: `前方等待${waitingCountText}个任务（含当前执行任务）`,
+        progressSummary: queueProgressSummary,
+        progressLabel: queueProgressLabel,
+        progressBarPercent: runningProgressPercent,
+        footer: '轮到当前任务后将自动开始生成，无需重复提交。',
+        icon: (
+          <svg
+            className="h-7 w-7"
+            width={28}
+            height={28}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.8}
+              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+        ),
+      }
+    : isCurrentTaskRunning || isCurrentTaskStarting
+      ? {
+          backdropTestId: 'running-overlay-backdrop',
+          cardTestId: 'running-status-card',
+          tone: 'blue' as const,
+          label: runningStatusLabel,
+          title: runningStatusTitle,
+          detail: runningStatusDetail,
+          progressSummary: runningStepSummary,
+          progressLabel: runningProgressLabel,
+          progressBarPercent: runningOverlayPercent,
+          footer: '生成过程中可使用底部“取消生成”终止任务',
+          icon: <Loader2 className="h-7 w-7 animate-spin" />,
+        }
+      : null;
 
   // Empty state when no conversation or during hydration
   if (!mounted || !conversation) {
@@ -340,7 +552,10 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
   }
 
   return (
-    <div className={`relative flex h-full min-h-0 flex-col bg-white shadow-sm ${className}`}>
+    <div
+      aria-busy={formIsBusy}
+      className={`relative flex h-full min-h-0 flex-col bg-white shadow-sm ${className}`}
+    >
       {/* Header */}
       <div className="relative z-20 border-b border-gray-200 bg-white px-4 py-3">
         <div>
@@ -350,47 +565,6 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
           </p>
         </div>
       </div>
-
-      {isCurrentTaskQueued && (
-        <div className="mx-4 mt-4 rounded-lg border border-amber-300 bg-gradient-to-r from-amber-50 to-orange-50 px-4 py-3 shadow-sm">
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 rounded bg-amber-200/80 p-1.5 text-amber-700">
-              <svg
-                className="h-4 w-4"
-                width={16}
-                height={16}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-amber-900">任务排队中</p>
-              <p className="mt-1 text-sm text-amber-900">
-                前方等待{waitingCountText}个任务（含当前执行任务）
-              </p>
-              <p className="mt-1 text-sm text-amber-900">
-                {runningProgressText
-                  ? `当前执行任务进度：${runningProgressText}`
-                  : '当前暂无执行任务，即将开始下一任务'}
-              </p>
-              <div className="mt-2 h-1.5 w-full rounded-full bg-amber-200">
-                <div
-                  className="h-full rounded-full bg-amber-500 transition-[width] duration-500"
-                  style={{ width: `${runningProgressPercent}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Form Content */}
       <div className="flex-1 overflow-y-auto p-4">
@@ -421,16 +595,30 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         )}
       </div>
 
-      {isCurrentTaskRunning && (
+      {statusOverlayCard && (
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none absolute inset-x-0 top-1/2 z-30 flex -translate-y-1/2 justify-center px-6"
+          className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-6"
         >
-          <div className="flex w-full max-w-md items-center justify-center gap-3 rounded-full border border-blue-200 bg-white/95 px-5 py-3 text-center text-sm font-medium text-blue-700 shadow-xl shadow-blue-100/80 backdrop-blur">
-            <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-            <p>正在生成招标文档...</p>
-          </div>
+          <div
+            data-testid={statusOverlayCard.backdropTestId}
+            className="absolute inset-0 bg-slate-900/4 backdrop-blur-[0.5px]"
+          />
+
+          <TaskStatusCard
+            testId={statusOverlayCard.cardTestId}
+            tone={statusOverlayCard.tone}
+            label={statusOverlayCard.label}
+            title={statusOverlayCard.title}
+            detail={statusOverlayCard.detail}
+            progressSummary={statusOverlayCard.progressSummary}
+            progressLabel={statusOverlayCard.progressLabel}
+            progressBarPercent={statusOverlayCard.progressBarPercent}
+            footer={statusOverlayCard.footer}
+            className="relative max-w-lg"
+            icon={statusOverlayCard.icon}
+          />
         </div>
       )}
     </div>

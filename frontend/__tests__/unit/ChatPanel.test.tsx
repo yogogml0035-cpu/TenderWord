@@ -94,10 +94,12 @@ describe('ChatPanel', () => {
     useChatStreamStore.setState({ streams: {} });
   });
 
-  it('shows top queue status bar and suppresses default empty state while queued', () => {
+  it('suppresses the default empty state while queued without showing a top status bar', () => {
     render(<ChatPanel />);
 
-    expect(screen.getByText('排队中，轮到当前任务后将开始显示进度日志')).toBeInTheDocument();
+    expect(
+      screen.queryByText('排队中，轮到当前任务后将开始显示进度日志')
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId('custom-empty')).toBeInTheDocument();
     expect(screen.queryByTestId('default-empty')).not.toBeInTheDocument();
     expect(screen.getByTestId('chat-input')).toHaveAttribute('data-model', 'deepseek');
@@ -120,6 +122,26 @@ describe('ChatPanel', () => {
     expect(
       screen.queryByText('排队中，轮到当前任务后将开始显示进度日志')
     ).not.toBeInTheDocument();
+  });
+
+  it('suppresses the default empty state while starting without showing a top status bar', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      taskSummaries: {
+        'task-1': {
+          task_id: 'task-1',
+          status: 'queued',
+          waiting_count: 0,
+          updated_at: Date.now(),
+        },
+      },
+    }));
+
+    render(<ChatPanel />);
+
+    expect(screen.queryByText('排队中，轮到当前任务后将开始显示进度日志')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在启动任务，稍后将显示进度日志')).not.toBeInTheDocument();
+    expect(screen.getByTestId('custom-empty')).toBeInTheDocument();
   });
 
   it('uses the conversation draft model when present', () => {

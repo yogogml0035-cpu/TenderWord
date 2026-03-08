@@ -158,42 +158,37 @@ function MessageItem({ message, onDownload, onRetry }: MessageItemProps) {
   // Render user message
   if (message.type === 'user') {
     return (
-      <div className="animate-fade-in-up flex justify-end">
+      <div className="animate-fade-in-up flex items-start justify-end gap-3">
         <div
-          data-testid="user-message-stack"
-          className="ml-auto flex min-w-0 max-w-[40%] flex-col items-end"
+          data-testid="user-message-frame"
+          className="min-w-0 w-fit max-w-[40%]"
         >
           <div
-            data-testid="user-message-avatar"
-            className="mb-2 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded bg-gray-200 shadow-sm"
+            data-testid="user-message-bubble"
+            className="w-fit max-w-full rounded-2xl rounded-tr-sm bg-blue-500 px-4 py-2.5 text-white shadow-sm"
           >
-            <User className="h-5 w-5 text-gray-600" />
-          </div>
-
-          <div
-            data-testid="user-message-frame"
-            className="-translate-x-6 min-w-0 w-fit max-w-full"
-          >
-            <div
-              data-testid="user-message-bubble"
-              className="w-fit max-w-full rounded-2xl rounded-tr-sm bg-blue-500 px-4 py-2.5 text-white shadow-sm"
+            <p
+              data-testid="user-message-text"
+              className="whitespace-pre-wrap break-words text-sm leading-6"
             >
-              <p
-                data-testid="user-message-text"
-                className="whitespace-pre-wrap break-words text-sm leading-6"
-              >
-                {typeof message.content === 'string' ? message.content : '...'}
-              </p>
-            </div>
-            <div className="mt-1 text-right">
-              <span className="text-[10px] text-gray-400">
-                {new Date(message.timestamp).toLocaleTimeString('zh-CN', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </span>
-            </div>
+              {typeof message.content === 'string' ? message.content : '...'}
+            </p>
           </div>
+          <div className="mt-1 text-right">
+            <span className="text-[10px] text-gray-400">
+              {new Date(message.timestamp).toLocaleTimeString('zh-CN', {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </span>
+          </div>
+        </div>
+
+        <div
+          data-testid="user-message-avatar"
+          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded bg-gray-200 shadow-sm"
+        >
+          <User className="h-5 w-5 text-gray-600" />
         </div>
       </div>
     );

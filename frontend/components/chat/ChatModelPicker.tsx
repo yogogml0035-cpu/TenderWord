@@ -13,12 +13,16 @@ interface ChatModelPickerProps {
   value: ModelType;
   onChange: (value: ModelType) => void;
   disabled?: boolean;
+  triggerClassName?: string;
+  menuClassName?: string;
 }
 
 export function ChatModelPicker({
   value,
   onChange,
   disabled = false,
+  triggerClassName,
+  menuClassName,
 }: ChatModelPickerProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -62,17 +66,18 @@ export function ChatModelPicker({
         aria-label="选择聊天模型"
         data-testid="chat-model-trigger"
         className={cn(
-          'group inline-flex max-w-full items-center gap-1.5 rounded-[18px] border border-slate-200 bg-white/95 px-3 py-1 text-left shadow-sm transition-all duration-200',
+          'group inline-flex max-w-full items-center gap-2 rounded-[18px] border border-slate-200 bg-white/95 px-3 py-1.5 text-left shadow-sm transition-all duration-200',
           disabled
             ? 'cursor-not-allowed opacity-60'
-            : 'hover:border-blue-200 hover:bg-white hover:shadow-md'
+            : 'hover:border-blue-200 hover:bg-white hover:shadow-md',
+          triggerClassName
         )}
       >
-        <div className="flex min-w-0 flex-col leading-none">
-          <span className="text-[10px] font-medium tracking-[0.16em] text-slate-400 uppercase">
-            模型
-          </span>
-          <span className="mt-0.5 truncate text-[13px] font-semibold leading-5 text-slate-900">
+        <div
+          data-testid="chat-model-trigger-content"
+          className="flex min-w-0 items-center gap-2 leading-none"
+        >
+          <span className="truncate text-[13px] font-semibold leading-none text-slate-900">
             {selectedOption.label}
           </span>
         </div>
@@ -88,7 +93,10 @@ export function ChatModelPicker({
         <div
           role="dialog"
           aria-label="选择聊天模型"
-          className="animate-scale-in absolute bottom-full left-0 z-30 mb-3 w-[min(26rem,calc(100vw-3rem))] overflow-hidden rounded-[28px] border border-slate-200 bg-white/96 shadow-2xl shadow-slate-300/40 backdrop-blur"
+          className={cn(
+            'animate-scale-in absolute bottom-full left-0 z-30 mb-3 w-[min(26rem,calc(100vw-3rem))] overflow-hidden rounded-[28px] border border-slate-200 bg-white/96 shadow-2xl shadow-slate-300/40 backdrop-blur',
+            menuClassName
+          )}
         >
           <div className="border-b border-slate-100 bg-gradient-to-r from-slate-50 via-white to-blue-50/60 px-5 py-4">
             <p className="text-base font-semibold text-slate-900">选择当前聊天模型</p>

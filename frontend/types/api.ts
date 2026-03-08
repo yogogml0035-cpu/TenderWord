@@ -209,6 +209,7 @@ export interface CreateTaskData {
   created_at?: string;
   user_session_id?: string;
   queue_position?: number;
+  waiting_count?: number;
   estimated_wait_seconds?: number;
 }
 

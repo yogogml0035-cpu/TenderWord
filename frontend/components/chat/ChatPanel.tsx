@@ -30,8 +30,12 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   const conversation = getCurrentConversation();
   const conversationDraft = getConversationDraft(conversation?.id || null);
   const currentTaskId = conversation?.currentTaskId;
-  const currentTaskStatus = currentTaskId ? taskSummaries[currentTaskId]?.status : null;
-  const isCurrentTaskQueued = currentTaskStatus === 'queued';
+  const currentTaskSummary = currentTaskId ? taskSummaries[currentTaskId] : null;
+  const currentTaskStatus = currentTaskSummary?.status || null;
+  const waitingCount = currentTaskSummary?.waiting_count;
+  const isCurrentTaskQueued =
+    currentTaskStatus === 'queued' && typeof waitingCount === 'number' && waitingCount > 0;
+  const isCurrentTaskStarting = currentTaskStatus === 'queued' && !isCurrentTaskQueued;
   const selectedModel: ModelType = conversationDraft?.model || 'deepseek';
   const messages = conversation?.messages || [];
   const mergedMessages: Message[] = messages.map((message) => {
@@ -215,19 +219,13 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         </div>
       </div>
 
-      {isCurrentTaskQueued && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
-          排队中，轮到当前任务后将开始显示进度日志
-        </div>
-      )}
-
       {/* Message List */}
       <div className="flex-1 overflow-hidden">
         <MessageList
           messages={mergedMessages}
           onDownload={handleDownload}
           onRetry={handleRetry}
-          emptyState={isCurrentTaskQueued ? <div className="h-full" /> : undefined}
+          emptyState={isCurrentTaskQueued || isCurrentTaskStarting ? <div className="h-full" /> : undefined}
         />
       </div>
 

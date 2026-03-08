@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { useCurrentConversationTaskStatus } from '@/hooks/useCurrentConversationTaskStatus';
 import { getTaskList, getTaskStatus } from '@/lib/api';
 import { useChatStore } from '@/stores/chatStore';
@@ -158,5 +158,104 @@ describe('useCurrentConversationTaskStatus', () => {
     });
 
     expect(mockGetTaskList).toHaveBeenCalledWith({ status: 'running' });
+  });
+
+  it('keeps current task progress when the current conversation task is already running', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: 'task-running',
+        },
+      ],
+      activeTaskIds: ['task-running'],
+    }));
+
+    mockGetTaskStatus.mockResolvedValue({
+      task_id: 'task-running',
+      status: 'running',
+      created_at: new Date().toISOString(),
+      progress: {
+        completed_nodes: ['prepare_template', 'parse_outline', 'extract_requirements'],
+        running_nodes: ['generate_chapters'],
+        current_node: 'generate_chapters',
+        current_node_display: '生成章节内容',
+        completed_count: 3,
+        total_nodes: 7,
+        progress_text: '3/7',
+        progress_percent: 42.8571428571,
+      },
+    } as never);
+
+    const { result } = renderHook(() => useCurrentConversationTaskStatus(60000));
+
+    await waitFor(() => {
+      expect(result.current.currentTaskStatus).toBe('running');
+      expect(result.current.runningTaskProgress).toEqual({
+        completed_count: 3,
+        total_nodes: 7,
+        progress_percent: 42.8571428571,
+        progress_text: '3/7',
+      });
+    });
+
+    expect(mockGetTaskList).not.toHaveBeenCalled();
+  });
+
+  it('re-polls queued task quickly when it is next to run', async () => {
+    jest.useFakeTimers();
+    try {
+      mockGetTaskStatus
+        .mockResolvedValueOnce({
+          task_id: 'task-queued',
+          status: 'queued',
+          created_at: new Date().toISOString(),
+          queue_position: 0,
+          waiting_count: 0,
+          progress: {
+            completed_nodes: [],
+            running_nodes: [],
+            completed_count: 0,
+            total_nodes: 7,
+            progress_text: '0/7',
+            progress_percent: 0,
+          },
+          current_running_progress: null,
+        } as never)
+        .mockResolvedValueOnce({
+          task_id: 'task-queued',
+          status: 'running',
+          created_at: new Date().toISOString(),
+          progress: {
+            completed_nodes: ['prepare_template'],
+            running_nodes: ['extract_tender_params'],
+            current_node: 'extract_tender_params',
+            current_node_display: '提取原始采购需求',
+            completed_count: 1,
+            total_nodes: 7,
+            progress_text: '1/7',
+            progress_percent: 14.2857142857,
+          },
+        } as never);
+
+      const { result } = renderHook(() => useCurrentConversationTaskStatus(60000));
+
+      await waitFor(() => {
+        expect(mockGetTaskStatus).toHaveBeenCalledTimes(1);
+      });
+
+      await act(async () => {
+        jest.advanceTimersByTime(450);
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(mockGetTaskStatus).toHaveBeenCalledTimes(2);
+        expect(result.current.currentTaskStatus).toBe('running');
+      });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

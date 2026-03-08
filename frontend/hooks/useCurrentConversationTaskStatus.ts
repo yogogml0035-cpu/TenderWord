@@ -6,6 +6,7 @@ import type { TaskProgress as ApiTaskProgress, TaskStatus } from '@/types/api';
 import { useChatStore } from '@/stores/chatStore';
 
 const DEFAULT_POLL_INTERVAL_MS = 5000;
+const STARTING_TASK_POLL_INTERVAL_MS = 400;
 
 export interface RunningTaskProgressSnapshot {
   completed_count: number;
@@ -106,12 +107,15 @@ export function useCurrentConversationTaskStatus(
     }
 
     let disposed = false;
+    let timer: number | null = null;
 
-    const syncCurrentTask = async () => {
+    const syncCurrentTask = async (): Promise<number> => {
+      let nextPollIntervalMs = pollIntervalMs;
+
       try {
         const task = await getTaskStatus(currentTaskId);
         if (disposed) {
-          return;
+          return nextPollIntervalMs;
         }
 
         const normalizedTaskProgress = normalizeRunningTaskProgress(task.progress);
@@ -128,12 +132,24 @@ export function useCurrentConversationTaskStatus(
             task.progress.current_node_display || task.progress.current_node || '',
         });
 
+        if (task.status === 'running') {
+          setRunningTaskProgressByTaskId({
+            taskId: currentTaskId,
+            progress: normalizedTaskProgress,
+          });
+          return nextPollIntervalMs;
+        }
+
         if (task.status !== 'queued') {
           setRunningTaskProgressByTaskId({
             taskId: currentTaskId,
             progress: null,
           });
-          return;
+          return nextPollIntervalMs;
+        }
+
+        if (typeof task.waiting_count === 'number' && task.waiting_count <= 0) {
+          nextPollIntervalMs = Math.min(STARTING_TASK_POLL_INTERVAL_MS, pollIntervalMs);
         }
 
         const currentRunningProgress = normalizeRunningTaskProgress(task.current_running_progress);
@@ -142,13 +158,13 @@ export function useCurrentConversationTaskStatus(
             taskId: currentTaskId,
             progress: currentRunningProgress,
           });
-          return;
+          return nextPollIntervalMs;
         }
 
         try {
           const runningTasks = await getTaskList({ status: 'running' });
           if (disposed) {
-            return;
+            return nextPollIntervalMs;
           }
 
           const headRunningTask = runningTasks.tasks[0];
@@ -174,22 +190,33 @@ export function useCurrentConversationTaskStatus(
         }
       } catch (error) {
         if (disposed) {
-          return;
+          return nextPollIntervalMs;
         }
         if (isTaskNotFoundError(error)) {
           discardStaleTask(currentTaskId);
         }
       }
+
+      return nextPollIntervalMs;
     };
 
-    void syncCurrentTask();
-    const timer = window.setInterval(() => {
-      void syncCurrentTask();
-    }, pollIntervalMs);
+    const scheduleSync = async () => {
+      const nextPollIntervalMs = await syncCurrentTask();
+      if (disposed) {
+        return;
+      }
+      timer = window.setTimeout(() => {
+        void scheduleSync();
+      }, nextPollIntervalMs);
+    };
+
+    void scheduleSync();
 
     return () => {
       disposed = true;
-      window.clearInterval(timer);
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
     };
   }, [currentTaskId, discardStaleTask, pollIntervalMs, upsertTaskSummary]);
 

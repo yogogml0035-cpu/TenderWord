@@ -244,7 +244,7 @@ export function FileUploader({
             </div>
           </div>
           <div className="inline-flex items-center justify-center rounded-full border border-[var(--primary)]/15 bg-[var(--primary)]/8 px-3 py-1.5 text-xs font-medium text-[var(--primary)]">
-            点击或拖拽上传
+            点击或拖拽
           </div>
         </div>
         <p className="mt-3 text-center text-[11px] text-[var(--text-muted)] sm:text-left">

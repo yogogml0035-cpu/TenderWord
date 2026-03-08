@@ -189,7 +189,7 @@ class Settings(BaseSettings):
     # 任务队列配置
     # ========================================
     TASK_TOTAL_NODES: int = Field(default=7, description="任务总节点数，用于进度计算")
-    TASK_HEARTBEAT_TIMEOUT: int = Field(default=120, description="任务心跳超时（秒）")
+    TASK_HEARTBEAT_TIMEOUT: int = Field(default=15, description="任务心跳超时（秒）")
     TASK_CLEANUP_INTERVAL: int = Field(default=5, description="任务清理间隔（秒）")
 
     @property

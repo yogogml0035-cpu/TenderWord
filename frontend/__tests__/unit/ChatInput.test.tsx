@@ -12,6 +12,7 @@ describe('ChatInput', () => {
     );
 
     expect(screen.getByTestId('chat-model-trigger')).toHaveTextContent('DeepSeek');
+    expect(screen.getByTestId('chat-model-trigger-content')).toHaveClass('items-center');
     expect(screen.getByTestId('chat-model-trigger')).not.toHaveTextContent('问问');
     expect(screen.queryByText('深度推理与长文本生成')).not.toBeInTheDocument();
     expect(screen.queryByText('Enter 发送，Shift + Enter 换行')).not.toBeInTheDocument();
