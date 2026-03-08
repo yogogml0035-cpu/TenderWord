@@ -56,5 +56,38 @@ describe('ChatInput', () => {
 
     expect(handleSend).toHaveBeenCalledWith('测试消息');
     expect(textarea).toHaveValue('');
+    expect(textarea).toHaveStyle({ height: '44px', overflowY: 'hidden' });
+  });
+
+  it('auto-resizes the textarea and clamps it at the configured max height', () => {
+    render(
+      <ChatInput
+        onSend={jest.fn()}
+        selectedModel="deepseek"
+        onModelChange={jest.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText('输入消息...') as HTMLTextAreaElement;
+
+    Object.defineProperty(textarea, 'scrollHeight', {
+      configurable: true,
+      value: 72,
+    });
+
+    fireEvent.change(textarea, { target: { value: '第一行\n第二行' } });
+
+    expect(textarea).toHaveStyle({ height: '72px', overflowY: 'hidden' });
+
+    Object.defineProperty(textarea, 'scrollHeight', {
+      configurable: true,
+      value: 260,
+    });
+
+    fireEvent.change(textarea, {
+      target: { value: '一段足够长的文本\n'.repeat(12) },
+    });
+
+    expect(textarea).toHaveStyle({ height: '180px', overflowY: 'auto' });
   });
 });

@@ -62,21 +62,23 @@ export function ChatModelPicker({
         aria-label="选择聊天模型"
         data-testid="chat-model-trigger"
         className={cn(
-          'group inline-flex max-w-full items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-3.5 py-2 text-left shadow-sm transition-all duration-200',
+          'group inline-flex max-w-full items-center gap-1.5 rounded-[18px] border border-slate-200 bg-white/95 px-3 py-1 text-left shadow-sm transition-all duration-200',
           disabled
             ? 'cursor-not-allowed opacity-60'
             : 'hover:border-blue-200 hover:bg-white hover:shadow-md'
         )}
       >
-        <div className="flex min-w-0 flex-col">
-          <span className="text-[11px] font-medium tracking-[0.18em] text-slate-400 uppercase">
+        <div className="flex min-w-0 flex-col leading-none">
+          <span className="text-[10px] font-medium tracking-[0.16em] text-slate-400 uppercase">
             模型
           </span>
-          <span className="truncate text-sm font-semibold text-slate-900">{selectedOption.label}</span>
+          <span className="mt-0.5 truncate text-[13px] font-semibold leading-5 text-slate-900">
+            {selectedOption.label}
+          </span>
         </div>
         <ChevronDown
           className={cn(
-            'h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200',
+            'h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-200',
             isOpen && 'rotate-180'
           )}
         />

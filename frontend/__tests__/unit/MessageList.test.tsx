@@ -53,6 +53,19 @@ function createTaskMessages(): Message[] {
   ];
 }
 
+function createUserMessage(content = '你好'): Message[] {
+  return [
+    {
+      id: 'msg-user',
+      conversationId: 'conv-1',
+      type: 'user',
+      content,
+      timestamp: 1,
+      status: 'sent',
+    },
+  ];
+}
+
 describe('MessageList', () => {
   it('renders task messages in log -> content -> download order', () => {
     render(<MessageList messages={createTaskMessages()} />);
@@ -98,5 +111,30 @@ describe('MessageList', () => {
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
 
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders user messages in a content-sized bubble capped at 40 percent width', () => {
+    render(<MessageList messages={createUserMessage()} />);
+
+    expect(screen.getByTestId('user-message-stack')).toHaveClass('flex-col', 'items-end', 'max-w-[40%]');
+    expect(screen.getByTestId('user-message-frame')).toHaveClass('-translate-x-6', 'w-fit', 'max-w-full');
+    expect(screen.getByTestId('user-message-bubble')).toHaveClass('w-fit', 'max-w-full');
+  });
+
+  it('preserves user-authored line breaks in message bubbles', () => {
+    render(<MessageList messages={createUserMessage('第一行\n第二行')} />);
+
+    expect(screen.getByTestId('user-message-text')).toHaveClass('whitespace-pre-wrap', 'break-words');
+    expect(screen.getByTestId('user-message-text').textContent).toBe('第一行\n第二行');
+  });
+
+  it('renders the user avatar above the message bubble', () => {
+    render(<MessageList messages={createUserMessage()} />);
+
+    const stack = screen.getByTestId('user-message-stack');
+    expect(stack.firstElementChild).toBe(screen.getByTestId('user-message-avatar'));
+    expect(screen.getByTestId('user-message-avatar').nextElementSibling).toBe(
+      screen.getByTestId('user-message-frame')
+    );
   });
 });
