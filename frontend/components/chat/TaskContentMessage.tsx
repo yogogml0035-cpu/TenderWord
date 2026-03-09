@@ -8,6 +8,7 @@ interface TaskContentMessageProps {
   message: Message;
   onRetry?: () => void;
   maxHeight?: number;
+  disabled?: boolean;
 }
 
 async function copyPlainText(text: string) {
@@ -76,6 +77,7 @@ export function TaskContentMessage({
   message,
   onRetry,
   maxHeight = 320,
+  disabled = false,
 }: TaskContentMessageProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
@@ -101,8 +103,11 @@ export function TaskContentMessage({
   }, [content, stickToBottom]);
 
   const handleCopyContent = useCallback(() => {
+    if (disabled) {
+      return;
+    }
     void copyPlainText(content);
-  }, [content]);
+  }, [content, disabled]);
 
   return (
     <div className={`overflow-hidden rounded border bg-white shadow-sm ${getBorderColor(message.status)}`}>
@@ -120,6 +125,7 @@ export function TaskContentMessage({
           {message.status === 'error' && onRetry && (
             <button
               onClick={onRetry}
+              disabled={disabled}
               className="flex items-center gap-1 rounded bg-blue-50 px-2.5 py-1 text-xs text-blue-600 transition-colors duration-200 hover:bg-blue-100"
             >
               <RefreshCw className="h-3.5 w-3.5" />
@@ -131,7 +137,7 @@ export function TaskContentMessage({
             aria-label="复制AI内容"
             title="复制AI内容"
             onClick={handleCopyContent}
-            disabled={!content}
+            disabled={!content || disabled}
             className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 transition-colors duration-200 hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Copy className="h-3.5 w-3.5" />

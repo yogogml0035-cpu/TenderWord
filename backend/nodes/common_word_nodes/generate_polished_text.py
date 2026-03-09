@@ -52,6 +52,25 @@ PROMPT_REGISTRY = {
     "xjcg": (POLISH_SYSTEM_PROMPT, POLISH_USER_PROMPT),
     "gngk": (POLISH_SYSTEM_PROMPT, POLISH_USER_PROMPT),
 }
+
+REWRITE_SYSTEM_PROMPT = """
+你是招标文档润色助手。
+请根据用户修改指令，在保持文档结构与专业风格的前提下，对现有文本进行定向改写。
+要求：
+1. 只输出最终可直接写回文档的正文文本，不输出解释。
+2. 无指令涉及的段落尽量保持原意。
+3. 避免编造事实，不新增与指令无关的内容。
+""".strip()
+
+REWRITE_USER_PROMPT = """
+【当前文档内容】
+{base_text}
+
+【用户修改指令】
+{user_prompt}
+
+请严格按指令完成润色修改，输出最终文本：
+""".strip()
    
 
 def _sanitize_filename(name: str) -> str:
@@ -89,16 +108,32 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
     
     if tender_type not in PROMPT_REGISTRY:
         raise ValueError(f"未知的招标类型: {tender_type}，支持的类型: {list(PROMPT_REGISTRY.keys())}")
-    
-    system_prompt_template, user_prompt_template = PROMPT_REGISTRY[tender_type]
-    
-    # 构建 system prompt 和 user prompt
-    system_prompt = system_prompt_template
-    user_prompt = user_prompt_template.format(
-        project_info = state.get("project_content", ""),
-        tender_params=tender_params,
-        origin_tender_params=origin_tender_params,
-    )
+
+    rewrite_mode = bool(state.get("rewrite_mode"))
+    if rewrite_mode:
+        rewrite_base_text = str(
+            state.get("rewrite_base_text")
+            or state.get("polished_text")
+            or origin_tender_params
+            or ""
+        )
+        rewrite_user_prompt = str(state.get("rewrite_user_prompt") or "").strip()
+        if not rewrite_user_prompt:
+            raise ValueError("rewrite_user_prompt 不能为空")
+
+        system_prompt = REWRITE_SYSTEM_PROMPT
+        user_prompt = REWRITE_USER_PROMPT.format(
+            base_text=rewrite_base_text,
+            user_prompt=rewrite_user_prompt,
+        )
+    else:
+        system_prompt_template, user_prompt_template = PROMPT_REGISTRY[tender_type]
+        system_prompt = system_prompt_template
+        user_prompt = user_prompt_template.format(
+            project_info=state.get("project_content", ""),
+            tender_params=tender_params,
+            origin_tender_params=origin_tender_params,
+        )
     
     # 保存提示词到文件
     prompts_dir = pathlib.Path(__file__).resolve().parents[2] / "prompts"

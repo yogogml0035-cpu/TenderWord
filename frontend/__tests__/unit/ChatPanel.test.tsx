@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
+import type { Message } from '@/types/chat';
 
 jest.mock('@/hooks/useHydrated', () => ({
   useHydrated: () => true,
@@ -11,9 +12,11 @@ jest.mock('@/components/chat/MessageList', () => ({
   MessageList: ({
     messages,
     emptyState,
+    onRetry,
   }: {
     messages: Array<unknown>;
     emptyState?: unknown;
+    onRetry?: (message: Message) => void;
   }) => (
     <div data-testid="message-list">
       {messages.length === 0 ? (
@@ -24,6 +27,15 @@ jest.mock('@/components/chat/MessageList', () => ({
         )
       ) : (
         <div data-testid="message-count">{messages.length}</div>
+      )}
+      {onRetry && messages.length > 0 && (
+        <button
+          type="button"
+          data-testid="retry-message-button"
+          onClick={() => onRetry(messages[0] as Message)}
+        >
+          retry message
+        </button>
       )}
     </div>
   ),
@@ -165,5 +177,74 @@ describe('ChatPanel', () => {
     fireEvent.click(screen.getByTestId('change-model-button'));
 
     expect(useChatStore.getState().getConversationDraft('conv-1')?.model).toBe('qwen');
+  });
+
+  it('retries failed ai message in place instead of appending a new bubble', async () => {
+    const failedMessage: Message = {
+      id: 'msg-ai-failed',
+      conversationId: 'conv-1',
+      type: 'ai',
+      content: '旧的失败内容',
+      timestamp: Date.now(),
+      status: 'error',
+      metadata: {
+        chatKind: 'normal',
+        chatPrompt: '请重试',
+        chatModel: 'qwen',
+      },
+    };
+
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+          messages: [failedMessage],
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+    }));
+
+    const encoder = new TextEncoder();
+    const streamPayload = `${JSON.stringify({ event: 'done', data: { content: '重试成功内容' } })}\n`;
+    const originalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      body: {
+        getReader: () => {
+          let consumed = false;
+          return {
+            read: async () => {
+              if (consumed) {
+                return { value: undefined, done: true };
+              }
+              consumed = true;
+              return { value: encoder.encode(streamPayload), done: false };
+            },
+          };
+        },
+      },
+    } as unknown as Response);
+    (globalThis as { fetch?: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      render(<ChatPanel />);
+
+      fireEvent.click(screen.getByTestId('retry-message-button'));
+
+      await waitFor(() => {
+        const conversation = useChatStore.getState().conversations[0];
+        expect(conversation.messages).toHaveLength(1);
+        expect(conversation.messages[0].id).toBe('msg-ai-failed');
+        expect(conversation.messages[0].status).toBe('completed');
+        expect(conversation.messages[0].content).toBe('重试成功内容');
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
+    }
   });
 });

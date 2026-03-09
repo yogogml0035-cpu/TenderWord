@@ -46,13 +46,14 @@ class TenderGraphStateBase(BaseState, total=False):
 
     origin_tender_params: str
     tender_params: str
-    polished_text: str
 
     replacements: List[Tuple[str, str]]
     placeholder_mapping: Dict[str, str]
     insertion_before_text: str
     insertion_after_text: str
 
+    polished_text: str
+    
     comment_plan_detail: List[Dict[str, Any]]
     strikethrough_plan: List[Dict[str, Any]]
     non_black_font_plan: List[Dict[str, Any]]

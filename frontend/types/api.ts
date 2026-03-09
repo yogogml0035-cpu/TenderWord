@@ -63,6 +63,13 @@ export interface GenerateRequest {
   tender_data: TenderData;
   file_paths: FilesConfig;
   insertion_config?: InsertionConfig;
+  conversation_id?: string;
+  model: 'deepseek' | 'qwen' | 'doubao';
+}
+
+export interface RewriteRequest {
+  conversation_id: string;
+  user_prompt: string;
   model: 'deepseek' | 'qwen' | 'doubao';
 }
 
@@ -215,6 +222,50 @@ export interface CreateTaskData {
 
 export type CreateTaskResponse = ApiResponse<CreateTaskData>;
 
+export interface ChatStreamMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatStreamRequest {
+  conversation_id: string;
+  model: 'deepseek' | 'qwen' | 'doubao';
+  messages: ChatStreamMessage[];
+}
+
+export interface ChatStreamChunkEvent {
+  event: 'chunk';
+  data: {
+    content: string;
+  };
+}
+
+export interface ChatStreamDoneEvent {
+  event: 'done';
+  data: {
+    content: string;
+  };
+}
+
+export interface ChatStreamErrorEvent {
+  event: 'error';
+  data: {
+    code?: string;
+    message: string;
+  };
+}
+
+export type ChatStreamEvent = ChatStreamChunkEvent | ChatStreamDoneEvent | ChatStreamErrorEvent;
+
+export interface ConversationHeartbeatData {
+  conversation_id: string;
+  alive: boolean;
+  instance_id: string;
+  server_time: string;
+}
+
+export type ConversationHeartbeatResponse = ApiResponse<ConversationHeartbeatData>;
+
 // ============================================
 // SSE Event Types
 // ============================================
@@ -333,6 +384,15 @@ export const ErrorCodes = {
   LLM_RATE_LIMIT: 'LLM_RATE_LIMIT',
   LLM_SERVICE_ERROR: 'LLM_SERVICE_ERROR',
   LLM_INVALID_MODEL: 'LLM_INVALID_MODEL',
+
+  // Rewrite / Chat
+  REWRITE_NO_DOCUMENT: 'REWRITE_NO_DOCUMENT',
+  REWRITE_PROMPT_INVALID: 'REWRITE_PROMPT_INVALID',
+  REWRITE_HISTORY_NOT_FOUND: 'REWRITE_HISTORY_NOT_FOUND',
+  REWRITE_TARGET_NOT_RESOLVED: 'REWRITE_TARGET_NOT_RESOLVED',
+  CHAT_MODE_REQUIRES_REWRITE: 'CHAT_MODE_REQUIRES_REWRITE',
+  CHAT_DOC_CONTEXT_REQUIRED: 'CHAT_DOC_CONTEXT_REQUIRED',
+  CONVERSATION_INSTANCE_RESET: 'CONVERSATION_INSTANCE_RESET',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

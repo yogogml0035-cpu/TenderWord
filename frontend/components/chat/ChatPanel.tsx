@@ -1,12 +1,20 @@
 'use client';
 
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useHydrated } from '@/hooks/useHydrated';
+import { useCurrentConversationTaskStatus } from '@/hooks/useCurrentConversationTaskStatus';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
-import { downloadFile } from '@/lib/api';
+import {
+  API_BASE_URL,
+  ApiError,
+  cancelTask,
+  createRewriteTask,
+  downloadFile,
+} from '@/lib/api';
+import type { ChatStreamEvent } from '@/types/api';
 import type { Message } from '@/types/chat';
 import type { ModelType } from '@/components/forms/ModelSelector';
 
@@ -14,29 +22,69 @@ interface ChatPanelProps {
   className?: string;
 }
 
+function collectNormalChatContext(messages: Message[]) {
+  const candidates = messages.filter((message) => {
+    if (message.metadata?.messageKind) {
+      return false;
+    }
+    if (message.metadata?.chatKind && message.metadata.chatKind !== 'normal') {
+      return false;
+    }
+    if (message.type === 'user') {
+      return true;
+    }
+    if (message.type === 'ai') {
+      return message.status === 'completed';
+    }
+    return false;
+  });
+
+  return candidates.slice(-6).map((message) => ({
+    role: message.type === 'user' ? 'user' : 'assistant',
+    content: typeof message.content === 'string' ? message.content : '',
+  }));
+}
+
+function getConversationMessagesById(conversationId: string): Message[] {
+  const state = useChatStore.getState();
+  return state.conversations.find((item) => item.id === conversationId)?.messages || [];
+}
+
 export function ChatPanel({ className = '' }: ChatPanelProps) {
   const mounted = useHydrated();
   const {
+    conversations,
+    activeTaskIds,
     getCurrentConversation,
     getConversationDraft,
     updateConversationDraft,
     addMessage,
-    currentConversationIsBusy,
+    updateMessage,
+    startTask,
     taskSummaries,
   } =
     useChatStore();
   const streams = useChatStreamStore((state) => state.streams);
+  const normalChatAbortRef = useRef<Record<string, AbortController>>({});
+  const [activeNormalConversations, setActiveNormalConversations] = useState<Record<string, boolean>>(
+    {}
+  );
 
   const conversation = getCurrentConversation();
   const conversationDraft = getConversationDraft(conversation?.id || null);
-  const currentTaskId = conversation?.currentTaskId;
-  const currentTaskSummary = currentTaskId ? taskSummaries[currentTaskId] : null;
-  const currentTaskStatus = currentTaskSummary?.status || null;
-  const waitingCount = currentTaskSummary?.waiting_count;
-  const isCurrentTaskQueued =
-    currentTaskStatus === 'queued' && typeof waitingCount === 'number' && waitingCount > 0;
-  const isCurrentTaskStarting = currentTaskStatus === 'queued' && !isCurrentTaskQueued;
+  const {
+    currentTaskId,
+    currentTaskStatus,
+    waitingCount,
+    isCurrentTaskQueued,
+    isCurrentTaskRunning,
+    runningTaskProgress,
+  } = useCurrentConversationTaskStatus();
+  const isCurrentTaskStarting =
+    isCurrentTaskQueued && (!waitingCount || Number.isNaN(Number(waitingCount)) || waitingCount <= 0);
   const selectedModel: ModelType = conversationDraft?.model || 'deepseek';
+  const chatMode = conversationDraft?.chat_mode || 'normal';
+  const inputValue = conversationDraft?.chat_input || '';
   const messages = conversation?.messages || [];
   const mergedMessages: Message[] = messages.map((message) => {
     if (!message.taskId) {
@@ -84,23 +132,364 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       metadata: mergedMetadata,
     };
   });
-  const isLoading = currentConversationIsBusy();
+  const isNormalStreamActive = !!(conversation && activeNormalConversations[conversation.id]);
+  const isTaskBusy = isCurrentTaskQueued || isCurrentTaskRunning;
+  const isBusy = isTaskBusy || isNormalStreamActive;
+  const hasCompletedDocument = messages.some(
+    (message) =>
+      message.metadata?.messageKind === 'task-download' &&
+      message.status === 'completed' &&
+      typeof message.metadata?.outputFile === 'string'
+  );
+  const rewriteModeEnabled = chatMode === 'rewrite';
+  const canEnterRewriteMode =
+    rewriteModeEnabled || hasCompletedDocument || !!conversationDraft?.pending_rewrite_task_id;
+  const otherActiveTaskCount = conversation
+    ? activeTaskIds.filter((taskId) => {
+        const owner = conversations.find((item) => item.currentTaskId === taskId);
+        return !!owner && owner.id !== conversation.id;
+      }).length
+    : 0;
+  const showRewriteQueueHint =
+    rewriteModeEnabled && !isTaskBusy && otherActiveTaskCount > 0 && canEnterRewriteMode;
+  const isRewriteQueueStage =
+    rewriteModeEnabled &&
+    !!conversation &&
+    currentTaskStatus === 'queued' &&
+    typeof waitingCount === 'number' &&
+    waitingCount > 0 &&
+    conversationDraft?.pending_rewrite_task_id === currentTaskId;
 
-  const handleSendMessage = (content: string) => {
-    if (!conversation) return;
+  const updateInputValue = useCallback(
+    (nextValue: string) => {
+      if (!conversation) {
+        return;
+      }
+      updateConversationDraft(conversation.id, { chat_input: nextValue });
+    },
+    [conversation, updateConversationDraft]
+  );
 
-    // Add user message
-    addMessage(conversation.id, {
-      type: 'user',
-      content,
-      status: 'sent',
+  const toggleRewriteMode = useCallback(() => {
+    if (!conversation) {
+      return;
+    }
+
+    if (rewriteModeEnabled) {
+      updateConversationDraft(conversation.id, { chat_mode: 'normal' });
+      return;
+    }
+
+    if (!canEnterRewriteMode) {
+      addMessage(conversation.id, {
+        type: 'system',
+        content: '当前会话尚无可修改文档，请先完成一次文档生成。',
+        status: 'completed',
+      });
+      return;
+    }
+
+    updateConversationDraft(conversation.id, { chat_mode: 'rewrite' });
+  }, [
+    addMessage,
+    canEnterRewriteMode,
+    conversation,
+    rewriteModeEnabled,
+    updateConversationDraft,
+  ]);
+
+  const setNormalChatActive = useCallback((conversationId: string, active: boolean) => {
+    setActiveNormalConversations((state) => {
+      if (active) {
+        return { ...state, [conversationId]: true };
+      }
+      return Object.fromEntries(Object.entries(state).filter(([id]) => id !== conversationId));
     });
+  }, []);
 
-    // Note: In a real implementation, you might want to:
-    // 1. Send to backend for chat-based regeneration
-    // 2. Or just store locally for now
-    // For this version, we'll just add the message
-  };
+  const sendNormalChatMessage = useCallback(
+    async (
+      prompt: string,
+      options: {
+        appendUserMessage?: boolean;
+        modelOverride?: ModelType;
+        reuseAiMessageId?: string;
+      } = {}
+    ) => {
+      if (!conversation) {
+        return;
+      }
+      const conversationId = conversation.id;
+      if (normalChatAbortRef.current[conversationId]) {
+        return;
+      }
+      if (isTaskBusy) {
+        return;
+      }
+
+      const appendUserMessage = options.appendUserMessage ?? true;
+      const modelForRequest = options.modelOverride || selectedModel;
+      const baseAiMetadata = {
+        chatKind: 'normal' as const,
+        chatPrompt: prompt,
+        chatModel: modelForRequest,
+      };
+
+      if (appendUserMessage) {
+        addMessage(conversationId, {
+          type: 'user',
+          content: prompt,
+          status: 'sent',
+          metadata: {
+            chatKind: 'normal',
+          },
+        });
+      }
+
+      let aiMessageId = options.reuseAiMessageId;
+      if (aiMessageId) {
+        updateMessage(conversationId, aiMessageId, {
+          content: '',
+          status: 'generating',
+          error: undefined,
+          metadata: baseAiMetadata,
+        });
+      } else {
+        aiMessageId = addMessage(conversationId, {
+          type: 'ai',
+          content: '',
+          status: 'generating',
+          metadata: baseAiMetadata,
+        });
+      }
+
+      const contextMessages = collectNormalChatContext(
+        getConversationMessagesById(conversationId)
+      );
+
+      const controller = new AbortController();
+      normalChatAbortRef.current[conversationId] = controller;
+      setNormalChatActive(conversationId, true);
+
+      let accumulatedText = '';
+      let streamFinished = false;
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            conversation_id: conversationId,
+            model: modelForRequest,
+            messages: contextMessages,
+          }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          let errorMessage = '聊天请求失败';
+          let errorCode = 'CHAT_STREAM_ERROR';
+          try {
+            const errorPayload = await response.json();
+            const detailError = errorPayload?.detail?.error;
+            if (detailError?.message) {
+              errorMessage = String(detailError.message);
+            }
+            if (detailError?.code) {
+              errorCode = String(detailError.code);
+            }
+          } catch {
+            // ignore json parse errors
+          }
+          throw new ApiError(errorMessage, errorCode, response.status);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new ApiError('聊天流不可用', 'CHAT_STREAM_ERROR', 500);
+        }
+
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+
+        const handleEventLine = (rawLine: string) => {
+          const trimmed = rawLine.trim();
+          if (!trimmed) {
+            return;
+          }
+
+          let event: ChatStreamEvent | null = null;
+          try {
+            event = JSON.parse(trimmed) as ChatStreamEvent;
+          } catch {
+            event = null;
+          }
+          if (!event) {
+            return;
+          }
+
+          if (event.event === 'chunk') {
+            accumulatedText += event.data.content || '';
+            updateMessage(conversationId, aiMessageId, {
+              content: accumulatedText,
+              status: 'generating',
+            });
+            return;
+          }
+
+          if (event.event === 'done') {
+            const finalText = event.data.content || accumulatedText;
+            accumulatedText = finalText;
+            updateMessage(conversationId, aiMessageId, {
+              content: finalText,
+              status: 'completed',
+              error: undefined,
+            });
+            streamFinished = true;
+            return;
+          }
+
+          if (event.event === 'error') {
+            const errorMessage = event.data.message || '聊天失败';
+            updateMessage(conversationId, aiMessageId, {
+              content: accumulatedText,
+              status: 'error',
+              error: errorMessage,
+            });
+            streamFinished = true;
+          }
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) {
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            handleEventLine(line);
+          }
+        }
+
+        if (buffer.trim()) {
+          handleEventLine(buffer);
+        }
+
+        if (!streamFinished) {
+          updateMessage(conversationId, aiMessageId, {
+            content: accumulatedText,
+            status: 'completed',
+            error: undefined,
+          });
+        }
+      } catch (error) {
+        const isAbort =
+          error instanceof DOMException
+            ? error.name === 'AbortError'
+            : error instanceof Error && error.name === 'AbortError';
+
+        if (isAbort) {
+          updateMessage(conversationId, aiMessageId, {
+            content: accumulatedText,
+            status: 'cancelled',
+          });
+        } else {
+          const message = error instanceof ApiError ? error.message : '聊天失败，请稍后重试';
+          const errorCode = error instanceof ApiError ? error.code : '';
+          updateMessage(conversationId, aiMessageId, {
+            content: accumulatedText,
+            status: 'error',
+            error: message,
+          });
+          if (errorCode === 'CHAT_MODE_REQUIRES_REWRITE' || errorCode === 'CHAT_DOC_CONTEXT_REQUIRED') {
+            addMessage(conversationId, {
+              type: 'system',
+              content: message,
+              status: 'completed',
+            });
+          }
+        }
+      } finally {
+        delete normalChatAbortRef.current[conversationId];
+        setNormalChatActive(conversationId, false);
+      }
+    },
+    [
+      addMessage,
+      conversation,
+      isTaskBusy,
+      selectedModel,
+      setNormalChatActive,
+      updateMessage,
+    ]
+  );
+
+  const handleSendMessage = useCallback(
+    async (content: string) => {
+      if (!conversation || isBusy) {
+        return;
+      }
+
+      if (rewriteModeEnabled) {
+        addMessage(conversation.id, {
+          type: 'user',
+          content,
+          status: 'sent',
+          metadata: {
+            chatKind: 'rewrite',
+          },
+        });
+
+        try {
+          const result = await createRewriteTask({
+            conversation_id: conversation.id,
+            user_prompt: content,
+            model: selectedModel,
+          });
+          startTask(conversation.id, result.task_id, {
+            status: result.status || 'queued',
+            queue_position: result.queue_position,
+            waiting_count: result.waiting_count,
+          });
+          updateConversationDraft(conversation.id, {
+            chat_input: '',
+            pending_rewrite_prompt: content,
+            pending_rewrite_task_id: result.task_id,
+          });
+        } catch (error) {
+          const message =
+            error instanceof ApiError ? error.message : '润色任务创建失败，请稍后重试';
+          addMessage(conversation.id, {
+            type: 'system',
+            content: message,
+            status: 'completed',
+          });
+        }
+        return;
+      }
+
+      await sendNormalChatMessage(content, {
+        appendUserMessage: true,
+      });
+      updateConversationDraft(conversation.id, { chat_input: '' });
+    },
+    [
+      addMessage,
+      conversation,
+      isBusy,
+      rewriteModeEnabled,
+      selectedModel,
+      sendNormalChatMessage,
+      startTask,
+      updateConversationDraft,
+    ]
+  );
 
   const handleModelChange = (model: ModelType) => {
     if (!conversation) {
@@ -110,16 +499,32 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     updateConversationDraft(conversation.id, { model });
   };
 
-  const handleRetry = () => {
-    if (!conversation) return;
+  const handleRetry = useCallback(
+    (message: Message) => {
+      if (!conversation || isBusy) {
+        return;
+      }
 
-    // Find the last user message
-    const lastUserMessage = [...messages].reverse().find((m) => m.type === 'user');
+      const retryPrompt =
+        typeof message.metadata?.chatPrompt === 'string' ? message.metadata.chatPrompt : '';
+      const retryModel =
+        message.metadata?.chatModel === 'deepseek' ||
+        message.metadata?.chatModel === 'qwen' ||
+        message.metadata?.chatModel === 'doubao'
+          ? message.metadata.chatModel
+          : selectedModel;
 
-    if (lastUserMessage && typeof lastUserMessage.content === 'string') {
-      handleSendMessage(lastUserMessage.content);
-    }
-  };
+      if (retryPrompt) {
+        void sendNormalChatMessage(retryPrompt, {
+          appendUserMessage: false,
+          modelOverride: retryModel,
+          reuseAiMessageId: message.id,
+        });
+        return;
+      }
+    },
+    [conversation, isBusy, selectedModel, sendNormalChatMessage]
+  );
 
   const handleDownload = async (filePath: string, fileName?: string) => {
     try {
@@ -137,6 +542,94 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       alert('下载失败，请重试');
     }
   };
+
+  const handleStopAction = useCallback(async () => {
+    if (!conversation) {
+      return;
+    }
+
+    if (isNormalStreamActive) {
+      normalChatAbortRef.current[conversation.id]?.abort();
+      return;
+    }
+
+    if (!currentTaskId) {
+      return;
+    }
+
+    try {
+      await cancelTask(currentTaskId);
+
+      if (isRewriteQueueStage) {
+        const refillPrompt = conversationDraft?.pending_rewrite_prompt || '';
+        updateConversationDraft(conversation.id, {
+          chat_input: refillPrompt,
+          pending_rewrite_prompt: undefined,
+          pending_rewrite_task_id: undefined,
+        });
+      }
+    } catch {
+      // noop
+    }
+  }, [
+    conversation,
+    conversationDraft?.pending_rewrite_prompt,
+    currentTaskId,
+    isNormalStreamActive,
+    isRewriteQueueStage,
+    updateConversationDraft,
+  ]);
+
+  useEffect(
+    () => () => {
+      const controllers = Object.values(normalChatAbortRef.current);
+      for (const controller of controllers) {
+        controller.abort();
+      }
+      normalChatAbortRef.current = {};
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!conversation) {
+      return;
+    }
+    const pendingTaskId = conversationDraft?.pending_rewrite_task_id;
+    if (!pendingTaskId) {
+      return;
+    }
+
+    const pendingSummary = taskSummaries[pendingTaskId];
+    const pendingStatus = pendingSummary?.status;
+    const stillActive =
+      conversation.currentTaskId === pendingTaskId ||
+      pendingStatus === 'queued' ||
+      pendingStatus === 'running';
+    if (stillActive) {
+      return;
+    }
+
+    updateConversationDraft(conversation.id, {
+      pending_rewrite_task_id: undefined,
+      pending_rewrite_prompt: undefined,
+    });
+  }, [
+    conversation,
+    conversationDraft?.pending_rewrite_task_id,
+    taskSummaries,
+    updateConversationDraft,
+  ]);
+
+  const queueProgressLabel = runningTaskProgress
+    ? `${Math.round(runningTaskProgress.progress_percent)}%`
+    : '等待中';
+  const queueProgressSummary = runningTaskProgress
+    ? `全局执行进度：${runningTaskProgress.completed_count}/${runningTaskProgress.total_nodes}`
+    : '全局执行进度获取中...';
+  const queueProgressBarPercent = runningTaskProgress
+    ? Math.max(8, Math.round(runningTaskProgress.progress_percent))
+    : 12;
 
   // Empty state when no conversation selected or during hydration
   if (!mounted || !conversation) {
@@ -220,23 +713,67 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       </div>
 
       {/* Message List */}
-      <div className="flex-1 overflow-hidden">
+      <div className="relative flex-1 overflow-hidden">
         <MessageList
           messages={mergedMessages}
           onDownload={handleDownload}
           onRetry={handleRetry}
+          interactionDisabled={isRewriteQueueStage}
           emptyState={isCurrentTaskQueued || isCurrentTaskStarting ? <div className="h-full" /> : undefined}
         />
+
+        {isRewriteQueueStage && (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">
+            <div className="absolute inset-0 bg-slate-900/6 shadow-inner backdrop-blur-[1px]" />
+            <div className="relative w-full max-w-md rounded-3xl border border-amber-300/90 bg-white/95 p-6 shadow-xl shadow-amber-100/70">
+              <div className="mb-3 inline-flex rounded-full border border-amber-200/80 bg-amber-50 px-3 py-1 text-xs font-semibold tracking-[0.18em] text-amber-700">
+                排队等待
+              </div>
+              <h3 className="text-xl font-semibold tracking-tight text-slate-900">润色任务排队中</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                前方等待 {waitingCount} 个任务（含当前执行任务），轮到后将自动进入日志流。
+              </p>
+              <div className="mt-5">
+                <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
+                  <span>{queueProgressSummary}</span>
+                  <span>{queueProgressLabel}</span>
+                </div>
+                <div className="h-2.5 overflow-hidden rounded-full bg-slate-200/80">
+                  <div
+                    className="h-full rounded-full bg-amber-500/90 transition-[width] duration-500"
+                    style={{ width: `${Math.max(0, Math.min(100, queueProgressBarPercent))}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Input */}
       <ChatInput
+        value={inputValue}
+        onValueChange={updateInputValue}
         onSend={handleSendMessage}
+        onCancel={handleStopAction}
         selectedModel={selectedModel}
         onModelChange={handleModelChange}
-        disabled={isLoading}
-        loading={isLoading}
-        placeholder={isLoading ? '生成中，请稍候...' : '输入消息...'}
+        chatMode={chatMode}
+        onToggleRewriteMode={toggleRewriteMode}
+        rewriteAvailable={canEnterRewriteMode}
+        rewriteHint={showRewriteQueueHint ? '发送后将进入队列' : null}
+        actionMode={isBusy ? 'cancel' : 'send'}
+        disabled={false}
+        loading={isBusy}
+        placeholder={
+          chatMode === 'rewrite'
+            ? isBusy
+              ? '润色处理中，请稍候...'
+              : '输入修改润色指令...'
+            : isBusy
+              ? '回复生成中，请稍候...'
+              : '输入消息...'
+        }
       />
     </div>
   );

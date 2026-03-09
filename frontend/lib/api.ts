@@ -15,6 +15,8 @@ import type {
   CancelTaskData,
   CreateTaskData,
   GenerateRequest,
+  RewriteRequest,
+  ConversationHeartbeatData,
   ApiSuccessResponse,
   FileType,
   TaskStatus,
@@ -183,6 +185,13 @@ export async function createGenerateTask(params: GenerateRequest): Promise<Creat
   });
 }
 
+export async function createRewriteTask(params: RewriteRequest): Promise<CreateTaskData> {
+  return request<CreateTaskData>('/api/rewrite', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
 export async function getTaskStatus(taskId: string): Promise<TaskData> {
   return request<TaskData>(`/api/tasks/${encodeURIComponent(taskId)}`);
 }
@@ -210,6 +219,17 @@ export async function sendTaskHeartbeat(taskId: string): Promise<TaskHeartbeatDa
   return request<TaskHeartbeatData>(`/api/tasks/${encodeURIComponent(taskId)}/heartbeat`, {
     method: 'POST',
   });
+}
+
+export async function sendConversationHeartbeat(
+  conversationId: string
+): Promise<ConversationHeartbeatData> {
+  return request<ConversationHeartbeatData>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/heartbeat`,
+    {
+      method: 'POST',
+    }
+  );
 }
 
 export async function getTaskList(options?: {

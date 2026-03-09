@@ -7,6 +7,7 @@ import type { LogEntry, Message } from '@/types/chat';
 interface TaskLogMessageProps {
   message: Message;
   maxHeight?: number;
+  disabled?: boolean;
 }
 
 function formatLogTime(timestamp: number) {
@@ -120,7 +121,11 @@ function LogEntryItem({ log }: { log: LogEntry }) {
   );
 }
 
-export function TaskLogMessage({ message, maxHeight = 260 }: TaskLogMessageProps) {
+export function TaskLogMessage({
+  message,
+  maxHeight = 260,
+  disabled = false,
+}: TaskLogMessageProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
 
@@ -154,8 +159,11 @@ export function TaskLogMessage({ message, maxHeight = 260 }: TaskLogMessageProps
   }, [logs.length, stickToBottom]);
 
   const handleCopyLogs = useCallback(() => {
+    if (disabled) {
+      return;
+    }
     void copyPlainText(copyText);
-  }, [copyText]);
+  }, [copyText, disabled]);
 
   return (
     <div className={`overflow-hidden rounded border bg-white shadow-sm ${getBorderColor(message.status)}`}>
@@ -173,7 +181,7 @@ export function TaskLogMessage({ message, maxHeight = 260 }: TaskLogMessageProps
           aria-label="复制进度日志"
           title="复制进度日志"
           onClick={handleCopyLogs}
-          disabled={!copyText}
+          disabled={!copyText || disabled}
           className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 transition-colors duration-200 hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Copy className="h-3.5 w-3.5" />

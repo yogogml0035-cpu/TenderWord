@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useRef, useCallback } from 'react';
-import { ArrowUp, Loader2 } from 'lucide-react';
+import React, { useRef, useCallback } from 'react';
+import { ArrowUp, Languages, Loader2, Square, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ModelType } from '@/components/forms/ModelSelector';
 import { ChatModelPicker } from './ChatModelPicker';
@@ -10,23 +10,38 @@ const MIN_TEXTAREA_HEIGHT = 44;
 const MAX_TEXTAREA_HEIGHT = 180;
 
 interface ChatInputProps {
+  value: string;
+  onValueChange: (value: string) => void;
   onSend: (message: string) => void;
+  onCancel?: () => void;
   selectedModel: ModelType;
   onModelChange: (model: ModelType) => void;
+  chatMode?: 'normal' | 'rewrite';
+  onToggleRewriteMode?: () => void;
+  rewriteAvailable?: boolean;
+  rewriteHint?: string | null;
+  actionMode?: 'send' | 'cancel';
   disabled?: boolean;
   placeholder?: string;
   loading?: boolean;
 }
 
 export function ChatInput({
+  value,
+  onValueChange,
   onSend,
+  onCancel,
   selectedModel,
   onModelChange,
+  chatMode = 'normal',
+  onToggleRewriteMode,
+  rewriteAvailable = false,
+  rewriteHint,
+  actionMode = 'send',
   disabled = false,
   placeholder = '输入消息...',
   loading = false,
 }: ChatInputProps) {
-  const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputLocked = disabled || loading;
   const resetTextareaHeight = useCallback((textarea: HTMLTextAreaElement | null) => {
@@ -40,13 +55,17 @@ export function ChatInput({
   }, []);
 
   const handleSend = useCallback(() => {
-    const trimmed = input.trim();
+    const trimmed = value.trim();
     if (!trimmed || inputLocked) return;
 
     onSend(trimmed);
-    setInput('');
+    onValueChange('');
     resetTextareaHeight(textareaRef.current);
-  }, [input, inputLocked, onSend, resetTextareaHeight]);
+  }, [inputLocked, onSend, onValueChange, resetTextareaHeight, value]);
+
+  const handleCancel = useCallback(() => {
+    onCancel?.();
+  }, [onCancel]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -57,7 +76,7 @@ export function ChatInput({
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const target = e.target;
-    setInput(target.value);
+    onValueChange(target.value);
 
     target.style.height = '0px';
 
@@ -70,7 +89,10 @@ export function ChatInput({
     target.style.overflowY = target.scrollHeight > MAX_TEXTAREA_HEIGHT ? 'auto' : 'hidden';
   };
 
-  const isEmpty = !input.trim();
+  const isEmpty = !value.trim();
+  const rewriteModeEnabled = chatMode === 'rewrite';
+  const rewriteButtonDisabled = !rewriteModeEnabled && !rewriteAvailable;
+  const isCancelAction = actionMode === 'cancel';
 
   return (
     <div className="border-t border-slate-200 bg-gradient-to-b from-white via-slate-50/60 to-white px-4 py-2.5">
@@ -81,10 +103,35 @@ export function ChatInput({
         )}
       >
         <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between px-2">
+            <button
+              type="button"
+              onClick={onToggleRewriteMode}
+              disabled={rewriteButtonDisabled}
+              className={cn(
+                'group inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-sm font-medium transition-all duration-200',
+                rewriteModeEnabled
+                  ? 'border border-blue-100 bg-blue-50 text-blue-700 shadow-sm shadow-blue-100/70'
+                  : 'border border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50/60 hover:text-blue-700',
+                rewriteButtonDisabled && 'cursor-not-allowed opacity-45'
+              )}
+            >
+              <Languages className="h-4 w-4 shrink-0" strokeWidth={2.1} />
+              <span className="leading-none">修改润色</span>
+              {rewriteModeEnabled && (
+                <X
+                  className="h-3.5 w-3.5 shrink-0 opacity-80 transition-opacity group-hover:opacity-100"
+                  strokeWidth={2.4}
+                />
+              )}
+            </button>
+            {rewriteHint ? <span className="text-xs text-amber-600">{rewriteHint}</span> : <span />}
+          </div>
+
           <div>
             <textarea
               ref={textareaRef}
-              value={input}
+              value={value}
               onChange={handleInput}
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
@@ -119,17 +166,21 @@ export function ChatInput({
             <div className="flex shrink-0 items-center">
               <button
                 type="button"
-                onClick={handleSend}
-                disabled={isEmpty || inputLocked}
-                aria-label={loading ? '发送中' : '发送消息'}
+                onClick={isCancelAction ? handleCancel : handleSend}
+                disabled={isCancelAction ? !onCancel : isEmpty || inputLocked}
+                aria-label={isCancelAction ? '暂停任务' : loading ? '发送中' : '发送消息'}
                 className={cn(
                   'flex h-10 w-10 items-center justify-center rounded-[18px] border transition-all duration-200',
-                  isEmpty || inputLocked
-                    ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
-                    : 'border-blue-500 bg-blue-500 text-white shadow-sm shadow-blue-200 hover:-translate-y-0.5 hover:bg-blue-600'
+                  isCancelAction
+                    ? 'border-blue-500 bg-blue-500 text-white shadow-sm shadow-blue-200 hover:-translate-y-0.5 hover:bg-blue-600'
+                    : isEmpty || inputLocked
+                      ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+                      : 'border-blue-500 bg-blue-500 text-white shadow-sm shadow-blue-200 hover:-translate-y-0.5 hover:bg-blue-600'
                 )}
               >
-                {loading ? (
+                {isCancelAction ? (
+                  <Square className="h-5 w-5 fill-current" />
+                ) : loading ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
                   <ArrowUp className="h-5 w-5" strokeWidth={2.4} />

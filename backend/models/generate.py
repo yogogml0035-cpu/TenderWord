@@ -62,6 +62,9 @@ class GenerateRequest(BaseModel):
     insertion_config: Optional[InsertionConfig] = Field(
         default=None, description="插入锚点配置（可选）"
     )
+    conversation_id: Optional[str] = Field(
+        default=None, description="会话ID，用于会话级 rewrite 历史与状态管理"
+    )
     model: LLMModel = Field(default=LLMModel.DEEPSEEK, description="使用的 LLM 模型")
 
     model_config = {

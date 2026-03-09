@@ -21,6 +21,7 @@ export type MessageStatus =
   | 'cancelled';
 
 export type TaskMessageKind = 'task-log' | 'task-content' | 'task-download';
+export type ChatMessageKind = 'normal' | 'rewrite';
 
 // ============================================
 // Dual Column Content Types
@@ -64,6 +65,9 @@ export interface Message {
   error?: string;
   metadata?: {
     messageKind?: TaskMessageKind;
+    chatKind?: ChatMessageKind;
+    chatPrompt?: string;
+    chatModel?: 'deepseek' | 'qwen' | 'doubao';
     logs?: LogEntry[];
     outputFile?: string;
     fileName?: string;

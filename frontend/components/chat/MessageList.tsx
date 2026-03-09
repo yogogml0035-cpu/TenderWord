@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useEffect, useState } from 'react';
-import { User, Bot, Info } from 'lucide-react';
+import { User, Bot, Info, Loader2, RefreshCw } from 'lucide-react';
 import type { Message } from '@/types/chat';
 import { TaskLogMessage } from './TaskLogMessage';
 import { TaskContentMessage } from './TaskContentMessage';
@@ -10,9 +10,80 @@ import { TaskDownloadMessage } from './TaskDownloadMessage';
 interface MessageListProps {
   messages: Message[];
   onDownload?: (filePath: string, fileName?: string) => void;
-  onRetry?: () => void;
+  onRetry?: (message: Message) => void;
   emptyState?: React.ReactNode;
+  interactionDisabled?: boolean;
   className?: string;
+}
+
+function renderInlineMarkdown(text: string): React.ReactNode[] {
+  const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\((https?:\/\/[^\s)]+)\))/g;
+  const parts = text.split(pattern);
+
+  return parts
+    .filter((part) => part.length > 0)
+    .map((part, index) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={`md-bold-${index}`}>{part.slice(2, -2)}</strong>;
+      }
+      if (part.startsWith('`') && part.endsWith('`')) {
+        return (
+          <code
+            key={`md-code-${index}`}
+            className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[13px] text-slate-700"
+          >
+            {part.slice(1, -1)}
+          </code>
+        );
+      }
+      const linkMatch = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/.exec(part);
+      if (linkMatch) {
+        return (
+          <a
+            key={`md-link-${index}`}
+            href={linkMatch[2]}
+            target="_blank"
+            rel="noreferrer"
+            className="text-blue-600 underline"
+          >
+            {linkMatch[1]}
+          </a>
+        );
+      }
+      return <React.Fragment key={`md-text-${index}`}>{part}</React.Fragment>;
+    });
+}
+
+function SimpleMarkdown({ content }: { content: string }) {
+  const segments = content.split('```');
+  return (
+    <div className="space-y-2 text-sm leading-6 text-slate-700">
+      {segments.map((segment, index) => {
+        const isCode = index % 2 === 1;
+        if (isCode) {
+          return (
+            <pre
+              key={`code-${index}`}
+              className="overflow-x-auto rounded border border-slate-200 bg-slate-900/95 p-3 font-mono text-xs text-slate-100"
+            >
+              {segment.trim()}
+            </pre>
+          );
+        }
+
+        const lines = segment.split('\n');
+        return (
+          <div key={`text-${index}`} className="space-y-1">
+            {lines.map((line, lineIndex) => (
+              <p key={`line-${index}-${lineIndex}`} className="whitespace-pre-wrap break-words">
+                {renderInlineMarkdown(line)}
+              </p>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export function MessageList({
@@ -20,13 +91,13 @@ export function MessageList({
   onDownload,
   onRetry,
   emptyState,
+  interactionDisabled = false,
   className = '',
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [userScrolled, setUserScrolled] = useState(false);
 
-  // Handle scroll events
   const handleScroll = () => {
     if (!containerRef.current) return;
 
@@ -39,14 +110,12 @@ export function MessageList({
     }
   };
 
-  // Auto-scroll to bottom for new messages (if user hasn't manually scrolled up)
   useEffect(() => {
     if (containerRef.current && isAtBottom && !userScrolled) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
   }, [messages, isAtBottom, userScrolled]);
 
-  // Scroll to bottom button handler
   const scrollToBottom = () => {
     if (containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
@@ -60,7 +129,6 @@ export function MessageList({
       <div className={`flex h-full items-center justify-center p-8 ${className}`}>
         {emptyState || (
           <div className="max-w-sm text-center">
-            {/* Animated Bot Icon */}
             <div className="relative mb-6 inline-block">
               <div className="absolute inset-0 animate-pulse rounded-full bg-blue-100 opacity-50" />
               <div className="relative rounded-full border border-blue-100 bg-white p-4 shadow-md">
@@ -88,12 +156,16 @@ export function MessageList({
             className="animate-message-appear"
             style={{ animationDelay: `${Math.min(index * 100, 500)}ms` }}
           >
-            <MemoMessageItem message={message} onDownload={onDownload} onRetry={onRetry} />
+            <MemoMessageItem
+              message={message}
+              interactionDisabled={interactionDisabled}
+              onDownload={onDownload}
+              onRetry={onRetry}
+            />
           </div>
         ))}
       </div>
 
-      {/* Scroll to bottom button */}
       {!isAtBottom && messages.length > 0 && (
         <button
           onClick={scrollToBottom}
@@ -120,14 +192,14 @@ export function MessageList({
   );
 }
 
-// Individual Message Item
 interface MessageItemProps {
   message: Message;
+  interactionDisabled?: boolean;
   onDownload?: (filePath: string, fileName?: string) => void;
-  onRetry?: () => void;
+  onRetry?: (message: Message) => void;
 }
 
-function MessageItem({ message, onDownload, onRetry }: MessageItemProps) {
+function MessageItem({ message, interactionDisabled = false, onDownload, onRetry }: MessageItemProps) {
   if (message.type === 'ai') {
     const messageKind = message.metadata?.messageKind;
 
@@ -138,16 +210,48 @@ function MessageItem({ message, onDownload, onRetry }: MessageItemProps) {
         </div>
 
         <div className="min-w-0 flex-1">
-          {messageKind === 'task-log' && <TaskLogMessage message={message} />}
-          {messageKind === 'task-content' && <TaskContentMessage message={message} onRetry={onRetry} />}
+          {messageKind === 'task-log' && <TaskLogMessage message={message} disabled={interactionDisabled} />}
+          {messageKind === 'task-content' && (
+            <TaskContentMessage
+              message={message}
+              disabled={interactionDisabled}
+              onRetry={onRetry ? () => onRetry(message) : undefined}
+            />
+          )}
           {messageKind === 'task-download' && (
-            <TaskDownloadMessage message={message} onDownload={onDownload} />
+            <TaskDownloadMessage
+              message={message}
+              disabled={interactionDisabled}
+              onDownload={onDownload}
+            />
           )}
           {!messageKind && (
             <div className="rounded border border-gray-200 bg-white px-4 py-3 shadow-sm">
-              <p className="text-sm text-gray-700">
-                {typeof message.content === 'string' ? message.content : '...'}
-              </p>
+              <SimpleMarkdown content={typeof message.content === 'string' ? message.content : '...'} />
+
+              {message.status === 'generating' && (
+                <div className="mt-3 flex items-center gap-2 text-xs text-blue-600">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>回复生成中...</span>
+                </div>
+              )}
+
+              {(message.status === 'error' || message.status === 'cancelled') && onRetry && (
+                <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-100 pt-2">
+                  <span className="text-xs text-rose-500">
+                    {message.status === 'cancelled' ? '已取消，保留部分内容' : '回复失败，保留部分内容'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onRetry(message)}
+                    disabled={interactionDisabled}
+                    className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-600 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    重试
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -155,22 +259,15 @@ function MessageItem({ message, onDownload, onRetry }: MessageItemProps) {
     );
   }
 
-  // Render user message
   if (message.type === 'user') {
     return (
       <div className="animate-fade-in-up flex items-start justify-end gap-3">
-        <div
-          data-testid="user-message-frame"
-          className="min-w-0 w-fit max-w-[40%]"
-        >
+        <div data-testid="user-message-frame" className="min-w-0 w-fit max-w-[40%]">
           <div
             data-testid="user-message-bubble"
             className="w-fit max-w-full rounded-2xl rounded-tr-sm bg-blue-500 px-4 py-2.5 text-white shadow-sm"
           >
-            <p
-              data-testid="user-message-text"
-              className="whitespace-pre-wrap break-words text-sm leading-6"
-            >
+            <p data-testid="user-message-text" className="whitespace-pre-wrap break-words text-sm leading-6">
               {typeof message.content === 'string' ? message.content : '...'}
             </p>
           </div>
@@ -194,7 +291,6 @@ function MessageItem({ message, onDownload, onRetry }: MessageItemProps) {
     );
   }
 
-  // Render system message
   if (message.type === 'system') {
     return (
       <div className="animate-fade-in-up flex justify-center">

@@ -53,6 +53,10 @@ export interface ConversationFormDraft {
     before_text: string;
     after_text: string;
   };
+  chat_mode?: 'normal' | 'rewrite';
+  chat_input?: string;
+  pending_rewrite_prompt?: string;
+  pending_rewrite_task_id?: string;
   files?: {
     origin_tender?: ConversationDraftFile;
     clean_draft?: ConversationDraftFile;
@@ -274,6 +278,7 @@ interface ChatStore {
   taskMessageMap: Record<string, TaskMessageGroupIds>;
   conversationDrafts: Record<string, ConversationFormDraft>;
   taskSummaries: Record<string, TaskSummarySnapshot>;
+  unreadConversationResults: Record<string, boolean>;
   isLoading: boolean;
   error: string | null;
   selectedTenderType: TenderType | null;
@@ -323,6 +328,9 @@ interface ChatStore {
   ) => void;
   removeTaskSummary: (taskId: string) => void;
   getTaskSummary: (taskId: string) => TaskSummarySnapshot | null;
+  markConversationUnreadResult: (conversationId: string) => void;
+  clearConversationUnreadResult: (conversationId: string) => void;
+  isConversationUnreadResult: (conversationId: string) => boolean;
 
   getCurrentConversation: () => Conversation | null;
   currentConversationActiveTask: () => string | null;
@@ -337,6 +345,7 @@ interface ChatStore {
   findMessageByTaskId: (taskId: string) => { conversationId: string; message: Message } | null;
   getSortedConversations: () => Conversation[];
   getMostRecentConversationByType: (type: TenderType) => Conversation | null;
+  resetSessionState: () => void;
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -350,6 +359,7 @@ export const useChatStore = create<ChatStore>()(
         taskMessageMap: {},
         conversationDrafts: {},
         taskSummaries: {},
+        unreadConversationResults: {},
         isLoading: false,
         error: null,
         selectedTenderType: null,
@@ -420,11 +430,26 @@ export const useChatStore = create<ChatStore>()(
               taskSummaries: Object.fromEntries(
                 Object.entries(state.taskSummaries).filter(([taskId]) => !deletedTaskIds.has(taskId))
               ),
+              unreadConversationResults: Object.fromEntries(
+                Object.entries(state.unreadConversationResults).filter(
+                  ([conversationId]) => conversationId !== id
+                )
+              ),
             };
           });
         },
 
-        setCurrentConversation: (id) => set({ currentConversationId: id }),
+        setCurrentConversation: (id) =>
+          set((state) => ({
+            currentConversationId: id,
+            unreadConversationResults: id
+              ? Object.fromEntries(
+                  Object.entries(state.unreadConversationResults).filter(
+                    ([conversationId]) => conversationId !== id
+                  )
+                )
+              : state.unreadConversationResults,
+          })),
 
         updateConversationDraft: (conversationId, updates) => {
           set((state) => ({
@@ -668,6 +693,7 @@ export const useChatStore = create<ChatStore>()(
         completeTask: (taskId, outputFile, fileName, content) => {
           const locatedTaskGroup = get().findTaskMessageGroup(taskId);
           let nextGroup: TaskMessageGroupIds | undefined;
+          const terminalConversationId: string | null = locatedTaskGroup?.conversationId || null;
 
           if (locatedTaskGroup) {
             const { conversationId, logMessage, contentMessage, downloadMessage, group } =
@@ -752,6 +778,16 @@ export const useChatStore = create<ChatStore>()(
               delete nextTaskMessageMap[taskId];
             }
 
+            const shouldMarkUnread =
+              terminalConversationId &&
+              terminalConversationId !== state.currentConversationId;
+            const nextUnreadResults = shouldMarkUnread
+              ? {
+                  ...state.unreadConversationResults,
+                  [terminalConversationId]: true,
+                }
+              : state.unreadConversationResults;
+
             return {
               conversations: state.conversations.map((conversation) =>
                 conversation.currentTaskId === taskId
@@ -763,6 +799,7 @@ export const useChatStore = create<ChatStore>()(
               taskSummaries: Object.fromEntries(
                 Object.entries(state.taskSummaries).filter(([id]) => id !== taskId)
               ),
+              unreadConversationResults: nextUnreadResults,
             };
           });
         },
@@ -770,6 +807,7 @@ export const useChatStore = create<ChatStore>()(
         failTask: (taskId, error, content) => {
           const locatedTaskGroup = get().findTaskMessageGroup(taskId);
           let nextGroup: TaskMessageGroupIds | undefined;
+          const terminalConversationId: string | null = locatedTaskGroup?.conversationId || null;
 
           if (locatedTaskGroup) {
             const { conversationId, logMessage, contentMessage, group } = locatedTaskGroup;
@@ -820,6 +858,16 @@ export const useChatStore = create<ChatStore>()(
               delete nextTaskMessageMap[taskId];
             }
 
+            const shouldMarkUnread =
+              terminalConversationId &&
+              terminalConversationId !== state.currentConversationId;
+            const nextUnreadResults = shouldMarkUnread
+              ? {
+                  ...state.unreadConversationResults,
+                  [terminalConversationId]: true,
+                }
+              : state.unreadConversationResults;
+
             return {
               conversations: state.conversations.map((conversation) =>
                 conversation.currentTaskId === taskId
@@ -831,6 +879,7 @@ export const useChatStore = create<ChatStore>()(
               taskSummaries: Object.fromEntries(
                 Object.entries(state.taskSummaries).filter(([id]) => id !== taskId)
               ),
+              unreadConversationResults: nextUnreadResults,
             };
           });
         },
@@ -838,6 +887,7 @@ export const useChatStore = create<ChatStore>()(
         cancelTask: (taskId, content) => {
           const locatedTaskGroup = get().findTaskMessageGroup(taskId);
           let nextGroup: TaskMessageGroupIds | undefined;
+          const terminalConversationId: string | null = locatedTaskGroup?.conversationId || null;
 
           if (locatedTaskGroup) {
             const { conversationId, logMessage, contentMessage, group } = locatedTaskGroup;
@@ -887,6 +937,16 @@ export const useChatStore = create<ChatStore>()(
               delete nextTaskMessageMap[taskId];
             }
 
+            const shouldMarkUnread =
+              terminalConversationId &&
+              terminalConversationId !== state.currentConversationId;
+            const nextUnreadResults = shouldMarkUnread
+              ? {
+                  ...state.unreadConversationResults,
+                  [terminalConversationId]: true,
+                }
+              : state.unreadConversationResults;
+
             return {
               conversations: state.conversations.map((conversation) =>
                 conversation.currentTaskId === taskId
@@ -898,6 +958,7 @@ export const useChatStore = create<ChatStore>()(
               taskSummaries: Object.fromEntries(
                 Object.entries(state.taskSummaries).filter(([id]) => id !== taskId)
               ),
+              unreadConversationResults: nextUnreadResults,
             };
           });
         },
@@ -951,6 +1012,26 @@ export const useChatStore = create<ChatStore>()(
           })),
 
         getTaskSummary: (taskId) => get().taskSummaries[taskId] || null,
+
+        markConversationUnreadResult: (conversationId) =>
+          set((state) => ({
+            unreadConversationResults: {
+              ...state.unreadConversationResults,
+              [conversationId]: true,
+            },
+          })),
+
+        clearConversationUnreadResult: (conversationId) =>
+          set((state) => ({
+            unreadConversationResults: Object.fromEntries(
+              Object.entries(state.unreadConversationResults).filter(
+                ([id]) => id !== conversationId
+              )
+            ),
+          })),
+
+        isConversationUnreadResult: (conversationId) =>
+          !!get().unreadConversationResults[conversationId],
 
         getCurrentConversation: () => {
           const state = get();
@@ -1090,6 +1171,20 @@ export const useChatStore = create<ChatStore>()(
               .sort((a, b) => b.createdAt - a.createdAt)[0] || null
           );
         },
+
+        resetSessionState: () =>
+          set({
+            conversations: [],
+            currentConversationId: null,
+            activeTaskIds: [],
+            taskMessageMap: {},
+            conversationDrafts: {},
+            taskSummaries: {},
+            unreadConversationResults: {},
+            isLoading: false,
+            error: null,
+            selectedTenderType: null,
+          }),
       }),
       {
         name: 'chat-storage',
@@ -1100,6 +1195,7 @@ export const useChatStore = create<ChatStore>()(
           selectedTenderType: state.selectedTenderType,
           conversationDrafts: state.conversationDrafts,
           taskSummaries: state.taskSummaries,
+          unreadConversationResults: state.unreadConversationResults,
         }),
       }
     )

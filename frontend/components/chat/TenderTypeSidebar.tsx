@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FileText } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useHydrated } from '@/hooks/useHydrated';
@@ -37,7 +37,14 @@ export function TenderTypeSidebar({ onNewChat }: TenderTypeSidebarProps) {
   const [hoveredType, setHoveredType] = useState<TenderType['id'] | null>(null);
   const hydrated = useHydrated();
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { createConversation, currentConversationId, conversations, setCurrentConversation } = useChatStore();
+  const {
+    createConversation,
+    currentConversationId,
+    conversations,
+    setCurrentConversation,
+    taskSummaries,
+    isConversationUnreadResult,
+  } = useChatStore();
   const clearCloseTimer = () => {
     if (closeTimerRef.current) {
       clearTimeout(closeTimerRef.current);
@@ -87,6 +94,48 @@ export function TenderTypeSidebar({ onNewChat }: TenderTypeSidebarProps) {
     : null;
   const currentType = currentConversation?.tenderType;
 
+  const typeIndicators = useMemo(() => {
+    const indicators: Record<
+      TenderType['id'],
+      { unread: boolean; running: boolean; queued: boolean }
+    > = {
+      xjcg: { unread: false, running: false, queued: false },
+      gngk: { unread: false, running: false, queued: false },
+    };
+
+    for (const conversation of conversations) {
+      if (conversation.id === currentConversationId) {
+        continue;
+      }
+
+      const slot = indicators[conversation.tenderType];
+      if (!slot) {
+        continue;
+      }
+
+      if (isConversationUnreadResult(conversation.id)) {
+        slot.unread = true;
+        continue;
+      }
+
+      const taskId = conversation.currentTaskId;
+      if (!taskId) {
+        continue;
+      }
+      const summary = taskSummaries[taskId];
+      if (!summary) {
+        continue;
+      }
+      if (summary.status === 'running') {
+        slot.running = true;
+      } else if (summary.status === 'queued') {
+        slot.queued = true;
+      }
+    }
+
+    return indicators;
+  }, [conversations, currentConversationId, isConversationUnreadResult, taskSummaries]);
+
   useEffect(() => {
     return () => {
       if (closeTimerRef.current) {
@@ -111,7 +160,7 @@ export function TenderTypeSidebar({ onNewChat }: TenderTypeSidebarProps) {
             <button
               onClick={() => handleTypeClick(type.id)}
               className={cn(
-                'flex h-14 w-24 flex-col items-center justify-center gap-1 rounded-lg shadow-sm transition-all duration-200',
+                'relative flex h-14 w-24 flex-col items-center justify-center gap-1 rounded-lg shadow-sm transition-all duration-200',
                 currentType === type.id
                   ? 'bg-[var(--primary)] text-white shadow-md'
                   : hoveredType === type.id
@@ -120,6 +169,37 @@ export function TenderTypeSidebar({ onNewChat }: TenderTypeSidebarProps) {
               )}
               title={type.name}
             >
+              {(() => {
+                const indicator = typeIndicators[type.id];
+                if (!indicator) {
+                  return null;
+                }
+                if (indicator.unread) {
+                  return (
+                    <span
+                      className="absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_0_2px_rgba(255,255,255,0.9)]"
+                      aria-label="有未读结果"
+                    />
+                  );
+                }
+                if (indicator.running) {
+                  return (
+                    <span
+                      className="absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full bg-blue-500 shadow-[0_0_0_2px_rgba(255,255,255,0.9)]"
+                      aria-label="有运行中任务"
+                    />
+                  );
+                }
+                if (indicator.queued) {
+                  return (
+                    <span
+                      className="absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full bg-amber-500 shadow-[0_0_0_2px_rgba(255,255,255,0.9)]"
+                      aria-label="有排队任务"
+                    />
+                  );
+                }
+                return null;
+              })()}
               {type.icon}
               <span className="text-[11px] font-medium">{type.name}</span>
             </button>

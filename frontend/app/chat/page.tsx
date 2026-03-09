@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, Suspense, useRef } from 'react';
+import React, { useEffect, useState, useCallback, Suspense, useRef, useMemo } from 'react';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { TenderTypeSidebar } from '@/components/chat/TenderTypeSidebar';
 import { FormPanel } from '@/components/chat/FormPanel';
@@ -8,7 +8,10 @@ import { ChatPanel } from '@/components/chat/ChatPanel';
 import { useUrlParams } from '@/hooks/useUrlParams';
 import { useHydrated } from '@/hooks/useHydrated';
 import { useChatStore } from '@/stores/chatStore';
-import { fetchTenderData } from '@/lib/api';
+import { useChatStreamStore } from '@/stores/chatStreamStore';
+import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
+import { useHistoryStore } from '@/stores/historyStore';
+import { fetchTenderData, sendConversationHeartbeat } from '@/lib/api';
 
 /**
  * URL参数处理状态
@@ -17,6 +20,14 @@ interface UrlProcessingState {
   isProcessing: boolean;
   error: string | null;
 }
+
+interface ConversationInstanceResetState {
+  previousInstanceId: string;
+  nextInstanceId: string;
+}
+
+const CONVERSATION_HEARTBEAT_INTERVAL_MS = 30_000;
+const CONVERSATION_ID_SEPARATOR = '\u0001';
 
 /**
  * Chat页面内容组件 - 包含useSearchParams的使用
@@ -29,15 +40,22 @@ function ChatPageContent() {
 
   const {
     createConversation,
+    conversations,
     setCurrentConversation,
     setSelectedTenderType,
     updateConversationDraft,
+    resetSessionState,
   } = useChatStore();
   // URL参数处理状态
   const [urlState, setUrlState] = useState<UrlProcessingState>({
     isProcessing: false,
     error: null,
   });
+  const [instanceResetState, setInstanceResetState] = useState<ConversationInstanceResetState | null>(
+    null
+  );
+  const heartbeatInFlightRef = useRef(false);
+  const knownInstanceIdRef = useRef<string | null>(null);
 
   /**
    * 处理URL参数 - 获取招标数据
@@ -111,6 +129,106 @@ function ChatPageContent() {
     };
   }, [hydrated, hasParams, isValid, handleUrlParams]);
 
+  const conversationIds = useMemo(
+    () => conversations.map((conversation) => conversation.id).filter((id) => id.length > 0),
+    [conversations]
+  );
+  const conversationIdsKey = useMemo(
+    () => conversationIds.join(CONVERSATION_ID_SEPARATOR),
+    [conversationIds]
+  );
+
+  useEffect(() => {
+    if (!hydrated || !conversationIdsKey || instanceResetState) {
+      return;
+    }
+
+    let disposed = false;
+
+    const heartbeat = async () => {
+      if (disposed || heartbeatInFlightRef.current) {
+        return;
+      }
+
+      const activeConversationIds = conversationIdsKey
+        .split(CONVERSATION_ID_SEPARATOR)
+        .filter((id) => id.length > 0);
+      if (activeConversationIds.length === 0) {
+        return;
+      }
+
+      heartbeatInFlightRef.current = true;
+      try {
+        const heartbeatResults = await Promise.allSettled(
+          activeConversationIds.map((conversationId) => sendConversationHeartbeat(conversationId))
+        );
+        if (disposed) {
+          return;
+        }
+
+        for (const result of heartbeatResults) {
+          if (result.status !== 'fulfilled') {
+            continue;
+          }
+
+          const instanceId = result.value.instance_id;
+          const knownInstanceId = knownInstanceIdRef.current;
+
+          if (!knownInstanceId) {
+            knownInstanceIdRef.current = instanceId;
+            continue;
+          }
+
+          if (instanceId !== knownInstanceId) {
+            setInstanceResetState({
+              previousInstanceId: knownInstanceId,
+              nextInstanceId: instanceId,
+            });
+            knownInstanceIdRef.current = instanceId;
+            return;
+          }
+        }
+      } finally {
+        heartbeatInFlightRef.current = false;
+      }
+    };
+
+    void heartbeat();
+
+    const intervalId = window.setInterval(() => {
+      void heartbeat();
+    }, CONVERSATION_HEARTBEAT_INTERVAL_MS);
+
+    const handleFocus = () => {
+      void heartbeat();
+    };
+    const handlePageShow = () => {
+      void heartbeat();
+    };
+    const handleOnline = () => {
+      void heartbeat();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void heartbeat();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('pageshow', handlePageShow);
+    window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('pageshow', handlePageShow);
+      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [conversationIdsKey, hydrated, instanceResetState]);
+
   /**
    * 清除错误提示
    */
@@ -118,6 +236,21 @@ function ChatPageContent() {
     if (!hydrated) return;
     setUrlState((prev) => ({ ...prev, error: null }));
   }, [hydrated]);
+
+  const handleConfirmInstanceReset = useCallback(() => {
+    useChatStreamStore.setState({ streams: {} });
+    useChatTaskSessionStore.getState().clearSessions();
+    useHistoryStore.getState().clearHistory();
+    resetSessionState();
+
+    processedUrlConversationKeyRef.current = null;
+    knownInstanceIdRef.current = null;
+    setInstanceResetState(null);
+    setUrlState({
+      isProcessing: false,
+      error: null,
+    });
+  }, [resetSessionState]);
 
   return (
     <div className="grid h-screen grid-cols-[auto_minmax(0,2fr)_minmax(0,3fr)] overflow-hidden bg-gray-100">
@@ -174,6 +307,36 @@ function ChatPageContent() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
+          </div>
+        </div>
+      )}
+
+      {instanceResetState && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/45 p-6">
+          <div className="w-full max-w-lg rounded-2xl border border-amber-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-slate-900">检测到服务已重启</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  为避免旧会话状态与新实例不一致，当前标签页会话需要重置。确认后会清空本标签页中的会话、任务、普通聊天记录、润色状态与未读标记。
+                </p>
+                <p className="mt-2 text-xs text-slate-400">
+                  实例变化：{instanceResetState.previousInstanceId} →{' '}
+                  {instanceResetState.nextInstanceId}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={handleConfirmInstanceReset}
+                className="inline-flex items-center rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600"
+              >
+                确认并重置会话
+              </button>
+            </div>
           </div>
         </div>
       )}

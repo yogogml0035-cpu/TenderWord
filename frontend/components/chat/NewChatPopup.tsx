@@ -44,7 +44,15 @@ export function NewChatPopup({
   const CONTEXT_MENU_HEIGHT = 88;
   const CONTEXT_MENU_GAP = 8;
 
-  const { conversations, setCurrentConversation, currentConversationId, deleteConversation, updateConversation } = useChatStore();
+  const {
+    conversations,
+    setCurrentConversation,
+    currentConversationId,
+    deleteConversation,
+    updateConversation,
+    taskSummaries,
+    isConversationUnreadResult,
+  } = useChatStore();
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
@@ -66,6 +74,46 @@ export function NewChatPopup({
 
   // Filter conversations by type
   const typeConversations = conversations.filter((c) => c.tenderType === type).slice(0, 5);
+
+  const getConversationBadge = useCallback(
+    (conversationId: string, currentTaskId?: string) => {
+      if (conversationId === currentConversationId) {
+        return null;
+      }
+
+      if (isConversationUnreadResult(conversationId)) {
+        return {
+          label: '未读结果',
+          className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+        };
+      }
+
+      if (!currentTaskId) {
+        return null;
+      }
+      const summary = taskSummaries[currentTaskId];
+      if (!summary) {
+        return null;
+      }
+
+      if (summary.status === 'running') {
+        return {
+          label: '运行中',
+          className: 'border-blue-200 bg-blue-50 text-blue-700',
+        };
+      }
+
+      if (summary.status === 'queued') {
+        return {
+          label: '排队中',
+          className: 'border-amber-200 bg-amber-50 text-amber-700',
+        };
+      }
+
+      return null;
+    },
+    [currentConversationId, isConversationUnreadResult, taskSummaries]
+  );
 
   // Open context menu by trigger button position
   const openContextMenu = useCallback((
@@ -225,62 +273,73 @@ export function NewChatPopup({
             </div>
 
             <div className="max-h-[150px] overflow-y-auto">
-              {typeConversations.map((conv, index) => (
-                <div
-                  key={conv.id}
-                  className={`animate-fade-in-up cursor-pointer transition-colors duration-200 ${
-                    currentConversationId === conv.id
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-gray-700 hover:bg-gray-50'
-                  } `}
-                  style={{ animationDelay: `${index * 50}ms` }}
-                  title={conv.title}
-                >
-                  {editing.conversationId === conv.id ? (
-                    <div className="px-4 py-2.5">
-                      <input
-                        ref={editingInputRef}
-                        type="text"
-                        value={editing.tempTitle}
-                        onChange={(e) => setEditing((prev) => ({ ...prev, tempTitle: e.target.value }))}
-                        onKeyDown={handleEditingKeyDown}
-                        onBlur={handleEditingBlur}
-                        className="w-full rounded border border-blue-400 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      />
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 px-4 py-2.5">
-                      <button
-                        onClick={() => {
-                          setCurrentConversation(conv.id);
-                          onClose();
-                        }}
-                        className="min-w-0 flex-1 text-left"
-                      >
-                        <div className="truncate text-sm">{conv.title}</div>
-                        <div className="mt-0.5 text-[10px] text-gray-400">
-                          {new Date(conv.updatedAt).toLocaleDateString('zh-CN')}
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="更多操作"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openContextMenu(
-                            conv.id,
-                            e.currentTarget.getBoundingClientRect(),
-                            e.currentTarget
-                          );
-                        }}
-                        className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700"
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
+              {typeConversations.map((conv, index) => {
+                // 徽标优先级：未读结果 > 运行中 > 排队中
+                const badge = getConversationBadge(conv.id, conv.currentTaskId);
+                return (
+                  <div
+                    key={conv.id}
+                    className={`animate-fade-in-up cursor-pointer transition-colors duration-200 ${
+                      currentConversationId === conv.id
+                        ? 'bg-blue-50 text-blue-700'
+                        : 'text-gray-700 hover:bg-gray-50'
+                    } `}
+                    style={{ animationDelay: `${index * 50}ms` }}
+                    title={conv.title}
+                  >
+                    {editing.conversationId === conv.id ? (
+                      <div className="px-4 py-2.5">
+                        <input
+                          ref={editingInputRef}
+                          type="text"
+                          value={editing.tempTitle}
+                          onChange={(e) => setEditing((prev) => ({ ...prev, tempTitle: e.target.value }))}
+                          onKeyDown={handleEditingKeyDown}
+                          onBlur={handleEditingBlur}
+                          className="w-full rounded border border-blue-400 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 px-4 py-2.5">
+                        <button
+                          onClick={() => {
+                            setCurrentConversation(conv.id);
+                            onClose();
+                          }}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <div className="truncate text-sm">{conv.title}</div>
+                          <div className="mt-0.5 flex items-center gap-2 text-[10px] text-gray-400">
+                            <span>{new Date(conv.updatedAt).toLocaleDateString('zh-CN')}</span>
+                            {badge && (
+                              <span
+                                className={`inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${badge.className}`}
+                              >
+                                {badge.label}
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="更多操作"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openContextMenu(
+                              conv.id,
+                              e.currentTarget.getBoundingClientRect(),
+                              e.currentTarget
+                            );
+                          }}
+                          className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700"
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             {/* Context Menu */}

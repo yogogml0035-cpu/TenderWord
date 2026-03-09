@@ -1,15 +1,32 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { ChatInput } from '@/components/chat/ChatInput';
+import { useState } from 'react';
+
+function ControlledChatInput({
+  onSend = jest.fn(),
+  selectedModel = 'deepseek',
+  onModelChange = jest.fn(),
+}: {
+  onSend?: (message: string) => void;
+  selectedModel?: 'deepseek' | 'qwen' | 'doubao';
+  onModelChange?: (model: 'deepseek' | 'qwen' | 'doubao') => void;
+}) {
+  const [value, setValue] = useState('');
+
+  return (
+    <ChatInput
+      value={value}
+      onValueChange={setValue}
+      onSend={onSend}
+      selectedModel={selectedModel}
+      onModelChange={onModelChange}
+    />
+  );
+}
 
 describe('ChatInput', () => {
   it('renders the selected model inside the composer', () => {
-    render(
-      <ChatInput
-        onSend={jest.fn()}
-        selectedModel="deepseek"
-        onModelChange={jest.fn()}
-      />
-    );
+    render(<ControlledChatInput />);
 
     expect(screen.getByTestId('chat-model-trigger')).toHaveTextContent('DeepSeek');
     expect(screen.getByTestId('chat-model-trigger-content')).toHaveClass('items-center');
@@ -21,13 +38,7 @@ describe('ChatInput', () => {
   it('opens the model picker and changes the selected model', () => {
     const handleModelChange = jest.fn();
 
-    render(
-      <ChatInput
-        onSend={jest.fn()}
-        selectedModel="deepseek"
-        onModelChange={handleModelChange}
-      />
-    );
+    render(<ControlledChatInput onModelChange={handleModelChange} />);
 
     fireEvent.click(screen.getByTestId('chat-model-trigger'));
 
@@ -42,13 +53,7 @@ describe('ChatInput', () => {
   it('sends a trimmed message when Enter is pressed', () => {
     const handleSend = jest.fn();
 
-    render(
-      <ChatInput
-        onSend={handleSend}
-        selectedModel="deepseek"
-        onModelChange={jest.fn()}
-      />
-    );
+    render(<ControlledChatInput onSend={handleSend} />);
 
     const textarea = screen.getByPlaceholderText('输入消息...');
 
@@ -61,13 +66,7 @@ describe('ChatInput', () => {
   });
 
   it('auto-resizes the textarea and clamps it at the configured max height', () => {
-    render(
-      <ChatInput
-        onSend={jest.fn()}
-        selectedModel="deepseek"
-        onModelChange={jest.fn()}
-      />
-    );
+    render(<ControlledChatInput />);
 
     const textarea = screen.getByPlaceholderText('输入消息...') as HTMLTextAreaElement;
 

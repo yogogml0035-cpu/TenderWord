@@ -283,9 +283,10 @@ describe('FormPanel', () => {
 
     await waitFor(() => {
       expect(mockConvertXjcgFormToApiRequest).toHaveBeenCalledWith(mockXjcgFormData);
-      expect(mockCreateGenerateTask).toHaveBeenCalledWith(
-        mockConvertXjcgFormToApiRequest.mock.results[0]?.value
-      );
+      expect(mockCreateGenerateTask).toHaveBeenCalledWith({
+        ...mockConvertXjcgFormToApiRequest.mock.results[0]?.value,
+        conversation_id: 'conv-1',
+      });
     });
     expect(mockConvertGngkFormToApiRequest).not.toHaveBeenCalled();
   });
@@ -309,9 +310,10 @@ describe('FormPanel', () => {
 
     await waitFor(() => {
       expect(mockConvertGngkFormToApiRequest).toHaveBeenCalledWith(mockGngkFormData);
-      expect(mockCreateGenerateTask).toHaveBeenCalledWith(
-        mockConvertGngkFormToApiRequest.mock.results[0]?.value
-      );
+      expect(mockCreateGenerateTask).toHaveBeenCalledWith({
+        ...mockConvertGngkFormToApiRequest.mock.results[0]?.value,
+        conversation_id: 'conv-1',
+      });
     });
     expect(mockConvertXjcgFormToApiRequest).not.toHaveBeenCalled();
   });

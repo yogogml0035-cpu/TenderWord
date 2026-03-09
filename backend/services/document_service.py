@@ -17,17 +17,15 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 from backend.models import (
     DoneEventData,
     ErrorEventData,
-    FormType,
     GenerateRequest,
     GenerateResponse,
-    GenerateResult,
     LLMEventData,
     LogEventData,
     ProgressEventData,
     SSEEvent,
     SSEEventType,
 )
-from backend.models.tender import TenderData
+from backend.services.conversation_service import get_conversation_service
 from backend.task.task_queue_manager import get_task_queue
 from backend.util.log_util.execution_log import logger as execution_logger
 from backend.util.log_util.progress_log import progress_log
@@ -43,6 +41,32 @@ _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="doc_gen_")
 
 
 LLM_SNAPSHOT_INTERVAL_SECONDS = 0.25
+
+REWRITE_STATE_KEYS = [
+    "tender_type",
+    "prepared_doc_path",
+    "polished_text",
+    "insertion_before_text",
+    "insertion_after_text",
+    "project_name",
+    "project_number",
+    "project_content",
+    "buyer_name",
+    "bzj_rule",
+    "project_zbr_xbr",
+    "zbr_xbr_tel",
+    "zbr_pinyin",
+    "shell_start_date",
+    "shell_end_date",
+    "submit_date",
+    "platform",
+    "service_fee",
+]
+
+REWRITE_DEFAULT_ANCHORS = {
+    "xjcg": ("第三章  采购需求", "第四章  响应文件有关格式"),
+    "gngk": ("第三章 招标内容及要求", "第四章 投标文件有关格式"),
+}
 
 
 class _BufferedLoggerWriter:
@@ -308,6 +332,7 @@ class DocumentService:
         """初始化文档生成服务."""
         _init_graph_registry()
         self._task_queue = get_task_queue()
+        self._conversation_service = get_conversation_service()
         # 任务ID -> SSE 回调的映射
         self._callbacks: Dict[str, SSECallback] = {}
         self._callbacks_lock = threading.Lock()
@@ -333,15 +358,7 @@ class DocumentService:
         Returns:
             生成响应（包含 task_id）
         """
-        # 生成任务ID
-        task_id = f"task-{uuid.uuid4().hex[:8]}-{uuid.uuid4().hex[:4]}"
-
-        # 创建 SSE 回调
-        callback = SSECallback(task_id)
-        with self._callbacks_lock:
-            self._callbacks[task_id] = callback
-
-        # 获取 Graph 类
+        task_id, callback = self._allocate_task_callback_pair()
         form_type = request.form_type.value
         graph_class = GRAPH_REGISTRY.get(form_type)
 
@@ -354,27 +371,145 @@ class DocumentService:
                 error=f"Form type '{form_type}' not supported",
             )
 
-        # 准备初始状态
         initial_state = self._build_initial_state(request, task_id=task_id)
-
-        # 在任务队列中注册任务
-        self._task_queue.add_task(
+        return self._submit_graph_task(
             task_id=task_id,
-            user_session_id=initial_state.get("user_session_id", ""),
+            graph_class=graph_class,
+            initial_state=initial_state,
+            callback=callback,
+            model_provider=request.model.value,
+            task_kind="generate",
+            conversation_id=initial_state.get("conversation_id"),
         )
 
-        # 在后台线程中执行
+    def create_rewrite_task(
+        self,
+        *,
+        conversation_id: str,
+        user_prompt: str,
+        model_provider: str,
+    ) -> GenerateResponse:
+        """创建 rewrite 任务（复用文档任务队列 + SSE 三卡片链路）。"""
+        normalized_conversation_id = str(conversation_id or "").strip()
+        normalized_prompt = str(user_prompt or "").strip()
+
+        task_id, callback = self._allocate_task_callback_pair()
+        if not normalized_conversation_id:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="conversation_id 不能为空",
+                error="REWRITE_HISTORY_NOT_FOUND",
+            )
+
+        if not normalized_prompt:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="润色指令不能为空",
+                error="REWRITE_PROMPT_INVALID",
+            )
+
+        if not self._is_rewrite_prompt_related(normalized_prompt):
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="当前输入不属于可执行的润色指令",
+                error="REWRITE_PROMPT_INVALID",
+            )
+
+        target_state = self._resolve_rewrite_target_state(
+            conversation_id=normalized_conversation_id,
+            user_prompt=normalized_prompt,
+        )
+        if not target_state:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="当前会话没有可用文档，请先完成一次生成",
+                error="REWRITE_NO_DOCUMENT",
+            )
+
+        rewrite_initial_state = self._build_rewrite_initial_state(
+            task_id=task_id,
+            conversation_id=normalized_conversation_id,
+            user_prompt=normalized_prompt,
+            target_state=target_state,
+        )
+
+        tender_type = str(rewrite_initial_state.get("tender_type") or "").strip()
+        if tender_type not in {"xjcg", "gngk"}:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="无法解析 rewrite 目标文档类型",
+                error="REWRITE_TARGET_NOT_RESOLVED",
+            )
+
+        form_type = f"{tender_type}_tender"
+        graph_class = GRAPH_REGISTRY.get(form_type)
+        if not graph_class:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message=f"未知的表单类型: {form_type}",
+                error="REWRITE_TARGET_NOT_RESOLVED",
+            )
+
+        return self._submit_graph_task(
+            task_id=task_id,
+            graph_class=graph_class,
+            initial_state=rewrite_initial_state,
+            callback=callback,
+            model_provider=model_provider,
+            task_kind="rewrite",
+            conversation_id=normalized_conversation_id,
+            rewrite_user_prompt=normalized_prompt,
+        )
+
+    def _allocate_task_callback_pair(self) -> tuple[str, SSECallback]:
+        task_id = f"task-{uuid.uuid4().hex[:8]}-{uuid.uuid4().hex[:4]}"
+        callback = SSECallback(task_id)
+        with self._callbacks_lock:
+            self._callbacks[task_id] = callback
+        return task_id, callback
+
+    def _submit_graph_task(
+        self,
+        *,
+        task_id: str,
+        graph_class: type,
+        initial_state: Dict[str, Any],
+        callback: SSECallback,
+        model_provider: str,
+        task_kind: str,
+        conversation_id: Optional[str] = None,
+        rewrite_user_prompt: Optional[str] = None,
+    ) -> GenerateResponse:
+        self._task_queue.add_task(
+            task_id=task_id,
+            user_session_id=str(initial_state.get("user_session_id") or ""),
+        )
+
         future = _executor.submit(
             self._run_graph,
             task_id,
             graph_class,
             initial_state,
             callback,
-            request.model.value,
+            model_provider,
+            task_kind,
+            conversation_id,
+            rewrite_user_prompt,
         )
         self._task_queue.register_worker_future(task_id, future)
 
-        logger.info(f"创建文档生成任务: task_id={task_id}, form_type={form_type}")
+        logger.info(
+            "创建文档任务: task_id=%s, task_kind=%s, tender_type=%s",
+            task_id,
+            task_kind,
+            initial_state.get("tender_type"),
+        )
 
         task_snapshot = self._task_queue.get_task(task_id)
         task_status = task_snapshot.status.value if task_snapshot else None
@@ -390,6 +525,83 @@ class DocumentService:
             waiting_count=waiting_count,
         )
 
+    def _is_rewrite_prompt_related(self, prompt: str) -> bool:
+        text = prompt.strip().lower()
+        if not text:
+            return False
+
+        rewrite_keywords = (
+            "润色",
+            "修改",
+            "改写",
+            "补充",
+            "删除",
+            "替换",
+            "优化",
+            "调整",
+            "改成",
+            "改为",
+        )
+        return any(keyword in text for keyword in rewrite_keywords)
+
+    def _resolve_rewrite_target_state(
+        self, *, conversation_id: str, user_prompt: str
+    ) -> Optional[Dict[str, Any]]:
+        candidates = self._conversation_service.list_rewrite_states(conversation_id)
+        if not candidates:
+            return None
+
+        prompt = user_prompt.strip()
+        if len(candidates) >= 2 and any(token in prompt for token in ("上一版", "前一版", "上个版本")):
+            return dict(candidates[-2])
+        if any(token in prompt for token in ("第一版", "最初版本", "初稿")):
+            return dict(candidates[0])
+        return dict(candidates[-1])
+
+    def _build_rewrite_initial_state(
+        self,
+        *,
+        task_id: str,
+        conversation_id: str,
+        user_prompt: str,
+        target_state: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        tender_type = str(target_state.get("tender_type") or "").strip() or "xjcg"
+        prepared_doc_path = str(target_state.get("prepared_doc_path") or "").strip()
+        if not prepared_doc_path:
+            raise ValueError("rewrite 目标文档路径不存在")
+
+        default_before, default_after = REWRITE_DEFAULT_ANCHORS.get(
+            tender_type, REWRITE_DEFAULT_ANCHORS["xjcg"]
+        )
+
+        state: Dict[str, Any] = {
+            "task_id": task_id,
+            "conversation_id": conversation_id,
+            "user_session_id": conversation_id,
+            "tender_type": tender_type,
+            "origin_tender_path": prepared_doc_path,
+            "clean_draft_path": prepared_doc_path,
+            "insertion_before_text": str(
+                target_state.get("insertion_before_text") or default_before
+            ),
+            "insertion_after_text": str(
+                target_state.get("insertion_after_text") or default_after
+            ),
+            "rewrite_mode": True,
+            "rewrite_user_prompt": user_prompt,
+            "rewrite_base_text": str(target_state.get("polished_text") or ""),
+        }
+
+        for key in REWRITE_STATE_KEYS:
+            if key in {"prepared_doc_path", "tender_type", "insertion_before_text", "insertion_after_text"}:
+                continue
+            value = target_state.get(key)
+            if isinstance(value, str):
+                state[key] = value
+
+        return state
+
     def _build_initial_state(self, request: GenerateRequest, task_id: str) -> Dict[str, Any]:
         """构建 Graph 初始状态.
 
@@ -404,9 +616,12 @@ class DocumentService:
 
         # 构建状态
         tender_type = request.form_type.value.replace("_tender", "")
+        conversation_id = str(getattr(request, "conversation_id", "") or "").strip()
         state: Dict[str, Any] = {
             # 与队列任务ID保持一致，确保进度、取消、日志链路统一
             "task_id": task_id,
+            "conversation_id": conversation_id,
+            "user_session_id": conversation_id,
             "tender_type": tender_type,
             # 项目信息
             "project_name": tender_data.project_name or "",
@@ -473,6 +688,9 @@ class DocumentService:
         initial_state: Dict[str, Any],
         callback: SSECallback,
         model_provider: str,
+        task_kind: str = "generate",
+        conversation_id: Optional[str] = None,
+        rewrite_user_prompt: Optional[str] = None,
     ) -> None:
         """在后台线程中执行 Graph.
 
@@ -482,6 +700,9 @@ class DocumentService:
             initial_state: 初始状态
             callback: SSE 回调
             model_provider: 模型提供商
+            task_kind: 任务类别（generate | rewrite）
+            conversation_id: 会话ID
+            rewrite_user_prompt: rewrite 用户指令
         """
         import asyncio
 
@@ -525,6 +746,29 @@ class DocumentService:
                 # 推送完成事件
                 output_file = result_state.get("prepared_doc_path", "")
                 output_file_str = str(output_file) if output_file else None
+
+                if conversation_id and isinstance(result_state, dict):
+                    try:
+                        rewrite_state = self._build_rewrite_state_snapshot(
+                            result_state=result_state,
+                            initial_state=initial_state,
+                        )
+                        if task_kind == "rewrite":
+                            self._conversation_service.append_rewrite_success(
+                                conversation_id=conversation_id,
+                                user_prompt=str(rewrite_user_prompt or ""),
+                                rewrite_state=rewrite_state,
+                                model=model_provider,
+                            )
+                        else:
+                            self._conversation_service.seed_generate_success(
+                                conversation_id=conversation_id,
+                                rewrite_state=rewrite_state,
+                                model=model_provider,
+                            )
+                    except Exception:
+                        logger.exception("写入 rewrite 会话历史失败: task_id=%s", task_id)
+
                 callback.push_done(
                     DoneEventData(
                         task_id=task_id,
@@ -615,6 +859,37 @@ class DocumentService:
 
             # 更新任务队列状态
             self._task_queue.complete_task(task_id, result=None, error=error_msg)
+
+    def _build_rewrite_state_snapshot(
+        self, *, result_state: Dict[str, Any], initial_state: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        snapshot: Dict[str, Any] = {}
+        for key in REWRITE_STATE_KEYS:
+            value = result_state.get(key)
+            if value in (None, ""):
+                value = initial_state.get(key)
+            if isinstance(value, str):
+                snapshot[key] = value
+
+        tender_type = str(snapshot.get("tender_type") or initial_state.get("tender_type") or "").strip()
+        if tender_type:
+            snapshot["tender_type"] = tender_type
+
+        if not snapshot.get("prepared_doc_path"):
+            fallback_doc = result_state.get("prepared_doc_path") or initial_state.get("prepared_doc_path")
+            if isinstance(fallback_doc, str):
+                snapshot["prepared_doc_path"] = fallback_doc
+
+        if not snapshot.get("insertion_before_text") or not snapshot.get("insertion_after_text"):
+            default_before, default_after = REWRITE_DEFAULT_ANCHORS.get(
+                snapshot.get("tender_type") or "xjcg",
+                REWRITE_DEFAULT_ANCHORS["xjcg"],
+            )
+            snapshot.setdefault("insertion_before_text", default_before)
+            snapshot.setdefault("insertion_after_text", default_after)
+
+        snapshot.setdefault("polished_text", str(result_state.get("polished_text") or ""))
+        return snapshot
 
     async def _invoke_graph_async(
         self,

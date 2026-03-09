@@ -339,7 +339,10 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
 
       try {
         setIsSubmitting(true);
-        const request = tenderFormConverterMap[conversation.tenderType](formData);
+        const request = {
+          ...tenderFormConverterMap[conversation.tenderType](formData),
+          conversation_id: conversation.id,
+        };
 
         const result = await createGenerateTask(request);
         startTask(conversation.id, result.task_id, {

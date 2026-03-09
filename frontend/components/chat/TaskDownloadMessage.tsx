@@ -7,9 +7,14 @@ import type { Message } from '@/types/chat';
 interface TaskDownloadMessageProps {
   message: Message;
   onDownload?: (filePath: string, fileName?: string) => void;
+  disabled?: boolean;
 }
 
-export function TaskDownloadMessage({ message, onDownload }: TaskDownloadMessageProps) {
+export function TaskDownloadMessage({
+  message,
+  onDownload,
+  disabled = false,
+}: TaskDownloadMessageProps) {
   const outputFile = typeof message.metadata?.outputFile === 'string' ? message.metadata.outputFile : '';
   const fileName =
     typeof message.metadata?.fileName === 'string' && message.metadata.fileName.length > 0
@@ -20,6 +25,9 @@ export function TaskDownloadMessage({ message, onDownload }: TaskDownloadMessage
 
   const handleDownload = () => {
     if (!outputFile || !onDownload) {
+      return;
+    }
+    if (disabled) {
       return;
     }
     onDownload(outputFile, fileName);
@@ -34,7 +42,7 @@ export function TaskDownloadMessage({ message, onDownload }: TaskDownloadMessage
         </div>
         <button
           onClick={handleDownload}
-          disabled={!outputFile}
+          disabled={!outputFile || disabled}
           className="flex items-center gap-1 rounded bg-blue-500 px-3 py-1.5 text-sm text-white shadow-sm transition-colors duration-200 hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Download className="h-4 w-4" />
