@@ -1,6 +1,71 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { FormPanel } from '@/components/chat/FormPanel';
 import { useChatStore } from '@/stores/chatStore';
+import type { TenderData } from '@/types/api';
+
+const mockUseTaskHeartbeat = jest.fn();
+const mockUseCurrentConversationTaskStatus = jest.fn();
+const mockCreateGenerateTask = jest.fn();
+const mockGetTaskStatus = jest.fn();
+const mockCancelTaskApi = jest.fn();
+const mockConvertXjcgFormToApiRequest = jest.fn();
+const mockConvertGngkFormToApiRequest = jest.fn();
+
+const mockTenderData: TenderData = {
+  project_name: '测试项目',
+  project_number: 'TEST-001',
+  project_content: '测试内容',
+  bzj_rule: '测试保证金规则',
+  buyer_name: '测试采购人',
+  project_zbr_xbr: '张三',
+  zbr_xbr_tel: '13800138000',
+  zbr_pinyin: 'zhangsan',
+  shell_start_date: '2024-01-01',
+  shell_end_date: '2024-12-31',
+  submit_date: '2024-12-31',
+  platform: '测试平台',
+  service_fee: '1000',
+};
+
+const mockXjcgFormData = {
+  tender_no: 'XJCG-001',
+  tender_data: mockTenderData,
+  model: 'deepseek' as const,
+  files: {
+    clean_draft: {
+      id: 'clean-id',
+      file_path: 'D:/UploadFiles/clean.docx',
+      file_name: 'clean.docx',
+      original_name: 'clean.docx',
+      size: 1024,
+      upload_time: '2024-01-01T00:00:00.000Z',
+    },
+    tender_params: [
+      {
+        id: 'params-id',
+        file_path: 'D:/UploadFiles/params.docx',
+        file_name: 'params.docx',
+        original_name: 'params.docx',
+        size: 1024,
+        upload_time: '2024-01-01T00:00:00.000Z',
+      },
+    ],
+  },
+  insertion_config: {
+    before_text: '第三章  采购需求',
+    after_text: '第四章  响应文件有关格式',
+  },
+};
+
+const mockGngkFormData = {
+  ...mockXjcgFormData,
+  tender_no: 'GNGK-001',
+  insertion_config: {
+    before_text: '第三章 招标内容及要求',
+    after_text: '第四章 投标文件有关格式',
+  },
+};
 
 jest.mock('@/hooks/useHydrated', () => ({
   useHydrated: () => true,
@@ -10,24 +75,39 @@ jest.mock('@/hooks/useChatSSE', () => ({
   useChatSSE: jest.fn(),
 }));
 
-const mockUseTaskHeartbeat = jest.fn();
 jest.mock('@/hooks/useTaskHeartbeat', () => ({
   useTaskHeartbeat: (...args: unknown[]) => mockUseTaskHeartbeat(...args),
 }));
 
-const mockUseCurrentConversationTaskStatus = jest.fn();
 jest.mock('@/hooks/useCurrentConversationTaskStatus', () => ({
   useCurrentConversationTaskStatus: (...args: unknown[]) =>
     mockUseCurrentConversationTaskStatus(...args),
+}));
+
+jest.mock('@/lib/api', () => ({
+  createGenerateTask: (...args: unknown[]) => mockCreateGenerateTask(...args),
+  getTaskStatus: (...args: unknown[]) => mockGetTaskStatus(...args),
+  cancelTask: (...args: unknown[]) => mockCancelTaskApi(...args),
+}));
+
+jest.mock('@/lib/formDataConverter', () => ({
+  convertXjcgFormToApiRequest: (...args: unknown[]) =>
+    mockConvertXjcgFormToApiRequest(...args),
+  convertGngkFormToApiRequest: (...args: unknown[]) =>
+    mockConvertGngkFormToApiRequest(...args),
 }));
 
 jest.mock('@/components/forms/XjcgTenderForm', () => ({
   XjcgTenderForm: ({
     isSubmitting,
     canCancel,
+    onSubmit,
+    onCancel,
   }: {
     isSubmitting?: boolean;
     canCancel?: boolean;
+    onSubmit: (data: typeof mockXjcgFormData) => Promise<void> | void;
+    onCancel?: () => Promise<void> | void;
   }) => (
     <div
       data-testid="xjcg-form"
@@ -35,6 +115,14 @@ jest.mock('@/components/forms/XjcgTenderForm', () => ({
       data-can-cancel={canCancel ? 'true' : 'false'}
     >
       XjcgTenderForm
+      <button type="button" aria-label="提交XJCG表单" onClick={() => void onSubmit(mockXjcgFormData)}>
+        提交XJCG
+      </button>
+      {canCancel ? (
+        <button type="button" aria-label="取消XJCG任务" onClick={() => void onCancel?.()}>
+          取消XJCG
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -43,9 +131,13 @@ jest.mock('@/components/forms/GngkTenderForm', () => ({
   GngkTenderForm: ({
     isSubmitting,
     canCancel,
+    onSubmit,
+    onCancel,
   }: {
     isSubmitting?: boolean;
     canCancel?: boolean;
+    onSubmit: (data: typeof mockGngkFormData) => Promise<void> | void;
+    onCancel?: () => Promise<void> | void;
   }) => (
     <div
       data-testid="gngk-form"
@@ -53,6 +145,14 @@ jest.mock('@/components/forms/GngkTenderForm', () => ({
       data-can-cancel={canCancel ? 'true' : 'false'}
     >
       GngkTenderForm
+      <button type="button" aria-label="提交GNGK表单" onClick={() => void onSubmit(mockGngkFormData)}>
+        提交GNGK
+      </button>
+      {canCancel ? (
+        <button type="button" aria-label="取消GNGK任务" onClick={() => void onCancel?.()}>
+          取消GNGK
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -61,8 +161,15 @@ describe('FormPanel', () => {
   beforeEach(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
+
     mockUseTaskHeartbeat.mockClear();
     mockUseCurrentConversationTaskStatus.mockReset();
+    mockCreateGenerateTask.mockReset();
+    mockGetTaskStatus.mockReset();
+    mockCancelTaskApi.mockReset();
+    mockConvertXjcgFormToApiRequest.mockReset();
+    mockConvertGngkFormToApiRequest.mockReset();
+
     mockUseCurrentConversationTaskStatus.mockReturnValue({
       currentTaskId: null,
       currentTaskSummary: null,
@@ -71,6 +178,54 @@ describe('FormPanel', () => {
       isCurrentTaskQueued: false,
       isCurrentTaskRunning: false,
       runningTaskProgress: null,
+    });
+
+    mockConvertXjcgFormToApiRequest.mockReturnValue({
+      form_type: 'xjcg_tender',
+      tender_data: mockTenderData,
+      file_paths: {
+        clean_draft: 'D:/UploadFiles/clean.docx',
+        tender_params: ['D:/UploadFiles/params.docx'],
+      },
+      insertion_config: mockXjcgFormData.insertion_config,
+      model: 'deepseek',
+    });
+    mockConvertGngkFormToApiRequest.mockReturnValue({
+      form_type: 'gngk_tender',
+      tender_data: mockTenderData,
+      file_paths: {
+        clean_draft: 'D:/UploadFiles/clean.docx',
+        tender_params: ['D:/UploadFiles/params.docx'],
+      },
+      insertion_config: mockGngkFormData.insertion_config,
+      model: 'deepseek',
+    });
+
+    mockCreateGenerateTask.mockResolvedValue({
+      task_id: 'task-created',
+      status: 'queued',
+      queue_position: 1,
+      waiting_count: 0,
+    });
+
+    mockGetTaskStatus.mockResolvedValue({
+      task_id: 'task-created',
+      status: 'queued',
+      progress: {
+        completed_nodes: [],
+        running_nodes: [],
+        completed_count: 0,
+        total_nodes: 10,
+        progress_percent: 0,
+      },
+    });
+
+    mockCancelTaskApi.mockResolvedValue({
+      success: true,
+      task_id: 'task-running',
+      message: '任务已取消',
+      was_running: true,
+      noop: false,
     });
 
     useChatStore.setState((state) => ({
@@ -99,6 +254,66 @@ describe('FormPanel', () => {
 
     expect(screen.getByText('XjcgTenderForm')).toBeInTheDocument();
     expect(mockUseTaskHeartbeat.mock.calls[0]?.[0]).toEqual(['task-queued', 'task-running']);
+  });
+
+  it('renders gngk form via registry mapping when tenderType is gngk', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          tenderType: 'gngk',
+        },
+      ],
+      selectedTenderType: 'gngk',
+    }));
+
+    render(<FormPanel />);
+
+    expect(screen.getByTestId('gngk-form')).toBeInTheDocument();
+    expect(screen.queryByTestId('xjcg-form')).not.toBeInTheDocument();
+    expect(screen.getByText('国内公开')).toBeInTheDocument();
+  });
+
+  it('uses xjcg converter mapping when submitting xjcg form', async () => {
+    const user = userEvent.setup();
+    render(<FormPanel />);
+
+    await user.click(screen.getByRole('button', { name: '提交XJCG表单' }));
+
+    await waitFor(() => {
+      expect(mockConvertXjcgFormToApiRequest).toHaveBeenCalledWith(mockXjcgFormData);
+      expect(mockCreateGenerateTask).toHaveBeenCalledWith(
+        mockConvertXjcgFormToApiRequest.mock.results[0]?.value
+      );
+    });
+    expect(mockConvertGngkFormToApiRequest).not.toHaveBeenCalled();
+  });
+
+  it('uses gngk converter mapping when submitting gngk form', async () => {
+    const user = userEvent.setup();
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          tenderType: 'gngk',
+        },
+      ],
+      selectedTenderType: 'gngk',
+    }));
+
+    render(<FormPanel />);
+
+    await user.click(screen.getByRole('button', { name: '提交GNGK表单' }));
+
+    await waitFor(() => {
+      expect(mockConvertGngkFormToApiRequest).toHaveBeenCalledWith(mockGngkFormData);
+      expect(mockCreateGenerateTask).toHaveBeenCalledWith(
+        mockConvertGngkFormToApiRequest.mock.results[0]?.value
+      );
+    });
+    expect(mockConvertXjcgFormToApiRequest).not.toHaveBeenCalled();
   });
 
   it('shows queue status card and keeps form locked/cancellable when current task is queued', () => {
@@ -249,6 +464,45 @@ describe('FormPanel', () => {
     expect(screen.getByTestId('running-status-card')).toHaveClass('border-blue-400/90');
     expect(screen.getByTestId('xjcg-form')).toHaveAttribute('data-submitting', 'true');
     expect(screen.getByTestId('xjcg-form')).toHaveAttribute('data-can-cancel', 'true');
+  });
+
+  it('calls cancel API through form cancel flow when current task is cancellable', async () => {
+    const user = userEvent.setup();
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: 'task-running',
+        },
+      ],
+      activeTaskIds: ['task-running'],
+    }));
+    mockUseCurrentConversationTaskStatus.mockReturnValue({
+      currentTaskId: 'task-running',
+      currentTaskSummary: {
+        task_id: 'task-running',
+        status: 'running',
+        updated_at: Date.now(),
+      },
+      currentTaskStatus: 'running',
+      waitingCount: undefined,
+      isCurrentTaskQueued: false,
+      isCurrentTaskRunning: true,
+      runningTaskProgress: {
+        completed_count: 1,
+        total_nodes: 5,
+        progress_percent: 20,
+      },
+    });
+
+    render(<FormPanel />);
+
+    await user.click(screen.getByRole('button', { name: '取消XJCG任务' }));
+
+    await waitFor(() => {
+      expect(mockCancelTaskApi).toHaveBeenCalledWith('task-running');
+    });
   });
 
   it('falls back to progress_text fraction when running progress snapshot is temporarily missing', () => {

@@ -6,15 +6,18 @@ import { useChatStore, type ConversationFormDraft } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
 import { useHydrated } from '@/hooks/useHydrated';
-import { XjcgTenderForm, type XjcgTenderFormData } from '../forms/XjcgTenderForm';
-import { GngkTenderForm, type GngkTenderFormData } from '../forms/GngkTenderForm';
 import { cancelTask, createGenerateTask, getTaskStatus } from '@/lib/api';
 import { useChatSSE } from '@/hooks/useChatSSE';
 import { useTaskHeartbeat } from '@/hooks/useTaskHeartbeat';
 import { useCurrentConversationTaskStatus } from '@/hooks/useCurrentConversationTaskStatus';
-import { convertGngkFormToApiRequest, convertXjcgFormToApiRequest } from '@/lib/formDataConverter';
 import { inferTenderNoFromConversationTitle } from '@/lib/chat-utils';
 import type { TenderData } from '@/types/api';
+import {
+  tenderFormComponentMap,
+  tenderFormConverterMap,
+  tenderTypeDisplayNameMap,
+  type TenderFormData,
+} from './tenderFormRegistry';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
@@ -331,16 +334,12 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
   };
 
   const handleSubmit = useCallback(
-    async (formData: XjcgTenderFormData | GngkTenderFormData) => {
+    async (formData: TenderFormData) => {
       if (!conversation) return;
 
       try {
         setIsSubmitting(true);
-
-        const request =
-          conversation.tenderType === 'xjcg'
-            ? convertXjcgFormToApiRequest(formData as XjcgTenderFormData)
-            : convertGngkFormToApiRequest(formData as GngkTenderFormData);
+        const request = tenderFormConverterMap[conversation.tenderType](formData);
 
         const result = await createGenerateTask(request);
         startTask(conversation.id, result.task_id, {
@@ -551,6 +550,9 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
     );
   }
 
+  const TenderFormComponent = tenderFormComponentMap[conversation.tenderType];
+  const tenderTypeDisplayName = tenderTypeDisplayNameMap[conversation.tenderType];
+
   return (
     <div
       aria-busy={formIsBusy}
@@ -560,39 +562,23 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
       <div className="relative z-20 border-b border-gray-200 bg-white px-4 py-3">
         <div>
           <h2 className="font-medium text-gray-900">招标信息</h2>
-          <p className="text-xs text-gray-500">
-            {conversation.tenderType === 'xjcg' ? '询价采购' : '国内公开'}
-          </p>
+          <p className="text-xs text-gray-500">{tenderTypeDisplayName}</p>
         </div>
       </div>
 
       {/* Form Content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {conversation.tenderType === 'xjcg' ? (
-          <XjcgTenderForm
-            key={conversation.id}
-            onSubmit={handleSubmit}
-            isSubmitting={formIsBusy}
-            canCancel={hasCancelableCurrentTask}
-            onCancel={handleCancelTask}
-            initialTenderNo={conversationDraft?.tender_no || inferredTenderNo || undefined}
-            initialTenderData={conversationDraft?.tender_data || initialTenderData || undefined}
-            initialDraft={conversationDraft}
-            onDraftChange={handleDraftChange}
-          />
-        ) : (
-          <GngkTenderForm
-            key={conversation.id}
-            onSubmit={handleSubmit}
-            isSubmitting={formIsBusy}
-            canCancel={hasCancelableCurrentTask}
-            onCancel={handleCancelTask}
-            initialTenderNo={conversationDraft?.tender_no || inferredTenderNo || undefined}
-            initialTenderData={conversationDraft?.tender_data || initialTenderData || undefined}
-            initialDraft={conversationDraft}
-            onDraftChange={handleDraftChange}
-          />
-        )}
+        <TenderFormComponent
+          key={conversation.id}
+          onSubmit={handleSubmit}
+          isSubmitting={formIsBusy}
+          canCancel={hasCancelableCurrentTask}
+          onCancel={handleCancelTask}
+          initialTenderNo={conversationDraft?.tender_no || inferredTenderNo || undefined}
+          initialTenderData={conversationDraft?.tender_data || initialTenderData || undefined}
+          initialDraft={conversationDraft}
+          onDraftChange={handleDraftChange}
+        />
       </div>
 
       {statusOverlayCard && (

@@ -210,10 +210,13 @@ export function FileUploader({
     []
   );
   const selectionHint = multiple ? `最多 ${maxFiles} 个文件` : '单文件上传';
+  const uploaderTestId = fileType ? `file-uploader-${fileType}` : 'file-uploader-default';
 
   return (
-    <div className={cn('space-y-3', className)}>
-      {/* Upload Area */}
+    <div
+      className={cn('space-y-3 rounded-2xl border border-[var(--border)] bg-white p-4 shadow-sm', className)}
+      data-testid={`${uploaderTestId}-card`}
+    >
       <div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -224,6 +227,7 @@ export function FileUploader({
           isDragging && 'border-[var(--primary)] bg-[var(--primary)]/10 shadow-sm',
           disabled && 'cursor-not-allowed opacity-50'
         )}
+        data-testid={`${uploaderTestId}-dropzone`}
       >
         <input
           type="file"
@@ -233,23 +237,20 @@ export function FileUploader({
           disabled={disabled}
           className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
         />
-        <div className="flex flex-col gap-3 text-center sm:flex-row sm:items-center sm:justify-between sm:text-left">
-          <div className="flex flex-col items-center gap-3 sm:flex-row">
-            <div className="mx-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--primary)]/10 text-[var(--primary)] sm:mx-0">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--primary)]/10 text-[var(--primary)]">
               <Upload className="h-5 w-5" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-semibold text-[var(--foreground)]">{label}</p>
               <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">{description}</p>
             </div>
           </div>
-          <div className="inline-flex items-center justify-center rounded-full border border-[var(--primary)]/15 bg-[var(--primary)]/8 px-3 py-1.5 text-xs font-medium text-[var(--primary)]">
-            点击或拖拽
+          <div className="inline-flex shrink-0 items-center justify-center rounded-full border border-[var(--primary)]/15 bg-[var(--primary)]/8 px-3 py-1.5 text-xs font-medium text-[var(--primary)]">
+            {selectionHint}
           </div>
         </div>
-        <p className="mt-3 text-center text-[11px] text-[var(--text-muted)] sm:text-left">
-          {selectionHint}
-        </p>
       </div>
 
       {/* Error Messages */}
@@ -269,30 +270,34 @@ export function FileUploader({
 
       {/* File List */}
       {files.length > 0 && (
-        <div className="space-y-2">
+        <div className="space-y-2" data-testid={`${uploaderTestId}-files`}>
+          <p className="text-xs font-medium text-[var(--text-muted)]">已上传文件</p>
           {files.map((file) => (
             <div
               key={file.id}
               className={cn(
                 'flex items-center justify-between rounded-xl border px-3 py-2.5 transition-colors',
-                'border-green-200 bg-green-50/80'
+                'border-[var(--border)] bg-[var(--secondary-bg)]/55'
               )}
             >
               <div className="flex min-w-0 items-center gap-2.5">
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-green-100">
-                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-green-100/90">
+                  <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
                 </div>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-green-900">
-                    {file.original_name}
+                  <p className="truncate text-sm font-medium text-[var(--foreground)]">{file.original_name}</p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {formatFileSize(file.size)} ·{' '}
+                    <span className="font-medium text-[var(--success)]">上传成功</span>
                   </p>
-                  <p className="text-xs text-green-600">{formatFileSize(file.size)} · 上传成功</p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => removeFile(file.id)}
                 disabled={disabled}
-                className="rounded p-1 text-green-600 transition-colors hover:bg-green-100 hover:text-green-800 disabled:opacity-50"
+                aria-label={`删除文件 ${file.original_name}`}
+                className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--secondary-bg)] hover:text-[var(--foreground)] disabled:opacity-50"
               >
                 <X className="h-4 w-4" />
               </button>
