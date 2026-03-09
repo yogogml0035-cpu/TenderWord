@@ -12,6 +12,7 @@ from backend.models.task import (
     TaskCancelResponse,
     TaskHeartbeatResponse,
     TaskInfo,
+    TaskKind,
     TaskListResponse,
     TaskProgress,
     TaskResponse,
@@ -21,6 +22,7 @@ from backend.task.task_queue_manager import (
     NODE_DISPLAY_NAMES,
     NodeName,
     Task as InternalTask,
+    TaskKind as InternalTaskKind,
     TaskQueueManager,
     TaskStatus as InternalTaskStatus,
     get_task_queue,
@@ -111,6 +113,7 @@ class TaskService:
             success=True,
             task_id=task_id,
             alive=alive,
+            task_kind=self._convert_task_kind(internal_task.task_kind),
             status=self._convert_status(internal_task.status),
         )
 
@@ -215,6 +218,13 @@ class TaskService:
             completed_nodes=task.progress.completed_nodes,
         )
 
+    def _convert_task_kind(self, task_kind: InternalTaskKind) -> TaskKind:
+        kind_map = {
+            InternalTaskKind.GENERATE: TaskKind.GENERATE,
+            InternalTaskKind.REWRITE: TaskKind.REWRITE,
+        }
+        return kind_map.get(task_kind, TaskKind.GENERATE)
+
     def _convert_to_task_info(self, task: InternalTask) -> TaskInfo:
         """将内部任务转换为 TaskInfo.
 
@@ -242,6 +252,7 @@ class TaskService:
         return TaskInfo(
             task_id=task.task_id,
             user_session_id=task.user_session_id,
+            task_kind=self._convert_task_kind(task.task_kind),
             status=self._convert_status(task.status),
             created_at=task.created_at,
             started_at=task.started_at,

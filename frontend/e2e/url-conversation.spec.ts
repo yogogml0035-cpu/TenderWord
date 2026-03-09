@@ -160,7 +160,7 @@ test.describe('URL-driven Conversation Flow', () => {
     await expect(freshPage.getByText('HISTORY-TEST-001')).toHaveCount(0);
   });
 
-  test('Stale generating task is cleared when backend reports TASK_NOT_FOUND', async ({
+  test('Stale generating task is preserved as interrupted when backend reports TASK_NOT_FOUND', async ({
     page,
   }) => {
     let streamRequestCount = 0;
@@ -244,30 +244,45 @@ test.describe('URL-driven Conversation Flow', () => {
     await page.waitForLoadState('networkidle');
 
     await expect(page.getByPlaceholder('输入消息...')).toBeVisible();
-    await expect(page.getByPlaceholder('生成中，请稍候...')).toHaveCount(0);
+    await expect(page.getByText('服务已重启，任务已中断，可重试')).toHaveCount(1);
 
     await expect
       .poll(async () =>
         page.evaluate(() => {
           const raw = window.sessionStorage.getItem('chat-storage');
           if (!raw) {
-            return 0;
+            return {
+              generatingCount: 0,
+              staleTaskCount: 0,
+              interruptedCount: 0,
+            };
           }
           const parsed = JSON.parse(raw) as {
             state?: {
               conversations?: Array<{
-                messages?: Array<{ status?: string; taskId?: string }>;
+                messages?: Array<{ status?: string; taskId?: string; error?: string }>;
               }>;
             };
           };
-          return (
-            parsed.state?.conversations?.flatMap((conversation) => conversation.messages ?? []).filter(
-              (message) => message.status === 'generating' || message.taskId === 'task-stale'
-            ).length ?? 0
-          );
+          const messages =
+            parsed.state?.conversations?.flatMap((conversation) => conversation.messages ?? []) ?? [];
+          return {
+            generatingCount: messages.filter((message) => message.status === 'generating').length,
+            staleTaskCount: messages.filter((message) => message.taskId === 'task-stale').length,
+            interruptedCount: messages.filter(
+              (message) =>
+                message.taskId === 'task-stale' &&
+                message.status === 'error' &&
+                message.error === '服务已重启，任务已中断，可重试'
+            ).length,
+          };
         })
       )
-      .toBe(0);
+      .toEqual({
+        generatingCount: 0,
+        staleTaskCount: 2,
+        interruptedCount: 1,
+      });
 
     await expect.poll(() => streamRequestCount).toBe(0);
   });

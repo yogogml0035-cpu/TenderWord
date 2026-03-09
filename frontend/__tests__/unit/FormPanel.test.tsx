@@ -422,7 +422,7 @@ describe('FormPanel', () => {
 
     expect(screen.queryByText('任务排队中')).not.toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('正在启动生成流程...');
-    expect(screen.getByRole('status')).toHaveTextContent('系统正在建立任务与进度流');
+    expect(screen.getByRole('status')).toHaveTextContent('系统正在建立生成任务与进度流');
     expect(screen.getByRole('status')).toHaveTextContent('当前没有前置任务');
   });
 

@@ -60,6 +60,7 @@ class ConversationService:
             "alive": True,
             "instance_id": SERVICE_INSTANCE_ID,
             "server_time": datetime.now(timezone.utc).isoformat(),
+            "rewrite_available": self.has_rewrite_history(conversation_id),
         }
 
     def get_latest_rewrite_state(self, conversation_id: str) -> Optional[Dict[str, Any]]:
@@ -83,6 +84,27 @@ class ConversationService:
             for entry in runtime.rewrite_messages:
                 if entry.role == "assistant" and isinstance(entry.rewrite_state, dict):
                     items.append(dict(entry.rewrite_state))
+            return items
+
+    def list_rewrite_messages(self, conversation_id: str) -> List[RewriteMessage]:
+        with self._lock:
+            runtime = self._conversations.get(conversation_id)
+            if runtime is None:
+                return []
+
+            items: List[RewriteMessage] = []
+            for entry in runtime.rewrite_messages:
+                items.append(
+                    RewriteMessage(
+                        role=entry.role,
+                        content=entry.content,
+                        rewrite_state=dict(entry.rewrite_state)
+                        if isinstance(entry.rewrite_state, dict)
+                        else None,
+                        model=entry.model,
+                        created_at=entry.created_at,
+                    )
+                )
             return items
 
     def has_rewrite_history(self, conversation_id: str) -> bool:
@@ -175,4 +197,3 @@ def get_conversation_service() -> ConversationService:
     if _conversation_service is None:
         _conversation_service = ConversationService()
     return _conversation_service
-

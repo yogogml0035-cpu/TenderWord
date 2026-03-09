@@ -22,6 +22,7 @@ type MockSSEOptions = Parameters<typeof useSSE>[0];
 function createRunningTaskStatus() {
   return {
     task_id: 'task-1',
+    task_kind: 'generate' as const,
     status: 'running' as const,
     created_at: new Date().toISOString(),
     progress: {
@@ -31,6 +32,23 @@ function createRunningTaskStatus() {
       completed_count: 1,
       total_nodes: 7,
       progress_percent: 14.3,
+    },
+  };
+}
+
+function createRewriteRunningTaskStatus() {
+  return {
+    task_id: 'task-1',
+    task_kind: 'rewrite' as const,
+    status: 'running' as const,
+    created_at: new Date().toISOString(),
+    progress: {
+      completed_nodes: ['resolve_rewrite_target'],
+      running_nodes: ['rewrite_text'],
+      current_node: 'rewrite_text',
+      completed_count: 1,
+      total_nodes: 4,
+      progress_percent: 25,
     },
   };
 }
@@ -254,6 +272,7 @@ describe('useChatSSE', () => {
     setQueueOnlyTaskState();
     mockGetTaskStatus.mockResolvedValue({
       task_id: 'task-1',
+      task_kind: 'generate',
       status: 'cancelled',
       created_at: new Date().toISOString(),
       progress: createRunningTaskStatus().progress,
@@ -453,6 +472,7 @@ describe('useChatSSE', () => {
   it('finalizes immediately from task status when runtime content is already present', async () => {
     mockGetTaskStatus.mockResolvedValue({
       task_id: 'task-1',
+      task_kind: 'generate',
       status: 'completed',
       created_at: new Date().toISOString(),
       progress: createRunningTaskStatus().progress,
@@ -498,8 +518,17 @@ describe('useChatSSE', () => {
     expect(latestOptions?.endpoint).toBe('');
   });
 
-  it('discards stale generating task when task status returns TASK_NOT_FOUND', async () => {
+  it('marks stale generating task as interrupted when task status returns TASK_NOT_FOUND', async () => {
     useChatStreamStore.getState().replaceStream('task-1', {
+      logs: [
+        {
+          id: 'log-stream',
+          timestamp: Date.now(),
+          level: 'info',
+          message: '正在执行',
+        },
+      ],
+      aiText: '已生成一半的内容',
       lastEventId: '42',
     });
     useChatTaskSessionStore.getState().upsertSession('task-1', { lastEventId: '42' });
@@ -515,10 +544,23 @@ describe('useChatSSE', () => {
     );
 
     await waitFor(() => {
-      expect(useChatStore.getState().findTaskMessageGroup('task-1')).toBeNull();
+      const group = useChatStore.getState().findTaskMessageGroup('task-1');
+      expect(group?.logMessage?.status).toBe('error');
+      expect(group?.contentMessage?.status).toBe('error');
     });
 
+    const group = useChatStore.getState().findTaskMessageGroup('task-1');
+    expect(group?.logMessage?.metadata?.localTaskReason).toBe('backend_restart');
+    expect(group?.logMessage?.metadata?.logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: '正在执行' }),
+        expect.objectContaining({ message: '服务已重启，任务已中断，可重试' }),
+      ])
+    );
+    expect(group?.contentMessage?.content).toBe('已生成一半的内容');
+    expect(group?.contentMessage?.error).toBe('服务已重启，任务已中断，可重试');
     expect(useChatStore.getState().hasActiveTasks()).toBe(false);
+    expect(useChatStore.getState().getCurrentConversation()?.currentTaskId).toBeUndefined();
     expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
     expect(latestOptions?.endpoint).toBe('');
@@ -651,5 +693,81 @@ describe('useChatSSE', () => {
 
     expect(latestCloseMock).toHaveBeenCalledTimes(1);
     expect(onComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats rewrite_text as the AI content trigger for rewrite tasks', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      taskSummaries: {
+        'task-1': {
+          task_id: 'task-1',
+          task_kind: 'rewrite',
+          status: 'running',
+          updated_at: Date.now(),
+        },
+      },
+    }));
+    mockGetTaskStatus.mockResolvedValue(createRewriteRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'progress',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'rewrite',
+          status: 'running',
+          progress_text: '1/4',
+          current_node: 'rewrite_text',
+          completed_count: 1,
+          total_nodes: 4,
+          progress_percent: 25,
+          current_node_display: 'AI重写内容',
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'llm',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          node: 'rewrite_text',
+          content: '润色后的内容',
+          content_mode: 'snapshot',
+          is_complete: true,
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'done',
+        id: '3',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'rewrite',
+          success: true,
+          message: '润色任务完成',
+          output_file: 'D:/UploadFiles/output-rewrite.docx',
+          processing_time: 3.2,
+        },
+      });
+    });
+
+    const group = getTaskGroup();
+    expect(group?.contentMessage?.status).toBe('completed');
+    expect(group?.contentMessage?.content).toBe('润色后的内容');
+    expect(group?.contentMessage?.metadata?.taskKind).toBe('rewrite');
+    expect(group?.downloadMessage?.metadata?.taskKind).toBe('rewrite');
   });
 });

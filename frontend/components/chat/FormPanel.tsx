@@ -346,6 +346,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
 
         const result = await createGenerateTask(request);
         startTask(conversation.id, result.task_id, {
+          task_kind: result.task_kind,
           status: result.status || 'queued',
           queue_position: result.queue_position,
           waiting_count: result.waiting_count,
@@ -355,11 +356,13 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         try {
           const task = await getTaskStatus(result.task_id);
           upsertTaskSummary(result.task_id, {
+            task_kind: task.task_kind,
             status: task.status,
             queue_position: task.queue_position,
             waiting_count: task.waiting_count,
             progress_percent: task.progress.progress_percent,
             progress_text: task.progress.progress_text || '',
+            current_node: task.progress.current_node || '',
             current_node_display: task.progress.current_node_display || task.progress.current_node || '',
           });
         } catch {
@@ -412,19 +415,31 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
     typeof currentTaskSummary?.current_node_display === 'string'
       ? currentTaskSummary.current_node_display.trim()
       : '';
+  const currentTaskKind = currentTaskSummary?.task_kind || 'generate';
+  const isRewriteTask = currentTaskKind === 'rewrite';
   const runningStepSummary = isCurrentTaskStarting
-    ? '系统正在建立任务与进度流'
+    ? `系统正在建立${isRewriteTask ? '润色' : '生成'}任务与进度流`
     : runningTaskProgress
       ? `已完成 ${runningTaskProgress.completed_count}/${runningTaskProgress.total_nodes} 个步骤`
       : runningProgressFraction
         ? `已完成 ${runningProgressFraction.completed}/${runningProgressFraction.total} 个步骤`
-        : '系统正在启动生成流程';
+        : `系统正在启动${isRewriteTask ? '润色' : '生成'}流程`;
   const runningStatusDetail = runningCurrentNodeDisplay
     || (isCurrentTaskStarting
       ? '当前没有前置任务，系统正在获取执行权并初始化 Word 与进度流。'
-      : '系统正在整理章节、参数与格式，请稍候，不建议关闭当前页面。');
-  const runningStatusTitle = isCurrentTaskStarting ? '正在启动生成流程...' : '正在生成招标文档...';
-  const runningStatusLabel = isCurrentTaskStarting ? '准备执行中' : '文档生成中';
+      : isRewriteTask
+        ? '系统正在选择目标版本、重写内容并写回文档，请稍候，不建议关闭当前页面。'
+        : '系统正在整理章节、参数与格式，请稍候，不建议关闭当前页面。');
+  const runningStatusTitle = isCurrentTaskStarting
+    ? `正在启动${isRewriteTask ? '润色' : '生成'}流程...`
+    : isRewriteTask
+      ? '正在修改润色文档...'
+      : '正在生成招标文档...';
+  const runningStatusLabel = isCurrentTaskStarting
+    ? '准备执行中'
+    : isRewriteTask
+      ? '润色处理中'
+      : '文档生成中';
   const runningProgressLabel = runningTaskProgress
     ? `${runningProgressPercent}%`
     : runningProgressNote || (isCurrentTaskStarting ? '启动中' : '处理中');
@@ -443,7 +458,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         progressSummary: queueProgressSummary,
         progressLabel: queueProgressLabel,
         progressBarPercent: runningProgressPercent,
-        footer: '轮到当前任务后将自动开始生成，无需重复提交。',
+        footer: `轮到当前任务后将自动开始${isRewriteTask ? '润色' : '生成'}，无需重复提交。`,
         icon: (
           <svg
             className="h-7 w-7"
@@ -473,7 +488,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
           progressSummary: runningStepSummary,
           progressLabel: runningProgressLabel,
           progressBarPercent: runningOverlayPercent,
-          footer: '生成过程中可使用底部“取消生成”终止任务',
+          footer: `${isRewriteTask ? '润色' : '生成'}过程中可使用底部“取消生成”终止任务`,
           icon: <Loader2 className="h-7 w-7 animate-spin" />,
         }
       : null;

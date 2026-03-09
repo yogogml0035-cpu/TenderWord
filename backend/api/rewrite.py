@@ -27,6 +27,10 @@ def _error_status(code: str) -> int:
         return status.HTTP_404_NOT_FOUND
     if code in {"REWRITE_PROMPT_INVALID", "REWRITE_TARGET_NOT_RESOLVED"}:
         return status.HTTP_400_BAD_REQUEST
+    if code == "LLM_TIMEOUT":
+        return status.HTTP_504_GATEWAY_TIMEOUT
+    if code == "LLM_SERVICE_ERROR":
+        return status.HTTP_503_SERVICE_UNAVAILABLE
     return status.HTTP_400_BAD_REQUEST
 
 
@@ -43,7 +47,7 @@ async def create_rewrite_task(request: RewriteRequest) -> GenerateResponse:
         request.model.value,
     )
     document_service = get_document_service()
-    response = document_service.create_rewrite_task(
+    response = await document_service.create_rewrite_task(
         conversation_id=request.conversation_id,
         user_prompt=request.user_prompt,
         model_provider=request.model.value,
@@ -64,4 +68,3 @@ async def create_rewrite_task(request: RewriteRequest) -> GenerateResponse:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     )
-

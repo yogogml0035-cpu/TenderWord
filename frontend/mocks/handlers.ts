@@ -20,6 +20,7 @@ const createSuccessGenerateResponse = (
   success: true,
   data: {
     task_id: 'test-task-123',
+    task_kind: 'generate',
     status: 'queued',
     created_at: '2024-01-01T00:00:00Z',
     user_session_id: 'session-123',
@@ -109,6 +110,7 @@ export const handlers = [
       success: true,
       data: {
         task_id: params.taskId,
+        task_kind: 'generate',
         status: 'running',
         created_at: '2024-01-01T00:00:00Z',
         started_at: '2024-01-01T00:00:05Z',

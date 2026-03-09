@@ -50,7 +50,12 @@ function getStatusIcon(status: Message['status']) {
   }
 }
 
-function getStatusLabel(status: Message['status']) {
+function getStatusLabel(message: Message) {
+  if (message.status === 'error' && message.metadata?.localTaskReason === 'backend_restart') {
+    return '日志结束（已中断）';
+  }
+
+  const status = message.status;
   switch (status) {
     case 'generating':
       return '日志收集中...';
@@ -132,6 +137,7 @@ export function TaskLogMessage({
   const logs = normalizeLogs(message.metadata?.logs);
   const progressText = message.metadata?.progressText;
   const progressPercent = message.metadata?.progressPercent;
+  const isRewriteTask = message.metadata?.taskKind === 'rewrite';
 
   const copyText = useMemo(
     () =>
@@ -170,10 +176,12 @@ export function TaskLogMessage({
       <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2">
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-gray-500" />
-          <span className="text-sm font-medium text-gray-700">进度日志</span>
+          <span className="text-sm font-medium text-gray-700">
+            {isRewriteTask ? '润色进度' : '进度日志'}
+          </span>
           <div className="ml-1 flex items-center gap-1.5 text-xs text-gray-500">
             {getStatusIcon(message.status)}
-            <span>{getStatusLabel(message.status)}</span>
+            <span>{getStatusLabel(message)}</span>
           </div>
         </div>
         <button

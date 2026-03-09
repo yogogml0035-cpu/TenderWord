@@ -8,9 +8,6 @@ import { ChatPanel } from '@/components/chat/ChatPanel';
 import { useUrlParams } from '@/hooks/useUrlParams';
 import { useHydrated } from '@/hooks/useHydrated';
 import { useChatStore } from '@/stores/chatStore';
-import { useChatStreamStore } from '@/stores/chatStreamStore';
-import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
-import { useHistoryStore } from '@/stores/historyStore';
 import { fetchTenderData, sendConversationHeartbeat } from '@/lib/api';
 
 /**
@@ -19,11 +16,6 @@ import { fetchTenderData, sendConversationHeartbeat } from '@/lib/api';
 interface UrlProcessingState {
   isProcessing: boolean;
   error: string | null;
-}
-
-interface ConversationInstanceResetState {
-  previousInstanceId: string;
-  nextInstanceId: string;
 }
 
 const CONVERSATION_HEARTBEAT_INTERVAL_MS = 30_000;
@@ -44,16 +36,13 @@ function ChatPageContent() {
     setCurrentConversation,
     setSelectedTenderType,
     updateConversationDraft,
-    resetSessionState,
+    handleBackendRestart,
   } = useChatStore();
   // URL参数处理状态
   const [urlState, setUrlState] = useState<UrlProcessingState>({
     isProcessing: false,
     error: null,
   });
-  const [instanceResetState, setInstanceResetState] = useState<ConversationInstanceResetState | null>(
-    null
-  );
   const heartbeatInFlightRef = useRef(false);
   const knownInstanceIdRef = useRef<string | null>(null);
 
@@ -139,7 +128,7 @@ function ChatPageContent() {
   );
 
   useEffect(() => {
-    if (!hydrated || !conversationIdsKey || instanceResetState) {
+    if (!hydrated || !conversationIdsKey) {
       return;
     }
 
@@ -171,6 +160,10 @@ function ChatPageContent() {
             continue;
           }
 
+          updateConversationDraft(result.value.conversation_id, {
+            rewrite_available: !!result.value.rewrite_available,
+          });
+
           const instanceId = result.value.instance_id;
           const knownInstanceId = knownInstanceIdRef.current;
 
@@ -180,11 +173,8 @@ function ChatPageContent() {
           }
 
           if (instanceId !== knownInstanceId) {
-            setInstanceResetState({
-              previousInstanceId: knownInstanceId,
-              nextInstanceId: instanceId,
-            });
             knownInstanceIdRef.current = instanceId;
+            handleBackendRestart();
             return;
           }
         }
@@ -227,7 +217,7 @@ function ChatPageContent() {
       window.removeEventListener('online', handleOnline);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [conversationIdsKey, hydrated, instanceResetState]);
+  }, [conversationIdsKey, handleBackendRestart, hydrated, updateConversationDraft]);
 
   /**
    * 清除错误提示
@@ -236,21 +226,6 @@ function ChatPageContent() {
     if (!hydrated) return;
     setUrlState((prev) => ({ ...prev, error: null }));
   }, [hydrated]);
-
-  const handleConfirmInstanceReset = useCallback(() => {
-    useChatStreamStore.setState({ streams: {} });
-    useChatTaskSessionStore.getState().clearSessions();
-    useHistoryStore.getState().clearHistory();
-    resetSessionState();
-
-    processedUrlConversationKeyRef.current = null;
-    knownInstanceIdRef.current = null;
-    setInstanceResetState(null);
-    setUrlState({
-      isProcessing: false,
-      error: null,
-    });
-  }, [resetSessionState]);
 
   return (
     <div className="grid h-screen grid-cols-[auto_minmax(0,2fr)_minmax(0,3fr)] overflow-hidden bg-gray-100">
@@ -311,35 +286,6 @@ function ChatPageContent() {
         </div>
       )}
 
-      {instanceResetState && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/45 p-6">
-          <div className="w-full max-w-lg rounded-2xl border border-amber-200 bg-white p-6 shadow-2xl">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-              <div className="min-w-0">
-                <h3 className="text-base font-semibold text-slate-900">检测到服务已重启</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  为避免旧会话状态与新实例不一致，当前标签页会话需要重置。确认后会清空本标签页中的会话、任务、普通聊天记录、润色状态与未读标记。
-                </p>
-                <p className="mt-2 text-xs text-slate-400">
-                  实例变化：{instanceResetState.previousInstanceId} →{' '}
-                  {instanceResetState.nextInstanceId}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-6 flex justify-end">
-              <button
-                type="button"
-                onClick={handleConfirmInstanceReset}
-                className="inline-flex items-center rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600"
-              >
-                确认并重置会话
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

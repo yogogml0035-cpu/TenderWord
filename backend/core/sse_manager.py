@@ -156,12 +156,14 @@ class SSEManager:
         task_id: str,
         completed_count: int,
         total_nodes: int,
+        task_kind: str = "generate",
         current_node: Optional[str] = None,
         current_node_display: Optional[str] = None,
     ) -> None:
         self._schedule(
             self.send_progress(
                 task_id=task_id,
+                task_kind=task_kind,
                 completed_count=completed_count,
                 total_nodes=total_nodes,
                 current_node=current_node,
@@ -174,6 +176,7 @@ class SSEManager:
         task_id: str,
         success: bool = True,
         message: str = "任务完成",
+        task_kind: str = "generate",
         output_file: Optional[str] = None,
         download_url: Optional[str] = None,
         processing_time: Optional[float] = None,
@@ -181,6 +184,7 @@ class SSEManager:
         self._schedule(
             self.send_done(
                 task_id=task_id,
+                task_kind=task_kind,
                 success=success,
                 message=message,
                 output_file=output_file,
@@ -193,10 +197,19 @@ class SSEManager:
         self,
         task_id: str,
         error: str,
+        task_kind: str = "generate",
         node: Optional[str] = None,
         is_fatal: bool = True,
     ) -> None:
-        self._schedule(self.send_error(task_id=task_id, error=error, node=node, is_fatal=is_fatal))
+        self._schedule(
+            self.send_error(
+                task_id=task_id,
+                task_kind=task_kind,
+                error=error,
+                node=node,
+                is_fatal=is_fatal,
+            )
+        )
 
     async def connect(
         self,
@@ -560,6 +573,7 @@ class SSEManager:
         task_id: str,
         completed_count: int,
         total_nodes: int,
+        task_kind: str = "generate",
         current_node: Optional[str] = None,
         current_node_display: Optional[str] = None,
     ) -> int:
@@ -584,6 +598,7 @@ class SSEManager:
             SSEEventType.PROGRESS,
             {
                 "task_id": task_id,
+                "task_kind": task_kind,
                 "status": "running",
                 "completed_count": completed_count,
                 "total_nodes": total_nodes,
@@ -600,6 +615,7 @@ class SSEManager:
         task_id: str,
         success: bool = True,
         message: str = "任务完成",
+        task_kind: str = "generate",
         output_file: Optional[str] = None,
         download_url: Optional[str] = None,
         processing_time: Optional[float] = None,
@@ -622,6 +638,7 @@ class SSEManager:
             SSEEventType.DONE,
             {
                 "task_id": task_id,
+                "task_kind": task_kind,
                 "success": success,
                 "message": message,
                 "output_file": output_file,
@@ -635,6 +652,7 @@ class SSEManager:
         self,
         task_id: str,
         error: str,
+        task_kind: str = "generate",
         node: Optional[str] = None,
         is_fatal: bool = True,
     ) -> int:
@@ -654,6 +672,7 @@ class SSEManager:
             SSEEventType.ERROR,
             {
                 "task_id": task_id,
+                "task_kind": task_kind,
                 "error": error,
                 "node": node,
                 "is_fatal": is_fatal,

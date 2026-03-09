@@ -66,7 +66,7 @@ describe('API Client', () => {
     it('should return task info on success', async () => {
       globalThis.fetch = mockFetchJson({
         success: true,
-        data: { task_id: 'test-task-123', status: 'queued', queue_position: 1 },
+        data: { task_id: 'test-task-123', task_kind: 'generate', status: 'queued', queue_position: 1 },
         message: 'Task created',
         timestamp: new Date().toISOString(),
       });
@@ -83,7 +83,7 @@ describe('API Client', () => {
         status: 200,
         json: async () => ({
           success: true,
-          data: { task_id: 'new-task-id', status: 'queued' },
+          data: { task_id: 'new-task-id', task_kind: 'generate', status: 'queued' },
           message: 'OK',
           timestamp: new Date().toISOString(),
         }),
@@ -203,6 +203,7 @@ describe('API Client', () => {
         success: true,
         data: {
           task_id: 'test-task-123',
+          task_kind: 'generate',
           status: 'running',
           created_at: new Date().toISOString(),
           progress: {
@@ -264,6 +265,7 @@ describe('API Client', () => {
         data: {
           task_id: 'test-task-123',
           alive: true,
+          task_kind: 'generate',
           status: 'running',
         },
         message: 'Heartbeat received',

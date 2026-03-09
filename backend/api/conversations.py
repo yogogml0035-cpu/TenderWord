@@ -15,6 +15,7 @@ class ConversationHeartbeatData(BaseModel):
     alive: bool = Field(..., description="会话是否活跃")
     instance_id: str = Field(..., description="服务实例标识")
     server_time: str = Field(..., description="服务端时间戳")
+    rewrite_available: bool = Field(default=False, description="当前会话是否可进入润色模式")
 
 
 class ConversationHeartbeatResponse(BaseModel):
@@ -38,4 +39,3 @@ async def heartbeat_conversation(
         data=ConversationHeartbeatData(**result),
         timestamp=result["server_time"],
     )
-

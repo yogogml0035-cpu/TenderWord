@@ -121,6 +121,7 @@ export function useCurrentConversationTaskStatus(
         const normalizedTaskProgress = normalizeRunningTaskProgress(task.progress);
 
         upsertTaskSummary(currentTaskId, {
+          task_kind: task.task_kind,
           status: task.status,
           queue_position: task.queue_position,
           waiting_count: task.waiting_count,
@@ -128,6 +129,7 @@ export function useCurrentConversationTaskStatus(
             ? { progress_percent: normalizedTaskProgress.progress_percent }
             : {}),
           progress_text: normalizedTaskProgress?.progress_text || getProgressText(task.progress),
+          current_node: task.progress.current_node || '',
           current_node_display:
             task.progress.current_node_display || task.progress.current_node || '',
         });

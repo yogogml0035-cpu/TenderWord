@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import pathlib
+import re
 import threading
 import time
 import traceback
@@ -27,6 +29,7 @@ from backend.models import (
 )
 from backend.services.conversation_service import get_conversation_service
 from backend.task.task_queue_manager import get_task_queue
+from backend.util.common_util import LLMTimeoutError, stream_llm_completion
 from backend.util.log_util.execution_log import logger as execution_logger
 from backend.util.log_util.progress_log import progress_log
 from backend.util.log_util.sse_log_handler import task_log_context
@@ -67,6 +70,25 @@ REWRITE_DEFAULT_ANCHORS = {
     "xjcg": ("第三章  采购需求", "第四章  响应文件有关格式"),
     "gngk": ("第三章 招标内容及要求", "第四章 投标文件有关格式"),
 }
+
+TASK_KIND_TO_LLM_NODE = {
+    "generate": "generate_polished_text",
+    "rewrite": "rewrite_text",
+}
+
+REWRITE_PROMPT_RELEVANCE_SYSTEM_PROMPT = """
+你是招标文档润色指令分类器。
+你的任务是判断用户输入是否是在要求修改当前招标文档内容。
+
+如果用户输入是在要求对当前文档进行润色、改写、补充、删除、替换、重写、调整、修订，输出 true。
+如果用户输入是闲聊、提问、解释、总结、翻译、评价、问候、与文档修改无关的话题，输出 false。
+
+规则：
+1. 只能输出小写 true 或 false。
+2. 不要输出解释、标点、JSON、代码块或任何额外文本。
+3. 即使没有出现“润色”“修改”等明确关键词，只要语义上是在要求改当前文档，也输出 true。
+4. 无法明确判断时，输出 false。
+""".strip()
 
 
 class _BufferedLoggerWriter:
@@ -172,19 +194,21 @@ class _LLMSnapshotRelay:
 
 # Graph 注册表：表单类型 -> Graph 类
 GRAPH_REGISTRY: Dict[str, type] = {}
+REWRITE_GRAPH_CLASS: Optional[type] = None
 
 
 def _init_graph_registry():
     """初始化 Graph 注册表（延迟加载）."""
-    global GRAPH_REGISTRY
-    if GRAPH_REGISTRY:
+    global GRAPH_REGISTRY, REWRITE_GRAPH_CLASS
+    if GRAPH_REGISTRY and REWRITE_GRAPH_CLASS is not None:
         return
 
     try:
-        from backend.graphs import XjcgTenderGraph, GngkTenderGraph
+        from backend.graphs import GngkTenderGraph, RewriteGraph, XjcgTenderGraph
 
         GRAPH_REGISTRY["xjcg_tender"] = XjcgTenderGraph
         GRAPH_REGISTRY["gngk_tender"] = GngkTenderGraph
+        REWRITE_GRAPH_CLASS = RewriteGraph
         logger.info("Graph 注册表初始化完成")
     except ImportError as e:
         logger.error(f"初始化 Graph 注册表失败: {e}")
@@ -380,9 +404,10 @@ class DocumentService:
             model_provider=request.model.value,
             task_kind="generate",
             conversation_id=initial_state.get("conversation_id"),
+            llm_node_name=TASK_KIND_TO_LLM_NODE["generate"],
         )
 
-    def create_rewrite_task(
+    async def create_rewrite_task(
         self,
         *,
         conversation_id: str,
@@ -410,19 +435,7 @@ class DocumentService:
                 error="REWRITE_PROMPT_INVALID",
             )
 
-        if not self._is_rewrite_prompt_related(normalized_prompt):
-            return GenerateResponse(
-                success=False,
-                task_id=task_id,
-                message="当前输入不属于可执行的润色指令",
-                error="REWRITE_PROMPT_INVALID",
-            )
-
-        target_state = self._resolve_rewrite_target_state(
-            conversation_id=normalized_conversation_id,
-            user_prompt=normalized_prompt,
-        )
-        if not target_state:
+        if not self._conversation_service.has_rewrite_history(normalized_conversation_id):
             return GenerateResponse(
                 success=False,
                 task_id=task_id,
@@ -430,41 +443,72 @@ class DocumentService:
                 error="REWRITE_NO_DOCUMENT",
             )
 
-        rewrite_initial_state = self._build_rewrite_initial_state(
+        latest_rewrite_state = self._conversation_service.get_latest_rewrite_state(
+            normalized_conversation_id
+        )
+        if not latest_rewrite_state:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="当前会话没有可用文档，请先完成一次生成",
+                error="REWRITE_NO_DOCUMENT",
+            )
+
+        try:
+            is_related = await self._is_rewrite_prompt_related(
+                prompt=normalized_prompt,
+                model_provider=model_provider,
+                latest_rewrite_state=latest_rewrite_state,
+            )
+        except LLMTimeoutError:
+            logger.exception("rewrite 指令相关性校验超时: conversation_id=%s", normalized_conversation_id)
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="润色指令校验超时，请稍后重试",
+                error="LLM_TIMEOUT",
+            )
+        except Exception:
+            logger.exception("rewrite 指令相关性校验失败: conversation_id=%s", normalized_conversation_id)
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="润色指令校验失败，请稍后重试",
+                error="LLM_SERVICE_ERROR",
+            )
+
+        if not is_related:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="当前输入不属于可执行的润色指令",
+                error="REWRITE_PROMPT_INVALID",
+            )
+
+        if not REWRITE_GRAPH_CLASS:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="Rewrite Graph 未初始化",
+                error="REWRITE_TARGET_NOT_RESOLVED",
+            )
+
+        rewrite_initial_state = self._build_rewrite_graph_initial_state(
             task_id=task_id,
             conversation_id=normalized_conversation_id,
             user_prompt=normalized_prompt,
-            target_state=target_state,
         )
-
-        tender_type = str(rewrite_initial_state.get("tender_type") or "").strip()
-        if tender_type not in {"xjcg", "gngk"}:
-            return GenerateResponse(
-                success=False,
-                task_id=task_id,
-                message="无法解析 rewrite 目标文档类型",
-                error="REWRITE_TARGET_NOT_RESOLVED",
-            )
-
-        form_type = f"{tender_type}_tender"
-        graph_class = GRAPH_REGISTRY.get(form_type)
-        if not graph_class:
-            return GenerateResponse(
-                success=False,
-                task_id=task_id,
-                message=f"未知的表单类型: {form_type}",
-                error="REWRITE_TARGET_NOT_RESOLVED",
-            )
 
         return self._submit_graph_task(
             task_id=task_id,
-            graph_class=graph_class,
+            graph_class=REWRITE_GRAPH_CLASS,
             initial_state=rewrite_initial_state,
             callback=callback,
             model_provider=model_provider,
             task_kind="rewrite",
             conversation_id=normalized_conversation_id,
             rewrite_user_prompt=normalized_prompt,
+            llm_node_name=TASK_KIND_TO_LLM_NODE["rewrite"],
         )
 
     def _allocate_task_callback_pair(self) -> tuple[str, SSECallback]:
@@ -485,10 +529,12 @@ class DocumentService:
         task_kind: str,
         conversation_id: Optional[str] = None,
         rewrite_user_prompt: Optional[str] = None,
+        llm_node_name: Optional[str] = None,
     ) -> GenerateResponse:
         self._task_queue.add_task(
             task_id=task_id,
             user_session_id=str(initial_state.get("user_session_id") or ""),
+            task_kind=task_kind,
         )
 
         future = _executor.submit(
@@ -501,6 +547,7 @@ class DocumentService:
             task_kind,
             conversation_id,
             rewrite_user_prompt,
+            llm_node_name,
         )
         self._task_queue.register_worker_future(task_id, future)
 
@@ -520,29 +567,68 @@ class DocumentService:
             success=True,
             task_id=task_id,
             message="任务已创建，正在后台执行",
+            task_kind=task_kind,
             status=task_status,
             queue_position=queue_position,
             waiting_count=waiting_count,
         )
 
-    def _is_rewrite_prompt_related(self, prompt: str) -> bool:
-        text = prompt.strip().lower()
-        if not text:
+    def _build_rewrite_relevance_user_prompt(
+        self,
+        *,
+        prompt: str,
+        latest_rewrite_state: Dict[str, Any],
+    ) -> str:
+        project_number = str(latest_rewrite_state.get("project_number") or "").strip()
+        project_name = str(latest_rewrite_state.get("project_name") or "").strip()
+        tender_type = str(latest_rewrite_state.get("tender_type") or "").strip()
+        polished_text = str(latest_rewrite_state.get("polished_text") or "").strip()
+        polished_preview = re.sub(r"\s+", " ", polished_text)
+        if len(polished_preview) > 600:
+            polished_preview = polished_preview[:600] + "..."
+
+        return (
+            "【当前会话文档信息】\n"
+            f"project_number={project_number}\n"
+            f"project_name={project_name}\n"
+            f"tender_type={tender_type}\n"
+            f"latest_polished_preview={polished_preview}\n\n"
+            "【用户输入】\n"
+            f"{prompt}\n\n"
+            "请判断该输入是否是在要求修改当前招标文档内容。"
+            "只输出 true 或 false。"
+        )
+
+    async def _is_rewrite_prompt_related(
+        self,
+        *,
+        prompt: str,
+        model_provider: str,
+        latest_rewrite_state: Dict[str, Any],
+    ) -> bool:
+        normalized_prompt = str(prompt or "").strip()
+        if not normalized_prompt:
             return False
 
-        rewrite_keywords = (
-            "润色",
-            "修改",
-            "改写",
-            "补充",
-            "删除",
-            "替换",
-            "优化",
-            "调整",
-            "改成",
-            "改为",
+        raw_output = await stream_llm_completion(
+            model_provider=model_provider,
+            system_prompt=REWRITE_PROMPT_RELEVANCE_SYSTEM_PROMPT,
+            user_prompt=self._build_rewrite_relevance_user_prompt(
+                prompt=normalized_prompt,
+                latest_rewrite_state=latest_rewrite_state,
+            ),
+            extra_params_override={"temperature": 0.0, "max_tokens": 4},
+            timeout_seconds=8,
+            check_interval=2.0,
         )
-        return any(keyword in text for keyword in rewrite_keywords)
+        normalized_output = str(raw_output or "").strip().lower()
+        logger.info(
+            "rewrite 指令相关性校验完成: model=%s, output=%r, prompt=%r",
+            model_provider,
+            normalized_output,
+            normalized_prompt,
+        )
+        return normalized_output == "true"
 
     def _resolve_rewrite_target_state(
         self, *, conversation_id: str, user_prompt: str
@@ -601,6 +687,21 @@ class DocumentService:
                 state[key] = value
 
         return state
+
+    def _build_rewrite_graph_initial_state(
+        self,
+        *,
+        task_id: str,
+        conversation_id: str,
+        user_prompt: str,
+    ) -> Dict[str, Any]:
+        return {
+            "task_id": task_id,
+            "conversation_id": conversation_id,
+            "user_session_id": conversation_id,
+            "rewrite_user_prompt": user_prompt,
+            "rewrite_mode": True,
+        }
 
     def _build_initial_state(self, request: GenerateRequest, task_id: str) -> Dict[str, Any]:
         """构建 Graph 初始状态.
@@ -691,6 +792,7 @@ class DocumentService:
         task_kind: str = "generate",
         conversation_id: Optional[str] = None,
         rewrite_user_prompt: Optional[str] = None,
+        llm_node_name: Optional[str] = None,
     ) -> None:
         """在后台线程中执行 Graph.
 
@@ -706,10 +808,13 @@ class DocumentService:
         """
         import asyncio
 
-        callback.push_log(f"开始执行文档生成任务: {task_id}")
+        task_label = "润色任务" if task_kind == "rewrite" else "文档生成任务"
+        success_message = "润色任务完成" if task_kind == "rewrite" else "文档生成完成"
+        callback.push_log(f"开始执行{task_label}: {task_id}")
         progress_log.info(f"[Task] 开始执行任务: {task_id}")
         stdout_writer = _BufferedLoggerWriter(level="info")
         stderr_writer = _BufferedLoggerWriter(level="error")
+        rewrite_cleanup_holder: Dict[str, str] = {}
 
         try:
             # 创建 Graph 实例
@@ -736,6 +841,8 @@ class DocumentService:
                             task_id,
                             callback,
                             model_provider,
+                            llm_node_name=llm_node_name or TASK_KIND_TO_LLM_NODE.get(task_kind, "generate_polished_text"),
+                            rewrite_cleanup_holder=rewrite_cleanup_holder,
                             stdout_writer=stdout_writer,
                             stderr_writer=stderr_writer,
                         )
@@ -772,8 +879,9 @@ class DocumentService:
                 callback.push_done(
                     DoneEventData(
                         task_id=task_id,
+                        task_kind=task_kind,
                         success=True,
-                        message="文档生成完成",
+                        message=success_message,
                         output_file=output_file_str,
                         processing_time=elapsed_time,
                     )
@@ -785,8 +893,9 @@ class DocumentService:
 
                     sse_manager.send_done_threadsafe(
                         task_id=task_id,
+                        task_kind=task_kind,
                         success=True,
-                        message="文档生成完成",
+                        message=success_message,
                         output_file=output_file_str,
                         processing_time=elapsed_time,
                     )
@@ -837,6 +946,7 @@ class DocumentService:
             callback.push_error(
                 ErrorEventData(
                     task_id=task_id,
+                    task_kind=task_kind,
                     error=error_msg,
                     is_fatal=not is_cancelled,
                 )
@@ -851,11 +961,15 @@ class DocumentService:
 
                 sse_manager.send_error_threadsafe(
                     task_id=task_id,
+                    task_kind=task_kind,
                     error=error_msg,
                     is_fatal=not is_cancelled,
                 )
             except Exception:
                 pass
+
+            if task_kind == "rewrite":
+                self._cleanup_rewrite_output(rewrite_cleanup_holder.get("path"))
 
             # 更新任务队列状态
             self._task_queue.complete_task(task_id, result=None, error=error_msg)
@@ -891,6 +1005,19 @@ class DocumentService:
         snapshot.setdefault("polished_text", str(result_state.get("polished_text") or ""))
         return snapshot
 
+    def _cleanup_rewrite_output(self, file_path: Optional[str]) -> None:
+        target = str(file_path or "").strip()
+        if not target:
+            return
+
+        try:
+            path = pathlib.Path(target)
+            if path.is_file():
+                path.unlink()
+                logger.info("已清理 rewrite 失败副本: %s", target)
+        except Exception:
+            logger.exception("清理 rewrite 副本失败: %s", target)
+
     async def _invoke_graph_async(
         self,
         compiled_graph,
@@ -898,6 +1025,8 @@ class DocumentService:
         task_id: str,
         callback: SSECallback,
         model_provider: str,
+        llm_node_name: str = "generate_polished_text",
+        rewrite_cleanup_holder: Optional[Dict[str, str]] = None,
         stdout_writer: Optional[Any] = None,
         stderr_writer: Optional[Any] = None,
     ) -> tuple:
@@ -924,6 +1053,7 @@ class DocumentService:
             model_provider=model_provider,
             callback=callback,
             sse_manager=_sse_manager,
+            node=llm_node_name,
         )
 
         # 配置
@@ -934,6 +1064,9 @@ class DocumentService:
                 "llm_stream_complete_callback": llm_relay.flush,
                 "suppress_llm_stdout": True,
                 "model_provider": model_provider,
+                "rewrite_cleanup_holder": rewrite_cleanup_holder
+                if rewrite_cleanup_holder is not None
+                else {},
                 "stdout_writer": stdout_writer,
                 "stderr_writer": stderr_writer,
             }

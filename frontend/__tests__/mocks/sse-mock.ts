@@ -181,6 +181,7 @@ export function createProgressEvent(
   return {
     timestamp: new Date().toISOString(),
     task_id: 'test-task',
+    task_kind: 'generate',
     status: 'running',
     progress_text: `${completedCount}/${totalNodes}`,
     current_node: node,
@@ -215,6 +216,7 @@ export function createErrorEvent(
   return {
     timestamp: new Date().toISOString(),
     task_id: taskId,
+    task_kind: 'generate',
     error,
     is_fatal: isFatal,
   };
@@ -231,6 +233,7 @@ export function createDoneEvent(
   return {
     timestamp: new Date().toISOString(),
     task_id: taskId,
+    task_kind: 'generate',
     success: true,
     message: '任务完成',
     output_file: outputFile,

@@ -28,6 +28,13 @@ class TaskStatus(str, Enum):
     CANCELLED = "cancelled"  # 已取消
 
 
+class TaskKind(str, Enum):
+    """任务类别"""
+
+    GENERATE = "generate"
+    REWRITE = "rewrite"
+
+
 class NodeStatus(str, Enum):
     """
     节点状态枚举
@@ -95,6 +102,7 @@ class TaskInfo(BaseModel):
 
     task_id: str = Field(..., description="任务ID")
     user_session_id: str = Field(..., description="用户会话ID")
+    task_kind: TaskKind = Field(default=TaskKind.GENERATE, description="任务类别")
     status: TaskStatus = Field(..., description="任务状态")
     created_at: datetime = Field(..., description="创建时间")
     started_at: Optional[datetime] = Field(default=None, description="开始执行时间")
@@ -159,4 +167,5 @@ class TaskHeartbeatResponse(BaseModel):
     success: bool = Field(..., description="是否成功接收心跳")
     task_id: str = Field(..., description="任务ID")
     alive: bool = Field(..., description="任务是否仍处于活跃状态")
+    task_kind: TaskKind = Field(default=TaskKind.GENERATE, description="任务类别")
     status: Optional[TaskStatus] = Field(default=None, description="任务当前状态")

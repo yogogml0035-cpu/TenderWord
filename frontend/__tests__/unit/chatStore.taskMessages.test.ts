@@ -1,5 +1,7 @@
 import { act } from '@testing-library/react';
 import { useChatStore } from '@/stores/chatStore';
+import { useChatStreamStore } from '@/stores/chatStreamStore';
+import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
 
 function resetStore() {
   window.localStorage.clear();
@@ -123,5 +125,60 @@ describe('chatStore task message grouping', () => {
     expect(conversation?.messages).toHaveLength(0);
     expect(conversation?.currentTaskId).toBeUndefined();
     expect(useChatStore.getState().activeTaskIds).toHaveLength(0);
+  });
+
+  it('interrupts active tasks on backend restart while preserving streamed logs and ai text', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'rewrite',
+        status: 'running',
+      });
+      useChatStore.getState().ensureTaskLogMessage('task-1');
+      useChatStore.getState().updateConversationDraft('conv-1', {
+        chat_mode: 'rewrite',
+        chat_input: '',
+        pending_rewrite_prompt: '请补充质保条款',
+        pending_rewrite_task_id: 'task-1',
+        rewrite_available: true,
+      });
+      useChatStreamStore.getState().replaceStream('task-1', {
+        logs: [
+          {
+            id: 'log-running',
+            timestamp: Date.now(),
+            level: 'info',
+            message: '正在润色',
+          },
+        ],
+        aiText: '已生成的润色内容',
+        aiComplete: false,
+      });
+      useChatTaskSessionStore.getState().upsertSession('task-1', { lastEventId: '42' });
+      useChatStore.getState().handleBackendRestart();
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const group = useChatStore.getState().findTaskMessageGroup('task-1');
+    const draft = useChatStore.getState().getConversationDraft('conv-1');
+
+    expect(conversation?.currentTaskId).toBeUndefined();
+    expect(useChatStore.getState().activeTaskIds).toHaveLength(0);
+    expect(group?.logMessage?.status).toBe('error');
+    expect(group?.contentMessage?.status).toBe('error');
+    expect(group?.contentMessage?.content).toBe('已生成的润色内容');
+    expect(group?.contentMessage?.error).toBe('服务已重启，任务已中断，可重试');
+    expect(group?.contentMessage?.metadata?.localTaskReason).toBe('backend_restart');
+    expect(group?.logMessage?.metadata?.logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: '正在润色' }),
+        expect.objectContaining({ message: '服务已重启，任务已中断，可重试' }),
+      ])
+    );
+    expect(draft?.rewrite_available).toBe(false);
+    expect(draft?.pending_rewrite_task_id).toBeUndefined();
+    expect(draft?.pending_rewrite_prompt).toBeUndefined();
+    expect(draft?.chat_input).toBe('请补充质保条款');
+    expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
+    expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
   });
 });

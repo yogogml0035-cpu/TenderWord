@@ -6,10 +6,16 @@ function ControlledChatInput({
   onSend = jest.fn(),
   selectedModel = 'deepseek',
   onModelChange = jest.fn(),
+  loading = false,
+  actionMode = 'send',
+  disabled = false,
 }: {
   onSend?: (message: string) => void;
   selectedModel?: 'deepseek' | 'qwen' | 'doubao';
   onModelChange?: (model: 'deepseek' | 'qwen' | 'doubao') => void;
+  loading?: boolean;
+  actionMode?: 'send' | 'cancel';
+  disabled?: boolean;
 }) {
   const [value, setValue] = useState('');
 
@@ -20,6 +26,9 @@ function ControlledChatInput({
       onSend={onSend}
       selectedModel={selectedModel}
       onModelChange={onModelChange}
+      loading={loading}
+      actionMode={actionMode}
+      disabled={disabled}
     />
   );
 }
@@ -89,5 +98,21 @@ describe('ChatInput', () => {
     });
 
     expect(textarea).toHaveStyle({ height: '180px', overflowY: 'auto' });
+  });
+
+  it('allows editing while loading in cancel mode without clearing draft on Enter', () => {
+    const handleSend = jest.fn();
+
+    render(<ControlledChatInput onSend={handleSend} loading actionMode="cancel" />);
+
+    const textarea = screen.getByPlaceholderText('输入消息...');
+    expect(textarea).not.toBeDisabled();
+
+    fireEvent.change(textarea, { target: { value: '这条消息先写好，等生成结束再发' } });
+    expect(textarea).toHaveValue('这条消息先写好，等生成结束再发');
+
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+    expect(handleSend).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue('这条消息先写好，等生成结束再发');
   });
 });

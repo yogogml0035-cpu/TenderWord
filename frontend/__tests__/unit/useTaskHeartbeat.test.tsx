@@ -14,6 +14,7 @@ describe('useTaskHeartbeat', () => {
     mockSendTaskHeartbeat.mockResolvedValue({
       task_id: 'task-1',
       alive: true,
+      task_kind: 'generate',
       status: 'running',
     });
   });
@@ -52,6 +53,7 @@ describe('useTaskHeartbeat', () => {
     mockSendTaskHeartbeat.mockResolvedValue({
       task_id: 'task-2',
       alive: false,
+      task_kind: 'generate',
       status: 'cancelled',
     });
 

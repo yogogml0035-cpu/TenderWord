@@ -17,6 +17,7 @@ from .task import (
     NodeStatus,
     TaskCancelResponse,
     TaskInfo,
+    TaskKind,
     TaskListResponse,
     TaskProgress,
     TaskResponse,
@@ -73,6 +74,7 @@ __all__ = [
     
     # 任务相关
     "TaskStatus",
+    "TaskKind",
     "NodeStatus",
     "TaskProgress",
     "TaskInfo",

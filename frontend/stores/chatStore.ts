@@ -1,10 +1,13 @@
 import { create } from 'zustand';
 import { createJSONStorage, devtools, persist } from 'zustand/middleware';
 import type { TenderType } from '@/types';
-import type { TaskStatus, TenderData } from '@/types/api';
+import type { TaskKind, TaskStatus, TenderData } from '@/types/api';
+import { useChatStreamStore } from '@/stores/chatStreamStore';
+import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
 import {
   isDualColumnContent,
   type Conversation,
+  type LocalTaskReason,
   type LogEntry,
   type Message,
   type TaskMessageKind,
@@ -14,6 +17,8 @@ import { createConversation as createConvUtil, generateMessageId } from '@/lib/c
 const TASK_LOG_KIND: TaskMessageKind = 'task-log';
 const TASK_CONTENT_KIND: TaskMessageKind = 'task-content';
 const TASK_DOWNLOAD_KIND: TaskMessageKind = 'task-download';
+const BACKEND_RESTART_LOCAL_REASON: LocalTaskReason = 'backend_restart';
+const BACKEND_RESTART_TASK_MESSAGE = '服务已重启，任务已中断，可重试';
 
 export interface TaskMessageGroupIds {
   logMessageId?: string;
@@ -25,6 +30,13 @@ export interface TaskMessageSnapshot {
   logs?: LogEntry[];
   aiText?: string;
   aiComplete?: boolean;
+}
+
+interface TaskRuntimeSnapshot extends TaskMessageSnapshot {
+  progressPercent?: number;
+  progressText?: string;
+  currentNode?: string;
+  currentNodeDisplay?: string;
 }
 
 export interface LocatedTaskMessageGroup {
@@ -57,6 +69,7 @@ export interface ConversationFormDraft {
   chat_input?: string;
   pending_rewrite_prompt?: string;
   pending_rewrite_task_id?: string;
+  rewrite_available?: boolean;
   files?: {
     origin_tender?: ConversationDraftFile;
     clean_draft?: ConversationDraftFile;
@@ -66,12 +79,15 @@ export interface ConversationFormDraft {
 
 export interface TaskSummarySnapshot {
   task_id: string;
+  task_kind?: TaskKind;
   status: TaskStatus;
   queue_position?: number;
   waiting_count?: number;
   progress_percent?: number;
   progress_text?: string;
+  current_node?: string;
   current_node_display?: string;
+  localReason?: LocalTaskReason;
   updated_at: number;
 }
 
@@ -146,6 +162,129 @@ function mergeConversationDraft(
   }
 
   return nextDraft;
+}
+
+function normalizeLogEntries(logs: unknown): LogEntry[] {
+  if (!Array.isArray(logs)) {
+    return [];
+  }
+
+  return logs.filter((item): item is LogEntry => {
+    return (
+      typeof item === 'object' &&
+      item !== null &&
+      typeof (item as LogEntry).id === 'string' &&
+      typeof (item as LogEntry).message === 'string' &&
+      typeof (item as LogEntry).timestamp === 'number'
+    );
+  });
+}
+
+function isTrackedTaskInFlight(status?: TaskStatus): boolean {
+  return status === 'queued' || status === 'running';
+}
+
+function getTaskRuntimeSnapshot(taskId: string): TaskRuntimeSnapshot | undefined {
+  const stream = useChatStreamStore.getState().streams[taskId];
+  if (!stream) {
+    return undefined;
+  }
+
+  return {
+    logs: stream.logs,
+    aiText: stream.aiText,
+    aiComplete: stream.aiComplete,
+    progressPercent: stream.progressPercent,
+    progressText: stream.progressText,
+    currentNode: stream.currentNode,
+    currentNodeDisplay: stream.currentNodeDisplay,
+  };
+}
+
+function buildInterruptedLogs(
+  existingLogs: unknown,
+  runtimeLogs?: LogEntry[]
+): LogEntry[] {
+  const baseLogs = runtimeLogs && runtimeLogs.length > 0 ? runtimeLogs : normalizeLogEntries(existingLogs);
+  const interruptedLogExists = baseLogs.some(
+    (log) =>
+      log.level === 'error' &&
+      log.message === BACKEND_RESTART_TASK_MESSAGE
+  );
+  if (interruptedLogExists) {
+    return baseLogs;
+  }
+
+  return [
+    ...baseLogs,
+    {
+      id: generateMessageId(),
+      timestamp: Date.now(),
+      level: 'error',
+      message: BACKEND_RESTART_TASK_MESSAGE,
+    },
+  ];
+}
+
+function collectBackendRestartTaskIds(state: Pick<
+  ChatStore,
+  'conversations' | 'activeTaskIds' | 'taskSummaries' | 'conversationDrafts'
+>): string[] {
+  const taskIds = new Set<string>();
+
+  for (const taskId of state.activeTaskIds) {
+    taskIds.add(taskId);
+  }
+
+  for (const [taskId, summary] of Object.entries(state.taskSummaries)) {
+    if (isTrackedTaskInFlight(summary.status)) {
+      taskIds.add(taskId);
+    }
+  }
+
+  for (const conversation of state.conversations) {
+    if (conversation.currentTaskId) {
+      taskIds.add(conversation.currentTaskId);
+    }
+
+    for (const message of conversation.messages) {
+      if (message.taskId && message.status === 'generating') {
+        taskIds.add(message.taskId);
+      }
+    }
+  }
+
+  for (const draft of Object.values(state.conversationDrafts)) {
+    if (draft.pending_rewrite_task_id) {
+      taskIds.add(draft.pending_rewrite_task_id);
+    }
+  }
+
+  return [...taskIds];
+}
+
+function shouldInterruptTaskForBackendRestart(
+  state: Pick<ChatStore, 'conversations' | 'activeTaskIds' | 'taskSummaries'>,
+  taskId: string
+): boolean {
+  if (state.activeTaskIds.includes(taskId)) {
+    return true;
+  }
+
+  const summary = state.taskSummaries[taskId];
+  if (summary && isTrackedTaskInFlight(summary.status)) {
+    return true;
+  }
+
+  return state.conversations.some((conversation) => {
+    if (conversation.currentTaskId === taskId) {
+      return true;
+    }
+
+    return conversation.messages.some(
+      (message) => message.taskId === taskId && message.status === 'generating'
+    );
+  });
 }
 
 function getActiveTaskIdsFromState(state: TaskScopeState): string[] {
@@ -321,6 +460,8 @@ interface ChatStore {
   ) => void;
   failTask: (taskId: string, error: string, content?: TaskMessageSnapshot) => void;
   cancelTask: (taskId: string, content?: TaskMessageSnapshot) => void;
+  interruptTaskForBackendRestart: (taskId: string) => void;
+  handleBackendRestart: () => void;
   discardStaleTask: (taskId: string) => void;
   upsertTaskSummary: (
     taskId: string,
@@ -540,6 +681,9 @@ export const useChatStore = create<ChatStore>()(
                     ...(state.taskSummaries[taskId] || {}),
                     task_id: taskId,
                     status: initialSummary.status,
+                    ...(typeof initialSummary.task_kind === 'string'
+                      ? { task_kind: initialSummary.task_kind }
+                      : {}),
                     ...(typeof initialSummary.queue_position === 'number'
                       ? { queue_position: initialSummary.queue_position }
                       : {}),
@@ -554,6 +698,9 @@ export const useChatStore = create<ChatStore>()(
                       : {}),
                     ...(typeof initialSummary.current_node_display === 'string'
                       ? { current_node_display: initialSummary.current_node_display }
+                      : {}),
+                    ...(typeof initialSummary.current_node === 'string'
+                      ? { current_node: initialSummary.current_node }
                       : {}),
                     updated_at: Date.now(),
                   },
@@ -606,6 +753,7 @@ export const useChatStore = create<ChatStore>()(
             taskId,
             metadata: {
               messageKind: TASK_LOG_KIND,
+              taskKind: get().taskSummaries[taskId]?.task_kind,
               logs: [],
             },
           });
@@ -645,6 +793,7 @@ export const useChatStore = create<ChatStore>()(
             taskId,
             metadata: {
               messageKind: TASK_CONTENT_KIND,
+              taskKind: get().taskSummaries[taskId]?.task_kind,
             },
           });
 
@@ -686,6 +835,7 @@ export const useChatStore = create<ChatStore>()(
             ...(typeof nextText === 'string' ? { content: nextText } : {}),
             metadata: {
               messageKind: TASK_CONTENT_KIND,
+              taskKind: get().taskSummaries[taskId]?.task_kind,
             },
           });
         },
@@ -694,6 +844,7 @@ export const useChatStore = create<ChatStore>()(
           const locatedTaskGroup = get().findTaskMessageGroup(taskId);
           let nextGroup: TaskMessageGroupIds | undefined;
           const terminalConversationId: string | null = locatedTaskGroup?.conversationId || null;
+          const completedTaskKind = get().taskSummaries[taskId]?.task_kind;
 
           if (locatedTaskGroup) {
             const { conversationId, logMessage, contentMessage, downloadMessage, group } =
@@ -707,6 +858,7 @@ export const useChatStore = create<ChatStore>()(
                 status: 'completed',
                 metadata: {
                   messageKind: TASK_LOG_KIND,
+                  taskKind: get().taskSummaries[taskId]?.task_kind,
                   ...(hasLogs ? { logs: content?.logs } : {}),
                 },
               });
@@ -726,6 +878,7 @@ export const useChatStore = create<ChatStore>()(
                 error: undefined,
                 metadata: {
                   messageKind: TASK_CONTENT_KIND,
+                  taskKind: get().taskSummaries[taskId]?.task_kind,
                 },
               });
             }
@@ -743,6 +896,7 @@ export const useChatStore = create<ChatStore>()(
                   content: resolvedFileName || '下载生成文件',
                   metadata: {
                     messageKind: TASK_DOWNLOAD_KIND,
+                    taskKind: get().taskSummaries[taskId]?.task_kind,
                     outputFile,
                     fileName: resolvedFileName,
                   },
@@ -756,6 +910,7 @@ export const useChatStore = create<ChatStore>()(
                   taskId,
                   metadata: {
                     messageKind: TASK_DOWNLOAD_KIND,
+                    taskKind: get().taskSummaries[taskId]?.task_kind,
                     outputFile,
                     fileName: resolvedFileName,
                   },
@@ -787,6 +942,16 @@ export const useChatStore = create<ChatStore>()(
                   [terminalConversationId]: true,
                 }
               : state.unreadConversationResults;
+            const nextConversationDrafts =
+              terminalConversationId && completedTaskKind && typeof outputFile === 'string'
+                ? {
+                    ...state.conversationDrafts,
+                    [terminalConversationId]: mergeConversationDraft(
+                      state.conversationDrafts[terminalConversationId] || {},
+                      { rewrite_available: true }
+                    ),
+                  }
+                : state.conversationDrafts;
 
             return {
               conversations: state.conversations.map((conversation) =>
@@ -799,6 +964,7 @@ export const useChatStore = create<ChatStore>()(
               taskSummaries: Object.fromEntries(
                 Object.entries(state.taskSummaries).filter(([id]) => id !== taskId)
               ),
+              conversationDrafts: nextConversationDrafts,
               unreadConversationResults: nextUnreadResults,
             };
           });
@@ -820,6 +986,7 @@ export const useChatStore = create<ChatStore>()(
                 status: 'error',
                 metadata: {
                   messageKind: TASK_LOG_KIND,
+                  taskKind: get().taskSummaries[taskId]?.task_kind,
                   ...(hasLogs ? { logs: content?.logs } : {}),
                 },
               });
@@ -840,6 +1007,7 @@ export const useChatStore = create<ChatStore>()(
                 ...(hasAiText ? { content: content?.aiText || '' } : {}),
                 metadata: {
                   messageKind: TASK_CONTENT_KIND,
+                  taskKind: get().taskSummaries[taskId]?.task_kind,
                 },
               });
             }
@@ -963,7 +1131,218 @@ export const useChatStore = create<ChatStore>()(
           });
         },
 
+        interruptTaskForBackendRestart: (taskId) => {
+          const taskSummary = get().taskSummaries[taskId];
+          const runtimeSnapshot = getTaskRuntimeSnapshot(taskId);
+
+          let locatedTaskGroup = get().findTaskMessageGroup(taskId);
+          if (!locatedTaskGroup) {
+            get().ensureTaskLogMessage(taskId, { status: 'error' });
+            locatedTaskGroup = get().findTaskMessageGroup(taskId);
+          }
+
+          const taskKind =
+            taskSummary?.task_kind ||
+            locatedTaskGroup?.contentMessage?.metadata?.taskKind ||
+            locatedTaskGroup?.logMessage?.metadata?.taskKind ||
+            locatedTaskGroup?.downloadMessage?.metadata?.taskKind;
+
+          let nextGroup: TaskMessageGroupIds | undefined;
+          const terminalConversationId: string | null = locatedTaskGroup?.conversationId || null;
+
+          if (locatedTaskGroup) {
+            const { conversationId, logMessage, contentMessage, group } = locatedTaskGroup;
+            const nextLogs = buildInterruptedLogs(logMessage?.metadata?.logs, runtimeSnapshot?.logs);
+            const nextProgressText =
+              runtimeSnapshot?.progressText ||
+              taskSummary?.progress_text ||
+              logMessage?.metadata?.progressText;
+            const nextProgressPercent =
+              runtimeSnapshot?.progressPercent ??
+              taskSummary?.progress_percent ??
+              (typeof logMessage?.metadata?.progressPercent === 'number'
+                ? logMessage.metadata.progressPercent
+                : undefined);
+            const nextCurrentNode =
+              runtimeSnapshot?.currentNode ||
+              taskSummary?.current_node ||
+              (typeof logMessage?.metadata?.currentNode === 'string'
+                ? logMessage.metadata.currentNode
+                : undefined);
+            const nextCurrentNodeDisplay =
+              runtimeSnapshot?.currentNodeDisplay ||
+              taskSummary?.current_node_display ||
+              (typeof logMessage?.metadata?.currentNodeDisplay === 'string'
+                ? logMessage.metadata.currentNodeDisplay
+                : undefined);
+
+            if (logMessage && getTaskMessageKind(logMessage) === TASK_LOG_KIND) {
+              get().updateMessage(conversationId, logMessage.id, {
+                status: 'error',
+                metadata: {
+                  messageKind: TASK_LOG_KIND,
+                  ...(taskKind ? { taskKind } : {}),
+                  logs: nextLogs,
+                  ...(typeof nextProgressText === 'string'
+                    ? { progressText: nextProgressText }
+                    : {}),
+                  ...(typeof nextProgressPercent === 'number'
+                    ? { progressPercent: nextProgressPercent }
+                    : {}),
+                  ...(typeof nextCurrentNode === 'string'
+                    ? { currentNode: nextCurrentNode }
+                    : {}),
+                  ...(typeof nextCurrentNodeDisplay === 'string'
+                    ? { currentNodeDisplay: nextCurrentNodeDisplay }
+                    : {}),
+                  localTaskReason: BACKEND_RESTART_LOCAL_REASON,
+                },
+              });
+            }
+
+            const nextAiText =
+              typeof runtimeSnapshot?.aiText === 'string' && runtimeSnapshot.aiText.length > 0
+                ? runtimeSnapshot.aiText
+                : typeof contentMessage?.content === 'string'
+                  ? contentMessage.content
+                  : '';
+            const hasNonEmptyAiText = nextAiText.length > 0;
+
+            let contentMessageId: string | undefined = contentMessage?.id;
+            if (!contentMessage && hasNonEmptyAiText) {
+              contentMessageId =
+                get().ensureTaskContentMessage(taskId, {
+                  status: 'error',
+                  content: nextAiText,
+                  error: BACKEND_RESTART_TASK_MESSAGE,
+                }) || undefined;
+
+              if (contentMessageId) {
+                get().updateMessage(conversationId, contentMessageId, {
+                  status: 'error',
+                  error: BACKEND_RESTART_TASK_MESSAGE,
+                  metadata: {
+                    messageKind: TASK_CONTENT_KIND,
+                    ...(taskKind ? { taskKind } : {}),
+                    ...(typeof nextProgressText === 'string'
+                      ? { progressText: nextProgressText }
+                      : {}),
+                    ...(typeof nextProgressPercent === 'number'
+                      ? { progressPercent: nextProgressPercent }
+                      : {}),
+                    ...(typeof nextCurrentNode === 'string'
+                      ? { currentNode: nextCurrentNode }
+                      : {}),
+                    ...(typeof nextCurrentNodeDisplay === 'string'
+                      ? { currentNodeDisplay: nextCurrentNodeDisplay }
+                      : {}),
+                    localTaskReason: BACKEND_RESTART_LOCAL_REASON,
+                  },
+                });
+              }
+            } else if (contentMessage) {
+              get().updateMessage(conversationId, contentMessage.id, {
+                status: 'error',
+                ...(hasNonEmptyAiText ? { content: nextAiText } : {}),
+                error: BACKEND_RESTART_TASK_MESSAGE,
+                metadata: {
+                  messageKind: TASK_CONTENT_KIND,
+                  ...(taskKind ? { taskKind } : {}),
+                  ...(typeof nextProgressText === 'string'
+                    ? { progressText: nextProgressText }
+                    : {}),
+                  ...(typeof nextProgressPercent === 'number'
+                    ? { progressPercent: nextProgressPercent }
+                    : {}),
+                  ...(typeof nextCurrentNode === 'string'
+                    ? { currentNode: nextCurrentNode }
+                    : {}),
+                  ...(typeof nextCurrentNodeDisplay === 'string'
+                    ? { currentNodeDisplay: nextCurrentNodeDisplay }
+                    : {}),
+                  localTaskReason: BACKEND_RESTART_LOCAL_REASON,
+                },
+              });
+            }
+
+            nextGroup = mergeTaskMessageGroup(group, {
+              ...(logMessage ? { logMessageId: logMessage.id } : {}),
+              ...(contentMessageId ? { contentMessageId } : {}),
+            });
+          }
+
+          set((state) => {
+            const nextTaskMessageMap = { ...state.taskMessageMap };
+            if (nextGroup) {
+              nextTaskMessageMap[taskId] = nextGroup;
+            } else {
+              delete nextTaskMessageMap[taskId];
+            }
+
+            const shouldMarkUnread =
+              terminalConversationId &&
+              terminalConversationId !== state.currentConversationId;
+            const nextUnreadResults = shouldMarkUnread
+              ? {
+                  ...state.unreadConversationResults,
+                  [terminalConversationId]: true,
+                }
+              : state.unreadConversationResults;
+
+            return {
+              conversations: state.conversations.map((conversation) =>
+                conversation.currentTaskId === taskId
+                  ? { ...conversation, currentTaskId: undefined, updatedAt: Date.now() }
+                  : conversation
+              ),
+              activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
+              taskMessageMap: nextTaskMessageMap,
+              taskSummaries: Object.fromEntries(
+                Object.entries(state.taskSummaries).filter(([id]) => id !== taskId)
+              ),
+              unreadConversationResults: nextUnreadResults,
+            };
+          });
+
+          useChatStreamStore.getState().clearStream(taskId);
+          useChatTaskSessionStore.getState().removeSession(taskId);
+        },
+
+        handleBackendRestart: () => {
+          const state = get();
+          const interruptedTaskIds = collectBackendRestartTaskIds(state);
+
+          for (const taskId of interruptedTaskIds) {
+            get().interruptTaskForBackendRestart(taskId);
+          }
+
+          set((currentState) => ({
+            conversationDrafts: Object.fromEntries(
+              Object.entries(currentState.conversationDrafts).map(([conversationId, draft]) => [
+                conversationId,
+                mergeConversationDraft(draft, {
+                  rewrite_available: false,
+                  chat_input:
+                    typeof draft.chat_input === 'string' && draft.chat_input.length > 0
+                      ? draft.chat_input
+                      : draft.pending_rewrite_prompt,
+                  pending_rewrite_prompt: undefined,
+                  pending_rewrite_task_id: undefined,
+                }),
+              ])
+            ),
+          }));
+
+          useChatStreamStore.setState({ streams: {} });
+          useChatTaskSessionStore.getState().clearSessions();
+        },
+
         discardStaleTask: (taskId) => {
+          if (shouldInterruptTaskForBackendRestart(get(), taskId)) {
+            get().interruptTaskForBackendRestart(taskId);
+            return;
+          }
+
           set((state) => ({
             conversations: state.conversations.map((conv) => ({
               ...conv,

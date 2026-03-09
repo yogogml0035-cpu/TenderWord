@@ -8,6 +8,7 @@
 // ============================================
 
 export type TaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type TaskKind = 'generate' | 'rewrite';
 
 // ============================================
 // Tender Data Types
@@ -146,6 +147,7 @@ export type UploadMultipleResponse = ApiResponse<MultipleUploadResult>;
 
 export interface TaskData {
   task_id: string;
+  task_kind: TaskKind;
   status: TaskStatus;
   created_at: string;
   started_at?: string;
@@ -165,6 +167,7 @@ export type TaskResponse = ApiResponse<TaskData>;
 
 export interface TaskListItem {
   task_id: string;
+  task_kind: TaskKind;
   status: TaskStatus;
   created_at: string;
   started_at?: string;
@@ -201,6 +204,7 @@ export type CancelTaskResponse = ApiResponse<CancelTaskData>;
 export interface TaskHeartbeatData {
   task_id: string;
   alive: boolean;
+  task_kind: TaskKind;
   status?: TaskStatus;
 }
 
@@ -212,6 +216,7 @@ export type TaskHeartbeatResponse = ApiResponse<TaskHeartbeatData>;
 
 export interface CreateTaskData {
   task_id: string;
+  task_kind: TaskKind;
   status?: TaskStatus;
   created_at?: string;
   user_session_id?: string;
@@ -262,6 +267,7 @@ export interface ConversationHeartbeatData {
   alive: boolean;
   instance_id: string;
   server_time: string;
+  rewrite_available: boolean;
 }
 
 export type ConversationHeartbeatResponse = ApiResponse<ConversationHeartbeatData>;
@@ -296,6 +302,7 @@ export interface SSELLMEvent {
 export interface SSEProgressEvent {
   timestamp: string;
   task_id: string;
+  task_kind: TaskKind;
   status: TaskStatus | 'running';
   progress_text: string;
   current_node?: string;
@@ -316,6 +323,7 @@ export interface SSEStatusEvent {
 export interface SSEErrorEvent {
   timestamp: string;
   task_id: string;
+  task_kind: TaskKind;
   error: string;
   node?: string;
   is_fatal: boolean;
@@ -324,6 +332,7 @@ export interface SSEErrorEvent {
 export interface SSEDoneEvent {
   timestamp: string;
   task_id: string;
+  task_kind: TaskKind;
   success: boolean;
   message: string;
   output_file?: string;

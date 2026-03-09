@@ -8,6 +8,7 @@
 // ============================================
 
 import type { TenderType } from './index';
+import type { TaskKind } from './api';
 
 export type MessageType = 'user' | 'ai' | 'system';
 
@@ -22,6 +23,7 @@ export type MessageStatus =
 
 export type TaskMessageKind = 'task-log' | 'task-content' | 'task-download';
 export type ChatMessageKind = 'normal' | 'rewrite';
+export type LocalTaskReason = 'backend_restart';
 
 // ============================================
 // Dual Column Content Types
@@ -71,11 +73,13 @@ export interface Message {
     logs?: LogEntry[];
     outputFile?: string;
     fileName?: string;
+    taskKind?: TaskKind;
     progressPercent?: number;
     progressText?: string;
     currentNode?: string;
     currentNodeDisplay?: string;
     lastEventId?: string;
+    localTaskReason?: LocalTaskReason;
     [key: string]: unknown;
   };
 }

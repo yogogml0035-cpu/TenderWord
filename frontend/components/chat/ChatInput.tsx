@@ -43,7 +43,13 @@ export function ChatInput({
   loading = false,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const inputLocked = disabled || loading;
+  const rewriteModeEnabled = chatMode === 'rewrite';
+  const rewriteButtonDisabled = !rewriteModeEnabled && !rewriteAvailable;
+  const isCancelAction = actionMode === 'cancel';
+  const inputDisabled = disabled;
+  const controlsLocked = disabled || loading;
+  const sendLocked = disabled || loading || isCancelAction;
+
   const resetTextareaHeight = useCallback((textarea: HTMLTextAreaElement | null) => {
     if (!textarea) {
       return;
@@ -56,12 +62,12 @@ export function ChatInput({
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
-    if (!trimmed || inputLocked) return;
+    if (!trimmed || sendLocked) return;
 
     onSend(trimmed);
     onValueChange('');
     resetTextareaHeight(textareaRef.current);
-  }, [inputLocked, onSend, onValueChange, resetTextareaHeight, value]);
+  }, [onSend, onValueChange, resetTextareaHeight, sendLocked, value]);
 
   const handleCancel = useCallback(() => {
     onCancel?.();
@@ -90,16 +96,13 @@ export function ChatInput({
   };
 
   const isEmpty = !value.trim();
-  const rewriteModeEnabled = chatMode === 'rewrite';
-  const rewriteButtonDisabled = !rewriteModeEnabled && !rewriteAvailable;
-  const isCancelAction = actionMode === 'cancel';
 
   return (
     <div className="border-t border-slate-200 bg-gradient-to-b from-white via-slate-50/60 to-white px-4 py-2.5">
       <div
         className={cn(
           'rounded-[26px] border border-slate-200 bg-white px-3 py-2.5 shadow-lg shadow-slate-200/70 transition-all duration-200',
-          inputLocked && 'opacity-90'
+          controlsLocked && 'opacity-90'
         )}
       >
         <div className="flex flex-col gap-3">
@@ -135,11 +138,11 @@ export function ChatInput({
               onChange={handleInput}
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
-              disabled={inputLocked}
+              disabled={inputDisabled}
               rows={1}
               className={cn(
                 'block w-full resize-none bg-transparent px-2 py-2.5 text-[15px] leading-6 text-slate-800 transition-colors duration-200 placeholder:text-slate-400 focus:outline-none',
-                inputLocked && 'cursor-not-allowed text-slate-500'
+                inputDisabled && 'cursor-not-allowed text-slate-500'
               )}
               style={{
                 boxSizing: 'border-box',
@@ -155,10 +158,10 @@ export function ChatInput({
             <ChatModelPicker
               value={selectedModel}
               onChange={onModelChange}
-              disabled={inputLocked}
+              disabled={controlsLocked}
               triggerClassName={cn(
                 'h-10 rounded-[18px] bg-slate-50/90 px-4 py-0 shadow-sm shadow-slate-200/70',
-                !inputLocked && 'hover:bg-white'
+                !controlsLocked && 'hover:bg-white'
               )}
               menuClassName="left-0 right-auto"
             />
@@ -167,13 +170,13 @@ export function ChatInput({
               <button
                 type="button"
                 onClick={isCancelAction ? handleCancel : handleSend}
-                disabled={isCancelAction ? !onCancel : isEmpty || inputLocked}
+                disabled={isCancelAction ? !onCancel : isEmpty || sendLocked}
                 aria-label={isCancelAction ? '暂停任务' : loading ? '发送中' : '发送消息'}
                 className={cn(
                   'flex h-10 w-10 items-center justify-center rounded-[18px] border transition-all duration-200',
                   isCancelAction
                     ? 'border-blue-500 bg-blue-500 text-white shadow-sm shadow-blue-200 hover:-translate-y-0.5 hover:bg-blue-600'
-                    : isEmpty || inputLocked
+                    : isEmpty || sendLocked
                       ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
                       : 'border-blue-500 bg-blue-500 text-white shadow-sm shadow-blue-200 hover:-translate-y-0.5 hover:bg-blue-600'
                 )}

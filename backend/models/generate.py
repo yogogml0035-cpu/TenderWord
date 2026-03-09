@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from .tender import TenderData
-from .task import TaskProgress, TaskStatus
+from .task import TaskKind, TaskProgress, TaskStatus
 
 
 class LLMModel(str, Enum):
@@ -119,6 +119,7 @@ class GenerateResponse(BaseModel):
     success: bool = Field(..., description="是否成功")
     task_id: str = Field(..., description="任务ID")
     message: str = Field(default="", description="消息说明")
+    task_kind: TaskKind = Field(default=TaskKind.GENERATE, description="任务类别")
     status: Optional[TaskStatus] = Field(default=None, description="任务当前状态")
     queue_position: Optional[int] = Field(
         default=None,

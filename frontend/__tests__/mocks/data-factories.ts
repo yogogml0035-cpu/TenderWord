@@ -276,6 +276,7 @@ export class TaskFactory {
 
     return {
       task_id: generateId('task'),
+      task_kind: 'generate',
       status: 'queued' as TaskStatus,
       created_at: now.toISOString(),
       progress,

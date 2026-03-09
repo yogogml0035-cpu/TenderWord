@@ -228,23 +228,34 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
     filename = f"{filename}-{timestamp}.txt"
 
     output_dir = None
-    try:
-        if origin_tender_path:
-            output_dir = pathlib.Path(origin_tender_path).resolve().parent
-        elif tender_param_paths:
-            output_dir = pathlib.Path(tender_param_paths[0]).resolve().parent
-    except Exception:
-        output_dir = None
-    # if not output_dir:
-    #     output_dir = prompts_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
+    candidate_output_paths = [
+        origin_tender_path,
+        state.get("prepared_doc_path"),
+        state.get("clean_draft_path"),
+        state.get("rewrite_temp_output_path"),
+    ]
+    if tender_param_paths:
+        candidate_output_paths.append(tender_param_paths[0])
 
-    polished_txt_path = output_dir / filename
-    try:
-        with open(polished_txt_path, "w", encoding="utf-8") as f:
-            f.write(str(content))
-    except Exception as e:
-        progress_log.debug(f"警告: 保存润色文本到文件失败: {e}")
+    for candidate_path in candidate_output_paths:
+        if not candidate_path:
+            continue
+        try:
+            output_dir = pathlib.Path(str(candidate_path)).expanduser().resolve().parent
+            break
+        except Exception:
+            continue
+
+    if output_dir is not None:
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            polished_txt_path = output_dir / filename
+            with open(polished_txt_path, "w", encoding="utf-8") as f:
+                f.write(str(content))
+        except Exception as e:
+            progress_log.debug(f"警告: 保存润色文本到文件失败: {e}")
+    else:
+        progress_log.debug("警告: 未找到润色文本输出目录，跳过落盘文本文件")
 
     # 只返回需要更新的键，避免并行执行时的状态冲突
     # 在 LangGraph 中，并行节点应该只返回部分状态更新

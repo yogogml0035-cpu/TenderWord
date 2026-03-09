@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Any, Dict, Optional, Union
 
 from pydantic import BaseModel, Field
+from backend.models.task import TaskKind
 
 
 class SSEEventType(str, Enum):
@@ -115,6 +116,7 @@ class ProgressEventData(BaseModel):
     """
 
     task_id: str = Field(..., description="任务ID")
+    task_kind: TaskKind = Field(default=TaskKind.GENERATE, description="任务类别")
     status: str = Field(..., description="任务状态")
     completed_count: int = Field(default=0, description="已完成节点数")
     total_nodes: int = Field(default=7, description="总节点数")
@@ -135,6 +137,7 @@ class DoneEventData(BaseModel):
     """
 
     task_id: str = Field(..., description="任务ID")
+    task_kind: TaskKind = Field(default=TaskKind.GENERATE, description="任务类别")
     success: bool = Field(..., description="是否成功")
     message: str = Field(default="", description="消息")
     output_file: Optional[str] = Field(default=None, description="输出文件路径")
@@ -151,6 +154,7 @@ class ErrorEventData(BaseModel):
     """
 
     task_id: str = Field(..., description="任务ID")
+    task_kind: TaskKind = Field(default=TaskKind.GENERATE, description="任务类别")
     error: str = Field(..., description="错误信息")
     node: Optional[str] = Field(default=None, description="发生错误的节点")
     is_fatal: bool = Field(default=True, description="是否致命错误")

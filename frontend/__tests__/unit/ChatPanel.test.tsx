@@ -48,12 +48,18 @@ jest.mock('@/components/chat/ChatInput', () => ({
     placeholder,
     selectedModel,
     onModelChange,
+    rewriteAvailable,
+    rewriteHint,
+    chatMode,
   }: {
     disabled?: boolean;
     loading?: boolean;
     placeholder?: string;
     selectedModel?: string;
     onModelChange?: (model: string) => void;
+    rewriteAvailable?: boolean;
+    rewriteHint?: string | null;
+    chatMode?: 'normal' | 'rewrite';
   }) => (
     <div
       data-testid="chat-input"
@@ -61,6 +67,9 @@ jest.mock('@/components/chat/ChatInput', () => ({
       data-loading={loading ? 'true' : 'false'}
       data-placeholder={placeholder || ''}
       data-model={selectedModel || ''}
+      data-rewrite-available={rewriteAvailable ? 'true' : 'false'}
+      data-rewrite-hint={rewriteHint || ''}
+      data-chat-mode={chatMode || 'normal'}
     >
       <button type="button" data-testid="change-model-button" onClick={() => onModelChange?.('qwen')}>
         change model
@@ -177,6 +186,63 @@ describe('ChatPanel', () => {
     fireEvent.click(screen.getByTestId('change-model-button'));
 
     expect(useChatStore.getState().getConversationDraft('conv-1')?.model).toBe('qwen');
+  });
+
+  it('enables rewrite mode from backend conversation heartbeat state without local download cards', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          rewrite_available: true,
+        },
+      },
+    }));
+
+    render(<ChatPanel />);
+
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-rewrite-available', 'true');
+  });
+
+  it('keeps rewrite mode visible but disables the composer after backend restart cleared rewrite availability', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_mode: 'rewrite',
+          chat_input: '把这段改得更正式一些',
+          rewrite_available: false,
+        },
+      },
+    }));
+
+    render(<ChatPanel />);
+
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-chat-mode', 'rewrite');
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-disabled', 'true');
+    expect(screen.getByTestId('chat-input')).toHaveAttribute(
+      'data-placeholder',
+      '服务已重启，请重新生成一次文档后再继续润色。'
+    );
+    expect(screen.getByTestId('chat-input')).toHaveAttribute(
+      'data-rewrite-hint',
+      '服务已重启，请重新生成一次文档后再继续润色。'
+    );
   });
 
   it('retries failed ai message in place instead of appending a new bubble', async () => {

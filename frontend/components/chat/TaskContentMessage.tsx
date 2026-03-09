@@ -43,7 +43,12 @@ function getStatusIcon(status: Message['status']) {
   }
 }
 
-function getStatusLabel(status: Message['status']) {
+function getStatusLabel(message: Message) {
+  if (message.status === 'error' && message.metadata?.localTaskReason === 'backend_restart') {
+    return '任务已中断';
+  }
+
+  const status = message.status;
   switch (status) {
     case 'generating':
       return '生成中...';
@@ -84,6 +89,8 @@ export function TaskContentMessage({
   const content = typeof message.content === 'string' ? message.content : '';
   const progressText = message.metadata?.progressText;
   const progressPercent = message.metadata?.progressPercent;
+  const isRewriteTask = message.metadata?.taskKind === 'rewrite';
+  const retryDisabledByLocalReason = message.metadata?.localTaskReason === 'backend_restart';
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -114,15 +121,17 @@ export function TaskContentMessage({
       <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2">
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 text-gray-500" />
-          <span className="text-sm font-medium text-gray-700">AI 生成内容</span>
+          <span className="text-sm font-medium text-gray-700">
+            {isRewriteTask ? 'AI 润色内容' : 'AI 生成内容'}
+          </span>
           <div className="ml-1 flex items-center gap-1.5 text-xs text-gray-500">
             {getStatusIcon(message.status)}
-            <span>{getStatusLabel(message.status)}</span>
+            <span>{getStatusLabel(message)}</span>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {message.status === 'error' && onRetry && (
+          {message.status === 'error' && onRetry && !retryDisabledByLocalReason && (
             <button
               onClick={onRetry}
               disabled={disabled}

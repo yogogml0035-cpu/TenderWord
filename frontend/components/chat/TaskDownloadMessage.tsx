@@ -16,6 +16,7 @@ export function TaskDownloadMessage({
   disabled = false,
 }: TaskDownloadMessageProps) {
   const outputFile = typeof message.metadata?.outputFile === 'string' ? message.metadata.outputFile : '';
+  const isRewriteTask = message.metadata?.taskKind === 'rewrite';
   const fileName =
     typeof message.metadata?.fileName === 'string' && message.metadata.fileName.length > 0
       ? message.metadata.fileName
@@ -38,7 +39,9 @@ export function TaskDownloadMessage({
       <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2">
         <div className="flex items-center gap-2">
           <CheckCircle2 className="h-4 w-4 text-green-500" />
-          <span className="text-sm font-medium text-gray-700">文档已生成</span>
+          <span className="text-sm font-medium text-gray-700">
+            {isRewriteTask ? '润色文档已更新' : '文档已生成'}
+          </span>
         </div>
         <button
           onClick={handleDownload}
@@ -46,7 +49,7 @@ export function TaskDownloadMessage({
           className="flex items-center gap-1 rounded bg-blue-500 px-3 py-1.5 text-sm text-white shadow-sm transition-colors duration-200 hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Download className="h-4 w-4" />
-          下载文件
+          {isRewriteTask ? '下载润色文档' : '下载文件'}
         </button>
       </div>
 

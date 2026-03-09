@@ -135,15 +135,15 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   const isNormalStreamActive = !!(conversation && activeNormalConversations[conversation.id]);
   const isTaskBusy = isCurrentTaskQueued || isCurrentTaskRunning;
   const isBusy = isTaskBusy || isNormalStreamActive;
-  const hasCompletedDocument = messages.some(
-    (message) =>
-      message.metadata?.messageKind === 'task-download' &&
-      message.status === 'completed' &&
-      typeof message.metadata?.outputFile === 'string'
-  );
+  const rewriteAvailableFromBackend = !!conversationDraft?.rewrite_available;
   const rewriteModeEnabled = chatMode === 'rewrite';
   const canEnterRewriteMode =
-    rewriteModeEnabled || hasCompletedDocument || !!conversationDraft?.pending_rewrite_task_id;
+    rewriteModeEnabled || rewriteAvailableFromBackend || !!conversationDraft?.pending_rewrite_task_id;
+  const rewriteComposerDisabled =
+    rewriteModeEnabled &&
+    !isTaskBusy &&
+    !conversationDraft?.pending_rewrite_task_id &&
+    !rewriteAvailableFromBackend;
   const otherActiveTaskCount = conversation
     ? activeTaskIds.filter((taskId) => {
         const owner = conversations.find((item) => item.currentTaskId === taskId);
@@ -432,7 +432,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
   const handleSendMessage = useCallback(
     async (content: string) => {
-      if (!conversation || isBusy) {
+      if (!conversation || isBusy || rewriteComposerDisabled) {
         return;
       }
 
@@ -453,6 +453,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             model: selectedModel,
           });
           startTask(conversation.id, result.task_id, {
+            task_kind: result.task_kind,
             status: result.status || 'queued',
             queue_position: result.queue_position,
             waiting_count: result.waiting_count,
@@ -483,6 +484,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       addMessage,
       conversation,
       isBusy,
+      rewriteComposerDisabled,
       rewriteModeEnabled,
       selectedModel,
       sendNormalChatMessage,
@@ -761,15 +763,23 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         chatMode={chatMode}
         onToggleRewriteMode={toggleRewriteMode}
         rewriteAvailable={canEnterRewriteMode}
-        rewriteHint={showRewriteQueueHint ? '发送后将进入队列' : null}
+        rewriteHint={
+          rewriteComposerDisabled
+            ? '服务已重启，请重新生成一次文档后再继续润色。'
+            : showRewriteQueueHint
+              ? '发送后将进入队列'
+              : null
+        }
         actionMode={isBusy ? 'cancel' : 'send'}
-        disabled={false}
+        disabled={rewriteComposerDisabled}
         loading={isBusy}
         placeholder={
-          chatMode === 'rewrite'
+            chatMode === 'rewrite'
             ? isBusy
               ? '润色处理中，请稍候...'
-              : '输入修改润色指令...'
+              : rewriteComposerDisabled
+                ? '服务已重启，请重新生成一次文档后再继续润色。'
+                : '输入修改润色指令...'
             : isBusy
               ? '回复生成中，请稍候...'
               : '输入消息...'

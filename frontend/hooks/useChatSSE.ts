@@ -9,6 +9,7 @@ import type {
   SSELLMEvent,
   SSEProgressEvent,
   TaskData,
+  TaskKind,
   TaskStatus,
 } from '@/types/api';
 import type { LogEntry } from '@/types/chat';
@@ -25,15 +26,25 @@ interface UseChatSSEOptions {
   onError?: (error: string) => void;
 }
 
-const AI_CONTENT_TRIGGER_NODE = 'generate_polished_text';
+function getAIContentTriggerNode(taskKind: TaskKind): string {
+  return taskKind === 'rewrite' ? 'rewrite_text' : 'generate_polished_text';
+}
 
-function isGenerateNodeCompletedLog(message: string, node?: unknown): boolean {
+function resolveTaskKind(taskId: string, eventTaskKind?: unknown): TaskKind {
+  if (eventTaskKind === 'rewrite' || eventTaskKind === 'generate') {
+    return eventTaskKind;
+  }
+  return useChatStore.getState().getTaskSummary(taskId)?.task_kind || 'generate';
+}
+
+function isAIContentCompletedLog(message: string, node: unknown, taskKind: TaskKind): boolean {
   if (typeof message !== 'string' || !message) {
     return false;
   }
 
+  const triggerNode = getAIContentTriggerNode(taskKind);
   const nodeMatched =
-    node === AI_CONTENT_TRIGGER_NODE || message.includes(`[${AI_CONTENT_TRIGGER_NODE}]`);
+    node === triggerNode || message.includes(`[${triggerNode}]`);
   if (!nodeMatched) {
     return false;
   }
@@ -59,6 +70,7 @@ export function useChatSSE({
   const ensureTaskContentMessage = useChatStore((state) => state.ensureTaskContentMessage);
   const markTaskContentReady = useChatStore((state) => state.markTaskContentReady);
   const discardStaleTask = useChatStore((state) => state.discardStaleTask);
+  const upsertTaskSummary = useChatStore((state) => state.upsertTaskSummary);
   const [connectionTaskId, setConnectionTaskId] = useState<string | null>(null);
   const [connectionLastEventId, setConnectionLastEventId] = useState<string | null>(null);
   const handledTerminalTasksRef = useRef<Set<string>>(new Set());
@@ -133,6 +145,15 @@ export function useChatSSE({
       }
       handledTerminalTasksRef.current.add(targetTaskId);
 
+      upsertTaskSummary(targetTaskId, {
+        task_kind: task.task_kind,
+        status: task.status,
+        progress_percent: task.progress.progress_percent,
+        progress_text: task.progress.progress_text || '',
+        current_node: task.progress.current_node || '',
+        current_node_display: task.progress.current_node_display || task.progress.current_node || '',
+      });
+
       const finalContent = getCurrentContent(targetTaskId, task.status === 'completed');
 
       if (task.status === 'completed') {
@@ -164,6 +185,7 @@ export function useChatSSE({
       extractOutputInfo,
       failTask,
       getCurrentContent,
+      upsertTaskSummary,
     ]
   );
 
@@ -221,7 +243,8 @@ export function useChatSSE({
             };
             useChatStreamStore.getState().appendLog(taskId, logEntry);
 
-            if (isGenerateNodeCompletedLog(logMessage, logData.node)) {
+            const taskKind = resolveTaskKind(taskId);
+            if (isAIContentCompletedLog(logMessage, logData.node, taskKind)) {
               const aiText = useChatStreamStore.getState().streams[taskId]?.aiText || '';
               markTaskContentReady(taskId, aiText);
             }
@@ -235,8 +258,10 @@ export function useChatSSE({
             const isComplete = llmData.is_complete || false;
             const contentMode = llmData.content_mode || 'snapshot';
             const llmNode = llmData.node;
+            const taskKind = resolveTaskKind(taskId);
+            const triggerNode = getAIContentTriggerNode(taskKind);
 
-            if (llmNode === AI_CONTENT_TRIGGER_NODE) {
+            if (llmNode === triggerNode) {
               ensureTaskContentMessage(taskId);
             }
 
@@ -244,12 +269,12 @@ export function useChatSSE({
               const currentText = useChatStreamStore.getState().streams[taskId]?.aiText || '';
               const mergedText = currentText + nextText;
               useChatStreamStore.getState().setAIContent(taskId, mergedText, isComplete);
-              if (llmNode === AI_CONTENT_TRIGGER_NODE && isComplete) {
+              if (llmNode === triggerNode && isComplete) {
                 markTaskContentReady(taskId, mergedText);
               }
             } else {
               useChatStreamStore.getState().setAIContent(taskId, nextText, isComplete);
-              if (llmNode === AI_CONTENT_TRIGGER_NODE && isComplete) {
+              if (llmNode === triggerNode && isComplete) {
                 markTaskContentReady(taskId, nextText);
               }
             }
@@ -259,6 +284,18 @@ export function useChatSSE({
         case 'progress':
           if (data && typeof data === 'object') {
             const progressData = data as SSEProgressEvent;
+            upsertTaskSummary(taskId, {
+              task_kind: progressData.task_kind,
+              status:
+                progressData.status === 'running'
+                  ? 'running'
+                  : progressData.status,
+              progress_percent: progressData.progress_percent,
+              progress_text: progressData.progress_text,
+              current_node: progressData.current_node || '',
+              current_node_display:
+                progressData.current_node_display || progressData.current_node || '',
+            });
             useChatStreamStore.getState().setProgress(taskId, {
               progressPercent: progressData.progress_percent,
               progressText: progressData.progress_text,
@@ -266,9 +303,10 @@ export function useChatSSE({
               currentNodeDisplay: progressData.current_node_display,
             });
 
+            const triggerNode = getAIContentTriggerNode(progressData.task_kind);
             if (
-              progressData.current_node === AI_CONTENT_TRIGGER_NODE ||
-              progressData.node === AI_CONTENT_TRIGGER_NODE
+              progressData.current_node === triggerNode ||
+              progressData.node === triggerNode
             ) {
               ensureTaskContentMessage(taskId);
             }
@@ -278,6 +316,10 @@ export function useChatSSE({
         case 'done':
           if (data && typeof data === 'object') {
             const doneData = data as SSEDoneEvent;
+            upsertTaskSummary(taskId, {
+              task_kind: doneData.task_kind,
+              status: doneData.success ? 'completed' : 'failed',
+            });
             const outputFile = doneData.output_file;
             const doneFileName = (doneData as { file_name?: string }).file_name;
             const fileName =
@@ -297,6 +339,10 @@ export function useChatSSE({
         case 'error':
           if (data && typeof data === 'object') {
             const errorData = data as SSEErrorEvent;
+            upsertTaskSummary(taskId, {
+              task_kind: errorData.task_kind,
+              status: errorData.is_fatal ? 'failed' : 'cancelled',
+            });
             const errorMessage = errorData.error || 'Unknown error';
             const isFatal = errorData.is_fatal ?? true;
 
@@ -334,6 +380,7 @@ export function useChatSSE({
       normalizeLogLevel,
       parseTimestamp,
       rememberEventId,
+      upsertTaskSummary,
     ]
   );
 

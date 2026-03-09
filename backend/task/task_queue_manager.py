@@ -26,6 +26,13 @@ class TaskStatus(Enum):
     CANCELLED = "cancelled"  # 已取消
 
 
+class TaskKind(Enum):
+    """任务类别"""
+
+    GENERATE = "generate"
+    REWRITE = "rewrite"
+
+
 class NodeName(Enum):
     """Graph 节点名称（按执行顺序）"""
     PREPARE_TEMPLATE = "prepare_template"
@@ -37,6 +44,9 @@ class NodeName(Enum):
     REPLACE_CONTENT = "replace_content"
     GENERATE_POLISHED_TEXT = "generate_polished_text"
     GENERATE_COMMENTS = "generate_comments"
+    RESOLVE_REWRITE_TARGET = "resolve_rewrite_target"
+    DELETE_SECTION = "delete_section"
+    REWRITE_TEXT = "rewrite_text"
     UPDATE_WORD = "update_word"
 
 
@@ -51,6 +61,9 @@ NODE_DISPLAY_NAMES = {
     NodeName.REPLACE_CONTENT: "替换最新项目信息",
     NodeName.GENERATE_POLISHED_TEXT: "AI生成采购需求",
     NodeName.GENERATE_COMMENTS: "AI生成批注建议",
+    NodeName.RESOLVE_REWRITE_TARGET: "选择润色版本",
+    NodeName.DELETE_SECTION: "删除原段落",
+    NodeName.REWRITE_TEXT: "AI重写内容",
     NodeName.UPDATE_WORD: "生成招标文件",
 }
 
@@ -116,6 +129,7 @@ class Task:
     task_id: str
     user_session_id: str
     created_at: datetime
+    task_kind: TaskKind = TaskKind.GENERATE
     status: TaskStatus = TaskStatus.QUEUED
     progress: TaskProgress = field(default_factory=TaskProgress)
     result: Optional[Any] = None
@@ -197,7 +211,23 @@ class TaskQueueManager:
         )
         self._cleanup_thread.start()
     
-    def _create_task(self, user_session_id: str, task_id: Optional[str] = None) -> Task:
+    def _normalize_task_kind(self, task_kind: str | TaskKind | None) -> TaskKind:
+        if isinstance(task_kind, TaskKind):
+            return task_kind
+        if isinstance(task_kind, str):
+            try:
+                return TaskKind(task_kind)
+            except ValueError:
+                return TaskKind.GENERATE
+        return TaskKind.GENERATE
+
+    def _create_task(
+        self,
+        user_session_id: str,
+        task_id: Optional[str] = None,
+        *,
+        task_kind: str | TaskKind | None = None,
+    ) -> Task:
         """
         创建任务并加入队列（内部实现）
 
@@ -214,6 +244,7 @@ class TaskQueueManager:
                 task_id=final_task_id,
                 user_session_id=user_session_id,
                 created_at=datetime.now(),
+                task_kind=self._normalize_task_kind(task_kind),
                 last_heartbeat=datetime.now(),  # 初始化心跳时间
             )
             self._tasks[final_task_id] = task
@@ -221,7 +252,12 @@ class TaskQueueManager:
             self._cancel_events[final_task_id] = threading.Event()  # 创建取消事件
             return task
 
-    def create_task(self, user_session_id: str) -> Task:
+    def create_task(
+        self,
+        user_session_id: str,
+        *,
+        task_kind: str | TaskKind | None = None,
+    ) -> Task:
         """
         创建新任务并加入队列
         
@@ -231,9 +267,15 @@ class TaskQueueManager:
         Returns:
             创建的任务对象
         """
-        return self._create_task(user_session_id=user_session_id)
+        return self._create_task(user_session_id=user_session_id, task_kind=task_kind)
 
-    def add_task(self, task_id: str, user_session_id: str) -> Task:
+    def add_task(
+        self,
+        task_id: str,
+        user_session_id: str,
+        *,
+        task_kind: str | TaskKind | None = None,
+    ) -> Task:
         """
         兼容旧接口：使用外部提供的 task_id 创建任务。
 
@@ -241,7 +283,11 @@ class TaskQueueManager:
         - DocumentService 当前调用 add_task(task_id=..., user_session_id=...)
         - 该方法保持兼容，避免接口漂移导致 500
         """
-        return self._create_task(user_session_id=user_session_id, task_id=task_id)
+        return self._create_task(
+            user_session_id=user_session_id,
+            task_id=task_id,
+            task_kind=task_kind,
+        )
     
     def update_heartbeat(self, task_id: str) -> bool:
         """
@@ -470,6 +516,7 @@ class TaskQueueManager:
                 task.progress.total_nodes,
                 current_node,
                 current_node_display,
+                task.task_kind.value,
             )
 
             callback = self._progress_callbacks.get(task_id)
@@ -481,12 +528,13 @@ class TaskQueueManager:
 
         # 实时推送进度（不在锁内做 IO/调度）
         if payload:
-            completed_count, total_nodes, current_node, current_node_display = payload
+            completed_count, total_nodes, current_node, current_node_display, task_kind = payload
             try:
                 from backend.core.sse_manager import sse_manager
 
                 sse_manager.send_progress_threadsafe(
                     task_id=task_id,
+                    task_kind=task_kind,
                     completed_count=completed_count,
                     total_nodes=total_nodes,
                     current_node=current_node,
@@ -555,6 +603,7 @@ class TaskQueueManager:
                 task.progress.total_nodes,
                 current_node,
                 current_node_display,
+                task.task_kind.value,
             )
 
             if changed:
@@ -575,12 +624,13 @@ class TaskQueueManager:
 
         # 实时推送进度（不在锁内做 IO/调度）
         if payload and changed:
-            completed_count, total_nodes, current_node, current_node_display = payload
+            completed_count, total_nodes, current_node, current_node_display, task_kind = payload
             try:
                 from backend.core.sse_manager import sse_manager
 
                 sse_manager.send_progress_threadsafe(
                     task_id=task_id,
+                    task_kind=task_kind,
                     completed_count=completed_count,
                     total_nodes=total_nodes,
                     current_node=current_node,
