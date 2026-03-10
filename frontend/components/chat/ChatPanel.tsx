@@ -11,10 +11,9 @@ import {
   API_BASE_URL,
   ApiError,
   cancelTask,
-  createRewriteTask,
   downloadFile,
 } from '@/lib/api';
-import type { ChatStreamEvent } from '@/types/api';
+import type { UserStreamEvent } from '@/types/api';
 import type { Message } from '@/types/chat';
 import type { ModelType } from '@/components/forms/ModelSelector';
 
@@ -43,6 +42,11 @@ function collectNormalChatContext(messages: Message[]) {
     role: message.type === 'user' ? 'user' : 'assistant',
     content: typeof message.content === 'string' ? message.content : '',
   }));
+}
+
+function collectUserRouteContext(messages: Message[], latestPrompt: string) {
+  const history = collectNormalChatContext(messages).slice(-5);
+  return [...history, { role: 'user' as const, content: latestPrompt }];
 }
 
 function getConversationMessagesById(conversationId: string): Message[] {
@@ -207,13 +211,14 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     });
   }, []);
 
-  const sendNormalChatMessage = useCallback(
+  const sendUserMessage = useCallback(
     async (
       prompt: string,
       options: {
         appendUserMessage?: boolean;
         modelOverride?: ModelType;
         reuseAiMessageId?: string;
+        forceRewrite?: boolean;
       } = {}
     ) => {
       if (!conversation) {
@@ -229,43 +234,54 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
       const appendUserMessage = options.appendUserMessage ?? true;
       const modelForRequest = options.modelOverride || selectedModel;
+      const forceRewrite = options.forceRewrite ?? false;
+      const existingMessages = getConversationMessagesById(conversationId);
       const baseAiMetadata = {
         chatKind: 'normal' as const,
         chatPrompt: prompt,
         chatModel: modelForRequest,
       };
+      let userMessageId: string | undefined;
 
       if (appendUserMessage) {
-        addMessage(conversationId, {
+        userMessageId = addMessage(conversationId, {
           type: 'user',
           content: prompt,
           status: 'sent',
           metadata: {
-            chatKind: 'normal',
+            chatKind: forceRewrite ? 'rewrite' : 'normal',
           },
         });
       }
 
       let aiMessageId = options.reuseAiMessageId;
-      if (aiMessageId) {
-        updateMessage(conversationId, aiMessageId, {
-          content: '',
-          status: 'generating',
-          error: undefined,
-          metadata: baseAiMetadata,
-        });
-      } else {
+      let aiMessagePrepared = false;
+      const ensureAiMessage = (): string => {
+        if (aiMessagePrepared && aiMessageId) {
+          return aiMessageId;
+        }
+        if (aiMessageId) {
+          updateMessage(conversationId, aiMessageId, {
+            content: '',
+            status: 'generating',
+            error: undefined,
+            metadata: baseAiMetadata,
+          });
+          aiMessagePrepared = true;
+          return aiMessageId;
+        }
         aiMessageId = addMessage(conversationId, {
           type: 'ai',
           content: '',
           status: 'generating',
           metadata: baseAiMetadata,
         });
-      }
-
-      const contextMessages = collectNormalChatContext(
-        getConversationMessagesById(conversationId)
-      );
+        aiMessagePrepared = true;
+        return aiMessageId;
+      };
+      const contextMessages = appendUserMessage
+        ? collectUserRouteContext(existingMessages, prompt)
+        : collectNormalChatContext(getConversationMessagesById(conversationId));
 
       const controller = new AbortController();
       normalChatAbortRef.current[conversationId] = controller;
@@ -273,9 +289,10 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
       let accumulatedText = '';
       let streamFinished = false;
+      let activeRoute: 'chat' | 'rewrite' | 'blocked_doc_context' | null = null;
 
       try {
-        const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
+        const response = await fetch(`${API_BASE_URL}/api/user/stream`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -284,6 +301,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             conversation_id: conversationId,
             model: modelForRequest,
             messages: contextMessages,
+            force_rewrite: forceRewrite,
           }),
           signal: controller.signal,
         });
@@ -320,9 +338,9 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             return;
           }
 
-          let event: ChatStreamEvent | null = null;
+          let event: UserStreamEvent | null = null;
           try {
-            event = JSON.parse(trimmed) as ChatStreamEvent;
+            event = JSON.parse(trimmed) as UserStreamEvent;
           } catch {
             event = null;
           }
@@ -330,9 +348,51 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             return;
           }
 
+          if (event.event === 'route') {
+            activeRoute = event.data.route;
+            if (userMessageId && event.data.route === 'rewrite') {
+              updateMessage(conversationId, userMessageId, {
+                metadata: {
+                  chatKind: 'rewrite',
+                },
+              });
+            }
+            return;
+          }
+
+          if (event.event === 'task_accepted') {
+            if (userMessageId) {
+              updateMessage(conversationId, userMessageId, {
+                metadata: {
+                  chatKind: 'rewrite',
+                },
+              });
+            }
+            startTask(conversation.id, event.data.task_id, {
+              task_kind: event.data.task_kind,
+              status: event.data.status || 'queued',
+              queue_position: event.data.queue_position,
+              waiting_count: event.data.waiting_count,
+            });
+            updateConversationDraft(conversation.id, {
+              chat_input: '',
+              pending_rewrite_prompt: prompt,
+              pending_rewrite_task_id: event.data.task_id,
+            });
+            streamFinished = true;
+            return;
+          }
+
           if (event.event === 'chunk') {
+            if (!activeRoute) {
+              activeRoute = 'chat';
+            }
+            if (activeRoute !== 'chat') {
+              return;
+            }
+            const ensuredAiMessageId = ensureAiMessage();
             accumulatedText += event.data.content || '';
-            updateMessage(conversationId, aiMessageId, {
+            updateMessage(conversationId, ensuredAiMessageId, {
               content: accumulatedText,
               status: 'generating',
             });
@@ -340,9 +400,17 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           }
 
           if (event.event === 'done') {
+            if (!activeRoute) {
+              activeRoute = 'chat';
+            }
+            if (activeRoute !== 'chat') {
+              streamFinished = true;
+              return;
+            }
+            const ensuredAiMessageId = ensureAiMessage();
             const finalText = event.data.content || accumulatedText;
             accumulatedText = finalText;
-            updateMessage(conversationId, aiMessageId, {
+            updateMessage(conversationId, ensuredAiMessageId, {
               content: finalText,
               status: 'completed',
               error: undefined,
@@ -353,11 +421,29 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
           if (event.event === 'error') {
             const errorMessage = event.data.message || '聊天失败';
-            updateMessage(conversationId, aiMessageId, {
-              content: accumulatedText,
-              status: 'error',
-              error: errorMessage,
-            });
+            const errorCode = event.data.code || '';
+            if (activeRoute === 'chat' || options.reuseAiMessageId) {
+              const ensuredAiMessageId = ensureAiMessage();
+              updateMessage(conversationId, ensuredAiMessageId, {
+                content: accumulatedText,
+                status: 'error',
+                error: errorMessage,
+              });
+            }
+            if (
+              activeRoute !== 'chat' ||
+              errorCode === 'CHAT_DOC_CONTEXT_REQUIRED' ||
+              errorCode === 'REWRITE_PROMPT_INVALID' ||
+              errorCode === 'REWRITE_NO_DOCUMENT' ||
+              errorCode === 'LLM_TIMEOUT' ||
+              errorCode === 'LLM_SERVICE_ERROR'
+            ) {
+              addMessage(conversationId, {
+                type: 'system',
+                content: errorMessage,
+                status: 'completed',
+              });
+            }
             streamFinished = true;
           }
         };
@@ -382,11 +468,13 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         }
 
         if (!streamFinished) {
-          updateMessage(conversationId, aiMessageId, {
-            content: accumulatedText,
-            status: 'completed',
-            error: undefined,
-          });
+          if (activeRoute === 'chat' && aiMessagePrepared && aiMessageId) {
+            updateMessage(conversationId, aiMessageId, {
+              content: accumulatedText,
+              status: 'completed',
+              error: undefined,
+            });
+          }
         }
       } catch (error) {
         const isAbort =
@@ -395,19 +483,27 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             : error instanceof Error && error.name === 'AbortError';
 
         if (isAbort) {
-          updateMessage(conversationId, aiMessageId, {
-            content: accumulatedText,
-            status: 'cancelled',
-          });
+          if (aiMessagePrepared && aiMessageId) {
+            updateMessage(conversationId, aiMessageId, {
+              content: accumulatedText,
+              status: 'cancelled',
+            });
+          }
         } else {
           const message = error instanceof ApiError ? error.message : '聊天失败，请稍后重试';
           const errorCode = error instanceof ApiError ? error.code : '';
-          updateMessage(conversationId, aiMessageId, {
-            content: accumulatedText,
-            status: 'error',
-            error: message,
-          });
-          if (errorCode === 'CHAT_MODE_REQUIRES_REWRITE' || errorCode === 'CHAT_DOC_CONTEXT_REQUIRED') {
+          if (aiMessagePrepared && aiMessageId) {
+            updateMessage(conversationId, aiMessageId, {
+              content: accumulatedText,
+              status: 'error',
+              error: message,
+            });
+          }
+          if (
+            errorCode === 'CHAT_MODE_REQUIRES_REWRITE' ||
+            errorCode === 'CHAT_DOC_CONTEXT_REQUIRED' ||
+            !aiMessagePrepared
+          ) {
             addMessage(conversationId, {
               type: 'system',
               content: message,
@@ -426,6 +522,8 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       isTaskBusy,
       selectedModel,
       setNormalChatActive,
+      startTask,
+      updateConversationDraft,
       updateMessage,
     ]
   );
@@ -437,58 +535,24 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       }
 
       if (rewriteModeEnabled) {
-        addMessage(conversation.id, {
-          type: 'user',
-          content,
-          status: 'sent',
-          metadata: {
-            chatKind: 'rewrite',
-          },
+        await sendUserMessage(content, {
+          appendUserMessage: true,
+          forceRewrite: true,
         });
-
-        try {
-          const result = await createRewriteTask({
-            conversation_id: conversation.id,
-            user_prompt: content,
-            model: selectedModel,
-          });
-          startTask(conversation.id, result.task_id, {
-            task_kind: result.task_kind,
-            status: result.status || 'queued',
-            queue_position: result.queue_position,
-            waiting_count: result.waiting_count,
-          });
-          updateConversationDraft(conversation.id, {
-            chat_input: '',
-            pending_rewrite_prompt: content,
-            pending_rewrite_task_id: result.task_id,
-          });
-        } catch (error) {
-          const message =
-            error instanceof ApiError ? error.message : '润色任务创建失败，请稍后重试';
-          addMessage(conversation.id, {
-            type: 'system',
-            content: message,
-            status: 'completed',
-          });
-        }
         return;
       }
 
-      await sendNormalChatMessage(content, {
+      await sendUserMessage(content, {
         appendUserMessage: true,
       });
       updateConversationDraft(conversation.id, { chat_input: '' });
     },
     [
-      addMessage,
       conversation,
       isBusy,
       rewriteComposerDisabled,
       rewriteModeEnabled,
-      selectedModel,
-      sendNormalChatMessage,
-      startTask,
+      sendUserMessage,
       updateConversationDraft,
     ]
   );
@@ -517,7 +581,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           : selectedModel;
 
       if (retryPrompt) {
-        void sendNormalChatMessage(retryPrompt, {
+        void sendUserMessage(retryPrompt, {
           appendUserMessage: false,
           modelOverride: retryModel,
           reuseAiMessageId: message.id,
@@ -525,7 +589,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         return;
       }
     },
-    [conversation, isBusy, selectedModel, sendNormalChatMessage]
+    [conversation, isBusy, selectedModel, sendUserMessage]
   );
 
   const handleDownload = async (filePath: string, fileName?: string) => {

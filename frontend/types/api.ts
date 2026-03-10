@@ -238,6 +238,10 @@ export interface ChatStreamRequest {
   messages: ChatStreamMessage[];
 }
 
+export interface UserStreamRequest extends ChatStreamRequest {
+  force_rewrite: boolean;
+}
+
 export interface ChatStreamChunkEvent {
   event: 'chunk';
   data: {
@@ -261,6 +265,31 @@ export interface ChatStreamErrorEvent {
 }
 
 export type ChatStreamEvent = ChatStreamChunkEvent | ChatStreamDoneEvent | ChatStreamErrorEvent;
+
+export interface UserStreamRouteEvent {
+  event: 'route';
+  data: {
+    route: 'chat' | 'rewrite' | 'blocked_doc_context';
+  };
+}
+
+export interface UserStreamTaskAcceptedEvent {
+  event: 'task_accepted';
+  data: {
+    task_id: string;
+    task_kind: TaskKind;
+    status?: TaskStatus;
+    queue_position?: number;
+    waiting_count?: number;
+  };
+}
+
+export type UserStreamEvent =
+  | UserStreamRouteEvent
+  | UserStreamTaskAcceptedEvent
+  | ChatStreamChunkEvent
+  | ChatStreamDoneEvent
+  | ChatStreamErrorEvent;
 
 export interface ConversationHeartbeatData {
   conversation_id: string;

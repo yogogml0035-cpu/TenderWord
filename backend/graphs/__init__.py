@@ -27,6 +27,7 @@ from .base_graph import (
 from .xjcg_tender_graph import XjcgTenderGraph
 from .gngk_tender_graph import GngkTenderGraph
 from .rewrite_graph import RewriteGraph
+from .user_graph import UserGraph
 
 __all__ = [
     "BaseGraph",
@@ -38,4 +39,5 @@ __all__ = [
     "XjcgTenderGraph",
     "GngkTenderGraph",
     "RewriteGraph",
+    "UserGraph",
 ]

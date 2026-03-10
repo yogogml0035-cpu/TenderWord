@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import pathlib
-import re
 import threading
 import time
 import traceback
@@ -28,8 +27,9 @@ from backend.models import (
     SSEEventType,
 )
 from backend.services.conversation_service import get_conversation_service
+from backend.services.user_routing_service import get_user_routing_service
 from backend.task.task_queue_manager import get_task_queue
-from backend.util.common_util import LLMTimeoutError, stream_llm_completion
+from backend.util.common_util import LLMTimeoutError
 from backend.util.log_util.execution_log import logger as execution_logger
 from backend.util.log_util.progress_log import progress_log
 from backend.util.log_util.sse_log_handler import task_log_context
@@ -75,21 +75,6 @@ TASK_KIND_TO_LLM_NODE = {
     "generate": "generate_polished_text",
     "rewrite": "rewrite_text",
 }
-
-REWRITE_PROMPT_RELEVANCE_SYSTEM_PROMPT = """
-你是招标文档润色指令分类器。
-你的任务是判断用户输入是否是在要求修改当前招标文档内容。
-
-如果用户输入是在要求对当前文档进行润色、改写、补充、删除、替换、重写、调整、修订，输出 true。
-如果用户输入是闲聊、提问、解释、总结、翻译、评价、问候、与文档修改无关的话题，输出 false。
-
-规则：
-1. 只能输出小写 true 或 false。
-2. 不要输出解释、标点、JSON、代码块或任何额外文本。
-3. 即使没有出现“润色”“修改”等明确关键词，只要语义上是在要求改当前文档，也输出 true。
-4. 无法明确判断时，输出 false。
-""".strip()
-
 
 class _BufferedLoggerWriter:
     """将 stdout/stderr 文本按行转发到执行日志。"""
@@ -357,6 +342,7 @@ class DocumentService:
         _init_graph_registry()
         self._task_queue = get_task_queue()
         self._conversation_service = get_conversation_service()
+        self._user_routing_service = get_user_routing_service()
         # 任务ID -> SSE 回调的映射
         self._callbacks: Dict[str, SSECallback] = {}
         self._callbacks_lock = threading.Lock()
@@ -455,7 +441,7 @@ class DocumentService:
             )
 
         try:
-            is_related = await self._is_rewrite_prompt_related(
+            is_related = await self._user_routing_service.is_rewrite_prompt_related(
                 prompt=normalized_prompt,
                 model_provider=model_provider,
                 latest_rewrite_state=latest_rewrite_state,
@@ -572,63 +558,6 @@ class DocumentService:
             queue_position=queue_position,
             waiting_count=waiting_count,
         )
-
-    def _build_rewrite_relevance_user_prompt(
-        self,
-        *,
-        prompt: str,
-        latest_rewrite_state: Dict[str, Any],
-    ) -> str:
-        project_number = str(latest_rewrite_state.get("project_number") or "").strip()
-        project_name = str(latest_rewrite_state.get("project_name") or "").strip()
-        tender_type = str(latest_rewrite_state.get("tender_type") or "").strip()
-        polished_text = str(latest_rewrite_state.get("polished_text") or "").strip()
-        polished_preview = re.sub(r"\s+", " ", polished_text)
-        if len(polished_preview) > 600:
-            polished_preview = polished_preview[:600] + "..."
-
-        return (
-            "【当前会话文档信息】\n"
-            f"project_number={project_number}\n"
-            f"project_name={project_name}\n"
-            f"tender_type={tender_type}\n"
-            f"latest_polished_preview={polished_preview}\n\n"
-            "【用户输入】\n"
-            f"{prompt}\n\n"
-            "请判断该输入是否是在要求修改当前招标文档内容。"
-            "只输出 true 或 false。"
-        )
-
-    async def _is_rewrite_prompt_related(
-        self,
-        *,
-        prompt: str,
-        model_provider: str,
-        latest_rewrite_state: Dict[str, Any],
-    ) -> bool:
-        normalized_prompt = str(prompt or "").strip()
-        if not normalized_prompt:
-            return False
-
-        raw_output = await stream_llm_completion(
-            model_provider=model_provider,
-            system_prompt=REWRITE_PROMPT_RELEVANCE_SYSTEM_PROMPT,
-            user_prompt=self._build_rewrite_relevance_user_prompt(
-                prompt=normalized_prompt,
-                latest_rewrite_state=latest_rewrite_state,
-            ),
-            extra_params_override={"temperature": 0.0, "max_tokens": 4},
-            timeout_seconds=8,
-            check_interval=2.0,
-        )
-        normalized_output = str(raw_output or "").strip().lower()
-        logger.info(
-            "rewrite 指令相关性校验完成: model=%s, output=%r, prompt=%r",
-            model_provider,
-            normalized_output,
-            normalized_prompt,
-        )
-        return normalized_output == "true"
 
     def _resolve_rewrite_target_state(
         self, *, conversation_id: str, user_prompt: str

@@ -17,11 +17,11 @@ interface MessageListProps {
 }
 
 function renderInlineMarkdown(text: string): React.ReactNode[] {
-  const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\((https?:\/\/[^\s)]+)\))/g;
+  const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\((?:https?:\/\/[^\s)]+)\))/g;
   const parts = text.split(pattern);
 
   return parts
-    .filter((part) => part.length > 0)
+    .filter((part): part is string => typeof part === 'string' && part.length > 0)
     .map((part, index) => {
       if (part.startsWith('**') && part.endsWith('**')) {
         return <strong key={`md-bold-${index}`}>{part.slice(2, -2)}</strong>;

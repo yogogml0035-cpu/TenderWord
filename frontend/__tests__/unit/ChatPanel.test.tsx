@@ -43,20 +43,26 @@ jest.mock('@/components/chat/MessageList', () => ({
 
 jest.mock('@/components/chat/ChatInput', () => ({
   ChatInput: ({
+    value,
     disabled,
     loading,
     placeholder,
     selectedModel,
     onModelChange,
+    onSend,
+    onToggleRewriteMode,
     rewriteAvailable,
     rewriteHint,
     chatMode,
   }: {
+    value?: string;
     disabled?: boolean;
     loading?: boolean;
     placeholder?: string;
     selectedModel?: string;
     onModelChange?: (model: string) => void;
+    onSend?: (message: string) => void;
+    onToggleRewriteMode?: () => void;
     rewriteAvailable?: boolean;
     rewriteHint?: string | null;
     chatMode?: 'normal' | 'rewrite';
@@ -73,6 +79,20 @@ jest.mock('@/components/chat/ChatInput', () => ({
     >
       <button type="button" data-testid="change-model-button" onClick={() => onModelChange?.('qwen')}>
         change model
+      </button>
+      <button
+        type="button"
+        data-testid="toggle-rewrite-button"
+        onClick={() => onToggleRewriteMode?.()}
+      >
+        toggle rewrite
+      </button>
+      <button
+        type="button"
+        data-testid="send-current-input-button"
+        onClick={() => onSend?.(value || 'default message')}
+      >
+        send current input
       </button>
     </div>
   ),
@@ -309,6 +329,212 @@ describe('ChatPanel', () => {
       });
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
+    }
+  });
+
+  it('auto routes rewrite-like input in normal mode to rewrite task flow', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请帮我润色这一段内容',
+        },
+      },
+    }));
+
+    const encoder = new TextEncoder();
+    const streamPayload = [
+      JSON.stringify({ event: 'route', data: { route: 'rewrite' } }),
+      JSON.stringify({
+        event: 'task_accepted',
+        data: {
+          task_id: 'task-rewrite',
+          task_kind: 'rewrite',
+          status: 'queued',
+          queue_position: 0,
+          waiting_count: 0,
+        },
+      }),
+    ].join('\n') + '\n';
+    const originalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      body: {
+        getReader: () => {
+          let consumed = false;
+          return {
+            read: async () => {
+              if (consumed) {
+                return { value: undefined, done: true };
+              }
+              consumed = true;
+              return { value: encoder.encode(streamPayload), done: false };
+            },
+          };
+        },
+      },
+    } as unknown as Response);
+    (globalThis as { fetch?: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      render(<ChatPanel />);
+
+      fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+      await waitFor(() => {
+        const conversation = useChatStore.getState().conversations[0];
+        const draft = useChatStore.getState().getConversationDraft('conv-1');
+        expect(conversation.currentTaskId).toBe('task-rewrite');
+        expect(draft?.pending_rewrite_task_id).toBe('task-rewrite');
+        expect(conversation.messages[0].metadata?.chatKind).toBe('rewrite');
+      });
+
+      expect(fetchMock).toHaveBeenCalled();
+      expect(fetchMock.mock.calls[0][0]).toContain('/api/user/stream');
+      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).force_rewrite).toBe(false);
+    } finally {
+      (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
+    }
+  });
+
+  it('keeps rewrite mode and shows the current invalid rewrite hint when forced rewrite is rejected', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_mode: 'rewrite',
+          rewrite_available: true,
+          chat_input: '今天天气怎么样',
+        },
+      },
+    }));
+
+    const encoder = new TextEncoder();
+    const streamPayload = [
+      JSON.stringify({ event: 'route', data: { route: 'rewrite' } }),
+      JSON.stringify({
+        event: 'error',
+        data: {
+          code: 'REWRITE_PROMPT_INVALID',
+          message: '当前输入不属于可执行的润色指令',
+        },
+      }),
+    ].join('\n') + '\n';
+    const originalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      body: {
+        getReader: () => {
+          let consumed = false;
+          return {
+            read: async () => {
+              if (consumed) {
+                return { value: undefined, done: true };
+              }
+              consumed = true;
+              return { value: encoder.encode(streamPayload), done: false };
+            },
+          };
+        },
+      },
+    } as unknown as Response);
+    (globalThis as { fetch?: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      render(<ChatPanel />);
+
+      fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+      await waitFor(() => {
+        const conversation = useChatStore.getState().conversations[0];
+        const draft = useChatStore.getState().getConversationDraft('conv-1');
+        expect(draft?.chat_mode).toBe('rewrite');
+        expect(conversation.currentTaskId).toBeUndefined();
+        expect(conversation.messages).toHaveLength(2);
+        expect(conversation.messages[1].type).toBe('system');
+        expect(conversation.messages[1].content).toBe('当前输入不属于可执行的润色指令');
+      });
+
+      expect(fetchMock).toHaveBeenCalled();
+      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).force_rewrite).toBe(true);
+    } finally {
+      (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
+    }
+  });
+
+  it('keeps ordinary chat on the streaming path without creating a task', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '你好',
+        },
+      },
+    }));
+
+    const encoder = new TextEncoder();
+    const streamPayload = [
+      JSON.stringify({ event: 'route', data: { route: 'chat' } }),
+      JSON.stringify({ event: 'done', data: { content: '你好，请问有什么可以帮你？' } }),
+    ].join('\n') + '\n';
+    const originalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      body: {
+        getReader: () => {
+          let consumed = false;
+          return {
+            read: async () => {
+              if (consumed) {
+                return { value: undefined, done: true };
+              }
+              consumed = true;
+              return { value: encoder.encode(streamPayload), done: false };
+            },
+          };
+        },
+      },
+    } as unknown as Response);
+    (globalThis as { fetch?: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      render(<ChatPanel />);
+
+      fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+      await waitFor(() => {
+        const conversation = useChatStore.getState().conversations[0];
+        expect(conversation.currentTaskId).toBeUndefined();
+        expect(conversation.messages).toHaveLength(2);
+        expect(conversation.messages[1].type).toBe('ai');
+        expect(conversation.messages[1].status).toBe('completed');
+      });
     } finally {
       (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
     }

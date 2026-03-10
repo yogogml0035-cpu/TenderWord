@@ -8,6 +8,7 @@ from .base_state import BaseState, CommentInstruction, TenderGraphStateBase
 from .xjcg_tender_state import XjcgTenderGraphState
 from .gngk_tender_state import GngkTenderGraphState
 from .rewrite_state import RewriteGraphState
+from .user_state import UserGraphState
 
 __all__ = [
     "BaseState",
@@ -16,4 +17,5 @@ __all__ = [
     "XjcgTenderGraphState",
     "GngkTenderGraphState",
     "RewriteGraphState",
+    "UserGraphState",
 ]

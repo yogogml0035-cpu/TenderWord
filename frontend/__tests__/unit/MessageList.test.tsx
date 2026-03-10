@@ -66,6 +66,19 @@ function createUserMessage(content = '你好'): Message[] {
   ];
 }
 
+function createAiMessage(content = '你好'): Message[] {
+  return [
+    {
+      id: 'msg-ai',
+      conversationId: 'conv-1',
+      type: 'ai',
+      content,
+      timestamp: 1,
+      status: 'completed',
+    },
+  ];
+}
+
 describe('MessageList', () => {
   it('renders task messages in log -> content -> download order', () => {
     render(<MessageList messages={createTaskMessages()} />);
@@ -134,5 +147,19 @@ describe('MessageList', () => {
     const avatar = screen.getByTestId('user-message-avatar');
 
     expect(frame.nextElementSibling).toBe(avatar);
+  });
+
+  it('renders inline markdown safely when the split regex produces optional groups', () => {
+    render(
+      <MessageList
+        messages={createAiMessage('请看 **重点** 和 [文档](https://example.com/doc) 的说明')}
+      />
+    );
+
+    expect(screen.getByText('重点')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '文档' })).toHaveAttribute(
+      'href',
+      'https://example.com/doc'
+    );
   });
 });
