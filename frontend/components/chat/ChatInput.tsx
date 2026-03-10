@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useEffect } from 'react';
 import { ArrowUp, Loader2, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ModelType } from '@/components/forms/ModelSelector';
@@ -34,11 +34,27 @@ export function ChatInput({
   placeholder = '输入消息...',
   loading = false,
 }: ChatInputProps) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const internalTextareaRef = useRef<HTMLTextAreaElement>(null);
   const isCancelAction = actionMode === 'cancel';
   const inputDisabled = disabled;
   const controlsLocked = disabled || loading;
   const sendLocked = disabled || loading || isCancelAction;
+
+  const syncTextareaHeight = useCallback((textarea: HTMLTextAreaElement | null) => {
+    if (!textarea) {
+      return;
+    }
+
+    textarea.style.height = '0px';
+
+    const nextHeight = Math.min(
+      Math.max(textarea.scrollHeight, MIN_TEXTAREA_HEIGHT),
+      MAX_TEXTAREA_HEIGHT
+    );
+
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > MAX_TEXTAREA_HEIGHT ? 'auto' : 'hidden';
+  }, []);
 
   const resetTextareaHeight = useCallback((textarea: HTMLTextAreaElement | null) => {
     if (!textarea) {
@@ -50,13 +66,17 @@ export function ChatInput({
     textarea.scrollTop = 0;
   }, []);
 
+  useEffect(() => {
+    syncTextareaHeight(internalTextareaRef.current);
+  }, [syncTextareaHeight, value]);
+
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
     if (!trimmed || sendLocked) return;
 
     onSend(trimmed);
     onValueChange('');
-    resetTextareaHeight(textareaRef.current);
+    resetTextareaHeight(internalTextareaRef.current);
   }, [onSend, onValueChange, resetTextareaHeight, sendLocked, value]);
 
   const handleCancel = useCallback(() => {
@@ -73,16 +93,7 @@ export function ChatInput({
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const target = e.target;
     onValueChange(target.value);
-
-    target.style.height = '0px';
-
-    const nextHeight = Math.min(
-      Math.max(target.scrollHeight, MIN_TEXTAREA_HEIGHT),
-      MAX_TEXTAREA_HEIGHT
-    );
-
-    target.style.height = `${nextHeight}px`;
-    target.style.overflowY = target.scrollHeight > MAX_TEXTAREA_HEIGHT ? 'auto' : 'hidden';
+    syncTextareaHeight(target);
   };
 
   const isEmpty = !value.trim();
@@ -98,7 +109,7 @@ export function ChatInput({
         <div className="flex flex-col gap-3">
           <div>
             <textarea
-              ref={textareaRef}
+              ref={internalTextareaRef}
               value={value}
               onChange={handleInput}
               onKeyDown={handleKeyDown}

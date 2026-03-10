@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MessageList } from '@/components/chat/MessageList';
 import type { Message } from '@/types/chat';
 
@@ -80,6 +80,15 @@ function createAiMessage(content = '你好'): Message[] {
 }
 
 describe('MessageList', () => {
+  beforeEach(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: jest.fn().mockResolvedValue(undefined),
+      },
+    });
+  });
+
   it('renders task messages in log -> content -> download order', () => {
     render(<MessageList messages={createTaskMessages()} />);
 
@@ -126,11 +135,54 @@ describe('MessageList', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
-  it('renders user messages in a content-sized bubble capped at 40 percent width', () => {
+  it('renders user messages in a content-sized bubble capped above half of the chat width', () => {
     render(<MessageList messages={createUserMessage()} />);
 
-    expect(screen.getByTestId('user-message-frame')).toHaveClass('w-fit', 'max-w-[40%]');
-    expect(screen.getByTestId('user-message-bubble')).toHaveClass('w-fit', 'max-w-full');
+    expect(screen.getByTestId('user-message-frame')).toHaveClass('w-fit', 'max-w-[65%]');
+    expect(screen.getByTestId('user-message-bubble')).toHaveClass(
+      'w-fit',
+      'max-w-full',
+      'bg-blue-500',
+      'rounded-tr-sm'
+    );
+    expect(screen.getByTestId('user-message-actions')).toHaveClass('opacity-0', 'pointer-events-none');
+    expect(screen.getByTestId('user-message-time')).toHaveClass('opacity-100');
+  });
+
+  it('copies the user message from the inline copy button', async () => {
+    render(<MessageList messages={createUserMessage('请复制这段内容')} />);
+
+    fireEvent.mouseEnter(screen.getByTestId('user-message-frame'));
+    fireEvent.click(screen.getByRole('button', { name: '复制用户消息' }));
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('请复制这段内容');
+    });
+  });
+
+  it('shows the inline action row only when hovering the user bubble area', () => {
+    render(<MessageList messages={createUserMessage('悬浮显示操作')} />);
+
+    const frame = screen.getByTestId('user-message-frame');
+    const actions = screen.getByTestId('user-message-actions');
+    const time = screen.getByTestId('user-message-time');
+    const copyButton = screen.getByRole('button', { name: '复制用户消息' });
+
+    expect(actions).toHaveClass('opacity-0', 'pointer-events-none');
+    expect(time).toHaveClass('opacity-100');
+    expect(copyButton).toHaveAttribute('tabindex', '-1');
+
+    fireEvent.mouseEnter(frame);
+
+    expect(actions).toHaveClass('opacity-100');
+    expect(time).toHaveClass('opacity-0');
+    expect(copyButton).toHaveAttribute('tabindex', '0');
+
+    fireEvent.mouseLeave(frame);
+
+    expect(actions).toHaveClass('opacity-0', 'pointer-events-none');
+    expect(time).toHaveClass('opacity-100');
+    expect(copyButton).toHaveAttribute('tabindex', '-1');
   });
 
   it('preserves user-authored line breaks in message bubbles', () => {

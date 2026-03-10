@@ -33,6 +33,25 @@ function ControlledChatInput({
   );
 }
 
+function ProgrammaticValueChatInput() {
+  const [value, setValue] = useState('');
+
+  return (
+    <>
+      <button type="button" onClick={() => setValue('第一行\n第二行\n第三行')}>
+        set value
+      </button>
+      <ChatInput
+        value={value}
+        onValueChange={setValue}
+        onSend={jest.fn()}
+        selectedModel="deepseek"
+        onModelChange={jest.fn()}
+      />
+    </>
+  );
+}
+
 describe('ChatInput', () => {
   it('renders the selected model inside the composer', () => {
     render(<ControlledChatInput />);
@@ -98,6 +117,21 @@ describe('ChatInput', () => {
     });
 
     expect(textarea).toHaveStyle({ height: '180px', overflowY: 'auto' });
+  });
+
+  it('resizes the textarea when the draft is updated programmatically', () => {
+    render(<ProgrammaticValueChatInput />);
+
+    const textarea = screen.getByPlaceholderText('输入消息...') as HTMLTextAreaElement;
+    Object.defineProperty(textarea, 'scrollHeight', {
+      configurable: true,
+      value: 96,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'set value' }));
+
+    expect(textarea).toHaveValue('第一行\n第二行\n第三行');
+    expect(textarea).toHaveStyle({ height: '96px', overflowY: 'hidden' });
   });
 
   it('allows editing while loading in cancel mode without clearing draft on Enter', () => {

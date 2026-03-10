@@ -8,7 +8,7 @@ from langgraph.graph import END, START, StateGraph
 
 from backend.graphs.base_graph import BaseGraph
 from backend.nodes.common_word_nodes import delete_tender_param, update_word
-from backend.nodes.rewrite_nodes import resolve_rewrite_target, rewrite_text
+from backend.nodes.skills_nodes.rewrite_nodes import resolve_rewrite_target, rewrite_text
 from backend.states import RewriteGraphState
 
 

@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useRef, useEffect, useState } from 'react';
-import { User, Bot, Info, Loader2, RefreshCw } from 'lucide-react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { User, Bot, Info, Loader2, RefreshCw, Copy, Check } from 'lucide-react';
 import type { Message } from '@/types/chat';
 import { TaskLogMessage } from './TaskLogMessage';
 import { TaskContentMessage } from './TaskContentMessage';
@@ -84,6 +84,23 @@ function SimpleMarkdown({ content }: { content: string }) {
       })}
     </div>
   );
+}
+
+async function copyPlainText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'absolute';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
 }
 
 export function MessageList({
@@ -200,6 +217,39 @@ interface MessageItemProps {
 }
 
 function MessageItem({ message, interactionDisabled = false, onDownload, onRetry }: MessageItemProps) {
+  const [copied, setCopied] = useState(false);
+  const [showUserActions, setShowUserActions] = useState(false);
+  const copyResetTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current !== null) {
+        window.clearTimeout(copyResetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopyUserMessage = useCallback(() => {
+    if (interactionDisabled || message.type !== 'user' || typeof message.content !== 'string') {
+      return;
+    }
+
+    void copyPlainText(message.content)
+      .then(() => {
+        setCopied(true);
+        if (copyResetTimerRef.current !== null) {
+          window.clearTimeout(copyResetTimerRef.current);
+        }
+        copyResetTimerRef.current = window.setTimeout(() => {
+          setCopied(false);
+          copyResetTimerRef.current = null;
+        }, 1500);
+      })
+      .catch(() => {
+        setCopied(false);
+      });
+  }, [interactionDisabled, message.content, message.type]);
+
   if (message.type === 'ai') {
     const messageKind = message.metadata?.messageKind;
 
@@ -260,24 +310,64 @@ function MessageItem({ message, interactionDisabled = false, onDownload, onRetry
   }
 
   if (message.type === 'user') {
+    const userContent = typeof message.content === 'string' ? message.content : '';
+
     return (
       <div className="animate-fade-in-up flex items-start justify-end gap-3">
-        <div data-testid="user-message-frame" className="min-w-0 w-fit max-w-[40%]">
+        <div
+          data-testid="user-message-frame"
+          className="min-w-0 w-fit max-w-[65%]"
+          onMouseEnter={() => setShowUserActions(true)}
+          onMouseLeave={() => setShowUserActions(false)}
+          onFocusCapture={() => setShowUserActions(true)}
+          onBlurCapture={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setShowUserActions(false);
+            }
+          }}
+        >
           <div
             data-testid="user-message-bubble"
             className="w-fit max-w-full rounded-2xl rounded-tr-sm bg-blue-500 px-4 py-2.5 text-white shadow-sm"
           >
             <p data-testid="user-message-text" className="whitespace-pre-wrap break-words text-sm leading-6">
-              {typeof message.content === 'string' ? message.content : '...'}
+              {userContent || '...'}
             </p>
           </div>
-          <div className="mt-1 text-right">
-            <span className="text-[10px] text-gray-400">
-              {new Date(message.timestamp).toLocaleTimeString('zh-CN', {
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </span>
+
+          <div className="relative mt-1 h-7">
+            <div
+              data-testid="user-message-time"
+              className={`absolute inset-y-0 right-0 flex items-center transition-opacity duration-150 ${
+                showUserActions ? 'opacity-0' : 'opacity-100'
+              }`}
+            >
+              <span className="text-[10px] text-gray-400">
+                {new Date(message.timestamp).toLocaleTimeString('zh-CN', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </span>
+            </div>
+
+            <div
+              data-testid="user-message-actions"
+              className={`absolute inset-y-0 right-0 flex items-center gap-3 text-slate-400 transition-opacity duration-150 ${
+                showUserActions ? 'opacity-100' : 'pointer-events-none opacity-0'
+              }`}
+            >
+              <button
+                type="button"
+                aria-label="复制用户消息"
+                title="复制用户消息"
+                onClick={handleCopyUserMessage}
+                disabled={!userContent || interactionDisabled}
+                tabIndex={showUserActions ? 0 : -1}
+                className="inline-flex h-7 w-7 items-center justify-center transition-colors duration-200 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
         </div>
 
