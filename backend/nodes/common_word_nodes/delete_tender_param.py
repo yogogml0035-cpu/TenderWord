@@ -1,33 +1,21 @@
 """
-统一删除招标参数节点
-
-从文档中删除锚点之间的内容，基于前后锚点定位。
-支持多种招标类型（询价采购、国内公开等），通过 tender_type 参数动态调整字体大小。
-
-使用 find_anchor_range() 统一双策略定位：
-1. 段落扫描优先（从 GNGK 实现）
-2. Find.Execute 兜底（从 XJCG 实现）
-
-删除策略：
-1. 优先大块删除（效率高）
-2. 失败时逐元素删除（表格优先，然后段落）
-3. 保护字段检测：跳过受保护内容
+统一删除招标参数节点（回归 master 风格）。
 """
 
 from __future__ import annotations
 
 import os
-import re
-import time
 import pathlib
+import re
 import sys
+import time
 
 # 添加项目根目录到 sys.path
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 
 from backend.states import TenderGraphStateBase
 from backend.config.tender_config import TARGET_SIZES
@@ -38,10 +26,15 @@ from backend.util.word_util import (
     open_document_with_retry,
     save_document_with_retry,
     unprotect_document,
+    wdCollapseEnd,
+    wdFindStop,
     wdGoToPage,
     wdGoToAbsolute,
 )
-from backend.util.word_util.anchor_utils import find_anchor_range
+from backend.util.word_util.anchor_utils import (
+    find_anchor_range,
+    iter_anchor_text_variants,
+)
 
 NODE_NAME = "delete_tender_param"
 HEARTBEAT_INTERVAL_SECONDS = 5.0
@@ -75,50 +68,45 @@ def _check_cancelled(config) -> None:
         raise TaskCancelledException(f"任务 {task_id} 已被用户取消")
 
 
-
-def _find_anchor_fast(doc, text: str, min_start: int = 0) -> Optional[Dict[str, int]]:
-    """
-    快速查找锚点（不获取页码信息），用于循环中的 refresh。
-
-    Args:
-        doc: Word 文档对象
-        text: 要匹配的文本
-        min_start: 最小起始位置（用于过滤）
-
-    Returns:
-        {"start": int, "end": int} 或 None
-    """
-    for para in doc.Paragraphs:
-        try:
-            rng = para.Range
-            if rng.Start < min_start:
-                continue
-            if rng.Text.strip() == text:
-                return {"start": int(rng.Start), "end": int(rng.End)}
-        except Exception:
-            pass
+def _find_anchor_fast(
+    doc_content, text: str, min_start: int = 0, target_size: float = 18.0
+) -> Optional[Dict[str, int]]:
+    """沿用 master/xjcg 的 Find.Execute 逻辑快速重定位后置锚点。"""
+    candidates = iter_anchor_text_variants(text)
+    for candidate in candidates:
+        find_rng = doc_content.Duplicate
+        find_rng.Start = max(0, int(min_start))
+        find_rng.End = doc_content.End
+        finder = find_rng.Find
+        finder.ClearFormatting()
+        finder.Text = candidate
+        finder.Forward = True
+        finder.Wrap = wdFindStop
+        finder.MatchCase = False
+        finder.MatchWholeWord = False
+        while finder.Execute():
+            try:
+                font_name = str(find_rng.Font.Name)
+                font_size = float(find_rng.Font.Size)
+                is_font = font_name in ("宋体", "SimSun")
+                is_size = abs(font_size - float(target_size)) < 0.5
+                if is_font and is_size:
+                    return {"start": int(find_rng.Start), "end": int(find_rng.End)}
+            except Exception:
+                pass
+            find_rng.Collapse(wdCollapseEnd)
+            find_rng.End = doc_content.End
     return None
 
 
 def _is_range_locked(rng, doc) -> bool:
-    """
-    检测范围是否被保护（含字段保护检测）。
-
-    Args:
-        rng: Word Range 对象
-        doc: Word Document 对象
-
-    Returns:
-        True 如果被保护，False 如果可编辑
-    """
-    # 检查 Range.Locked 属性
+    """检测范围是否被保护（含字段保护检测）。"""
     try:
         if hasattr(rng, "Locked") and rng.Locked:
             return True
     except Exception:
         pass
 
-    # 检查字段锁定
     try:
         fields = rng.Fields
         count = fields.Count
@@ -132,9 +120,8 @@ def _is_range_locked(rng, doc) -> bool:
     except Exception:
         pass
 
-    # 通过尝试写入检测保护
     try:
-        marker = "\u200b"  # 零宽空格
+        marker = "\u200b"
         test_pos = rng.End
         probe_rng = doc.Range(test_pos, test_pos)
         probe_rng.InsertAfter(marker)
@@ -150,15 +137,21 @@ def _is_range_locked(rng, doc) -> bool:
 
 
 def _find_paragraph_containing_any(
-    doc, texts: tuple[str, ...], min_start: int = 0
+    doc,
+    texts: tuple[str, ...],
+    min_start: int = 0,
+    max_start: Optional[int] = None,
 ):
     """在指定起点之后，查找首个包含任一文本的段落。"""
-
     for para in doc.Paragraphs:
         try:
             rng = para.Range
-            if int(rng.End) < int(min_start):
+            range_start = int(rng.Start)
+            range_end = int(rng.End)
+            if range_end < int(min_start):
                 continue
+            if max_start is not None and range_start > int(max_start):
+                break
             para_text = str(getattr(rng, "Text", "") or "")
             if any(text in para_text for text in texts):
                 return rng
@@ -169,7 +162,6 @@ def _find_paragraph_containing_any(
 
 def _find_first_visible_insert_offset(paragraph_text: str) -> int:
     """优先将换行插入到编号前，否则回退到首个可见字符前。"""
-
     if not paragraph_text:
         return 0
 
@@ -183,39 +175,115 @@ def _find_first_visible_insert_offset(paragraph_text: str) -> int:
     return 0
 
 
+def _find_safe_insert_position(
+    doc,
+    candidate_positions,
+    *,
+    max_forward_scan_chars: int = 0,
+    field_name: str = "",
+    log=_visible_log,
+) -> Optional[int]:
+    """在候选位置中寻找首个可编辑插入点，必要时向后探测。"""
+    try:
+        doc_end = int(doc.Content.End)
+    except Exception:
+        return None
+
+    seen_positions: set[int] = set()
+    locked_positions = 0
+
+    for candidate in candidate_positions:
+        if candidate is None:
+            continue
+        base_pos = min(max(0, int(candidate)), doc_end)
+        for offset in range(max_forward_scan_chars + 1):
+            pos = min(base_pos + offset, doc_end)
+            if pos in seen_positions:
+                continue
+            seen_positions.add(pos)
+
+            try:
+                probe_rng = doc.Range(pos, pos)
+            except Exception:
+                continue
+
+            if _is_range_locked(probe_rng, doc):
+                locked_positions += 1
+                continue
+
+            if log and offset > 0 and field_name:
+                log(
+                    f'{field_name}字段候选位置受保护，改用偏移 {offset} 的可编辑位置'
+                )
+            return pos
+
+    if log and field_name and locked_positions > 0:
+        log(f'{field_name}字段跳过了 {locked_positions} 个受保护位置')
+    return None
+
+
 def _insert_paragraph_break_before_delivery(
-    doc, delivery_para_rng, fallback_pos: Optional[int]
+    doc,
+    delivery_para_rng,
+    fallback_pos: Optional[int],
+    *,
+    tender_type: str = "xjcg",
+    log=_visible_log,
 ) -> bool:
     """在交付日期段落前补一个段落边界，失败时回退到原删除起点。"""
-
-    inserted = False
-
+    paragraph_candidates = []
     if delivery_para_rng is not None:
         try:
             para_text_raw = str(getattr(delivery_para_rng, "Text", "") or "")
-            insert_offset = _find_first_visible_insert_offset(para_text_raw)
-            insert_pos = int(delivery_para_rng.Start) + int(insert_offset)
-            doc.Range(insert_pos, insert_pos).InsertBefore("\r")
-            inserted = True
-        except Exception:
-            inserted = False
+            primary_offset = _find_first_visible_insert_offset(para_text_raw)
+            paragraph_start = int(delivery_para_rng.Start)
+            paragraph_candidates = [
+                paragraph_start + primary_offset,
+                paragraph_start,
+            ]
 
-    if inserted or fallback_pos is None:
-        return inserted
+            safe_insert_pos = _find_safe_insert_position(
+                doc,
+                paragraph_candidates,
+                max_forward_scan_chars=24 if tender_type == "gngk" else 8,
+                field_name="交付日期",
+                log=log,
+            )
+            if safe_insert_pos is not None:
+                doc.Range(safe_insert_pos, safe_insert_pos).InsertBefore("\r")
+                return True
+        except Exception:
+            pass
+
+    if fallback_pos is None:
+        return False
+
+    fallback_insert_pos = _find_safe_insert_position(
+        doc,
+        [fallback_pos],
+        max_forward_scan_chars=24 if tender_type == "gngk" else 8,
+        field_name="交付日期",
+        log=log,
+    )
+    if fallback_insert_pos is None:
+        return False
 
     try:
-        safe_pos = min(max(0, int(fallback_pos)), int(doc.Content.End))
-        doc.Range(safe_pos, safe_pos).InsertParagraphAfter()
+        doc.Range(fallback_insert_pos, fallback_insert_pos).InsertParagraphAfter()
         return True
     except Exception:
         return False
 
 
 def _ensure_paragraph_break_after_payment(
-    doc, payment_para_rng, max_scan_chars: int = 4000
+    doc,
+    payment_para_rng,
+    max_scan_chars: int = 4000,
+    *,
+    tender_type: str = "xjcg",
+    log=_visible_log,
 ) -> bool:
     """在付款方式段落后补回车，必要时跳过受保护位置向后探测。"""
-
     if payment_para_rng is None:
         return False
 
@@ -238,42 +306,69 @@ def _ensure_paragraph_break_after_payment(
         return False
 
     max_pos = min(doc_end, payment_end + max_scan_chars)
-    for pos in range(payment_end, max_pos + 1):
-        try:
-            probe_rng = doc.Range(pos, pos)
-            if _is_range_locked(probe_rng, doc):
-                continue
-            probe_rng.InsertBefore("\r")
-            return True
-        except Exception:
-            continue
-    return False
+    safe_insert_pos = _find_safe_insert_position(
+        doc,
+        range(payment_end, max_pos + 1),
+        max_forward_scan_chars=8 if tender_type == "gngk" else 0,
+        field_name="付款方式",
+        log=log,
+    )
+    if safe_insert_pos is None:
+        return False
+
+    try:
+        doc.Range(safe_insert_pos, safe_insert_pos).InsertBefore("\r")
+        return True
+    except Exception:
+        return False
 
 
 def _restore_protected_field_paragraph_boundaries(
     doc,
     before_text: str,
     before_end_pos: Optional[int],
+    *,
+    target_size: float = 18.0,
+    tender_type: str = "xjcg",
     log=_visible_log,
 ) -> None:
-    """恢复删除后受保护字段周围的段落边界，避免字段与正文黏连触发重新分页。"""
+    """恢复删除后受保护字段周围的段落边界，避免字段与正文黏连。"""
+    del before_text, target_size
 
-    refreshed_before = _find_anchor_fast(doc, before_text)
-    search_start = (
-        int(refreshed_before["end"])
-        if refreshed_before and refreshed_before.get("end") is not None
-        else int(before_end_pos or 0)
-    )
+    try:
+        doc_end = int(doc.Content.End)
+    except Exception:
+        doc_end = 0
+
+    search_start = min(max(0, int(before_end_pos or 0)), doc_end)
+    search_window = 20000 if tender_type == "gngk" else 12000
+    search_end = min(doc_end, search_start + search_window)
+
+    if log:
+        log(
+            f"开始修复删除后段落边界，扫描范围 {search_start}-{search_end}"
+        )
 
     delivery_para_rng = _find_paragraph_containing_any(
-        doc, ("交付日期：", "交付日期:"), min_start=search_start
+        doc,
+        ("交付日期：", "交付日期:"),
+        min_start=search_start,
+        max_start=search_end,
     )
+    if log:
+        log('开始修复"交付日期"前的段落边界')
     if delivery_para_rng is None:
-        print('[delete_tender_param] 提示: 未找到"交付日期"锚点，回退到删除起点补段落边界')
+        print(
+            '[delete_tender_param] 提示: 在局部扫描范围内未找到"交付日期"锚点，回退到删除起点补段落边界'
+        )
         if log:
-            log('未找到"交付日期"字段，回退到删除起点补段落边界')
+            log('在局部扫描范围内未找到"交付日期"字段，回退到删除起点补段落边界')
     delivery_fixed = _insert_paragraph_break_before_delivery(
-        doc, delivery_para_rng, before_end_pos
+        doc,
+        delivery_para_rng,
+        before_end_pos,
+        tender_type=tender_type,
+        log=log,
     )
     if delivery_fixed:
         print('[delete_tender_param] 已补齐"交付日期"前的段落边界')
@@ -285,15 +380,25 @@ def _restore_protected_field_paragraph_boundaries(
             log('未能补齐"交付日期"前的段落边界')
 
     payment_para_rng = _find_paragraph_containing_any(
-        doc, ("付款方式：", "付款方式:"), min_start=search_start
+        doc,
+        ("付款方式：", "付款方式:"),
+        min_start=search_start,
+        max_start=search_end,
     )
+    if log:
+        log('开始修复"付款方式"后的回车')
     if payment_para_rng is None:
-        print('[delete_tender_param] 提示: 未找到"付款方式"锚点，跳过补回车')
+        print('[delete_tender_param] 提示: 在局部扫描范围内未找到"付款方式"锚点，跳过补回车')
         if log:
-            log('未找到"付款方式"字段，跳过补回车')
+            log('在局部扫描范围内未找到"付款方式"字段，跳过补回车')
         return
 
-    if _ensure_paragraph_break_after_payment(doc, payment_para_rng):
+    if _ensure_paragraph_break_after_payment(
+        doc,
+        payment_para_rng,
+        tender_type=tender_type,
+        log=log,
+    ):
         print('[delete_tender_param] 已补齐"付款方式"后的回车')
         if log:
             log('已补齐"付款方式"后的回车')
@@ -377,6 +482,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
 
         # 使用统一的工具函数取消文档保护
         unprotect_document(doc, node_name="delete_tender_param")
+        doc_content = doc.Content
 
         # === 使用统一的双策略查找锚点 ===
         print(f"[delete_tender_param] 正在查找锚点...")
@@ -404,11 +510,24 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
             _visible_log(msg)
             raise ValueError(msg)
 
-        before_page = before_hit["page"]
-        before_end_pos = before_hit["end"]
-        after_page = after_hit["page"]
-        after_start_pos = after_hit["start"]
-        after_end_pos = after_hit["end"]
+        used_before_text = before_hit.get("used_text", before_text)
+        used_after_text = after_hit.get("used_text", after_text)
+        if used_before_text != before_text:
+            print(
+                f"[delete_tender_param] 前置锚点 '{before_text}' 未命中，改用 '{used_before_text}'"
+            )
+            before_text = used_before_text
+        if used_after_text != after_text:
+            print(
+                f"[delete_tender_param] 后置锚点 '{after_text}' 未命中，改用 '{used_after_text}'"
+            )
+            after_text = used_after_text
+
+        before_page = int(before_hit["page"])
+        before_end_pos = int(before_hit["end"])
+        after_page = int(after_hit["page"])
+        after_start_pos = int(after_hit["start"])
+        after_end_pos = int(after_hit["end"])
 
         print(
             f"✅ 前置锚点: 页={before_page}, end={before_end_pos}, 字体={before_hit['font']}, 字号={before_hit['size']}"
@@ -482,11 +601,16 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
 
             # 每 50 步刷新一次文档末尾位置
             if step_idx % 50 == 0:
-                doc_end = doc.Content.End
+                doc_end = doc_content.End
 
             # 快速重新定位后置锚点（不获取页码）
             t0 = time.time()
-            after_hit_refresh = _find_anchor_fast(doc, after_text, current_pos)
+            after_hit_refresh = _find_anchor_fast(
+                doc_content,
+                after_text,
+                min_start=current_pos,
+                target_size=target_size,
+            )
             perf_stats["refresh_time"] += time.time() - t0
 
             if not after_hit_refresh:
@@ -545,7 +669,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                     tbl = tables(1)  # 使用索引而不是 list()
                     tbl_rng = tbl.Range
 
-                    # 检查表格是否超出删除范围（保护感知）
+                    # 检查表格是否超出删除范围
                     if tbl_rng.End > after_start_pos:
                         # 只删除到锚点之前
                         safe_del_rng = doc.Range(tbl_rng.Start, after_start_pos)
@@ -561,9 +685,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                         perf_stats["table_time"] += time.time() - t0
                         continue
 
-                    # 检查表格是否受保护
                     if _is_range_locked(tbl_rng, doc):
-                        # 跳过受保护表格，移动指针到表格末尾继续
                         current_pos = min(tbl_rng.End, after_start_pos)
                         deleted_something = True
                         perf_stats["table_time"] += time.time() - t0
@@ -593,7 +715,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                     if paras.Count > 0:
                         para_rng = paras(1).Range  # 使用索引而不是 list()
 
-                        # 检查段落是否超出删除范围（保护感知）
+                        # 检查段落是否超出删除范围
                         if para_rng.End > after_start_pos:
                             safe_del_rng = doc.Range(para_rng.Start, after_start_pos)
                             if _is_range_locked(safe_del_rng, doc):
@@ -608,9 +730,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                             perf_stats["para_time"] += time.time() - t0
                             continue
 
-                        # 检查段落是否受保护
                         if _is_range_locked(para_rng, doc):
-                            # 跳过受保护段落，移动指针到段末
                             current_pos = min(para_rng.End, after_start_pos)
                             deleted_something = True
                             perf_stats["para_time"] += time.time() - t0
@@ -639,7 +759,6 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                     if chunk_size > 0:
                         chunk_end = current_pos + chunk_size
                         small_rng = doc.Range(current_pos, chunk_end)
-                        # 检查保护
                         if _is_range_locked(small_rng, doc):
                             current_pos = chunk_end
                             deleted_something = True
@@ -684,6 +803,8 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                 doc=doc,
                 before_text=before_text,
                 before_end_pos=before_end_pos,
+                target_size=target_size,
+                tender_type=tender_type,
             )
         except Exception as layout_e:
             print(f"[delete_tender_param] 警告: 删除后段落边界修正失败: {layout_e}")

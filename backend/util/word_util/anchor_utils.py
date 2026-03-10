@@ -1,166 +1,240 @@
 """
-锚点定位工具函数
+锚点定位工具函数（回归 master 语义）。
 
-统一提供两种锚点定位策略：
-1. 段落扫描（_iter_paragraph_hits + _pick_anchor）- 从 GNGK 提取
-2. Find.Execute 兜底（find_anchor_with_find）- 从 XJCG 提取
-
-使用 find_anchor_range() 统一调用，自动选择最佳策略。
+核心语义：
+1. 文本按空格变体递减匹配；
+2. 段落扫描优先，严格字体/字号候选优先；
+3. Find.Execute 作为兜底。
 """
 
 from __future__ import annotations
 
-from typing import Optional, Dict, List, Tuple, Any
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
-from backend.util.word_util import (
+from backend.util.word_util.word_constants import (
     wdActiveEndPageNumber,
-    wdFindStop,
     wdCollapseEnd,
+    wdFindStop,
 )
 
 
-def _iter_paragraph_hits(doc, text: str, target_size: float) -> List[Dict[str, Any]]:
+def iter_anchor_text_variants(text: str) -> List[str]:
+    """生成锚点文本的空格变体序列。"""
+    if text is None:
+        return []
+    cur = str(text).replace("\u3000", " ")
+    variants: List[str] = []
+    seen: set[str] = set()
+    while True:
+        if cur not in seen:
+            variants.append(cur)
+            seen.add(cur)
+        if " " not in cur:
+            break
+        if "  " in cur:
+            cur = re.sub(r" {2,}", lambda m: " " * (len(m.group(0)) - 1), cur)
+        else:
+            cur = cur.replace(" ", "")
+    return variants
+
+
+def find_anchor_with_variants(text: str, find_once):
+    """按文本变体依次调用查找函数，命中即返回。"""
+    for candidate in iter_anchor_text_variants(text):
+        hit = find_once(candidate)
+        if hit:
+            return hit, candidate
+    return None, text
+
+
+def norm_space_text(text: str) -> str:
+    """规整文本中的连续空白。"""
+    if text is None:
+        return ""
+    normalized = str(text).replace("\u3000", " ")
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
+
+
+def iter_paragraph_anchor_hits(
+    doc,
+    text: str,
+    target_size: float,
+    *,
+    fonts=None,
+    normalize_space: bool = False,
+    strip_control: bool = False,
+    with_page_info: bool = True,
+) -> List[Dict[str, Any]]:
     """
-    遍历所有段落，返回所有匹配 text 且字号接近 target_size 的候选。
+    段落扫描命中集合。
 
-    从 GNGK extract_tender_params 提取的段落扫描逻辑。
-
-    Args:
-        doc: Word 文档对象
-        text: 要查找的文本（精确匹配，去除首尾空白）
-        target_size: 目标字号（如 18.0 或 22.0）
-
-    Returns:
-        候选列表，每个候选包含：
-        - page: 页码
-        - start: 起始位置
-        - end: 结束位置
-        - font: 字体名称
-        - size: 字号
-        - is_font: 是否匹配目标字体（宋体/SimSun）
-        - is_size: 是否匹配目标字号（容差 < 0.5）
+    语义与 master 保持一致：先文本匹配，再计算字体/字号匹配标记。
     """
-    hits = []
+    if fonts is None:
+        fonts = ("宋体", "SimSun")
+    want = norm_space_text(text) if normalize_space else ("" if text is None else str(text).strip())
+    hits: List[Dict[str, Any]] = []
     for para in doc.Paragraphs:
         try:
             raw = para.Range.Text
-            stripped = raw.strip()
-            if stripped != text:
+            if strip_control:
+                raw = raw.replace("\r", "").replace("\a", "")
+            got = norm_space_text(raw) if normalize_space else str(raw).strip()
+            if got != want:
                 continue
-
             font_name = para.Range.Font.Name
             font_size = para.Range.Font.Size
-            page = para.Range.Information(wdActiveEndPageNumber)
-
-            # 字体可放宽：只要是宋体/SimSun即可；字号按容差匹配
-            is_font = font_name == "宋体" or font_name == "SimSun"
+            is_font = str(font_name) in fonts
             is_size = abs(float(font_size) - float(target_size)) < 0.5
-
-            hits.append(
-                {
-                    "page": int(page),
-                    "start": int(para.Range.Start),
-                    "end": int(para.Range.End),
-                    "font": str(font_name),
-                    "size": float(font_size),
-                    "is_font": is_font,
-                    "is_size": is_size,
-                }
-            )
+            hit = {
+                "start": int(para.Range.Start),
+                "end": int(para.Range.End),
+                "font": str(font_name),
+                "size": float(font_size),
+                "is_font": is_font,
+                "is_size": is_size,
+            }
+            if with_page_info:
+                hit["page"] = int(para.Range.Information(wdActiveEndPageNumber))
+            hits.append(hit)
         except Exception:
             continue
     return hits
 
 
-def _pick_anchor(
-    hits: List[Dict[str, Any]], prefer_last: bool = True
-) -> Optional[Dict[str, Any]]:
+def iter_paragraph_anchor_hits_with_variants(
+    doc,
+    text: str,
+    target_size: float,
+    *,
+    fonts=None,
+    normalize_space: bool = False,
+    strip_control: bool = False,
+    with_page_info: bool = True,
+) -> Tuple[List[Dict[str, Any]], str]:
+    """按文本变体扫描段落，返回首个命中的候选集与命中文本。"""
+    for candidate in iter_anchor_text_variants(text):
+        hits = iter_paragraph_anchor_hits(
+            doc,
+            candidate,
+            target_size,
+            fonts=fonts,
+            normalize_space=normalize_space,
+            strip_control=strip_control,
+            with_page_info=with_page_info,
+        )
+        if hits:
+            return hits, candidate
+    return [], text
+
+
+def pick_anchor(hits: List[Dict[str, Any]], prefer_last: bool = True) -> Optional[Dict[str, Any]]:
     """
-    从候选里选一个锚点：默认选页码最大的（避开目录）。
+    从候选中选锚点。
 
-    从 GNGK extract_tender_params 提取的命中选取逻辑。
-
-    Args:
-        hits: _iter_paragraph_hits 返回的候选列表
-        prefer_last: True 则选页码最大的（默认），False 则选页码最小的
-
-    Returns:
-        选中的候选字典，如果无候选则返回 None
+    规则：严格匹配（字体+字号）优先；然后按页码+start 排序，取 first/last。
     """
     if not hits:
         return None
-    # 优先：字体正确 + 字号正确
-    strict = [h for h in hits if h["is_font"] and h["is_size"]]
+    strict = [h for h in hits if h.get("is_font") and h.get("is_size")]
     pool = strict if strict else hits
-    pool.sort(key=lambda x: (x["page"], x["start"]))
+    if pool and "page" in pool[0]:
+        pool.sort(key=lambda x: (x.get("page", 0), x.get("start", 0)))
+    else:
+        pool.sort(key=lambda x: x.get("start", 0))
     return pool[-1] if prefer_last else pool[0]
+
+
+def pick_after_anchor(hits: List[Dict[str, Any]], min_start: int) -> Optional[Dict[str, Any]]:
+    """选取起始位置不小于 min_start 的最早后置锚点。"""
+    if not hits:
+        return None
+    hits2 = [h for h in hits if int(h.get("start", -1)) >= int(min_start)]
+    if not hits2:
+        return None
+    strict = [h for h in hits2 if h.get("is_font") and h.get("is_size")]
+    pool = strict if strict else hits2
+    pool.sort(key=lambda x: (x.get("start", 0), x.get("page", 0)))
+    return pool[0]
+
+
+def find_word_anchor(
+    doc_content,
+    text: str,
+    start_pos: int = 0,
+    target_size: float = 18.0,
+    fonts=None,
+) -> Optional[Dict[str, Any]]:
+    """用 Find.Execute 按文本变体查找锚点。"""
+    if fonts is None:
+        fonts = ("宋体", "SimSun")
+
+    def _find_once(candidate: str) -> Optional[Dict[str, Any]]:
+        find_rng = doc_content.Duplicate
+        find_rng.Start = max(0, int(start_pos))
+        find_rng.End = doc_content.End
+        finder = find_rng.Find
+        finder.ClearFormatting()
+        finder.Text = candidate
+        finder.Forward = True
+        finder.Wrap = wdFindStop
+        finder.MatchCase = False
+        finder.MatchWholeWord = False
+        while finder.Execute():
+            try:
+                font_name = find_rng.Font.Name
+                font_size = find_rng.Font.Size
+                is_font = str(font_name) in fonts
+                is_size = abs(float(font_size) - float(target_size)) < 0.5
+                if is_font and is_size:
+                    page = find_rng.Information(wdActiveEndPageNumber)
+                    return {
+                        "page": int(page),
+                        "start": int(find_rng.Start),
+                        "end": int(find_rng.End),
+                        "used_text": candidate,
+                        "font": str(font_name),
+                        "size": float(font_size),
+                        "is_font": is_font,
+                        "is_size": is_size,
+                    }
+            except Exception:
+                pass
+            find_rng.Collapse(wdCollapseEnd)
+            find_rng.End = doc_content.End
+        return None
+
+    for candidate in iter_anchor_text_variants(text):
+        hit = _find_once(candidate)
+        if hit:
+            hit["used_text"] = candidate
+            return hit
+    return None
+
+
+def _iter_paragraph_hits(doc, text: str, target_size: float) -> List[Dict[str, Any]]:
+    """兼容旧名称：段落扫描候选。"""
+    return iter_paragraph_anchor_hits(doc, text, target_size)
+
+
+def _pick_anchor(hits: List[Dict[str, Any]], prefer_last: bool = True) -> Optional[Dict[str, Any]]:
+    """兼容旧名称：候选选择。"""
+    return pick_anchor(hits, prefer_last=prefer_last)
 
 
 def find_anchor_with_find(
     doc, text: str, target_size: float, start_pos: int = None
 ) -> Optional[Dict[str, Any]]:
-    """
-    使用 Find.Execute 查找锚点（兜底策略）。
-
-    从 XJCG extract_tender_params 提取的 Find.Execute 循环查找逻辑。
-    当段落扫描找不到时，使用此方法作为兜底。
-
-    Args:
-        doc: Word 文档对象
-        text: 要查找的文本
-        target_size: 目标字号（如 18.0）
-        start_pos: 搜索起始位置（可选，默认从文档开头）
-
-    Returns:
-        找到的锚点字典，包含 page, start, end, font, size；
-        如果未找到则返回 None
-    """
-    doc_content = doc.Content
-    find_rng = doc_content.Duplicate
-
-    # 如果指定了起始位置，调整搜索范围
-    if start_pos is not None:
-        find_rng.Start = start_pos
-        find_rng.End = doc_content.End
-
-    find_obj = find_rng.Find
-    find_obj.ClearFormatting()
-    find_obj.Text = text
-    find_obj.Forward = True
-    find_obj.Wrap = wdFindStop
-    find_obj.MatchCase = False
-    find_obj.MatchWholeWord = False
-
-    while find_obj.Execute():
-        try:
-            # 检查字体和字号
-            font_name = find_rng.Font.Name
-            font_size = find_rng.Font.Size
-            is_font = font_name == "宋体" or font_name == "SimSun"
-            is_size = abs(font_size - target_size) < 0.5
-
-            if is_font and is_size:
-                page = find_rng.Information(wdActiveEndPageNumber)
-                return {
-                    "page": int(page),
-                    "start": int(find_rng.Start),
-                    "end": int(find_rng.End),
-                    "font": str(font_name),
-                    "size": float(font_size),
-                    "is_font": is_font,
-                    "is_size": is_size,
-                }
-            else:
-                # 继续搜索下一个匹配项
-                find_rng.Collapse(wdCollapseEnd)
-                find_rng.End = doc_content.End
-        except Exception:
-            # 出错时继续搜索
-            find_rng.Collapse(wdCollapseEnd)
-            find_rng.End = doc_content.End
-            continue
-
-    return None
+    """兼容旧名称：Find.Execute 兜底。"""
+    actual_start = 0 if start_pos is None else int(start_pos)
+    return find_word_anchor(
+        doc_content=doc.Content,
+        text=text,
+        start_pos=actual_start,
+        target_size=target_size,
+    )
 
 
 def find_anchor_range(
@@ -171,58 +245,63 @@ def find_anchor_range(
     prefer_before: str = "last",
     prefer_after: str = "first",
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
-    """
-    统一双策略函数：查找前置锚点和后置锚点。
-
-    策略：
-    1. 先尝试段落扫描（_iter_paragraph_hits + _pick_anchor）
-    2. 若无候选，启用 Find.Execute 兜底（find_anchor_with_find）
-
-    Args:
-        doc: Word 文档对象
-        before_text: 前置锚点文本
-        after_text: 后置锚点文本
-        target_size: 目标字号（18.0 用于询价，22.0 用于国内公开）
-        prefer_before: 前置锚点选取策略，'last' 选页码最大的（避开目录），'first' 选最小的
-        prefer_after: 后置锚点选取策略，'first' 选页码最小的（第一个后续章节），'last' 选最大的
-
-    Returns:
-        (before_dict, after_dict) 元组：
-        - before_dict: 前置锚点信息，包含 page, start, end, font, size 等
-        - after_dict: 后置锚点信息
-        - 如果某个锚点未找到，对应项为 None
-    """
-    # === 1. 查找前置锚点 ===
-    # 尝试段落扫描
-    before_hits = _iter_paragraph_hits(doc, before_text, target_size)
-    before_hit = _pick_anchor(before_hits, prefer_last=(prefer_before == "last"))
-
-    # 如果段落扫描失败，使用 Find.Execute 兜底
+    """统一查找前后锚点：段落扫描优先，Find.Execute 兜底。"""
+    before_hits, used_before_text = iter_paragraph_anchor_hits_with_variants(
+        doc,
+        before_text,
+        target_size,
+        normalize_space=True,
+        strip_control=False,
+        with_page_info=True,
+    )
+    before_hit = pick_anchor(before_hits, prefer_last=(prefer_before == "last"))
+    if before_hit:
+        before_hit = dict(before_hit)
+        before_hit.setdefault("used_text", used_before_text)
     if not before_hit:
-        before_hit = find_anchor_with_find(doc, before_text, target_size)
-
+        before_hit = find_word_anchor(
+            doc_content=doc.Content,
+            text=before_text,
+            start_pos=0,
+            target_size=target_size,
+        )
     if not before_hit:
-        return (None, None)
+        return None, None
 
-    before_end_pos = before_hit["end"]
-
-    # === 2. 查找后置锚点 ===
-    # 尝试段落扫描（只保留在前置锚点之后出现的）
-    after_hits = _iter_paragraph_hits(doc, after_text, target_size)
-    after_hits = [h for h in after_hits if h["start"] >= before_end_pos]
-    after_hit = _pick_anchor(after_hits, prefer_last=(prefer_after == "last"))
-
-    # 如果段落扫描失败，使用 Find.Execute 兜底（从前置锚点之后开始）
+    before_end_pos = int(before_hit["end"])
+    after_hits, used_after_text = iter_paragraph_anchor_hits_with_variants(
+        doc,
+        after_text,
+        target_size,
+        normalize_space=True,
+        strip_control=False,
+        with_page_info=True,
+    )
+    after_hits = [h for h in after_hits if int(h.get("start", -1)) >= before_end_pos]
+    after_hit = pick_anchor(after_hits, prefer_last=(prefer_after == "last"))
+    if after_hit:
+        after_hit = dict(after_hit)
+        after_hit.setdefault("used_text", used_after_text)
     if not after_hit:
-        after_hit = find_anchor_with_find(
-            doc, after_text, target_size, start_pos=before_end_pos
+        after_hit = find_word_anchor(
+            doc_content=doc.Content,
+            text=after_text,
+            start_pos=before_end_pos,
+            target_size=target_size,
         )
 
-    return (before_hit, after_hit)
+    return before_hit, after_hit
 
 
-# 导出的公共 API
 __all__ = [
+    "iter_anchor_text_variants",
+    "find_anchor_with_variants",
+    "find_word_anchor",
+    "norm_space_text",
+    "iter_paragraph_anchor_hits",
+    "iter_paragraph_anchor_hits_with_variants",
+    "pick_anchor",
+    "pick_after_anchor",
     "find_anchor_range",
     "find_anchor_with_find",
     "_iter_paragraph_hits",

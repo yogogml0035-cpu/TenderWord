@@ -67,4 +67,21 @@ describe('useTaskHeartbeat', () => {
       expect(onTerminalState).toHaveBeenCalledWith('task-2', 'cancelled');
     });
   });
+
+  it('notifies the caller when heartbeat reports TASK_NOT_FOUND after backend restart', async () => {
+    const onMissingTask = jest.fn();
+    mockSendTaskHeartbeat.mockRejectedValue(
+      Object.assign(new Error('任务不存在'), { code: 'TASK_NOT_FOUND', status: 404 })
+    );
+
+    renderHook(() =>
+      useTaskHeartbeat(['task-3'], {
+        onMissingTask,
+      })
+    );
+
+    await waitFor(() => {
+      expect(onMissingTask).toHaveBeenCalledWith('task-3');
+    });
+  });
 });

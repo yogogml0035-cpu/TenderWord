@@ -163,6 +163,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
     getCurrentConversation,
     cancelTask: cancelChatTask,
     completeTask: completeChatTask,
+    discardStaleTask,
     failTask: failChatTask,
     startTask,
     upsertTaskSummary,
@@ -291,6 +292,10 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
     },
   });
   useTaskHeartbeat(heartbeatTaskIds, {
+    onMissingTask: (taskId) => {
+      discardStaleTask(taskId);
+      setIsSubmitting(false);
+    },
     onTerminalState: (taskId, status) => {
       if (status === 'cancelled' || status === 'failed') {
         void syncTaskTerminalState(taskId, status);

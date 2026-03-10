@@ -10,13 +10,14 @@ const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(['completed', 'failed', 'canc
 
 interface UseTaskHeartbeatOptions {
   onTerminalState?: (taskId: string, status: TaskStatus) => void;
+  onMissingTask?: (taskId: string) => void;
 }
 
 export function useTaskHeartbeat(
   taskIds: string | string[] | null,
   options: UseTaskHeartbeatOptions = {}
 ) {
-  const { onTerminalState } = options;
+  const { onTerminalState, onMissingTask } = options;
   const normalizedTaskIds = Array.isArray(taskIds)
     ? [...new Set(taskIds.filter((taskId): taskId is string => typeof taskId === 'string' && taskId.length > 0))]
     : typeof taskIds === 'string' && taskIds.length > 0
@@ -34,10 +35,26 @@ export function useTaskHeartbeat(
 
     const beat = async () => {
       const results = await Promise.allSettled(
-        activeTaskIds.map(async (taskId) => ({
-          taskId,
-          heartbeat: await sendTaskHeartbeat(taskId),
-        }))
+        activeTaskIds.map(async (taskId) => {
+          try {
+            return {
+              taskId,
+              heartbeat: await sendTaskHeartbeat(taskId),
+            };
+          } catch (error) {
+            throw {
+              taskId,
+              code:
+                typeof error === 'object' && error !== null
+                  ? (error as { code?: string }).code
+                  : undefined,
+              status:
+                typeof error === 'object' && error !== null
+                  ? (error as { status?: number }).status
+                  : undefined,
+            };
+          }
+        })
       );
 
       if (isDisposed) {
@@ -46,6 +63,13 @@ export function useTaskHeartbeat(
 
       for (const result of results) {
         if (result.status !== 'fulfilled') {
+          const reason = result.reason as { taskId?: string; code?: string; status?: number } | undefined;
+          const missingTaskId = typeof reason?.taskId === 'string' ? reason.taskId : null;
+          const isTaskMissing =
+            reason?.code === 'TASK_NOT_FOUND' || reason?.status === 404;
+          if (missingTaskId && isTaskMissing) {
+            onMissingTask?.(missingTaskId);
+          }
           continue;
         }
 
@@ -90,7 +114,7 @@ export function useTaskHeartbeat(
       window.removeEventListener('online', handleOnline);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [onTerminalState, taskIdsKey]);
+  }, [onMissingTask, onTerminalState, taskIdsKey]);
 }
 
 export default useTaskHeartbeat;

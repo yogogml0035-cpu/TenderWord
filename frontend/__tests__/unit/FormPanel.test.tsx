@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FormPanel } from '@/components/chat/FormPanel';
 import { useChatStore } from '@/stores/chatStore';
@@ -254,6 +254,59 @@ describe('FormPanel', () => {
 
     expect(screen.getByText('XjcgTenderForm')).toBeInTheDocument();
     expect(mockUseTaskHeartbeat.mock.calls[0]?.[0]).toEqual(['task-queued', 'task-running']);
+    expect(mockUseTaskHeartbeat.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        onMissingTask: expect.any(Function),
+        onTerminalState: expect.any(Function),
+      })
+    );
+  });
+
+  it('interrupts stale tasks immediately when heartbeat reports task not found', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: 'task-running',
+        },
+      ],
+      activeTaskIds: ['task-running'],
+      taskSummaries: {
+        'task-running': {
+          task_id: 'task-running',
+          status: 'running',
+          updated_at: Date.now(),
+        },
+      },
+    }));
+    mockUseCurrentConversationTaskStatus.mockReturnValue({
+      currentTaskId: 'task-running',
+      currentTaskSummary: {
+        task_id: 'task-running',
+        status: 'running',
+        updated_at: Date.now(),
+      },
+      currentTaskStatus: 'running',
+      waitingCount: undefined,
+      isCurrentTaskQueued: false,
+      isCurrentTaskRunning: true,
+      runningTaskProgress: null,
+    });
+
+    render(<FormPanel />);
+
+    const heartbeatOptions = mockUseTaskHeartbeat.mock.calls[0]?.[1] as
+      | { onMissingTask?: (taskId: string) => void }
+      | undefined;
+
+    act(() => {
+      heartbeatOptions?.onMissingTask?.('task-running');
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    expect(conversation?.currentTaskId).toBeUndefined();
+    expect(useChatStore.getState().activeTaskIds).toEqual([]);
   });
 
   it('renders gngk form via registry mapping when tenderType is gngk', () => {
