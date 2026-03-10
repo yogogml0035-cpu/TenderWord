@@ -50,10 +50,6 @@ jest.mock('@/components/chat/ChatInput', () => ({
     selectedModel,
     onModelChange,
     onSend,
-    onToggleRewriteMode,
-    rewriteAvailable,
-    rewriteHint,
-    chatMode,
   }: {
     value?: string;
     disabled?: boolean;
@@ -62,10 +58,6 @@ jest.mock('@/components/chat/ChatInput', () => ({
     selectedModel?: string;
     onModelChange?: (model: string) => void;
     onSend?: (message: string) => void;
-    onToggleRewriteMode?: () => void;
-    rewriteAvailable?: boolean;
-    rewriteHint?: string | null;
-    chatMode?: 'normal' | 'rewrite';
   }) => (
     <div
       data-testid="chat-input"
@@ -73,19 +65,9 @@ jest.mock('@/components/chat/ChatInput', () => ({
       data-loading={loading ? 'true' : 'false'}
       data-placeholder={placeholder || ''}
       data-model={selectedModel || ''}
-      data-rewrite-available={rewriteAvailable ? 'true' : 'false'}
-      data-rewrite-hint={rewriteHint || ''}
-      data-chat-mode={chatMode || 'normal'}
     >
       <button type="button" data-testid="change-model-button" onClick={() => onModelChange?.('qwen')}>
         change model
-      </button>
-      <button
-        type="button"
-        data-testid="toggle-rewrite-button"
-        onClick={() => onToggleRewriteMode?.()}
-      >
-        toggle rewrite
       </button>
       <button
         type="button"
@@ -208,61 +190,11 @@ describe('ChatPanel', () => {
     expect(useChatStore.getState().getConversationDraft('conv-1')?.model).toBe('qwen');
   });
 
-  it('enables rewrite mode from backend conversation heartbeat state without local download cards', () => {
-    useChatStore.setState((state) => ({
-      ...state,
-      conversations: [
-        {
-          ...state.conversations[0],
-          currentTaskId: undefined,
-        },
-      ],
-      activeTaskIds: [],
-      taskSummaries: {},
-      conversationDrafts: {
-        'conv-1': {
-          rewrite_available: true,
-        },
-      },
-    }));
-
+  it('does not expose a rewrite toggle in chat input', () => {
     render(<ChatPanel />);
 
-    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-rewrite-available', 'true');
-  });
-
-  it('keeps rewrite mode visible but disables the composer after backend restart cleared rewrite availability', () => {
-    useChatStore.setState((state) => ({
-      ...state,
-      conversations: [
-        {
-          ...state.conversations[0],
-          currentTaskId: undefined,
-        },
-      ],
-      activeTaskIds: [],
-      taskSummaries: {},
-      conversationDrafts: {
-        'conv-1': {
-          chat_mode: 'rewrite',
-          chat_input: '把这段改得更正式一些',
-          rewrite_available: false,
-        },
-      },
-    }));
-
-    render(<ChatPanel />);
-
-    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-chat-mode', 'rewrite');
-    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-disabled', 'true');
-    expect(screen.getByTestId('chat-input')).toHaveAttribute(
-      'data-placeholder',
-      '服务已重启，请重新生成一次文档后再继续润色。'
-    );
-    expect(screen.getByTestId('chat-input')).toHaveAttribute(
-      'data-rewrite-hint',
-      '服务已重启，请重新生成一次文档后再继续润色。'
-    );
+    expect(screen.queryByTestId('toggle-rewrite-button')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-placeholder', '回复生成中，请稍候...');
   });
 
   it('retries failed ai message in place instead of appending a new bubble', async () => {
@@ -401,80 +333,6 @@ describe('ChatPanel', () => {
 
       expect(fetchMock).toHaveBeenCalled();
       expect(fetchMock.mock.calls[0][0]).toContain('/api/user/stream');
-      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).force_rewrite).toBe(false);
-    } finally {
-      (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
-    }
-  });
-
-  it('keeps rewrite mode and shows the current invalid rewrite hint when forced rewrite is rejected', async () => {
-    useChatStore.setState((state) => ({
-      ...state,
-      conversations: [
-        {
-          ...state.conversations[0],
-          currentTaskId: undefined,
-        },
-      ],
-      activeTaskIds: [],
-      taskSummaries: {},
-      conversationDrafts: {
-        'conv-1': {
-          chat_mode: 'rewrite',
-          rewrite_available: true,
-          chat_input: '今天天气怎么样',
-        },
-      },
-    }));
-
-    const encoder = new TextEncoder();
-    const streamPayload = [
-      JSON.stringify({ event: 'route', data: { route: 'rewrite' } }),
-      JSON.stringify({
-        event: 'error',
-        data: {
-          code: 'REWRITE_PROMPT_INVALID',
-          message: '当前输入不属于可执行的润色指令',
-        },
-      }),
-    ].join('\n') + '\n';
-    const originalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      body: {
-        getReader: () => {
-          let consumed = false;
-          return {
-            read: async () => {
-              if (consumed) {
-                return { value: undefined, done: true };
-              }
-              consumed = true;
-              return { value: encoder.encode(streamPayload), done: false };
-            },
-          };
-        },
-      },
-    } as unknown as Response);
-    (globalThis as { fetch?: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
-
-    try {
-      render(<ChatPanel />);
-
-      fireEvent.click(screen.getByTestId('send-current-input-button'));
-
-      await waitFor(() => {
-        const conversation = useChatStore.getState().conversations[0];
-        const draft = useChatStore.getState().getConversationDraft('conv-1');
-        expect(draft?.chat_mode).toBe('rewrite');
-        expect(conversation.currentTaskId).toBeUndefined();
-        expect(conversation.messages).toHaveLength(2);
-        expect(conversation.messages[1].type).toBe('system');
-        expect(conversation.messages[1].content).toBe('当前输入不属于可执行的润色指令');
-      });
-
-      expect(fetchMock).toHaveBeenCalled();
-      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).force_rewrite).toBe(true);
     } finally {
       (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
     }
@@ -499,10 +357,8 @@ describe('ChatPanel', () => {
     }));
 
     const encoder = new TextEncoder();
-    const streamPayload = [
-      JSON.stringify({ event: 'route', data: { route: 'chat' } }),
-      JSON.stringify({ event: 'done', data: { content: '你好，请问有什么可以帮你？' } }),
-    ].join('\n') + '\n';
+    const streamPayload =
+      JSON.stringify({ event: 'done', data: { content: '你好，请问有什么可以帮你？' } }) + '\n';
     const originalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,

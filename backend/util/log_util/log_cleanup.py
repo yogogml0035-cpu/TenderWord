@@ -26,11 +26,16 @@ def get_log_files(log_dir: Path) -> List[Path]:
     Returns:
         日志文件列表
     """
-    patterns = ["execution-*.log", "progress-*.log"]
+    patterns = [
+        "execution-*.log",
+        "execution-*.log.*",
+        "progress-*.log",
+        "progress-*.log.*",
+    ]
     log_files = []
     for pattern in patterns:
         log_files.extend(log_dir.glob(pattern))
-    return log_files
+    return list({path.resolve(): path for path in log_files}.values())
 
 
 def get_total_size(files: List[Path]) -> int:

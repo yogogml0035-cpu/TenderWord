@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import asyncio
 
-from backend.services.user_routing_service import UserRoutingService
+from backend.services.user_routing_service import (
+    NO_DOCUMENT_HINT_TEXT,
+    REWRITE_INVALID_HINT_TEXT,
+    UserRoutingService,
+)
 
 
 class DummyConversationService:
@@ -13,97 +17,121 @@ class DummyConversationService:
         return self._latest_rewrite_state
 
 
-def test_route_message_blocks_doc_context_query():
+def test_stream_route_or_reply_returns_no_document_reply_when_exact_rewrite_has_no_history(monkeypatch):
     service = UserRoutingService(conversation_service=DummyConversationService())
 
+    async def _fake_stream_llm_completion(*_args, callbacks=None, **_kwargs):
+        if callbacks and callbacks.on_chunk:
+            callbacks.on_chunk("rewrite")
+        return "rewrite"
+
+    monkeypatch.setattr(
+        "backend.services.user_routing_service.stream_llm_completion",
+        _fake_stream_llm_completion,
+    )
+
     decision = asyncio.run(
-        service.route_message(
+        service.stream_route_or_reply(
             conversation_id="conv-1",
-            prompt="请总结一下当前文档的第三章",
+            messages=[{"role": "user", "content": "请帮我润色这一段内容"}],
+            latest_user_message="请帮我润色这一段内容",
             model_provider="deepseek",
         )
     )
 
-    assert decision.route == "blocked_doc_context"
-    assert decision.error_code == "CHAT_DOC_CONTEXT_REQUIRED"
+    assert decision.route == "reply"
+    assert decision.reply_text == NO_DOCUMENT_HINT_TEXT
+    assert decision.reply_streamed is False
 
 
-def test_route_message_returns_no_document_for_explicit_rewrite_without_history():
-    service = UserRoutingService(conversation_service=DummyConversationService())
-
-    decision = asyncio.run(
-        service.route_message(
-            conversation_id="conv-1",
-            prompt="请帮我润色这一段内容",
-            model_provider="deepseek",
-        )
-    )
-
-    assert decision.route == "rewrite"
-    assert decision.error_code == "REWRITE_NO_DOCUMENT"
-
-
-def test_route_message_treats_structured_edit_instruction_as_rewrite():
+def test_stream_route_or_reply_returns_rewrite_when_output_is_exact_literal(monkeypatch):
     latest_rewrite_state = {"project_name": "示例项目", "polished_text": "原始内容"}
     service = UserRoutingService(
         conversation_service=DummyConversationService(latest_rewrite_state=latest_rewrite_state)
     )
 
+    async def _fake_stream_llm_completion(*_args, callbacks=None, **_kwargs):
+        if callbacks and callbacks.on_chunk:
+            callbacks.on_chunk("rewrite")
+        return "rewrite"
+
+    monkeypatch.setattr(
+        "backend.services.user_routing_service.stream_llm_completion",
+        _fake_stream_llm_completion,
+    )
+
     decision = asyncio.run(
-        service.route_message(
+        service.stream_route_or_reply(
             conversation_id="conv-1",
-            prompt="4.2、视野角度：≥120°；这个指标前删除星号指标",
+            messages=[{"role": "user", "content": "把上一版第三章写得更正式"}],
+            latest_user_message="把上一版第三章写得更正式",
             model_provider="deepseek",
         )
     )
 
     assert decision.route == "rewrite"
-    assert decision.error_code is None
+    assert decision.reply_text == ""
 
 
-def test_route_message_uses_llm_fallback_for_potential_rewrite(monkeypatch):
+def test_stream_route_or_reply_flushes_prefix_buffer_once_reply_diverges(monkeypatch):
     latest_rewrite_state = {"project_name": "示例项目", "polished_text": "原始内容"}
     service = UserRoutingService(
         conversation_service=DummyConversationService(latest_rewrite_state=latest_rewrite_state)
     )
+    emitted_chunks: list[str] = []
 
-    async def _related(**_kwargs):
-        return True
+    async def _fake_stream_llm_completion(*_args, callbacks=None, **_kwargs):
+        for chunk in ["re", "write您好", "，这里是答复。"]:
+            if callbacks and callbacks.on_chunk:
+                callbacks.on_chunk(chunk)
+        return "rewrite您好，这里是答复。"
 
-    monkeypatch.setattr(service, "is_rewrite_prompt_related", _related)
+    monkeypatch.setattr(
+        "backend.services.user_routing_service.stream_llm_completion",
+        _fake_stream_llm_completion,
+    )
 
     decision = asyncio.run(
-        service.route_message(
+        service.stream_route_or_reply(
             conversation_id="conv-1",
-            prompt="把这段写得更正式一些",
+            messages=[{"role": "user", "content": "你好"}],
+            latest_user_message="你好",
             model_provider="deepseek",
+            on_reply_chunk=emitted_chunks.append,
         )
     )
 
-    assert decision.route == "rewrite"
-    assert decision.error_code is None
+    assert decision.route == "reply"
+    assert emitted_chunks[0] == "rewrite您好"
+    assert decision.reply_text == "rewrite您好，这里是答复。"
     assert decision.used_llm is True
 
 
-def test_route_message_force_rewrite_returns_invalid_when_classifier_rejects(monkeypatch):
+def test_stream_route_or_reply_force_rewrite_returns_fixed_reply(monkeypatch):
     latest_rewrite_state = {"project_name": "示例项目", "polished_text": "原始内容"}
     service = UserRoutingService(
         conversation_service=DummyConversationService(latest_rewrite_state=latest_rewrite_state)
     )
 
-    async def _unrelated(**_kwargs):
-        return False
+    async def _fake_stream_llm_completion(*_args, callbacks=None, **_kwargs):
+        if callbacks and callbacks.on_chunk:
+            callbacks.on_chunk(REWRITE_INVALID_HINT_TEXT)
+        return REWRITE_INVALID_HINT_TEXT
 
-    monkeypatch.setattr(service, "is_rewrite_prompt_related", _unrelated)
+    monkeypatch.setattr(
+        "backend.services.user_routing_service.stream_llm_completion",
+        _fake_stream_llm_completion,
+    )
 
     decision = asyncio.run(
-        service.route_message(
+        service.stream_route_or_reply(
             conversation_id="conv-1",
-            prompt="今天天气怎么样",
+            messages=[{"role": "user", "content": "今天天气怎么样"}],
+            latest_user_message="今天天气怎么样",
             model_provider="deepseek",
             force_rewrite=True,
         )
     )
 
-    assert decision.route == "rewrite"
-    assert decision.error_code == "REWRITE_PROMPT_INVALID"
+    assert decision.route == "reply"
+    assert decision.reply_text == REWRITE_INVALID_HINT_TEXT

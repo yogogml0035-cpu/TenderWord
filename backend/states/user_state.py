@@ -17,6 +17,6 @@ class UserGraphState(TypedDict, total=False):
     messages: List[UserGraphMessage]
     latest_user_message: str
     route: str
-    error_code: Optional[str]
-    error_message: Optional[str]
+    reply_text: str
+    reply_streamed: bool
     latest_rewrite_state: Optional[Dict[str, str]]

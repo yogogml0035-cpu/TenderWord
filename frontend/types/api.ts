@@ -238,9 +238,7 @@ export interface ChatStreamRequest {
   messages: ChatStreamMessage[];
 }
 
-export interface UserStreamRequest extends ChatStreamRequest {
-  force_rewrite: boolean;
-}
+export type UserStreamRequest = ChatStreamRequest;
 
 export interface ChatStreamChunkEvent {
   event: 'chunk';
@@ -269,7 +267,7 @@ export type ChatStreamEvent = ChatStreamChunkEvent | ChatStreamDoneEvent | ChatS
 export interface UserStreamRouteEvent {
   event: 'route';
   data: {
-    route: 'chat' | 'rewrite' | 'blocked_doc_context';
+    route: 'rewrite';
   };
 }
 

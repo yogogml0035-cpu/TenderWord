@@ -57,8 +57,6 @@ function getConversationMessagesById(conversationId: string): Message[] {
 export function ChatPanel({ className = '' }: ChatPanelProps) {
   const mounted = useHydrated();
   const {
-    conversations,
-    activeTaskIds,
     getCurrentConversation,
     getConversationDraft,
     updateConversationDraft,
@@ -87,7 +85,6 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   const isCurrentTaskStarting =
     isCurrentTaskQueued && (!waitingCount || Number.isNaN(Number(waitingCount)) || waitingCount <= 0);
   const selectedModel: ModelType = conversationDraft?.model || 'deepseek';
-  const chatMode = conversationDraft?.chat_mode || 'normal';
   const inputValue = conversationDraft?.chat_input || '';
   const messages = conversation?.messages || [];
   const mergedMessages: Message[] = messages.map((message) => {
@@ -139,25 +136,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   const isNormalStreamActive = !!(conversation && activeNormalConversations[conversation.id]);
   const isTaskBusy = isCurrentTaskQueued || isCurrentTaskRunning;
   const isBusy = isTaskBusy || isNormalStreamActive;
-  const rewriteAvailableFromBackend = !!conversationDraft?.rewrite_available;
-  const rewriteModeEnabled = chatMode === 'rewrite';
-  const canEnterRewriteMode =
-    rewriteModeEnabled || rewriteAvailableFromBackend || !!conversationDraft?.pending_rewrite_task_id;
-  const rewriteComposerDisabled =
-    rewriteModeEnabled &&
-    !isTaskBusy &&
-    !conversationDraft?.pending_rewrite_task_id &&
-    !rewriteAvailableFromBackend;
-  const otherActiveTaskCount = conversation
-    ? activeTaskIds.filter((taskId) => {
-        const owner = conversations.find((item) => item.currentTaskId === taskId);
-        return !!owner && owner.id !== conversation.id;
-      }).length
-    : 0;
-  const showRewriteQueueHint =
-    rewriteModeEnabled && !isTaskBusy && otherActiveTaskCount > 0 && canEnterRewriteMode;
   const isRewriteQueueStage =
-    rewriteModeEnabled &&
     !!conversation &&
     currentTaskStatus === 'queued' &&
     typeof waitingCount === 'number' &&
@@ -173,34 +152,6 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     },
     [conversation, updateConversationDraft]
   );
-
-  const toggleRewriteMode = useCallback(() => {
-    if (!conversation) {
-      return;
-    }
-
-    if (rewriteModeEnabled) {
-      updateConversationDraft(conversation.id, { chat_mode: 'normal' });
-      return;
-    }
-
-    if (!canEnterRewriteMode) {
-      addMessage(conversation.id, {
-        type: 'system',
-        content: '当前会话尚无可修改文档，请先完成一次文档生成。',
-        status: 'completed',
-      });
-      return;
-    }
-
-    updateConversationDraft(conversation.id, { chat_mode: 'rewrite' });
-  }, [
-    addMessage,
-    canEnterRewriteMode,
-    conversation,
-    rewriteModeEnabled,
-    updateConversationDraft,
-  ]);
 
   const setNormalChatActive = useCallback((conversationId: string, active: boolean) => {
     setActiveNormalConversations((state) => {
@@ -218,7 +169,6 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         appendUserMessage?: boolean;
         modelOverride?: ModelType;
         reuseAiMessageId?: string;
-        forceRewrite?: boolean;
       } = {}
     ) => {
       if (!conversation) {
@@ -234,7 +184,6 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
       const appendUserMessage = options.appendUserMessage ?? true;
       const modelForRequest = options.modelOverride || selectedModel;
-      const forceRewrite = options.forceRewrite ?? false;
       const existingMessages = getConversationMessagesById(conversationId);
       const baseAiMetadata = {
         chatKind: 'normal' as const,
@@ -249,7 +198,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           content: prompt,
           status: 'sent',
           metadata: {
-            chatKind: forceRewrite ? 'rewrite' : 'normal',
+            chatKind: 'normal',
           },
         });
       }
@@ -289,7 +238,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
       let accumulatedText = '';
       let streamFinished = false;
-      let activeRoute: 'chat' | 'rewrite' | 'blocked_doc_context' | null = null;
+      let activeRoute: 'reply' | 'rewrite' | null = null;
 
       try {
         const response = await fetch(`${API_BASE_URL}/api/user/stream`, {
@@ -301,7 +250,6 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             conversation_id: conversationId,
             model: modelForRequest,
             messages: contextMessages,
-            force_rewrite: forceRewrite,
           }),
           signal: controller.signal,
         });
@@ -350,7 +298,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
           if (event.event === 'route') {
             activeRoute = event.data.route;
-            if (userMessageId && event.data.route === 'rewrite') {
+            if (userMessageId) {
               updateMessage(conversationId, userMessageId, {
                 metadata: {
                   chatKind: 'rewrite',
@@ -385,9 +333,9 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
           if (event.event === 'chunk') {
             if (!activeRoute) {
-              activeRoute = 'chat';
+              activeRoute = 'reply';
             }
-            if (activeRoute !== 'chat') {
+            if (activeRoute === 'rewrite') {
               return;
             }
             const ensuredAiMessageId = ensureAiMessage();
@@ -401,9 +349,9 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
           if (event.event === 'done') {
             if (!activeRoute) {
-              activeRoute = 'chat';
+              activeRoute = 'reply';
             }
-            if (activeRoute !== 'chat') {
+            if (activeRoute === 'rewrite') {
               streamFinished = true;
               return;
             }
@@ -421,8 +369,8 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
           if (event.event === 'error') {
             const errorMessage = event.data.message || '聊天失败';
-            const errorCode = event.data.code || '';
-            if (activeRoute === 'chat' || options.reuseAiMessageId) {
+            const shouldBindToReplyBubble = activeRoute !== 'rewrite' || !!options.reuseAiMessageId;
+            if (shouldBindToReplyBubble) {
               const ensuredAiMessageId = ensureAiMessage();
               updateMessage(conversationId, ensuredAiMessageId, {
                 content: accumulatedText,
@@ -430,14 +378,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
                 error: errorMessage,
               });
             }
-            if (
-              activeRoute !== 'chat' ||
-              errorCode === 'CHAT_DOC_CONTEXT_REQUIRED' ||
-              errorCode === 'REWRITE_PROMPT_INVALID' ||
-              errorCode === 'REWRITE_NO_DOCUMENT' ||
-              errorCode === 'LLM_TIMEOUT' ||
-              errorCode === 'LLM_SERVICE_ERROR'
-            ) {
+            if (activeRoute === 'rewrite' || !aiMessagePrepared) {
               addMessage(conversationId, {
                 type: 'system',
                 content: errorMessage,
@@ -468,7 +409,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         }
 
         if (!streamFinished) {
-          if (activeRoute === 'chat' && aiMessagePrepared && aiMessageId) {
+          if (activeRoute !== 'rewrite' && aiMessagePrepared && aiMessageId) {
             updateMessage(conversationId, aiMessageId, {
               content: accumulatedText,
               status: 'completed',
@@ -501,7 +442,6 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           }
           if (
             errorCode === 'CHAT_MODE_REQUIRES_REWRITE' ||
-            errorCode === 'CHAT_DOC_CONTEXT_REQUIRED' ||
             !aiMessagePrepared
           ) {
             addMessage(conversationId, {
@@ -530,15 +470,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
   const handleSendMessage = useCallback(
     async (content: string) => {
-      if (!conversation || isBusy || rewriteComposerDisabled) {
-        return;
-      }
-
-      if (rewriteModeEnabled) {
-        await sendUserMessage(content, {
-          appendUserMessage: true,
-          forceRewrite: true,
-        });
+      if (!conversation || isBusy) {
         return;
       }
 
@@ -550,8 +482,6 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     [
       conversation,
       isBusy,
-      rewriteComposerDisabled,
-      rewriteModeEnabled,
       sendUserMessage,
       updateConversationDraft,
     ]
@@ -824,30 +754,9 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         onCancel={handleStopAction}
         selectedModel={selectedModel}
         onModelChange={handleModelChange}
-        chatMode={chatMode}
-        onToggleRewriteMode={toggleRewriteMode}
-        rewriteAvailable={canEnterRewriteMode}
-        rewriteHint={
-          rewriteComposerDisabled
-            ? '服务已重启，请重新生成一次文档后再继续润色。'
-            : showRewriteQueueHint
-              ? '发送后将进入队列'
-              : null
-        }
         actionMode={isBusy ? 'cancel' : 'send'}
-        disabled={rewriteComposerDisabled}
         loading={isBusy}
-        placeholder={
-            chatMode === 'rewrite'
-            ? isBusy
-              ? '润色处理中，请稍候...'
-              : rewriteComposerDisabled
-                ? '服务已重启，请重新生成一次文档后再继续润色。'
-                : '输入修改润色指令...'
-            : isBusy
-              ? '回复生成中，请稍候...'
-              : '输入消息...'
-        }
+        placeholder={isBusy ? '回复生成中，请稍候...' : '输入消息...'}
       />
     </div>
   );

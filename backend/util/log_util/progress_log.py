@@ -24,9 +24,9 @@
 import logging
 import logging.handlers
 import queue
-import sys
-from datetime import datetime
 from pathlib import Path
+
+from backend.util.log_util.daily_file_handler import DailyFileHandler
 
 # 延迟导入 settings 以避免循环导入
 _settings = None
@@ -64,19 +64,14 @@ LOG_DIR = _get_log_dir()
 # 有界队列，防止内存溢出
 _log_queue = _get_log_queue()
 
-# 日志文件路径: backend/logs/progress-YYYYMMDD.log
-_log_file = LOG_DIR / f"progress-{datetime.now().strftime('%Y%m%d')}.log"
-
-
-# 文件 handler - 使用 TimedRotatingFileHandler 支持按天轮转
+# 文件 handler - 直接写入 progress-YYYYMMDD.log，避免重复日期后缀
 def _create_file_handler():
     """创建文件 handler。"""
     settings = _get_settings()
-    log_file = LOG_DIR / f"progress-{datetime.now().strftime('%Y%m%d')}.log"
-    handler = logging.handlers.TimedRotatingFileHandler(
-        filename=str(log_file),
-        when=settings.LOG_ROTATION_WHEN,
-        backupCount=settings.PROGRESS_LOG_BACKUP_COUNT,
+    handler = DailyFileHandler(
+        log_dir=LOG_DIR,
+        prefix="progress",
+        backup_count=settings.PROGRESS_LOG_BACKUP_COUNT,
         encoding="utf-8",
         delay=True,
     )

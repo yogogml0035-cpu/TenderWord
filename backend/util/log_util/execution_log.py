@@ -29,9 +29,10 @@ Usage:
 import logging
 import logging.handlers
 import queue
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
+
+from backend.util.log_util.daily_file_handler import DailyFileHandler
 
 # 延迟导入 settings 以避免循环导入
 _settings = None
@@ -69,18 +70,14 @@ LOG_DIR = _get_log_dir()
 # 有界队列，防止内存溢出
 _log_queue = _get_log_queue()
 
-# 日志文件路径
-_log_file = LOG_DIR / f"execution-{datetime.now().strftime('%Y%m%d')}.log"
-
-
-# 文件 handler - 使用 TimedRotatingFileHandler 支持按天轮转
+# 文件 handler - 直接写入 execution-YYYYMMDD.log，避免重复日期后缀
 def _create_file_handler():
     """创建文件 handler。"""
     settings = _get_settings()
-    handler = logging.handlers.TimedRotatingFileHandler(
-        filename=str(_log_file),
-        when=settings.LOG_ROTATION_WHEN,
-        backupCount=settings.EXECUTION_LOG_BACKUP_COUNT,
+    handler = DailyFileHandler(
+        log_dir=LOG_DIR,
+        prefix="execution",
+        backup_count=settings.EXECUTION_LOG_BACKUP_COUNT,
         encoding="utf-8",
         delay=True,
     )
@@ -150,7 +147,7 @@ def log_task_end(state: Mapping[str, Any], task_name: str) -> None:
     logger.info(f"{project_zbr_xbr}-{project_info}结束生成，当前进入{task_name}")
 
 # 任务执行日志文件路径（向后兼容）
-TASK_EXECUTION_LOG_FILE = str(_log_file)
+TASK_EXECUTION_LOG_FILE = str(_file_handler.baseFilename)
 
 
 __all__ = [

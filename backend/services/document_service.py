@@ -399,6 +399,7 @@ class DocumentService:
         conversation_id: str,
         user_prompt: str,
         model_provider: str,
+        skip_prompt_validation: bool = False,
     ) -> GenerateResponse:
         """创建 rewrite 任务（复用文档任务队列 + SSE 三卡片链路）。"""
         normalized_conversation_id = str(conversation_id or "").strip()
@@ -440,36 +441,37 @@ class DocumentService:
                 error="REWRITE_NO_DOCUMENT",
             )
 
-        try:
-            is_related = await self._user_routing_service.is_rewrite_prompt_related(
-                prompt=normalized_prompt,
-                model_provider=model_provider,
-                latest_rewrite_state=latest_rewrite_state,
-            )
-        except LLMTimeoutError:
-            logger.exception("rewrite 指令相关性校验超时: conversation_id=%s", normalized_conversation_id)
-            return GenerateResponse(
-                success=False,
-                task_id=task_id,
-                message="润色指令校验超时，请稍后重试",
-                error="LLM_TIMEOUT",
-            )
-        except Exception:
-            logger.exception("rewrite 指令相关性校验失败: conversation_id=%s", normalized_conversation_id)
-            return GenerateResponse(
-                success=False,
-                task_id=task_id,
-                message="润色指令校验失败，请稍后重试",
-                error="LLM_SERVICE_ERROR",
-            )
+        if not skip_prompt_validation:
+            try:
+                is_related = await self._user_routing_service.is_rewrite_prompt_related(
+                    prompt=normalized_prompt,
+                    model_provider=model_provider,
+                    latest_rewrite_state=latest_rewrite_state,
+                )
+            except LLMTimeoutError:
+                logger.exception("rewrite 指令相关性校验超时: conversation_id=%s", normalized_conversation_id)
+                return GenerateResponse(
+                    success=False,
+                    task_id=task_id,
+                    message="润色指令校验超时，请稍后重试",
+                    error="LLM_TIMEOUT",
+                )
+            except Exception:
+                logger.exception("rewrite 指令相关性校验失败: conversation_id=%s", normalized_conversation_id)
+                return GenerateResponse(
+                    success=False,
+                    task_id=task_id,
+                    message="润色指令校验失败，请稍后重试",
+                    error="LLM_SERVICE_ERROR",
+                )
 
-        if not is_related:
-            return GenerateResponse(
-                success=False,
-                task_id=task_id,
-                message="当前输入不属于可执行的润色指令",
-                error="REWRITE_PROMPT_INVALID",
-            )
+            if not is_related:
+                return GenerateResponse(
+                    success=False,
+                    task_id=task_id,
+                    message="当前输入不属于可执行的润色指令",
+                    error="REWRITE_PROMPT_INVALID",
+                )
 
         if not REWRITE_GRAPH_CLASS:
             return GenerateResponse(

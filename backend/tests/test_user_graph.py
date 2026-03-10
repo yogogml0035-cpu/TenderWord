@@ -16,21 +16,33 @@ class DummyRequest:
 
 
 class RoutingStub:
-    def __init__(self, decision: UserRouteDecision | None = None, error: Exception | None = None):
+    def __init__(
+        self,
+        decision: UserRouteDecision | None = None,
+        error: Exception | None = None,
+        chunks: list[str] | None = None,
+    ):
         self._decision = decision
         self._error = error
+        self._chunks = chunks or []
 
-    async def route_message(self, **_kwargs):
+    async def stream_route_or_reply(self, **kwargs):
         if self._error is not None:
             raise self._error
+        on_reply_chunk = kwargs.get("on_reply_chunk")
+        if callable(on_reply_chunk):
+            for chunk in self._chunks:
+                on_reply_chunk(chunk)
         return self._decision
 
 
 class DocumentServiceStub:
     def __init__(self, response: GenerateResponse):
         self._response = response
+        self.calls: list[dict] = []
 
     async def create_rewrite_task(self, **_kwargs):
+        self.calls.append(dict(_kwargs))
         return self._response
 
 
@@ -41,17 +53,14 @@ async def _collect_lines(graph: UserGraph, state: dict) -> list[dict]:
     return lines
 
 
-def test_user_graph_streams_chat_route(monkeypatch):
-    async def _fake_chat_stream(*_args, **_kwargs):
-        yield json.dumps({"event": "chunk", "data": {"content": "你"}}) + "\n"
-        yield json.dumps({"event": "done", "data": {"content": "你好"}}) + "\n"
-
-    monkeypatch.setattr("backend.graphs.user_graph.stream_chat_response", _fake_chat_stream)
+def test_user_graph_streams_reply_without_route_event():
     graph = UserGraph(
         document_service=DocumentServiceStub(
             GenerateResponse(success=True, task_id="unused", task_kind=TaskKind.REWRITE)
         ),
-        routing_service=RoutingStub(UserRouteDecision(route="chat")),
+        routing_service=RoutingStub(
+            UserRouteDecision(route="reply", reply_text="你好", reply_streamed=False)
+        ),
     )
 
     lines = asyncio.run(
@@ -66,24 +75,55 @@ def test_user_graph_streams_chat_route(monkeypatch):
         )
     )
 
-    assert lines[0]["event"] == "route"
-    assert lines[0]["data"]["route"] == "chat"
-    assert lines[1]["event"] == "chunk"
-    assert lines[2]["event"] == "done"
+    assert lines == [
+        {"event": "chunk", "data": {"content": "你好"}},
+        {"event": "done", "data": {"content": "你好"}},
+    ]
+
+
+def test_user_graph_preserves_streamed_reply_chunks():
+    graph = UserGraph(
+        document_service=DocumentServiceStub(
+            GenerateResponse(success=True, task_id="unused", task_kind=TaskKind.REWRITE)
+        ),
+        routing_service=RoutingStub(
+            UserRouteDecision(route="reply", reply_text="你好", reply_streamed=True),
+            chunks=["你", "好"],
+        ),
+    )
+
+    lines = asyncio.run(
+        _collect_lines(
+            graph,
+            {
+                "conversation_id": "conv-1",
+                "model_provider": "deepseek",
+                "messages": [{"role": "user", "content": "你好"}],
+                "latest_user_message": "你好",
+            },
+        )
+    )
+
+    assert lines == [
+        {"event": "chunk", "data": {"content": "你"}},
+        {"event": "chunk", "data": {"content": "好"}},
+        {"event": "done", "data": {"content": "你好"}},
+    ]
 
 
 def test_user_graph_dispatches_rewrite_task_accepted():
+    document_service = DocumentServiceStub(
+        GenerateResponse(
+            success=True,
+            task_id="task-1",
+            task_kind=TaskKind.REWRITE,
+            status=TaskStatus.QUEUED,
+            queue_position=1,
+            waiting_count=2,
+        )
+    )
     graph = UserGraph(
-        document_service=DocumentServiceStub(
-            GenerateResponse(
-                success=True,
-                task_id="task-1",
-                task_kind=TaskKind.REWRITE,
-                status=TaskStatus.QUEUED,
-                queue_position=1,
-                waiting_count=2,
-            )
-        ),
+        document_service=document_service,
         routing_service=RoutingStub(UserRouteDecision(route="rewrite")),
     )
 
@@ -104,20 +144,28 @@ def test_user_graph_dispatches_rewrite_task_accepted():
     assert lines[1]["event"] == "task_accepted"
     assert lines[1]["data"]["task_id"] == "task-1"
     assert lines[1]["data"]["task_kind"] == "rewrite"
+    assert document_service.calls == [
+        {
+            "conversation_id": "conv-1",
+            "user_prompt": "请帮我润色",
+            "model_provider": "deepseek",
+            "skip_prompt_validation": True,
+        }
+    ]
 
 
-def test_user_graph_returns_doc_context_error():
+def test_user_graph_falls_back_to_reply_when_rewrite_task_has_no_document():
     graph = UserGraph(
         document_service=DocumentServiceStub(
-            GenerateResponse(success=True, task_id="unused", task_kind=TaskKind.REWRITE)
-        ),
-        routing_service=RoutingStub(
-            UserRouteDecision(
-                route="blocked_doc_context",
-                error_code="CHAT_DOC_CONTEXT_REQUIRED",
-                error_message="当前会话不自动携带文档正文，请切到“润色修改”或手动粘贴相关内容。",
+            GenerateResponse(
+                success=False,
+                task_id="unused",
+                task_kind=TaskKind.REWRITE,
+                message="当前会话没有可用文档，请先完成一次生成。",
+                error="REWRITE_NO_DOCUMENT",
             )
         ),
+        routing_service=RoutingStub(UserRouteDecision(route="rewrite")),
     )
 
     lines = asyncio.run(
@@ -126,16 +174,16 @@ def test_user_graph_returns_doc_context_error():
             {
                 "conversation_id": "conv-1",
                 "model_provider": "deepseek",
-                "messages": [{"role": "user", "content": "总结当前文档"}],
-                "latest_user_message": "总结当前文档",
+                "messages": [{"role": "user", "content": "请帮我润色"}],
+                "latest_user_message": "请帮我润色",
             },
         )
     )
 
-    assert lines[0]["event"] == "route"
-    assert lines[0]["data"]["route"] == "blocked_doc_context"
-    assert lines[1]["event"] == "error"
-    assert lines[1]["data"]["code"] == "CHAT_DOC_CONTEXT_REQUIRED"
+    assert lines == [
+        {"event": "chunk", "data": {"content": "当前会话没有可用文档，请先完成一次生成。"}},
+        {"event": "done", "data": {"content": "当前会话没有可用文档，请先完成一次生成。"}},
+    ]
 
 
 def test_user_graph_returns_timeout_error_when_router_times_out():
@@ -163,7 +211,7 @@ def test_user_graph_returns_timeout_error_when_router_times_out():
             "event": "error",
             "data": {
                 "code": "LLM_TIMEOUT",
-                "message": "润色指令校验超时，请稍后重试",
+                "message": "统一路由回复超时，请稍后重试",
             },
         }
     ]

@@ -135,11 +135,9 @@ describe('chatStore task message grouping', () => {
       });
       useChatStore.getState().ensureTaskLogMessage('task-1');
       useChatStore.getState().updateConversationDraft('conv-1', {
-        chat_mode: 'rewrite',
         chat_input: '',
         pending_rewrite_prompt: '请补充质保条款',
         pending_rewrite_task_id: 'task-1',
-        rewrite_available: true,
       });
       useChatStreamStore.getState().replaceStream('task-1', {
         logs: [
@@ -174,7 +172,6 @@ describe('chatStore task message grouping', () => {
         expect.objectContaining({ message: '服务已重启，任务已中断，可重试' }),
       ])
     );
-    expect(draft?.rewrite_available).toBe(false);
     expect(draft?.pending_rewrite_task_id).toBeUndefined();
     expect(draft?.pending_rewrite_prompt).toBeUndefined();
     expect(draft?.chat_input).toBe('请补充质保条款');

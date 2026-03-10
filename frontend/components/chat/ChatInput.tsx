@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useCallback } from 'react';
-import { ArrowUp, Languages, Loader2, Square, X } from 'lucide-react';
+import { ArrowUp, Loader2, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ModelType } from '@/components/forms/ModelSelector';
 import { ChatModelPicker } from './ChatModelPicker';
@@ -16,10 +16,6 @@ interface ChatInputProps {
   onCancel?: () => void;
   selectedModel: ModelType;
   onModelChange: (model: ModelType) => void;
-  chatMode?: 'normal' | 'rewrite';
-  onToggleRewriteMode?: () => void;
-  rewriteAvailable?: boolean;
-  rewriteHint?: string | null;
   actionMode?: 'send' | 'cancel';
   disabled?: boolean;
   placeholder?: string;
@@ -33,18 +29,12 @@ export function ChatInput({
   onCancel,
   selectedModel,
   onModelChange,
-  chatMode = 'normal',
-  onToggleRewriteMode,
-  rewriteAvailable = false,
-  rewriteHint,
   actionMode = 'send',
   disabled = false,
   placeholder = '输入消息...',
   loading = false,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const rewriteModeEnabled = chatMode === 'rewrite';
-  const rewriteButtonDisabled = !rewriteModeEnabled && !rewriteAvailable;
   const isCancelAction = actionMode === 'cancel';
   const inputDisabled = disabled;
   const controlsLocked = disabled || loading;
@@ -106,31 +96,6 @@ export function ChatInput({
         )}
       >
         <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between px-2">
-            <button
-              type="button"
-              onClick={onToggleRewriteMode}
-              disabled={rewriteButtonDisabled}
-              className={cn(
-                'group inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-sm font-medium transition-all duration-200',
-                rewriteModeEnabled
-                  ? 'border border-blue-100 bg-blue-50 text-blue-700 shadow-sm shadow-blue-100/70'
-                  : 'border border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50/60 hover:text-blue-700',
-                rewriteButtonDisabled && 'cursor-not-allowed opacity-45'
-              )}
-            >
-              <Languages className="h-4 w-4 shrink-0" strokeWidth={2.1} />
-              <span className="leading-none">修改润色</span>
-              {rewriteModeEnabled && (
-                <X
-                  className="h-3.5 w-3.5 shrink-0 opacity-80 transition-opacity group-hover:opacity-100"
-                  strokeWidth={2.4}
-                />
-              )}
-            </button>
-            {rewriteHint ? <span className="text-xs text-amber-600">{rewriteHint}</span> : <span />}
-          </div>
-
           <div>
             <textarea
               ref={textareaRef}

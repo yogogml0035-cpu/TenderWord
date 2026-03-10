@@ -160,10 +160,6 @@ function ChatPageContent() {
             continue;
           }
 
-          updateConversationDraft(result.value.conversation_id, {
-            rewrite_available: !!result.value.rewrite_available,
-          });
-
           const instanceId = result.value.instance_id;
           const knownInstanceId = knownInstanceIdRef.current;
 

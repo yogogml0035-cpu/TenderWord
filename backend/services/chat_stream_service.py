@@ -17,7 +17,10 @@ from backend.util.common_util.llm_stream_utils import MODEL_CONFIGS, ensure_llm_
 
 logger = logging.getLogger(__name__)
 
-MINIMAL_CHAT_SYSTEM_PROMPT = "你是一个简洁、专业、诚实的中文助手。"
+MINIMAL_CHAT_SYSTEM_PROMPT = (
+    "你是东松招标文件智能生成助手。"
+    "请用简洁、专业、诚实的中文回复。"
+)
 
 
 def build_error_detail(code: str, message: str) -> dict[str, Any]:

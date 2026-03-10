@@ -89,8 +89,6 @@ describe('ChatPage', () => {
       },
       conversationDrafts: {
         'conv-1': {
-          chat_mode: 'rewrite',
-          rewrite_available: true,
           pending_rewrite_prompt: '请补充售后条款',
           pending_rewrite_task_id: 'task-1',
         },
@@ -166,8 +164,6 @@ describe('ChatPage', () => {
       expect(group?.logMessage?.status).toBe('error');
       expect(group?.contentMessage?.status).toBe('error');
       expect(group?.contentMessage?.content).toBe('保留中的润色内容');
-      expect(draft?.rewrite_available).toBe(false);
-      expect(draft?.chat_mode).toBe('rewrite');
       expect(draft?.chat_input).toBe('请补充售后条款');
       expect(useChatStore.getState().activeTaskIds).toHaveLength(0);
       expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();

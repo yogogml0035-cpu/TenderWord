@@ -43,7 +43,8 @@ class ChatStreamRequest(BaseModel):
 @router.post(
     "/stream",
     summary="普通聊天流式接口",
-    description="返回 NDJSON 流，事件类型至少包含 chunk / done / error。",
+    description="已废弃，建议改用 /user/stream。返回 NDJSON 流，事件类型至少包含 chunk / done / error。",
+    deprecated=True,
 )
 async def stream_chat(request: Request, payload: ChatStreamRequest) -> StreamingResponse:
     normalized_messages = normalize_chat_messages(payload.messages)

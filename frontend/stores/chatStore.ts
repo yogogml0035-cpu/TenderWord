@@ -65,11 +65,9 @@ export interface ConversationFormDraft {
     before_text: string;
     after_text: string;
   };
-  chat_mode?: 'normal' | 'rewrite';
   chat_input?: string;
   pending_rewrite_prompt?: string;
   pending_rewrite_task_id?: string;
-  rewrite_available?: boolean;
   files?: {
     origin_tender?: ConversationDraftFile;
     clean_draft?: ConversationDraftFile;
@@ -844,7 +842,6 @@ export const useChatStore = create<ChatStore>()(
           const locatedTaskGroup = get().findTaskMessageGroup(taskId);
           let nextGroup: TaskMessageGroupIds | undefined;
           const terminalConversationId: string | null = locatedTaskGroup?.conversationId || null;
-          const completedTaskKind = get().taskSummaries[taskId]?.task_kind;
 
           if (locatedTaskGroup) {
             const { conversationId, logMessage, contentMessage, downloadMessage, group } =
@@ -942,16 +939,6 @@ export const useChatStore = create<ChatStore>()(
                   [terminalConversationId]: true,
                 }
               : state.unreadConversationResults;
-            const nextConversationDrafts =
-              terminalConversationId && completedTaskKind && typeof outputFile === 'string'
-                ? {
-                    ...state.conversationDrafts,
-                    [terminalConversationId]: mergeConversationDraft(
-                      state.conversationDrafts[terminalConversationId] || {},
-                      { rewrite_available: true }
-                    ),
-                  }
-                : state.conversationDrafts;
 
             return {
               conversations: state.conversations.map((conversation) =>
@@ -964,7 +951,7 @@ export const useChatStore = create<ChatStore>()(
               taskSummaries: Object.fromEntries(
                 Object.entries(state.taskSummaries).filter(([id]) => id !== taskId)
               ),
-              conversationDrafts: nextConversationDrafts,
+              conversationDrafts: state.conversationDrafts,
               unreadConversationResults: nextUnreadResults,
             };
           });
@@ -1321,7 +1308,6 @@ export const useChatStore = create<ChatStore>()(
               Object.entries(currentState.conversationDrafts).map(([conversationId, draft]) => [
                 conversationId,
                 mergeConversationDraft(draft, {
-                  rewrite_available: false,
                   chat_input:
                     typeof draft.chat_input === 'string' && draft.chat_input.length > 0
                       ? draft.chat_input

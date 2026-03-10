@@ -136,7 +136,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
         )
     
     # 保存提示词到文件
-    prompts_dir = pathlib.Path(__file__).resolve().parents[2] / "prompts"
+    prompts_dir = pathlib.Path(__file__).resolve().parents[2] / "prompts_log"
     prompts_dir.mkdir(exist_ok=True)
     project_number = str(state.get("project_number", "") or "").strip()
     project_name = str(state.get("project_name", "") or "").strip()
