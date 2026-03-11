@@ -38,7 +38,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
     value: 'doubao',
     label: '豆包',
     description: '响应更快，轻量交互顺手',
-    detail: '适合快速追问、短内容生成和改写润色。',
+    detail: '适合快速追问、短内容生成和改写修改。',
     badge: '快速响应',
     icon: <Zap className="h-5 w-5" />,
   },

@@ -725,7 +725,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
               <div className="mb-3 inline-flex rounded-full border border-amber-200/80 bg-amber-50 px-3 py-1 text-xs font-semibold tracking-[0.18em] text-amber-700">
                 排队等待
               </div>
-              <h3 className="text-xl font-semibold tracking-tight text-slate-900">润色任务排队中</h3>
+              <h3 className="text-xl font-semibold tracking-tight text-slate-900">修改任务排队中</h3>
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 前方等待 {waitingCount} 个任务（含当前执行任务），轮到后将自动进入日志流。
               </p>

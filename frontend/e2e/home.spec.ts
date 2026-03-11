@@ -31,15 +31,15 @@ test.describe('Homepage', () => {
   test('tender type selection is available', async ({ page }) => {
     await page.goto('/');
 
-    const chatLink = page.getByRole('link', { name: /进入聊天模式/ });
+    const chatLink = page.getByRole('link', { name: /进入使用/ });
     await expect(chatLink).toBeVisible();
   });
 
-  test('can navigate to chat mode from homepage', async ({ page }) => {
+  test('can navigate to tender workspace from homepage', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('link', { name: /进入聊天模式/ }).click();
+    await page.getByRole('link', { name: /进入使用/ }).click();
 
-    await expect(page).toHaveURL(/\/chat/);
+    await expect(page).toHaveURL(/\/tender/);
     await expect(page.getByText('类型', { exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: '选择招标类型' })).toBeVisible();
   });

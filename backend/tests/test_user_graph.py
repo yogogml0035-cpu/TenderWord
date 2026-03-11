@@ -133,8 +133,8 @@ def test_user_graph_dispatches_rewrite_task_accepted():
             {
                 "conversation_id": "conv-1",
                 "model_provider": "deepseek",
-                "messages": [{"role": "user", "content": "请帮我润色"}],
-                "latest_user_message": "请帮我润色",
+                "messages": [{"role": "user", "content": "请帮我修改"}],
+                "latest_user_message": "请帮我修改",
             },
         )
     )
@@ -147,7 +147,7 @@ def test_user_graph_dispatches_rewrite_task_accepted():
     assert document_service.calls == [
         {
             "conversation_id": "conv-1",
-            "user_prompt": "请帮我润色",
+            "user_prompt": "请帮我修改",
             "model_provider": "deepseek",
             "skip_prompt_validation": True,
         }
@@ -174,8 +174,8 @@ def test_user_graph_falls_back_to_reply_when_rewrite_task_has_no_document():
             {
                 "conversation_id": "conv-1",
                 "model_provider": "deepseek",
-                "messages": [{"role": "user", "content": "请帮我润色"}],
-                "latest_user_message": "请帮我润色",
+                "messages": [{"role": "user", "content": "请帮我修改"}],
+                "latest_user_message": "请帮我修改",
             },
         )
     )

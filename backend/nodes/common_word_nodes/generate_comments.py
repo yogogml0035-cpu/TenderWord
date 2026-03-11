@@ -1,7 +1,7 @@
 """
 批注生成节点
 
-本模块实现 generate_comments 节点，使用 LLM 基于润色文本和从 Word 文档中提取的
+本模块实现 generate_comments 节点，使用 LLM 基于修改文本和从 Word 文档中提取的
 各种计划详情生成批注指令。
 
 该节点遵循与 generate_polished_text.py 相同的架构模式，通过提示词注册表系统
@@ -48,9 +48,9 @@ def generate_comments(
     config
 ) -> TenderGraphStateBase:
     """
-    基于润色文本和计划使用 LLM 生成批注指令。
+    基于修改文本和计划使用 LLM 生成批注指令。
     
-    本函数分析润色文本以及从 Word 文档中提取的批注计划、删除线计划和非黑色字体计划，
+    本函数分析修改文本以及从 Word 文档中提取的批注计划、删除线计划和非黑色字体计划，
     使用 LLM 生成可插入 Word 文档的结构化批注指令。
     
     Args:
@@ -114,12 +114,12 @@ def generate_comments(
         non_black_font_plan=json.dumps(non_black_font_plan, ensure_ascii=False, indent=2)
     )
 
-    # 准备 prompts 输出路径：保存大模型生成的批注内容，使用 new_comments 后缀区分
+    # 准备 prompts_log 输出路径：保存大模型生成的批注内容，使用 new_comments 后缀区分
     new_comments_file = None
     comments_prompt_file = None
     try:
-        prompts_dir = pathlib.Path(__file__).resolve().parents[2] / "prompts"
-        prompts_dir.mkdir(exist_ok=True)
+        prompts_log_dir = pathlib.Path(__file__).resolve().parents[2] / "prompts_log"
+        prompts_log_dir.mkdir(exist_ok=True)
 
         project_number = str(state.get("project_number", "") or "").strip()
         project_name = str(state.get("project_name", "") or "").strip()
@@ -130,8 +130,8 @@ def generate_comments(
         ]
         timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
         prompt_base = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
-        comments_prompt_file = prompts_dir / f"prompt_{prompt_base}_comments_prompt_{timestamp}.txt"
-        new_comments_file = prompts_dir / f"prompt_{prompt_base}_new_comments_{timestamp}.txt"
+        comments_prompt_file = prompts_log_dir / f"prompt_{prompt_base}_comments_prompt_{timestamp}.txt"
+        new_comments_file = prompts_log_dir / f"prompt_{prompt_base}_new_comments_{timestamp}.txt"
 
         with open(comments_prompt_file, "w", encoding="utf-8") as f:
             f.write(system_prompt + "\n" + formatted_user_prompt)

@@ -177,7 +177,7 @@ export function TaskLogMessage({
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-gray-500" />
           <span className="text-sm font-medium text-gray-700">
-            {isRewriteTask ? '润色进度' : '进度日志'}
+            {isRewriteTask ? '修改进度' : '进度日志'}
           </span>
           <div className="ml-1 flex items-center gap-1.5 text-xs text-gray-500">
             {getStatusIcon(message.status)}

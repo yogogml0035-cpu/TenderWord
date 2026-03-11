@@ -16,7 +16,7 @@ from backend.util.log_util.progress_log import progress_log
 
 
 JUDGE_TARGET_SYSTEM_PROMPT = """
-你是文档润色版本选择助手。
+你是文档修改版本选择助手。
 你的任务是根据会话历史和用户最新修改指令，从候选 assistant 版本中选出最应该被修改的一版。
 
 规则：

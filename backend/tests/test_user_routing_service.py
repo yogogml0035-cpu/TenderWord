@@ -33,8 +33,8 @@ def test_stream_route_or_reply_returns_no_document_reply_when_exact_rewrite_has_
     decision = asyncio.run(
         service.stream_route_or_reply(
             conversation_id="conv-1",
-            messages=[{"role": "user", "content": "请帮我润色这一段内容"}],
-            latest_user_message="请帮我润色这一段内容",
+            messages=[{"role": "user", "content": "请帮我修改这一段内容"}],
+            latest_user_message="请帮我修改这一段内容",
             model_provider="deepseek",
         )
     )

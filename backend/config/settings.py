@@ -1,7 +1,7 @@
 """Pydantic Settings 配置模块.
 
 使用 Pydantic Settings v2 管理环境变量配置.
-支持从 .env 文件加载配置.
+支持从 backend/.env 文件加载配置.
 """
 
 from functools import lru_cache
@@ -12,11 +12,11 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-ENV_FILES = (
-    PROJECT_ROOT / ".env",
-    Path(__file__).resolve().parents[1] / ".env",
-)
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = BACKEND_DIR.parent
+BACKEND_ENV_FILE = BACKEND_DIR / ".env"
+BACKEND_ENV_EXAMPLE_FILE = BACKEND_DIR / ".env.example"
+ENV_FILES = (BACKEND_ENV_FILE,)
 
 
 class Settings(BaseSettings):

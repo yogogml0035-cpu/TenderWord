@@ -1,7 +1,7 @@
 """
 统一的 Word 文档更新节点
 
-将润色后的文本插入到 Word 文档中，支持多种招标类型。
+将修改后的文本插入到 Word 文档中，支持多种招标类型。
 使用 anchor_utils.find_anchor_range() 进行锚点定位。
 """
 
@@ -145,10 +145,10 @@ def _resolve_block_flow(protected_fields: Dict[str, Any]) -> Dict[str, Any]:
 
 def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
     """
-    将润色文本按关键字（交付日期、付款方式）拆分为三个块。
+    将修改文本按关键字（交付日期、付款方式）拆分为三个块。
 
     Args:
-        polished_text: 润色后的文本内容
+        polished_text: 修改后的文本内容
 
     Returns:
         包含拆分结果的字典：
@@ -234,7 +234,7 @@ def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
 
 def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     """
-    在指定锚点位置将润色后的文本插入到 Word 文档中。
+    在指定锚点位置将修改后的文本插入到 Word 文档中。
 
     统一支持 xjcg（询价采购）和 gngk（国内公开）两种招标类型，
     根据状态中的 tender_type 自动选择对应的字体大小进行锚点定位。

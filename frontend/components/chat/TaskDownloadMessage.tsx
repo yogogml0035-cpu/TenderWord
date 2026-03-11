@@ -40,7 +40,7 @@ export function TaskDownloadMessage({
         <div className="flex items-center gap-2">
           <CheckCircle2 className="h-4 w-4 text-green-500" />
           <span className="text-sm font-medium text-gray-700">
-            {isRewriteTask ? '润色文档已更新' : '文档已生成'}
+            {isRewriteTask ? '修改文档已更新' : '文档已生成'}
           </span>
         </div>
         <button
@@ -49,7 +49,7 @@ export function TaskDownloadMessage({
           className="flex items-center gap-1 rounded bg-blue-500 px-3 py-1.5 text-sm text-white shadow-sm transition-colors duration-200 hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Download className="h-4 w-4" />
-          {isRewriteTask ? '下载润色文档' : '下载文件'}
+          {isRewriteTask ? '下载修改文档' : '下载文件'}
         </button>
       </div>
 

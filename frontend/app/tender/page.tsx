@@ -22,10 +22,10 @@ const CONVERSATION_HEARTBEAT_INTERVAL_MS = 30_000;
 const CONVERSATION_ID_SEPARATOR = '\u0001';
 
 /**
- * Chat页面内容组件 - 包含useSearchParams的使用
- * 需要被Suspense包裹
+ * 使用页内容组件 - 包含 useSearchParams 的使用
+ * 需要被 Suspense 包裹
  */
-function ChatPageContent() {
+function TenderPageContent() {
   const { tenderno, tenderType, isValid, hasParams } = useUrlParams();
   const hydrated = useHydrated();
   const processedUrlConversationKeyRef = useRef<string | null>(null);
@@ -38,7 +38,6 @@ function ChatPageContent() {
     updateConversationDraft,
     handleBackendRestart,
   } = useChatStore();
-  // URL参数处理状态
   const [urlState, setUrlState] = useState<UrlProcessingState>({
     isProcessing: false,
     error: null,
@@ -46,9 +45,6 @@ function ChatPageContent() {
   const heartbeatInFlightRef = useRef(false);
   const knownInstanceIdRef = useRef<string | null>(null);
 
-  /**
-   * 处理URL参数 - 获取招标数据
-   */
   const handleUrlParams = useCallback(async () => {
     if (!hydrated || !hasParams || !isValid) return;
 
@@ -105,7 +101,6 @@ function ChatPageContent() {
     updateConversationDraft,
   ]);
 
-  // 处理URL参数（只执行一次，且在mounted后）
   useEffect(() => {
     if (!hydrated) return;
 
@@ -215,9 +210,6 @@ function ChatPageContent() {
     };
   }, [conversationIdsKey, handleBackendRestart, hydrated, updateConversationDraft]);
 
-  /**
-   * 清除错误提示
-   */
   const clearError = useCallback(() => {
     if (!hydrated) return;
     setUrlState((prev) => ({ ...prev, error: null }));
@@ -225,22 +217,18 @@ function ChatPageContent() {
 
   return (
     <div className="grid h-screen grid-cols-[auto_minmax(0,2fr)_minmax(0,3fr)] overflow-hidden bg-gray-100">
-      {/* Left Sidebar - Tender Types */}
       <div className="flex-shrink-0">
         <TenderTypeSidebar />
       </div>
 
-      {/* Middle Column - Form Panel */}
       <div className="min-h-0 min-w-0 border-r border-gray-200">
         <FormPanel />
       </div>
 
-      {/* Right Column - Chat Panel */}
       <div className="min-h-0 min-w-0">
         <ChatPanel />
       </div>
 
-      {/* URL参数处理中的加载遮罩 */}
       {urlState.isProcessing && (
         <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-white/60">
           <div className="flex flex-col items-center gap-3 rounded-lg border border-gray-200 bg-white p-6 shadow-xl">
@@ -250,7 +238,6 @@ function ChatPageContent() {
         </div>
       )}
 
-      {/* 错误提示（非阻塞式) */}
       {urlState.error && !urlState.isProcessing && (
         <div className="fixed bottom-4 right-4 z-50 animate-slide-in-up">
           <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 shadow-lg">
@@ -281,28 +268,23 @@ function ChatPageContent() {
           </div>
         </div>
       )}
-
     </div>
   );
 }
 
-/**
- * Chat页面主组件 - 使用Suspense包裹内容组件
- * 这是为了支持Next.js 16的useSearchParams需要在Suspense边界内使用
- */
-export default function ChatPage() {
+export default function TenderPage() {
   return (
     <Suspense
-      fallback={(
+      fallback={
         <div className="flex h-screen items-center justify-center bg-gray-100">
           <div className="flex flex-col items-center gap-3 rounded-lg border border-gray-200 bg-white p-6 shadow-xl">
             <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
             <p className="text-sm text-gray-600">正在加载...</p>
           </div>
         </div>
-      )}
+      }
     >
-      <ChatPageContent />
+      <TenderPageContent />
     </Suspense>
   );
 }

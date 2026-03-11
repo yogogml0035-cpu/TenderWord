@@ -744,7 +744,7 @@ describe('useChatSSE', () => {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
           node: 'rewrite_text',
-          content: '润色后的内容',
+          content: '修改后的内容',
           content_mode: 'snapshot',
           is_complete: true,
         },
@@ -757,7 +757,7 @@ describe('useChatSSE', () => {
           task_id: 'task-1',
           task_kind: 'rewrite',
           success: true,
-          message: '润色任务完成',
+          message: '修改任务完成',
           output_file: 'D:/UploadFiles/output-rewrite.docx',
           processing_time: 3.2,
         },
@@ -766,7 +766,7 @@ describe('useChatSSE', () => {
 
     const group = getTaskGroup();
     expect(group?.contentMessage?.status).toBe('completed');
-    expect(group?.contentMessage?.content).toBe('润色后的内容');
+    expect(group?.contentMessage?.content).toBe('修改后的内容');
     expect(group?.contentMessage?.metadata?.taskKind).toBe('rewrite');
     expect(group?.downloadMessage?.metadata?.taskKind).toBe('rewrite');
   });

@@ -423,12 +423,12 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
   const currentTaskKind = currentTaskSummary?.task_kind || 'generate';
   const isRewriteTask = currentTaskKind === 'rewrite';
   const runningStepSummary = isCurrentTaskStarting
-    ? `系统正在建立${isRewriteTask ? '润色' : '生成'}任务与进度流`
+    ? `系统正在建立${isRewriteTask ? '修改' : '生成'}任务与进度流`
     : runningTaskProgress
       ? `已完成 ${runningTaskProgress.completed_count}/${runningTaskProgress.total_nodes} 个步骤`
       : runningProgressFraction
         ? `已完成 ${runningProgressFraction.completed}/${runningProgressFraction.total} 个步骤`
-        : `系统正在启动${isRewriteTask ? '润色' : '生成'}流程`;
+        : `系统正在启动${isRewriteTask ? '修改' : '生成'}流程`;
   const runningStatusDetail = runningCurrentNodeDisplay
     || (isCurrentTaskStarting
       ? '当前没有前置任务，系统正在获取执行权并初始化 Word 与进度流。'
@@ -436,14 +436,14 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         ? '系统正在选择目标版本、重写内容并写回文档，请稍候，不建议关闭当前页面。'
         : '系统正在整理章节、参数与格式，请稍候，不建议关闭当前页面。');
   const runningStatusTitle = isCurrentTaskStarting
-    ? `正在启动${isRewriteTask ? '润色' : '生成'}流程...`
+    ? `正在启动${isRewriteTask ? '修改' : '生成'}流程...`
     : isRewriteTask
-      ? '正在修改润色文档...'
+      ? '正在修改文档...'
       : '正在生成招标文档...';
   const runningStatusLabel = isCurrentTaskStarting
     ? '准备执行中'
     : isRewriteTask
-      ? '润色处理中'
+      ? '修改处理中'
       : '文档生成中';
   const runningProgressLabel = runningTaskProgress
     ? `${runningProgressPercent}%`
@@ -463,7 +463,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         progressSummary: queueProgressSummary,
         progressLabel: queueProgressLabel,
         progressBarPercent: runningProgressPercent,
-        footer: `轮到当前任务后将自动开始${isRewriteTask ? '润色' : '生成'}，无需重复提交。`,
+        footer: `轮到当前任务后将自动开始${isRewriteTask ? '修改' : '生成'}，无需重复提交。`,
         icon: (
           <svg
             className="h-7 w-7"
@@ -493,7 +493,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
           progressSummary: runningStepSummary,
           progressLabel: runningProgressLabel,
           progressBarPercent: runningOverlayPercent,
-          footer: `${isRewriteTask ? '润色' : '生成'}过程中可使用底部“取消生成”终止任务`,
+          footer: `${isRewriteTask ? '修改' : '生成'}过程中可使用底部“取消生成”终止任务`,
           icon: <Loader2 className="h-7 w-7 animate-spin" />,
         }
       : null;
@@ -558,13 +558,13 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
                 <span className="flex h-6 w-6 items-center justify-center rounded bg-indigo-100 text-xs font-semibold text-indigo-600">
                   询
                 </span>
-                <span>询价采购 (XJCG)</span>
+                <span>询价采购</span>
               </div>
               <div className="flex items-center gap-3 text-sm text-gray-500">
                 <span className="flex h-6 w-6 items-center justify-center rounded bg-indigo-100 text-xs font-semibold text-indigo-600">
                   公
                 </span>
-                <span>国内公开招标 (GNGK)</span>
+                <span>国内公开</span>
               </div>
             </div>
           </div>

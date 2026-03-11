@@ -418,7 +418,7 @@ class DocumentService:
             return GenerateResponse(
                 success=False,
                 task_id=task_id,
-                message="润色指令不能为空",
+                message="修改指令不能为空",
                 error="REWRITE_PROMPT_INVALID",
             )
 
@@ -453,7 +453,7 @@ class DocumentService:
                 return GenerateResponse(
                     success=False,
                     task_id=task_id,
-                    message="润色指令校验超时，请稍后重试",
+                    message="修改指令校验超时，请稍后重试",
                     error="LLM_TIMEOUT",
                 )
             except Exception:
@@ -461,7 +461,7 @@ class DocumentService:
                 return GenerateResponse(
                     success=False,
                     task_id=task_id,
-                    message="润色指令校验失败，请稍后重试",
+                    message="修改指令校验失败，请稍后重试",
                     error="LLM_SERVICE_ERROR",
                 )
 
@@ -469,7 +469,7 @@ class DocumentService:
                 return GenerateResponse(
                     success=False,
                     task_id=task_id,
-                    message="当前输入不属于可执行的润色指令",
+                    message="当前输入不属于可执行的修改指令",
                     error="REWRITE_PROMPT_INVALID",
                 )
 
@@ -739,8 +739,8 @@ class DocumentService:
         """
         import asyncio
 
-        task_label = "润色任务" if task_kind == "rewrite" else "文档生成任务"
-        success_message = "润色任务完成" if task_kind == "rewrite" else "文档生成完成"
+        task_label = "修改任务" if task_kind == "rewrite" else "文档生成任务"
+        success_message = "修改任务完成" if task_kind == "rewrite" else "文档生成完成"
         callback.push_log(f"开始执行{task_label}: {task_id}")
         progress_log.info(f"[Task] 开始执行任务: {task_id}")
         stdout_writer = _BufferedLoggerWriter(level="info")

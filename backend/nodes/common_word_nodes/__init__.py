@@ -7,13 +7,13 @@
 节点列表：
 - prepare_template: 准备 Word 模板
 - replace_content: 替换内容
-- generate_polished_text: 生成润色文本（根据 tender_type 选择对应的 prompt）
+- generate_polished_text: 生成修改文本（根据 tender_type 选择对应的 prompt）
 - get_comments: 从送审稿 Word 文档中提取批注内容
 - copy_comments: 从送审稿按内容锚定复制批注到模板
-- generate_comments: 基于润色文本与计划使用 LLM 生成批注指令
+- generate_comments: 基于修改文本与计划使用 LLM 生成批注指令
 - extract_tender_params: 提取招标参数内容（从锚点之间）
 - delete_tender_param: 删除招标参数内容（从锚点之间）
-- update_word: 更新 Word 文档（插入润色文本）
+- update_word: 更新 Word 文档（插入修改文本）
 """
 
 from backend.nodes.common_word_nodes.prepare_template import prepare_template

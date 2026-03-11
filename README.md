@@ -115,8 +115,8 @@ python -m venv .venv
 pip install -r requirements.txt
 
 # 配置环境变量
-copy ..\.env.example ..\.env
-# 编辑 .env 文件填入配置
+copy .env.example .env
+# 编辑 backend\.env 文件填入配置
 
 # 启动后端服务（以下两种方式任选其一）
 
@@ -124,7 +124,6 @@ copy ..\.env.example ..\.env
 python main.py
 
 # 方式2: 使用 uvicorn（热重载模式，适合开发）
-cd backend
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -133,23 +132,25 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 ```powershell
 cd frontend
+# 配置环境变量
+copy .env.local.example .env.local
+
 # 启动方式二选一：
 #
 # 方式1：开发模式（热更新，适合本地开发/联调）
-cd frontend
 npm install
 npm run dev
 
 # 方式2：生产部署（构建 + 启动；部署到服务器时用这个）
 # 注意：NEXT_PUBLIC_* 属于“构建时注入”，改了环境变量也要重新 build
-# npm ci
-# npm run build
-# npm run start
+npm ci
+npm run build
+npm run start
 ```
 
 ### 4. 访问应用
 
-- 前端界面: http://localhost:8502/chat
+- 前端界面: http://localhost:8502
 - API 文档: http://localhost:8000/docs
 - 健康检查: http://localhost:8000/health
 
@@ -170,7 +171,7 @@ feat-wsq-h/
 │   ├── store/                # Zustand 状态管理
 │   ├── types/                # TypeScript 类型定义
 │   ├── public/               # 静态资源
-│   ├── .env.example          # 环境变量模板
+│   ├── .env.local.example    # 前端环境变量模板
 │   └── package.json
 │
 ├── backend/                  # FastAPI 后端
@@ -190,6 +191,7 @@ feat-wsq-h/
 │   ├── services/             # 业务逻辑
 │   ├── models/               # 数据模型
 │   ├── util/                 # 工具函数
+│   ├── .env.example          # 后端环境变量模板
 │   ├── main.py               # 应用入口
 │   └── requirements.txt
 │
@@ -197,7 +199,6 @@ feat-wsq-h/
 │   ├── deployment.md         # 部署文档
 │   └── Word_COM_问题排查指南.md
 │
-├── .env.example              # 后端环境变量模板
 └── README.md                 # 本文档
 ```
 
@@ -208,23 +209,26 @@ feat-wsq-h/
 | 方法 | 端点 | 描述 | 认证 |
 |------|------|------|------|
 | GET | `/health` | 健康检查 | 否 |
-| POST | `/api/v1/tender/generate` | 生成招标文档 | 否 |
-| POST | `/api/v1/tender/upload` | 上传文件 | 否 |
-| GET | `/api/v1/tender/status/{task_id}` | 查询任务状态 | 否 |
-| GET | `/api/v1/tender/download/{filename}` | 下载生成的文档 | 否 |
+| POST | `/api/generate` | 创建招标文档生成任务 | 否 |
+| POST | `/api/upload` | 上传单个文件 | 否 |
+| POST | `/api/upload/multiple` | 批量上传文件 | 否 |
+| GET | `/api/tender/{tender_no}` | 获取招标基础数据 | 否 |
+| GET | `/api/tasks/{task_id}` | 查询任务状态 | 否 |
+| GET | `/api/stream/{task_id}` | 订阅任务 SSE 事件 | 否 |
+| GET | `/api/download/{file_path}` | 下载生成的文档 | 否 |
 
 ### API 示例
 
-**生成招标文档:**
+**创建生成任务:**
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/tender/generate \
+curl -X POST http://localhost:8000/api/generate \
   -H "Content-Type: application/json" \
   -d '{
     "tender_no": "ZBGG-2024-001",
-    "tender_type": "xjcg",
-    "template_file": "template.docx",
-    "param_files": ["params.xlsx"],
+    "form_type": "xjcg_tender",
+    "template_path": "D:/UploadFiles/template.docx",
+    "param_file_paths": ["D:/UploadFiles/params.xlsx"],
     "model": "deepseek"
   }'
 ```
@@ -233,7 +237,9 @@ curl -X POST http://localhost:8000/api/v1/tender/generate \
 
 ## 🔧 环境变量配置
 
-### 后端环境变量 (.env)
+### 后端环境变量 (`backend/.env`)
+
+模板文件：`backend/.env.example`
 
 ```bash
 # 应用基础配置
@@ -264,7 +270,9 @@ UPLOAD_DIR=D:/UploadFiles
 MAX_UPLOAD_SIZE=104857600
 ```
 
-### 前端环境变量 (.env.local)
+### 前端环境变量 (`frontend/.env.local`)
+
+模板文件：`frontend/.env.local.example`
 
 ```bash
 # API 配置
@@ -301,7 +309,7 @@ cd D:\Tools\nssm\win64
 ### 基本使用流程
 
 1. 访问前端页面 http://localhost:8502
-2. 点击首页的 **"进入聊天模式"** 按钮，进入三栏式操作界面
+2. 点击首页的 **"进入使用"** 按钮，进入三栏式操作界面
 3. 在左侧招标类型栏选择招标类型（询价采购 / 国内公开）
 4. 在中间表单区域：
    - 输入招标编号，系统自动获取项目信息
@@ -311,26 +319,26 @@ cd D:\Tools\nssm\win64
 5. 点击"开始生成"按钮，右侧聊天面板将实时显示生成进度和日志
 6. 生成完成后，在聊天面板中查看结果并下载生成的招标文档
 
-### 直接访问聊天页面
+### 直接访问使用页面
 
-可以直接通过以下地址进入三栏聊天模式：
+可以直接通过以下地址进入三栏式使用界面：
 
 ```
-http://localhost:8502/chat
+http://localhost:8502/tender
 ```
 
 ### URL 参数路由
 
-系统支持通过 URL 参数直接进入聊天模式并自动选择招标类型:
+系统支持通过 URL 参数直接进入使用页面并自动选择招标类型:
 
 ```
-http://localhost:8502/chat?tender_lx=0&purchase_method=5&fund_lx=0&tenderno=ZBGG-2024-001
+http://localhost:8502/tender?tender_lx=0&purchase_method=5&fund_lx=0&tenderno=ZBGG-2024-001
 ```
 
 **页面路由:**
 
-- `/` - 首页（欢迎页面，点击进入聊天模式）
-- `/chat` - 三栏聊天模式（左栏类型选择 / 中栏表单 / 右栏对话）
+- `/` - 首页（欢迎页面，点击进入使用）
+- `/tender` - 三栏使用页（左栏类型选择 / 中栏表单 / 右栏对话）
 
 **参数说明:**
 - `tender_lx`: 招标类型（0=询价, 1=国内公开, 2=邀请招标）
@@ -416,7 +424,7 @@ taskkill /PID <进程ID> /F
 Invoke-WebRequest -Uri http://localhost:8000/health
 
 # 检查 CORS 配置
-# 确保 .env 中的 CORS_ORIGINS 包含前端地址 http://localhost:8502
+# 确保 backend/.env 中的 CORS_ORIGINS 包含前端地址 http://localhost:8502
 ```
 
 ### 并发相关问题

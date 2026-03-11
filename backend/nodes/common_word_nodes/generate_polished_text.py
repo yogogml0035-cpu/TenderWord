@@ -54,7 +54,7 @@ PROMPT_REGISTRY = {
 }
 
 REWRITE_SYSTEM_PROMPT = """
-你是招标文档润色助手。
+你是招标文档修改助手。
 请根据用户修改指令，在保持文档结构与专业风格的前提下，对现有文本进行定向改写。
 要求：
 1. 只输出最终可直接写回文档的正文文本，不输出解释。
@@ -69,20 +69,12 @@ REWRITE_USER_PROMPT = """
 【用户修改指令】
 {user_prompt}
 
-请严格按指令完成润色修改，输出最终文本：
+请严格按指令完成修改，输出最终文本：
 """.strip()
    
 
 def _sanitize_filename(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', "_", name).strip()
-
-
-from dotenv import load_dotenv
-_DOTENV_PATH = pathlib.Path(__file__).resolve().parents[2] / ".env"
-if _DOTENV_PATH.exists():
-    load_dotenv(dotenv_path=_DOTENV_PATH)
-else:
-    load_dotenv()
 
 
 def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
@@ -217,7 +209,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
         with open(polished_output_file, "w", encoding="utf-8") as f:
             f.write(str(content))
     except Exception as e:
-        progress_log.debug(f"警告: 保存润色结果到 prompts 失败: {e}")
+        progress_log.debug(f"警告: 保存修改结果到 prompts_log 失败: {e}")
 
     # 将大模型生成的内容写入 txt 文件，命名：项目编号-项目名称-初稿.txt
     project_number = str(state.get("project_number", "") or "").strip()
@@ -253,9 +245,9 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
             with open(polished_txt_path, "w", encoding="utf-8") as f:
                 f.write(str(content))
         except Exception as e:
-            progress_log.debug(f"警告: 保存润色文本到文件失败: {e}")
+            progress_log.debug(f"警告: 保存修改文本到文件失败: {e}")
     else:
-        progress_log.debug("警告: 未找到润色文本输出目录，跳过落盘文本文件")
+        progress_log.debug("警告: 未找到修改文本输出目录，跳过落盘文本文件")
 
     # 只返回需要更新的键，避免并行执行时的状态冲突
     # 在 LangGraph 中，并行节点应该只返回部分状态更新
@@ -345,9 +337,9 @@ if __name__ == "__main__":
         
         origin_tender_params = extract_text_from_word_file(str(tech_spec_path))
         
-        # 第三步：调用 generate_polished_text 生成润色后的文本
+        # 第三步：调用 generate_polished_text 生成修改后的文本
         progress_log.debug("") or progress_log.debug("-" * 80)
-        progress_log.debug("第三步: 生成润色后的文本")
+        progress_log.debug("第三步: 生成修改后的文本")
         progress_log.debug("-" * 80)
         
         polish_state: TenderGraphStateBase = {
@@ -359,19 +351,19 @@ if __name__ == "__main__":
         polished_text = polished_result_state.get("polished_text", "")
         
         if polished_text:
-            progress_log.debug(f"成功生成润色文本，长度: {len(polished_text)} 字符")
+            progress_log.debug(f"成功生成修改文本，长度: {len(polished_text)} 字符")
             
             # 保存完整内容到文件
             output_file = tech_spec_path.parent / f"{tech_spec_path.stem}_polished.txt"
             try:
                 with open(output_file, "w", encoding="utf-8") as f:
                     f.write(polished_text)
-                progress_log.debug(f"润色文本已保存到文件: {output_file}")
+                progress_log.debug(f"修改文本已保存到文件: {output_file}")
             except Exception as save_e:
                 progress_log.debug(f"警告: 保存文件时出错: {save_e}")
             
             progress_log.debug("") or progress_log.debug("=" * 80)
-            progress_log.debug("生成的润色文本（完整内容）:")
+            progress_log.debug("生成的修改文本（完整内容）:")
             progress_log.debug("=" * 80)
             progress_log.debug(polished_text)
             progress_log.debug("=" * 80)

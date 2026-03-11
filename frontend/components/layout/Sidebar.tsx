@@ -99,7 +99,7 @@ export function SidebarWithHistory({ className }: { className?: string }) {
           <p className="mb-2 px-2 text-xs font-medium tracking-wider text-[var(--text-muted)] uppercase">
             模式
           </p>
-          <NavLink href="/chat" icon={<MessageSquare className="h-4 w-4" />}>
+          <NavLink href="/tender" icon={<MessageSquare className="h-4 w-4" />}>
             三栏聊天
           </NavLink>
         </nav>

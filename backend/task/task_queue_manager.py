@@ -61,7 +61,7 @@ NODE_DISPLAY_NAMES = {
     NodeName.REPLACE_CONTENT: "替换最新项目信息",
     NodeName.GENERATE_POLISHED_TEXT: "AI生成采购需求",
     NodeName.GENERATE_COMMENTS: "AI生成批注建议",
-    NodeName.RESOLVE_REWRITE_TARGET: "选择润色版本",
+    NodeName.RESOLVE_REWRITE_TARGET: "选择修改版本",
     NodeName.DELETE_SECTION: "删除原段落",
     NodeName.REWRITE_TEXT: "AI重写内容",
     NodeName.UPDATE_WORD: "生成招标文件",

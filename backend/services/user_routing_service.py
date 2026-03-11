@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 REWRITE_ROUTE_LITERAL = "rewrite"
 REPLY_ROUTE_LITERAL = "reply"
 
-REWRITE_INVALID_HINT_TEXT = "当前不是有效的润色修改指令，请明确说明改哪段、改成什么效果。"
-CHAT_REWRITE_SWITCH_HINT_TEXT = "当前问题更适合使用“润色修改”模式，请切换后再发送。"
+REWRITE_INVALID_HINT_TEXT = "当前不是有效的修改指令，请明确说明改哪段、改成什么效果。"
+CHAT_REWRITE_SWITCH_HINT_TEXT = "当前问题更适合使用“修改”模式，请切换后再发送。"
 DOC_CONTEXT_HINT_TEXT = (
     "当前不会自动携带文档正文，如需我分析具体内容，请粘贴相关段落；"
     "如果是想修改已生成的招标文件，请直接告诉我需要修改或重写的部分。"
@@ -28,28 +28,28 @@ NON_REWRITE_HINT_TEXT = (
 )
 
 REWRITE_PROMPT_RELEVANCE_SYSTEM_PROMPT = """
-你是招标文档润色指令分类器。
+你是招标文档修改指令分类器。
 你的任务是判断用户输入是否是在要求修改当前招标文档内容。
 
-如果用户输入是在要求对当前文档进行润色、改写、补充、删除、替换、重写、调整、修订，输出 true。
+如果用户输入是在要求对当前文档进行修改、改写、补充、删除、替换、重写、调整、修订，输出 true。
 如果用户输入是闲聊、提问、解释、总结、翻译、评价、问候、与文档修改无关的话题，输出 false。
 
 规则：
 1. 只能输出小写 true 或 false。
 2. 不要输出解释、标点、JSON、代码块或任何额外文本。
-3. 即使没有出现“润色”“修改”等明确关键词，只要语义上是在要求改当前文档，也输出 true。
+3. 即使没有出现“修改”等明确关键词，只要语义上是在要求改当前文档，也输出 true。
 4. 无法明确判断时，输出 false。
 """.strip()
 
 ROUTE_OR_REPLY_SYSTEM_PROMPT = """
 你是东松招标文件智能生成助手。
-如果用户输入和修改、润色、改写、重写已生成的招标文本有关，只输出 rewrite。
+如果用户输入和修改、改写、重写已生成的招标文本有关，只输出 rewrite。
 如果用户输入无关，就直接正常回答问题，并在合适时自然提醒用户：当前支持在生成招标文件后继续修改或重写，不满意时可以直接下达修改重写指令。
 如果用户的问题依赖“当前文档”“这份文档”“第几章”等正文内容，但消息本身不是要求修改重写，不要假装看过文档；要直接说明当前不会自动携带文档正文，建议用户粘贴相关段落或直接下达修改重写指令。
 如果用户是在打招呼、询问你是谁、你能做什么，请简短自我介绍，并明确自称“东松招标文件智能生成助手”。
 
 规则：
-1. 只有确定是修改、润色、改写、重写当前招标文本时，才能输出 rewrite。
+1. 只有确定是修改、改写、重写当前招标文本时，才能输出 rewrite。
 2. 输出 rewrite 时只能输出这一个单词，小写，不得带任何额外字符。
 3. 其他情况直接输出给用户的中文回复，不要输出 JSON、标签、解释、分析过程。
 4. 如果不确定是否属于修改重写，按普通回复处理。
@@ -58,19 +58,19 @@ ROUTE_OR_REPLY_SYSTEM_PROMPT = """
 
 FORCE_REWRITE_SYSTEM_PROMPT = f"""
 你是东松招标文件智能生成助手。
-如果用户输入是在要求修改、润色、改写、重写当前招标文本，只输出 rewrite。
-如果不是有效的润色修改指令，就直接输出下面这句话，不得改写：
+如果用户输入是在要求修改、改写、重写当前招标文本，只输出 rewrite。
+如果不是有效的修改指令，就直接输出下面这句话，不得改写：
 {REWRITE_INVALID_HINT_TEXT}
 
 规则：
-1. 命中润色修改时只能输出 rewrite。
+1. 命中修改时只能输出 rewrite。
 2. 不命中时只能输出上面的固定提示语。
 3. 不要输出解释、JSON、标签、额外标点或分析过程。
 """.strip()
 
-# Deprecated legacy heuristics, kept for /chat/stream compatibility only.
+# Deprecated legacy heuristics, kept for legacy stream compatibility only.
 REWRITE_TOKENS = (
-    "润色",
+    "修改",
     "改写",
     "修改文档",
     "帮我改",

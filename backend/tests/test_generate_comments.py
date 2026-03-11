@@ -118,7 +118,7 @@ class TestPromptFormatting:
         from backend.prompts.comment_prompt import COMMENT_USER_PROMPT
         
         # 准备测试数据
-        test_polished_text = "这是润色后的文本内容"
+        test_polished_text = "这是修改后的文本内容"
         test_comment_plan = [{"content": "批注内容", "scope_text": "范围文本"}]
         test_strikethrough = [{"paragraph_text": "段落", "strikethrough_text": "删除线"}]
         test_non_black_font = [{"paragraph_text": "段落", "font_text": "非黑色字体"}]

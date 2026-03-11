@@ -10,6 +10,11 @@ from typing import Any, Callable, Optional
 from backend.config.settings import settings
 from backend.util.log_util.progress_log import progress_log
 
+
+ENV_SETUP_HINT = (
+    "请在系统环境变量或 backend/.env 中补齐后重试（可参考 backend/.env.example）。"
+)
+
 class LLMTimeoutError(Exception):
     """大模型响应超时异常"""
 
@@ -163,7 +168,7 @@ def ensure_llm_env(model_provider: str) -> None:
         missing_text = ", ".join(missing)
         raise ValueError(
             f"{config.display_name} 配置缺失：{missing_text} 未设置。"
-            "请在系统环境变量或项目根目录的 .env 中补齐后重试（可参考 .env.example）。"
+            f"{ENV_SETUP_HINT}"
         )
 
 
@@ -284,7 +289,7 @@ async def _stream_openai_compatible(
         missing_text = ", ".join(missing)
         raise ValueError(
             f"{config.display_name} 配置缺失：{missing_text} 未设置。"
-            "请在系统环境变量或项目根目录的 .env 中补齐后重试（可参考 .env.example）。"
+            f"{ENV_SETUP_HINT}"
         )
 
     client = AsyncOpenAI(

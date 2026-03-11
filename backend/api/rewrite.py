@@ -18,7 +18,7 @@ router = APIRouter(prefix="/rewrite", tags=["Rewrite"])
 
 class RewriteRequest(BaseModel):
     conversation_id: str = Field(..., min_length=1, description="会话ID")
-    user_prompt: str = Field(..., min_length=1, description="润色修改指令")
+    user_prompt: str = Field(..., min_length=1, description="修改指令")
     model: LLMModel = Field(default=LLMModel.DEEPSEEK, description="使用的模型")
 
 
@@ -38,11 +38,11 @@ def _error_status(code: str) -> int:
     "",
     response_model=GenerateResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="创建润色修改任务",
+    summary="创建修改任务",
 )
 async def create_rewrite_task(request: RewriteRequest) -> GenerateResponse:
     logger.info(
-        "收到润色修改请求: conversation_id=%s, model=%s",
+        "收到修改请求: conversation_id=%s, model=%s",
         request.conversation_id,
         request.model.value,
     )
@@ -63,7 +63,7 @@ async def create_rewrite_task(request: RewriteRequest) -> GenerateResponse:
             "success": False,
             "error": {
                 "code": error_code,
-                "message": response.message or "润色任务创建失败",
+                "message": response.message or "修改任务创建失败",
             },
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },

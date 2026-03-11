@@ -33,7 +33,7 @@ export interface UseUrlParamsReturn {
  * 
  * @example
  * ```typescript
- * // 完整URL: /chat?tender_lx=0&purchase_method=2&fund_lx=0&tenderno=TEST001
+ * // 完整URL: /tender?tender_lx=0&purchase_method=2&fund_lx=0&tenderno=TEST001
  * function MyComponent() {
  *   const { tenderno, tenderType, isValid, errors } = useUrlParams();
  *   
@@ -48,7 +48,7 @@ export interface UseUrlParamsReturn {
  * @example
  * ```typescript
  * // 缺少tenderno
- * // URL: /chat?tender_lx=0&purchase_method=2&fund_lx=0
+ * // URL: /tender?tender_lx=0&purchase_method=2&fund_lx=0
  * function MyComponent() {
  *   const { tenderno, tenderType, isValid, errors } = useUrlParams();
  *   // tenderno: undefined

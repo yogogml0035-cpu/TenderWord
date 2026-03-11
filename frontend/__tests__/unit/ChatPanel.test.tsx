@@ -279,7 +279,7 @@ describe('ChatPanel', () => {
       taskSummaries: {},
       conversationDrafts: {
         'conv-1': {
-          chat_input: '请帮我润色这一段内容',
+          chat_input: '请帮我修改这一段内容',
         },
       },
     }));

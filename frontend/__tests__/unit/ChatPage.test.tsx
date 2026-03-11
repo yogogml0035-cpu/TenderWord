@@ -1,5 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
-import ChatPage from '@/app/chat/page';
+import ChatPage from '@/app/tender/page';
 import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
@@ -115,10 +115,10 @@ describe('ChatPage', () => {
               id: 'log-stream-1',
               timestamp: Date.now(),
               level: 'info',
-              message: '正在润色',
+              message: '正在修改',
             },
           ],
-          aiText: '保留中的润色内容',
+          aiText: '保留中的修改内容',
           aiComplete: false,
           lastEventId: '42',
         },
@@ -163,7 +163,7 @@ describe('ChatPage', () => {
       expect(conversation?.currentTaskId).toBeUndefined();
       expect(group?.logMessage?.status).toBe('error');
       expect(group?.contentMessage?.status).toBe('error');
-      expect(group?.contentMessage?.content).toBe('保留中的润色内容');
+      expect(group?.contentMessage?.content).toBe('保留中的修改内容');
       expect(draft?.chat_input).toBe('请补充售后条款');
       expect(useChatStore.getState().activeTaskIds).toHaveLength(0);
       expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();

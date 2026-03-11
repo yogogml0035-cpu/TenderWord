@@ -145,10 +145,10 @@ describe('chatStore task message grouping', () => {
             id: 'log-running',
             timestamp: Date.now(),
             level: 'info',
-            message: '正在润色',
+            message: '正在修改',
           },
         ],
-        aiText: '已生成的润色内容',
+        aiText: '已生成的修改内容',
         aiComplete: false,
       });
       useChatTaskSessionStore.getState().upsertSession('task-1', { lastEventId: '42' });
@@ -163,12 +163,12 @@ describe('chatStore task message grouping', () => {
     expect(useChatStore.getState().activeTaskIds).toHaveLength(0);
     expect(group?.logMessage?.status).toBe('error');
     expect(group?.contentMessage?.status).toBe('error');
-    expect(group?.contentMessage?.content).toBe('已生成的润色内容');
+    expect(group?.contentMessage?.content).toBe('已生成的修改内容');
     expect(group?.contentMessage?.error).toBe('服务已重启，任务已中断，可重试');
     expect(group?.contentMessage?.metadata?.localTaskReason).toBe('backend_restart');
     expect(group?.logMessage?.metadata?.logs).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ message: '正在润色' }),
+        expect.objectContaining({ message: '正在修改' }),
         expect.objectContaining({ message: '服务已重启，任务已中断，可重试' }),
       ])
     );

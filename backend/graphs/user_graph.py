@@ -95,7 +95,7 @@ class UserGraph:
 
         if not response.success:
             error_code = str(response.error or "REWRITE_FAILED")
-            error_message = str(response.message or "润色任务创建失败")
+            error_message = str(response.message or "修改任务创建失败")
             if error_code == "REWRITE_NO_DOCUMENT":
                 self._emit_event(stream_writer, "chunk", {"content": error_message})
                 self._emit_event(stream_writer, "done", {"content": error_message})

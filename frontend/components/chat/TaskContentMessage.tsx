@@ -122,7 +122,7 @@ export function TaskContentMessage({
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 text-gray-500" />
           <span className="text-sm font-medium text-gray-700">
-            {isRewriteTask ? 'AI 润色内容' : 'AI 生成内容'}
+            {isRewriteTask ? 'AI 修改内容' : 'AI 生成内容'}
           </span>
           <div className="ml-1 flex items-center gap-1.5 text-xs text-gray-500">
             {getStatusIcon(message.status)}
