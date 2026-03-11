@@ -140,4 +140,48 @@ describe('chatStore conversation scoped selectors', () => {
 
     expect(useChatStore.getState().getConversationDraft(conversationId)?.model).toBe('deepseek');
   });
+
+  it('finds the most recent matching conversation by normalized tender number and type', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          id: 'conv-xjcg-old',
+          title: '0811-DSITC253505',
+          tenderType: 'xjcg',
+          createdAt: 1,
+          updatedAt: 1,
+          messages: [],
+        },
+        {
+          id: 'conv-xjcg-new',
+          title: '自定义标题',
+          tenderType: 'xjcg',
+          createdAt: 2,
+          updatedAt: 20,
+          messages: [],
+        },
+        {
+          id: 'conv-gngk',
+          title: '0811-DSITC253505',
+          tenderType: 'gngk',
+          createdAt: 3,
+          updatedAt: 30,
+          messages: [],
+        },
+      ],
+      conversationDrafts: {
+        'conv-xjcg-new': {
+          tender_no: ' 0811-dsitc253505 ',
+          model: 'deepseek',
+        },
+      },
+    }));
+
+    const store = useChatStore.getState();
+    expect(store.findConversationByTenderNo('0811-DSITC253505', 'xjcg')?.id).toBe(
+      'conv-xjcg-new'
+    );
+    expect(store.findConversationByTenderNo('0811-dsitc253505', 'gngk')?.id).toBe('conv-gngk');
+  });
 });

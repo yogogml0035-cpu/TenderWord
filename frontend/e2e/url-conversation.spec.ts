@@ -29,10 +29,95 @@ test.describe('URL-driven Conversation Flow', () => {
   });
 
   test('URL params with gngk type loads page', async ({ page }) => {
-    await page.goto('/tender?tenderno=GNGK001&purchase_method=1&tender_lx=1&fund_lx=0');
+    await page.goto('/tender?tenderno=GNGK001&purchase_method=2&tender_lx=0&fund_lx=0');
 
     await expect(page.locator('.animate-spin')).not.toBeVisible({ timeout: 15000 });
     await expect(page.getByText('国内公开')).toBeVisible();
+  });
+
+  test('Matching URL reuses existing same-session conversation', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.sessionStorage.setItem(
+        'chat-storage',
+        JSON.stringify({
+          state: {
+            conversations: [
+              {
+                id: 'conv-existing',
+                title: '自定义标题',
+                tenderType: 'gngk',
+                createdAt: 1,
+                updatedAt: 5,
+                messages: [],
+              },
+            ],
+            currentConversationId: null,
+            selectedTenderType: null,
+            conversationDrafts: {
+              'conv-existing': {
+                tender_no: '0811-DSITC253505',
+                tender_data: {
+                  project_name: '缓存项目',
+                  project_number: '0811-DSITC253505',
+                  project_content: '缓存内容',
+                  bzj_rule: '缓存保证金规则',
+                  buyer_name: '缓存采购人',
+                  project_zbr_xbr: '张三',
+                  zbr_xbr_tel: '13800138000',
+                  zbr_pinyin: 'zhangsan',
+                  shell_start_date: '2024-01-01',
+                  shell_end_date: '2024-12-31',
+                  submit_date: '2024-12-31',
+                  platform: '缓存平台',
+                  service_fee: '1000',
+                },
+              },
+            },
+          },
+          version: 0,
+        })
+      );
+    });
+
+    await page.goto(
+      '/tender?tenderno=0811-DSITC253505&purchase_method=2&tender_lx=0&fund_lx=0'
+    );
+    await page.waitForLoadState('networkidle');
+
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const raw = window.sessionStorage.getItem('chat-storage');
+          if (!raw) {
+            return null;
+          }
+
+          const parsed = JSON.parse(raw) as {
+            state?: {
+              conversations?: Array<{ id: string; title: string }>;
+              currentConversationId?: string | null;
+              conversationDrafts?: Record<string, { tender_fetch?: { status?: string } }>;
+            };
+          };
+
+          return {
+            conversationCount: parsed.state?.conversations?.length ?? 0,
+            currentConversationId: parsed.state?.currentConversationId ?? null,
+            currentTitle:
+              parsed.state?.conversations?.find(
+                (conversation) => conversation.id === parsed.state?.currentConversationId
+              )?.title ?? null,
+            fetchStatus:
+              parsed.state?.conversationDrafts?.['conv-existing']?.tender_fetch?.status ?? null,
+          };
+        })
+      )
+      .toEqual({
+        conversationCount: 1,
+        currentConversationId: 'conv-existing',
+        currentTitle: '自定义标题',
+        fetchStatus: 'success',
+      });
   });
 
   test('Sidebar shows type options', async ({ page }) => {

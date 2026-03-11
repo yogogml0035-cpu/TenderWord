@@ -8,7 +8,9 @@ import { ChatPanel } from '@/components/chat/ChatPanel';
 import { useUrlParams } from '@/hooks/useUrlParams';
 import { useHydrated } from '@/hooks/useHydrated';
 import { useChatStore } from '@/stores/chatStore';
-import { fetchTenderData, sendConversationHeartbeat } from '@/lib/api';
+import { sendConversationHeartbeat } from '@/lib/api';
+import { generateConversationTitle, isDefaultConversationTitle, normalizeTenderNo } from '@/lib/chat-utils';
+import { createTenderFetchState, syncTenderDataDraft } from '@/lib/tenderFetch';
 
 /**
  * URL参数处理状态
@@ -33,8 +35,11 @@ function TenderPageContent() {
   const {
     createConversation,
     conversations,
+    findConversationByTenderNo,
+    getConversationDraft,
     setCurrentConversation,
     setSelectedTenderType,
+    updateConversation,
     updateConversationDraft,
     handleBackendRestart,
   } = useChatStore();
@@ -56,39 +61,59 @@ function TenderPageContent() {
       return;
     }
 
-    const urlConversationKey = `${tenderType}:${tenderno}`;
+    const normalizedTenderNo = normalizeTenderNo(tenderno);
+    if (!normalizedTenderNo) {
+      return;
+    }
+
+    const urlConversationKey = `${tenderType}:${normalizedTenderNo}`;
     if (processedUrlConversationKeyRef.current === urlConversationKey) {
       return;
     }
     processedUrlConversationKeyRef.current = urlConversationKey;
 
-    setUrlState((prev) => ({ ...prev, isProcessing: true, error: null }));
+    const existingConversation = findConversationByTenderNo(normalizedTenderNo, tenderType);
+    const conversationId =
+      existingConversation?.id || createConversation(normalizedTenderNo, tenderType);
+    setCurrentConversation(conversationId);
 
-    try {
-      const data = await fetchTenderData(tenderno);
-      const newConversationId = createConversation(tenderno, tenderType);
-      setCurrentConversation(newConversationId);
-      updateConversationDraft(newConversationId, {
-        tender_no: tenderno,
-        tender_data: data,
+    if (existingConversation && isDefaultConversationTitle(existingConversation.title)) {
+      updateConversation(conversationId, {
+        title: generateConversationTitle(normalizedTenderNo),
       });
-
-      setUrlState((prev) => ({
-        ...prev,
-        isProcessing: false,
-      }));
-    } catch (err) {
-      const newConversationId = createConversation(tenderno, tenderType);
-      setCurrentConversation(newConversationId);
-      updateConversationDraft(newConversationId, { tender_no: tenderno });
-
-      const errorMessage = err instanceof Error ? err.message : '获取招标数据失败';
-      setUrlState((prev) => ({
-        ...prev,
-        isProcessing: false,
-        error: errorMessage,
-      }));
     }
+
+    const existingDraft = getConversationDraft(conversationId);
+    if (existingDraft?.tender_data) {
+      updateConversationDraft(conversationId, {
+        tender_no: normalizedTenderNo,
+        tender_fetch: createTenderFetchState('success'),
+      });
+      setUrlState({
+        isProcessing: false,
+        error: null,
+      });
+      return;
+    }
+
+    setUrlState({
+      isProcessing: true,
+      error: null,
+    });
+
+    let nextError: string | null = null;
+    await syncTenderDataDraft({
+      tenderNo: normalizedTenderNo,
+      updateDraft: (updates) => updateConversationDraft(conversationId, updates),
+      onError: (message) => {
+        nextError = message;
+      },
+    });
+
+    setUrlState({
+      isProcessing: false,
+      error: nextError,
+    });
   }, [
     hydrated,
     hasParams,
@@ -96,8 +121,11 @@ function TenderPageContent() {
     tenderType,
     tenderno,
     createConversation,
+    findConversationByTenderNo,
+    getConversationDraft,
     setCurrentConversation,
     setSelectedTenderType,
+    updateConversation,
     updateConversationDraft,
   ]);
 

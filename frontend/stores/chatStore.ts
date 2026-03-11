@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createJSONStorage, devtools, persist } from 'zustand/middleware';
 import type { TenderType } from '@/types';
 import type { TaskKind, TaskStatus, TenderData } from '@/types/api';
+import type { TenderFetchState } from '@/lib/tenderFetch';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
 import {
@@ -12,7 +13,12 @@ import {
   type Message,
   type TaskMessageKind,
 } from '@/types/chat';
-import { createConversation as createConvUtil, generateMessageId } from '@/lib/chat-utils';
+import {
+  createConversation as createConvUtil,
+  generateMessageId,
+  inferTenderNoFromConversationTitle,
+  normalizeTenderNo,
+} from '@/lib/chat-utils';
 
 const TASK_LOG_KIND: TaskMessageKind = 'task-log';
 const TASK_CONTENT_KIND: TaskMessageKind = 'task-content';
@@ -60,6 +66,7 @@ export interface ConversationDraftFile {
 export interface ConversationFormDraft {
   tender_no?: string;
   tender_data?: TenderData | null;
+  tender_fetch?: TenderFetchState;
   model?: 'deepseek' | 'qwen' | 'doubao';
   insertion_config?: {
     before_text: string;
@@ -160,6 +167,16 @@ function mergeConversationDraft(
   }
 
   return nextDraft;
+}
+
+function getConversationTenderNo(
+  conversation: Conversation,
+  draft?: ConversationFormDraft
+): string | null {
+  return (
+    normalizeTenderNo(draft?.tender_no) ||
+    normalizeTenderNo(inferTenderNoFromConversationTitle(conversation.title))
+  );
 }
 
 function normalizeLogEntries(logs: unknown): LogEntry[] {
@@ -487,7 +504,7 @@ interface ChatStore {
   hasActiveTasks: () => boolean;
   clearError: () => void;
   setSelectedTenderType: (type: TenderType | null) => void;
-  findConversationByTenderNo: (tenderno: string) => Conversation | null;
+  findConversationByTenderNo: (tenderno: string, tenderType: TenderType) => Conversation | null;
   findTaskMessageGroup: (taskId: string) => LocatedTaskMessageGroup | null;
   findMessageByTaskId: (taskId: string) => { conversationId: string; message: Message } | null;
   getSortedConversations: () => Conversation[];
@@ -1462,9 +1479,25 @@ export const useChatStore = create<ChatStore>()(
         clearError: () => set({ error: null }),
         setSelectedTenderType: (type) => set({ selectedTenderType: type }),
 
-        findConversationByTenderNo: (tenderno) => {
+        findConversationByTenderNo: (tenderno, tenderType) => {
           const state = get();
-          return state.conversations.find((conv) => conv.title === tenderno) || null;
+          const normalizedTenderNo = normalizeTenderNo(tenderno);
+          if (!normalizedTenderNo) {
+            return null;
+          }
+
+          return (
+            [...state.conversations]
+              .filter((conversation) => conversation.tenderType === tenderType)
+              .sort((a, b) => b.updatedAt - a.updatedAt)
+              .find(
+                (conversation) =>
+                  getConversationTenderNo(
+                    conversation,
+                    state.conversationDrafts[conversation.id]
+                  ) === normalizedTenderNo
+              ) || null
+          );
         },
 
         findTaskMessageGroup: (taskId) => {

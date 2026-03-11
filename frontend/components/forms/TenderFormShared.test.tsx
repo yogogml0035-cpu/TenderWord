@@ -3,8 +3,10 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TenderFormShared, type BaseTenderFormData } from './TenderFormShared';
 import type { UploadedFile } from './FileUploader';
-import type { TenderData } from './TenderNoInput';
 import type { ConversationFormDraft } from '@/stores/chatStore';
+import type { TenderData } from '@/types/api';
+
+const mockSyncTenderDataDraft = jest.fn();
 
 const mockTenderData: TenderData = {
   project_name: '测试项目',
@@ -44,17 +46,26 @@ jest.mock('./TenderNoInput', () => ({
   TenderNoInput: ({
     value,
     onChange,
-    onDataFetched,
+    onFetch,
+    isLoading,
+    isSuccess,
+    error,
     required,
     disabled,
   }: {
     value: string;
     onChange: (value: string) => void;
-    onDataFetched?: (data: TenderData) => void;
+    onFetch?: () => Promise<void> | void;
+    isLoading?: boolean;
+    isSuccess?: boolean;
+    error?: string | null;
     required?: boolean;
     disabled?: boolean;
   }) => (
-    <div data-testid="tender-no-input">
+    <div
+      data-testid="tender-no-input"
+      data-fetch-status={isLoading ? 'loading' : error ? 'error' : isSuccess ? 'success' : 'idle'}
+    >
       <label>
         招标编号
         {required && <span aria-label="required">*</span>}
@@ -70,13 +81,21 @@ jest.mock('./TenderNoInput', () => ({
       <button
         type="button"
         aria-label="模拟获取招标信息"
-        disabled={disabled}
-        onClick={() => onDataFetched?.(mockTenderData)}
+        disabled={disabled || isLoading}
+        onClick={() => void onFetch?.()}
       >
         获取信息
       </button>
+      {error ? <p>{error}</p> : null}
     </div>
   ),
+}));
+
+jest.mock('@/lib/tenderFetch', () => ({
+  createTenderFetchState: (status: string, error?: string) => (error ? { status, error } : { status }),
+  resolveTenderFetchState: (state: { status: string } | undefined, data: TenderData | null | undefined) =>
+    state || (data ? { status: 'success' } : { status: 'idle' }),
+  syncTenderDataDraft: (...args: unknown[]) => mockSyncTenderDataDraft(...args),
 }));
 
 jest.mock('./FileUploader', () => ({
@@ -132,6 +151,23 @@ function renderSharedForm(options?: {
 
 describe('TenderFormShared', () => {
   beforeEach(() => {
+    mockSyncTenderDataDraft.mockReset();
+    mockSyncTenderDataDraft.mockImplementation(
+      async ({
+        tenderNo,
+        updateDraft,
+      }: {
+        tenderNo: string;
+        updateDraft: (updates: Partial<ConversationFormDraft>) => void;
+      }) => {
+        updateDraft({
+          tender_no: tenderNo,
+          tender_data: mockTenderData,
+          tender_fetch: { status: 'success' },
+        });
+        return mockTenderData;
+      }
+    );
     mockUploadFactoryByType.clean_draft = () => [buildUploadedFile('clean_draft')];
     mockUploadFactoryByType.origin_tender = () => [buildUploadedFile('origin_tender')];
     mockUploadFactoryByType.params = () => [buildUploadedFile('params')];
@@ -155,10 +191,17 @@ describe('TenderFormShared', () => {
     const user = userEvent.setup();
     renderSharedForm();
 
+    await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
     await user.click(screen.getByLabelText('模拟获取招标信息'));
 
+    expect(mockSyncTenderDataDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenderNo: 'TEST-001',
+      })
+    );
     expect(screen.getByText('测试项目')).toBeInTheDocument();
     expect(screen.getByText('测试采购人')).toBeInTheDocument();
+    expect(screen.getByTestId('tender-no-input')).toHaveAttribute('data-fetch-status', 'success');
   });
 
   it('validates tender number is required', async () => {
@@ -262,6 +305,9 @@ describe('TenderFormShared', () => {
     const initialDraft: ConversationFormDraft = {
       tender_no: 'INIT-001',
       tender_data: mockTenderData,
+      tender_fetch: {
+        status: 'success',
+      },
       model: 'qwen',
       insertion_config: {
         before_text: '初始前文本',
@@ -285,6 +331,7 @@ describe('TenderFormShared', () => {
     expect(screen.getByLabelText('招标编号输入框')).toHaveValue('INIT-001');
     expect(screen.getByDisplayValue('初始前文本')).toBeInTheDocument();
     expect(screen.getByDisplayValue('初始后文本')).toBeInTheDocument();
+    expect(screen.getByTestId('tender-no-input')).toHaveAttribute('data-fetch-status', 'success');
 
     await user.type(screen.getByLabelText('招标编号输入框'), 'A');
     await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
@@ -295,6 +342,7 @@ describe('TenderFormShared', () => {
       expect(onDraftChange).toHaveBeenCalledWith(
         expect.objectContaining({
           tender_no: 'INIT-001A',
+          tender_fetch: { status: 'idle' },
         })
       )
     );

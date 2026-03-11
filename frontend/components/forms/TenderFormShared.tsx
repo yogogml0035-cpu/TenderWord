@@ -4,6 +4,18 @@ import React, { useState, useCallback, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import type { TenderType } from '@/types';
 import type { ConversationDraftFile, ConversationFormDraft } from '@/stores/chatStore';
+import { useChatStore } from '@/stores/chatStore';
+import {
+  createTenderFetchState,
+  resolveTenderFetchState,
+  syncTenderDataDraft,
+  type TenderDraftUpdates,
+  type TenderFetchState,
+} from '@/lib/tenderFetch';
+import {
+  generateConversationTitle,
+  shouldAutoUpdateConversationTitle,
+} from '@/lib/chat-utils';
 import { TenderNoInput, type TenderData } from './TenderNoInput';
 import { FileUploader, type UploadedFile } from './FileUploader';
 import type { ModelType } from './ModelSelector';
@@ -99,9 +111,16 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   onCancel,
 }: TenderFormSharedProps<TFormData>) {
   const variantConfig = tenderFormVariantConfigMap[tenderType];
-  const [tenderNo, setTenderNo] = useState(initialDraft?.tender_no || initialTenderNo);
-  const [tenderData, setTenderData] = useState<TenderData | null>(
+  const updateConversation = useChatStore((state) => state.updateConversation);
+  const currentConversation = useChatStore((state) =>
+    state.conversations.find((conversation) => conversation.id === state.currentConversationId) || null
+  );
+  const [localTenderNo, setLocalTenderNo] = useState(initialDraft?.tender_no || initialTenderNo);
+  const [localTenderData, setLocalTenderData] = useState<TenderData | null>(
     initialDraft?.tender_data || initialTenderData || null
+  );
+  const [localTenderFetchState, setLocalTenderFetchState] = useState<TenderFetchState>(
+    resolveTenderFetchState(initialDraft?.tender_fetch, initialDraft?.tender_data || initialTenderData)
   );
   const [originFile, setOriginFile] = useState<UploadedFile | null>(
     (initialDraft?.files?.origin_tender as UploadedFile | undefined) || null
@@ -122,6 +141,29 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   });
   const [error, setError] = useState<string | null>(null);
   const selectedModel: ModelType = initialDraft?.model || 'deepseek';
+  const tenderNo = onDraftChange ? initialDraft?.tender_no || initialTenderNo : localTenderNo;
+  const tenderData = onDraftChange
+    ? initialDraft?.tender_data || initialTenderData || null
+    : localTenderData;
+  const tenderFetchState = onDraftChange
+    ? resolveTenderFetchState(initialDraft?.tender_fetch, initialDraft?.tender_data || initialTenderData)
+    : localTenderFetchState;
+
+  const applyTenderDraftUpdates = useCallback(
+    (updates: TenderDraftUpdates) => {
+      if (Object.prototype.hasOwnProperty.call(updates, 'tender_no')) {
+        setLocalTenderNo(updates.tender_no || '');
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, 'tender_data')) {
+        setLocalTenderData(updates.tender_data || null);
+      }
+      if (updates.tender_fetch) {
+        setLocalTenderFetchState(updates.tender_fetch);
+      }
+      onDraftChange?.(updates);
+    },
+    [onDraftChange]
+  );
 
   const syncDraftFiles = useCallback(
     (
@@ -148,22 +190,37 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     [onDraftChange]
   );
 
-  const handleTenderDataFetched = useCallback(
-    (data: TenderData) => {
-      setTenderData(data);
+  const handleTenderNoChange = useCallback(
+    (value: string) => {
       setError(null);
-      onDraftChange?.({ tender_data: data });
+      setLocalTenderNo(value);
+      const nextFetchState = createTenderFetchState('idle');
+      setLocalTenderFetchState(nextFetchState);
+      onDraftChange?.({
+        tender_no: value,
+        tender_fetch: nextFetchState,
+      });
     },
     [onDraftChange]
   );
 
-  const handleTenderNoChange = useCallback(
-    (value: string) => {
-      setTenderNo(value);
-      onDraftChange?.({ tender_no: value });
-    },
-    [onDraftChange]
-  );
+  const handleFetchTenderData = useCallback(async () => {
+    setError(null);
+
+    const data = await syncTenderDataDraft({
+      tenderNo,
+      updateDraft: applyTenderDraftUpdates,
+      onSuccess: () => {
+        if (currentConversation && shouldAutoUpdateConversationTitle(currentConversation.title)) {
+          updateConversation(currentConversation.id, {
+            title: generateConversationTitle(tenderNo.trim()),
+          });
+        }
+      },
+    });
+
+    return data;
+  }, [applyTenderDraftUpdates, currentConversation, tenderNo, updateConversation]);
 
   const handleBeforeTextChange = useCallback(
     (value: string) => {
@@ -258,9 +315,12 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         <TenderNoInput
           value={tenderNo}
           onChange={handleTenderNoChange}
-          onDataFetched={handleTenderDataFetched}
+          onFetch={handleFetchTenderData}
           disabled={isSubmitting}
           required
+          isLoading={tenderFetchState.status === 'loading'}
+          isSuccess={tenderFetchState.status === 'success'}
+          error={tenderFetchState.status === 'error' ? tenderFetchState.error || null : null}
         />
         {tenderData && <InfoCard items={tenderInfoItems} columns={2} />}
       </FormSection>

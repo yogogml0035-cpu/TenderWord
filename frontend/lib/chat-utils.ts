@@ -252,6 +252,23 @@ export function generateConversationTitle(tenderNo: string): string {
   return tenderNo;
 }
 
+export function normalizeTenderNo(tenderNo: string | null | undefined): string | null {
+  const candidate = tenderNo?.trim();
+  if (!candidate) {
+    return null;
+  }
+
+  return candidate.toUpperCase();
+}
+
+export function isDefaultConversationTitle(title: string): boolean {
+  return title.trim() === '新对话';
+}
+
+export function shouldAutoUpdateConversationTitle(title: string): boolean {
+  return isDefaultConversationTitle(title) || inferTenderNoFromConversationTitle(title) !== null;
+}
+
 /**
  * Infer tender number from conversation title.
  * Returns null when title looks like a custom label rather than a tender number.
