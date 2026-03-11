@@ -127,10 +127,35 @@ function Assert-PortFree {
 }
 
 function Remove-IfExists {
-    param([string]$Path)
+    param(
+        [string]$Path,
+        [int]$RetryCount = 3,
+        [int]$RetryDelayMs = 400
+    )
 
-    if (Test-Path -LiteralPath $Path) {
-        Remove-Item -LiteralPath $Path -Force
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $true
+    }
+
+    for ($attempt = 1; $attempt -le $RetryCount; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+            return $true
+        } catch {
+            if ($attempt -lt $RetryCount) {
+                Start-Sleep -Milliseconds $RetryDelayMs
+                continue
+            }
+
+            try {
+                Clear-Content -LiteralPath $Path -Force -ErrorAction Stop
+                Write-Info "无法删除文件：$Path。已清空内容并保留空文件。原因：$($_.Exception.Message)"
+                return $true
+            } catch {
+                Write-Info "无法删除文件：$Path。请稍后手动清理。原因：$($_.Exception.Message)"
+                return $false
+            }
+        }
     }
 }
 
@@ -141,7 +166,12 @@ function Read-PidFile {
         return $null
     }
 
-    $raw = (Get-Content -LiteralPath $Path -Raw).Trim()
+    $rawContent = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
+    if ($null -eq $rawContent) {
+        return $null
+    }
+
+    $raw = $rawContent.Trim()
     if (-not $raw) {
         return $null
     }
@@ -155,9 +185,9 @@ function Read-PidFile {
 }
 
 function Test-ProcessRunning {
-    param([int]$Pid)
+    param([int]$ProcessId)
 
-    return [bool](Get-Process -Id $Pid -ErrorAction SilentlyContinue)
+    return [bool](Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
 }
 
 function Clear-Or-RejectPidFile {
@@ -168,15 +198,15 @@ function Clear-Or-RejectPidFile {
 
     $pidValue = Read-PidFile -Path $PidFile
     if (-not $pidValue) {
-        Remove-IfExists -Path $PidFile
+        $null = Remove-IfExists -Path $PidFile
         return
     }
 
-    if (Test-ProcessRunning -Pid $pidValue) {
+    if (Test-ProcessRunning -ProcessId $pidValue) {
         Fail "检测到已有运行中的 $Label 进程（PID: $pidValue）。请先执行 .\stop-build.ps1。"
     }
 
-    Remove-IfExists -Path $PidFile
+    $null = Remove-IfExists -Path $PidFile
 }
 
 function Get-LogTail {
@@ -195,16 +225,16 @@ function Get-LogTail {
 
 function Stop-ProcessTreeById {
     param(
-        [int]$Pid,
+        [int]$ProcessId,
         [string]$Label
     )
 
-    if (-not (Test-ProcessRunning -Pid $Pid)) {
+    if (-not (Test-ProcessRunning -ProcessId $ProcessId)) {
         return
     }
 
-    Write-Info "停止 $Label 进程树（PID: $Pid）..."
-    $null = taskkill /PID $Pid /T /F 2>$null
+    Write-Info "停止 $Label 进程树（PID: $ProcessId）..."
+    $null = taskkill /PID $ProcessId /T /F 2>$null
 }
 
 function Start-LoggedProcess {
@@ -218,8 +248,8 @@ function Start-LoggedProcess {
         [string]$PidFile
     )
 
-    Remove-IfExists -Path $StdoutLog
-    Remove-IfExists -Path $StderrLog
+    $null = Remove-IfExists -Path $StdoutLog
+    $null = Remove-IfExists -Path $StderrLog
 
     $process = Start-Process `
         -FilePath $FilePath `
@@ -352,7 +382,7 @@ try {
 
     Clear-Or-RejectPidFile -Label "backend" -PidFile $script:BackendPidFile
     Clear-Or-RejectPidFile -Label "frontend" -PidFile $script:FrontendPidFile
-    Remove-IfExists -Path $script:StateFile
+    $null = Remove-IfExists -Path $script:StateFile
 
     Assert-PortFree -Port $BackendPort
     Assert-PortFree -Port $FrontendPort
@@ -361,6 +391,9 @@ try {
     $backendCheckOutput = & $backendPython -c "import asyncio; import fastapi; import uvicorn; import pydantic_settings; import backend.main" 2>&1
     if ($LASTEXITCODE -ne 0) {
         $details = ($backendCheckOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+        if ($details -match "WinError 10106|_overlapped") {
+            Fail "后端预检查失败。检测到本机 Python/Windows 网络栈异常（_overlapped / WinError 10106），这不是当前仓库代码导入错误。请先修复本机 Python 或 Winsock 环境后再启动。`n$details"
+        }
         Fail "后端预检查失败。请先修复 Python/依赖/本机环境问题后再启动。`n$details"
     }
 
@@ -417,26 +450,26 @@ try {
     Write-Host "  Frontend Log: $script:FrontendStdoutLog" -ForegroundColor Green
 } catch {
     if ($script:FrontendProcess) {
-        Stop-ProcessTreeById -Pid $script:FrontendProcess.Id -Label "frontend"
+        Stop-ProcessTreeById -ProcessId $script:FrontendProcess.Id -Label "frontend"
     } else {
         $frontendPid = Read-PidFile -Path $script:FrontendPidFile
         if ($frontendPid) {
-            Stop-ProcessTreeById -Pid $frontendPid -Label "frontend"
+            Stop-ProcessTreeById -ProcessId $frontendPid -Label "frontend"
         }
     }
 
     if ($script:BackendProcess) {
-        Stop-ProcessTreeById -Pid $script:BackendProcess.Id -Label "backend"
+        Stop-ProcessTreeById -ProcessId $script:BackendProcess.Id -Label "backend"
     } else {
         $backendPid = Read-PidFile -Path $script:BackendPidFile
         if ($backendPid) {
-            Stop-ProcessTreeById -Pid $backendPid -Label "backend"
+            Stop-ProcessTreeById -ProcessId $backendPid -Label "backend"
         }
     }
 
-    Remove-IfExists -Path $script:BackendPidFile
-    Remove-IfExists -Path $script:FrontendPidFile
-    Remove-IfExists -Path $script:StateFile
+    $null = Remove-IfExists -Path $script:BackendPidFile
+    $null = Remove-IfExists -Path $script:FrontendPidFile
+    $null = Remove-IfExists -Path $script:StateFile
     Write-Host "[$script:ScriptName] ERROR: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }

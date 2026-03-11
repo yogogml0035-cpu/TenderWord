@@ -30,7 +30,6 @@ class UserStreamRequest(BaseModel):
         default="deepseek", description="模型类型"
     )
     messages: List[UserChatMessage] = Field(default_factory=list, description="聊天历史消息")
-    force_rewrite: bool = Field(default=False, description="是否强制按 rewrite 规则判定")
 
 
 @router.post(
@@ -61,7 +60,6 @@ async def stream_user_message(request: Request, payload: UserStreamRequest) -> S
     initial_state = {
         "conversation_id": payload.conversation_id,
         "model_provider": payload.model,
-        "force_rewrite": payload.force_rewrite,
         "messages": normalized_messages,
         "latest_user_message": latest_user_message,
     }

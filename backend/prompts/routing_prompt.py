@@ -16,7 +16,6 @@ from backend.prompts.types import (
 REWRITE_ROUTE_LITERAL = "rewrite"
 REPLY_ROUTE_LITERAL = "reply"
 
-REWRITE_INVALID_HINT_TEXT = "当前不是有效的修改指令，请明确说明改哪段、改成什么效果。"
 CHAT_REWRITE_SWITCH_HINT_TEXT = "当前问题更适合使用“修改”模式，请切换后再发送。"
 DOC_CONTEXT_HINT_TEXT = (
     "当前不会自动携带文档正文，如需我分析具体内容，请粘贴相关段落；"
@@ -55,18 +54,6 @@ ROUTE_OR_REPLY_SYSTEM_PROMPT = """
 3. 其他情况直接输出给用户的中文回复，不要输出 JSON、标签、解释、分析过程。
 4. 如果不确定是否属于修改重写，按普通回复处理。
 5. 对“支持生成后继续修改或重写”的提醒最多说一次，不要重复改写同一提醒。
-""".strip()
-
-FORCE_REWRITE_SYSTEM_PROMPT = f"""
-你是东松招标文件智能生成助手。
-如果用户输入是在要求修改、改写、重写当前招标文本，只输出 rewrite。
-如果不是有效的修改指令，就直接输出下面这句话，不得改写：
-{REWRITE_INVALID_HINT_TEXT}
-
-规则：
-1. 命中修改时只能输出 rewrite。
-2. 不命中时只能输出上面的固定提示语。
-3. 不要输出解释、JSON、标签、额外标点或分析过程。
 """.strip()
 
 JUDGE_TARGET_SYSTEM_PROMPT = """
@@ -152,12 +139,10 @@ def render_route_or_reply_prompt(data: RouteOrReplyPromptInput) -> RenderedPromp
         f"{data.latest_user_message}\n"
     )
 
-    system_prompt = (
-        FORCE_REWRITE_SYSTEM_PROMPT
-        if data.force_rewrite
-        else ROUTE_OR_REPLY_SYSTEM_PROMPT
+    return RenderedPrompt(
+        system_prompt=ROUTE_OR_REPLY_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
     )
-    return RenderedPrompt(system_prompt=system_prompt, user_prompt=user_prompt)
 
 
 def build_rewrite_target_selection_bundle(

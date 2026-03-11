@@ -8,12 +8,9 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Sequence
 
 from backend.prompts.routing_prompt import (
-    CHAT_REWRITE_SWITCH_HINT_TEXT,
-    DOC_CONTEXT_HINT_TEXT,
     NON_REWRITE_HINT_TEXT,
     NO_DOCUMENT_HINT_TEXT,
     REPLY_ROUTE_LITERAL,
-    REWRITE_INVALID_HINT_TEXT,
     REWRITE_ROUTE_LITERAL,
     render_rewrite_relevance_prompt,
     render_route_or_reply_prompt,
@@ -182,20 +179,12 @@ class UserRoutingService:
         messages: Sequence[Dict[str, str]],
         latest_user_message: str,
         model_provider: str,
-        force_rewrite: bool = False,
         on_reply_chunk: Optional[Callable[[str], None]] = None,
     ) -> UserRouteDecision:
         normalized_message = str(latest_user_message or "").strip()
         latest_rewrite_state = self._conversation_service.get_latest_rewrite_state(conversation_id)
         latest_rewrite_snapshot = RewriteStateSnapshot.from_mapping(latest_rewrite_state)
         has_rewrite_history = latest_rewrite_state is not None
-
-        if force_rewrite and not has_rewrite_history:
-            return UserRouteDecision(
-                route=REPLY_ROUTE_LITERAL,
-                latest_rewrite_state=latest_rewrite_state,
-                reply_text=NO_DOCUMENT_HINT_TEXT,
-            )
 
         prefix_buffer = ""
         reply_parts: list[str] = []
@@ -237,7 +226,6 @@ class UserRoutingService:
                 latest_user_message=normalized_message,
                 latest_rewrite_state=latest_rewrite_snapshot,
                 has_rewrite_history=has_rewrite_history,
-                force_rewrite=force_rewrite,
             )
         )
         raw_output = await stream_llm_completion(
@@ -250,10 +238,9 @@ class UserRoutingService:
         )
 
         logger.info(
-            "user 路由输出完成: model=%s, output=%r, force_rewrite=%s",
+            "user 路由输出完成: model=%s, output=%r",
             model_provider,
             raw_output,
-            force_rewrite,
         )
 
         if raw_output == REWRITE_ROUTE_LITERAL:
@@ -294,14 +281,12 @@ class UserRoutingService:
         conversation_id: str,
         prompt: str,
         model_provider: str,
-        force_rewrite: bool = False,
     ) -> UserRouteDecision:
         return await self.stream_route_or_reply(
             conversation_id=conversation_id,
             messages=[{"role": "user", "content": prompt}],
             latest_user_message=prompt,
             model_provider=model_provider,
-            force_rewrite=force_rewrite,
         )
 
 

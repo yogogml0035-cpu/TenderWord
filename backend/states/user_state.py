@@ -13,7 +13,6 @@ class UserGraphMessage(TypedDict):
 class UserGraphState(TypedDict, total=False):
     conversation_id: str
     model_provider: str
-    force_rewrite: bool
     messages: List[UserGraphMessage]
     latest_user_message: str
     route: str

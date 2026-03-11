@@ -59,7 +59,6 @@ class UserGraph:
             messages=state.get("messages") or [],
             latest_user_message=str(state.get("latest_user_message") or "").strip(),
             model_provider=str(state.get("model_provider") or "deepseek"),
-            force_rewrite=bool(state.get("force_rewrite")),
             on_reply_chunk=lambda text: self._emit_event(
                 stream_writer,
                 "chunk",

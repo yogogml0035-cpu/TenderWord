@@ -9,6 +9,10 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from backend.prompts.routing_prompt import (
+    CHAT_REWRITE_SWITCH_HINT_TEXT,
+    DOC_CONTEXT_HINT_TEXT,
+)
 from backend.services.chat_stream_service import (
     build_error_detail,
     extract_latest_user_message,
@@ -16,8 +20,6 @@ from backend.services.chat_stream_service import (
     stream_chat_response,
 )
 from backend.services.user_routing_service import (
-    CHAT_REWRITE_SWITCH_HINT_TEXT,
-    DOC_CONTEXT_HINT_TEXT,
     looks_like_doc_context_query,
     looks_like_rewrite_intent,
 )

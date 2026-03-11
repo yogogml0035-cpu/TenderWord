@@ -94,7 +94,6 @@ class RouteOrReplyPromptInput:
     latest_user_message: str
     latest_rewrite_state: Optional[RewriteStateSnapshot]
     has_rewrite_history: bool
-    force_rewrite: bool = False
 
 
 @dataclass(frozen=True)

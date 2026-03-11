@@ -6,7 +6,6 @@ from backend.prompts.comment_prompt import COMMENT_PROMPT_REGISTRY, render_comme
 from backend.prompts.generate_prompt import GENERATE_PROMPT_REGISTRY, render_generate_prompt
 from backend.prompts.rewrite_prompt import render_rewrite_prompt
 from backend.prompts.routing_prompt import (
-    REWRITE_INVALID_HINT_TEXT,
     build_rewrite_target_selection_bundle,
     parse_rewrite_target_selection,
     render_rewrite_relevance_prompt,
@@ -93,7 +92,7 @@ def test_render_rewrite_relevance_prompt_truncates_document_preview():
     assert "..." in rendered.user_prompt
 
 
-def test_render_route_or_reply_prompt_compresses_history_and_uses_force_mode_literal():
+def test_render_route_or_reply_prompt_compresses_history_and_uses_shared_prompt():
     rendered = render_route_or_reply_prompt(
         RouteOrReplyPromptInput(
             messages=[
@@ -108,11 +107,11 @@ def test_render_route_or_reply_prompt_compresses_history_and_uses_force_mode_lit
                 polished_text="C" * 500,
             ),
             has_rewrite_history=True,
-            force_rewrite=True,
         )
     )
 
-    assert REWRITE_INVALID_HINT_TEXT in rendered.system_prompt
+    assert "只输出 rewrite" in rendered.system_prompt
+    assert "当前不是有效的修改指令" not in rendered.system_prompt
     assert "has_rewrite_history=yes" in rendered.user_prompt
     assert "用户: 你好" in rendered.user_prompt
     assert "助手: 欢迎使用" in rendered.user_prompt
