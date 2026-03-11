@@ -2,29 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
-import re
 import shutil
 import time
 import uuid
 from typing import Any, Dict, List
 
 from backend.nodes.common_word_nodes.generate_polished_text import generate_polished_text
+from backend.prompts.routing_prompt import (
+    build_rewrite_target_selection_bundle,
+    parse_rewrite_target_selection,
+)
+from backend.prompts.types import (
+    RewriteHistoryMessage as PromptRewriteHistoryMessage,
+    RewriteStateSnapshot,
+    RewriteTargetSelectionPromptInput,
+)
 from backend.services.conversation_service import RewriteMessage, get_conversation_service
 from backend.states import RewriteGraphState
 from backend.util.common_util import StreamCallbacks, stream_llm_completion
 from backend.util.log_util.progress_log import progress_log
-
-
-JUDGE_TARGET_SYSTEM_PROMPT = """
-你是文档修改版本选择助手。
-你的任务是根据会话历史和用户最新修改指令，从候选 assistant 版本中选出最应该被修改的一版。
-
-规则：
-1. 只能返回候选 assistant 版本的零基索引。
-2. 只能输出一个纯数字，不要输出解释、标点、JSON 或额外文本。
-3. 若用户没有明确指定历史版本，默认选择最符合语义的候选版本。
-4. 若多版都可行，优先选择最新且最相关的一版。
-""".strip()
 
 
 def _get_model_provider(config: Dict[str, Any] | None) -> str:
@@ -33,92 +29,40 @@ def _get_model_provider(config: Dict[str, Any] | None) -> str:
     return str(model_provider or "deepseek")
 
 
-def _build_assistant_candidates(
+def _build_prompt_history_messages(
     rewrite_messages: List[RewriteMessage],
-) -> List[Dict[str, Any]]:
-    candidates: List[Dict[str, Any]] = []
-    assistant_index = 0
+) -> List[PromptRewriteHistoryMessage]:
+    prompt_messages: List[PromptRewriteHistoryMessage] = []
     for message in rewrite_messages:
-        if message.role != "assistant" or not isinstance(message.rewrite_state, dict):
-            continue
-        candidates.append(
-            {
-                "assistant_index": assistant_index,
-                "content": message.content,
-                "created_at": message.created_at,
-                "rewrite_state": dict(message.rewrite_state),
-            }
-        )
-        assistant_index += 1
-    return candidates
-
-
-def _build_judge_target_prompt(
-    rewrite_messages: List[RewriteMessage],
-    assistant_candidates: List[Dict[str, Any]],
-    user_prompt: str,
-) -> str:
-    lines: List[str] = ["【会话历史】"]
-    assistant_counter = 0
-    for idx, message in enumerate(rewrite_messages):
-        if message.role == "assistant" and isinstance(message.rewrite_state, dict):
-            rewrite_state = message.rewrite_state
-            lines.extend(
-                [
-                    f"{idx}. role=assistant candidate_index={assistant_counter}",
-                    f"content={message.content}",
-                    f"tender_type={rewrite_state.get('tender_type', '')}",
-                    f"prepared_doc_path={rewrite_state.get('prepared_doc_path', '')}",
-                    "polished_text:",
-                    str(rewrite_state.get("polished_text", "")),
-                    "---",
-                ]
+        prompt_messages.append(
+            PromptRewriteHistoryMessage(
+                role=message.role,
+                content=message.content,
+                rewrite_state=RewriteStateSnapshot.from_mapping(message.rewrite_state),
+                created_at=message.created_at,
             )
-            assistant_counter += 1
-            continue
-
-        lines.extend(
-            [
-                f"{idx}. role={message.role}",
-                f"content={message.content}",
-                "---",
-            ]
         )
-
-    candidate_list = ", ".join(str(item["assistant_index"]) for item in assistant_candidates)
-    lines.extend(
-        [
-            "",
-            "【用户最新指令】",
-            user_prompt,
-            "",
-            f"可选 assistant candidate_index: {candidate_list}",
-            "请只输出一个纯数字索引。",
-        ]
-    )
-    return "\n".join(lines)
+    return prompt_messages
 
 
-def _parse_selected_index(raw_output: str, candidate_count: int) -> int:
-    normalized = str(raw_output or "").strip()
-    if not re.fullmatch(r"\d+", normalized):
-        raise ValueError(f"rewrite 目标版本选择结果非法: {normalized!r}")
-    index = int(normalized)
-    if index < 0 or index >= candidate_count:
-        raise ValueError(f"rewrite 目标版本索引越界: {index}")
-    return index
+def _list_assistant_messages(rewrite_messages: List[RewriteMessage]) -> List[RewriteMessage]:
+    return [
+        message
+        for message in rewrite_messages
+        if message.role == "assistant" and isinstance(message.rewrite_state, dict)
+    ]
 
 
 def _select_rewrite_target_index(user_prompt: str, rewrite_messages: List[RewriteMessage], config) -> int:
-    assistant_candidates = _build_assistant_candidates(rewrite_messages)
-    if not assistant_candidates:
+    rendered_bundle = build_rewrite_target_selection_bundle(
+        RewriteTargetSelectionPromptInput(
+            messages=_build_prompt_history_messages(rewrite_messages),
+            user_prompt=user_prompt,
+        )
+    )
+    if not rendered_bundle.assistant_candidates:
         raise ValueError("当前会话没有可用的 rewrite 版本候选")
 
-    judge_prompt = _build_judge_target_prompt(
-        rewrite_messages=rewrite_messages,
-        assistant_candidates=assistant_candidates,
-        user_prompt=user_prompt,
-    )
     model_provider = _get_model_provider(config)
     callbacks = StreamCallbacks()
 
@@ -131,15 +75,17 @@ def _select_rewrite_target_index(user_prompt: str, rewrite_messages: List[Rewrit
     result = loop.run_until_complete(
         stream_llm_completion(
             model_provider=model_provider,
-            system_prompt=JUDGE_TARGET_SYSTEM_PROMPT,
-            user_prompt=judge_prompt,
+            system_prompt=rendered_bundle.rendered_prompt.system_prompt,
+            user_prompt=rendered_bundle.rendered_prompt.user_prompt,
             callbacks=callbacks,
             extra_params_override={"temperature": 0.0},
             timeout_seconds=20,
             check_interval=3.0,
         )
     )
-    selected_index = _parse_selected_index(result, len(assistant_candidates))
+    selected_index = parse_rewrite_target_selection(
+        result, len(rendered_bundle.assistant_candidates)
+    )
     progress_log.info(
         "[resolve_rewrite_target] 已选择 assistant candidate_index=%s",
         selected_index,
@@ -172,9 +118,8 @@ def resolve_rewrite_target(state: RewriteGraphState, config) -> RewriteGraphStat
         raise ValueError("当前会话没有可用的 rewrite 历史")
 
     selected_index = _select_rewrite_target_index(rewrite_user_prompt, rewrite_messages, config)
-    assistant_candidates = _build_assistant_candidates(rewrite_messages)
-    target_candidate = assistant_candidates[selected_index]
-    target_state = dict(target_candidate["rewrite_state"])
+    assistant_messages = _list_assistant_messages(rewrite_messages)
+    target_state = dict(assistant_messages[selected_index].rewrite_state or {})
 
     source_prepared_doc_path = pathlib.Path(
         str(target_state.get("prepared_doc_path") or "")

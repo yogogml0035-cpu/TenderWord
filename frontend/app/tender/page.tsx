@@ -261,7 +261,7 @@ function TenderPageContent() {
         <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-white/60">
           <div className="flex flex-col items-center gap-3 rounded-lg border border-gray-200 bg-white p-6 shadow-xl">
             <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-            <p className="text-sm text-gray-600">正在处理招标信息...</p>
+            <p className="text-sm text-gray-600">正在获取招标信息...</p>
           </div>
         </div>
       )}

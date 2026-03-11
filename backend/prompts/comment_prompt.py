@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+import json
+
+from backend.prompts.types import CommentPromptInput, RenderedPrompt
+
 COMMENT_SYSTEM_PROMPT = """
 # Role
 你是一位20年资深的政府采购与医疗器械招投标审计专家。你不仅具备敏锐的合规嗅觉，更是一个严格执行“历史经验库”的智能审计引擎。
@@ -120,4 +126,35 @@ COMMENT_USER_PROMPT = """
 
 请务必遵守以上约束，**直接输出 JSON 数组本身**，不要包含任何其他内容。
 """
+
+
+COMMENT_PROMPT_REGISTRY = {
+    "xjcg": (COMMENT_SYSTEM_PROMPT, COMMENT_USER_PROMPT),
+    "gngk": (COMMENT_SYSTEM_PROMPT, COMMENT_USER_PROMPT),
+}
+
+
+def render_comment_prompt(data: CommentPromptInput) -> RenderedPrompt:
+    tender_type = str(data.tender_type or "xjcg")
+    if tender_type not in COMMENT_PROMPT_REGISTRY:
+        raise ValueError(
+            f"未知的招标类型: {tender_type}。支持的类型: {list(COMMENT_PROMPT_REGISTRY.keys())}"
+        )
+
+    system_prompt, user_prompt = COMMENT_PROMPT_REGISTRY[tender_type]
+    return RenderedPrompt(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt.format(
+            polished_text=data.polished_text,
+            comment_plan_detail=json.dumps(
+                data.comment_plan_detail or [], ensure_ascii=False, indent=2
+            ),
+            strikethrough_plan=json.dumps(
+                data.strikethrough_plan or [], ensure_ascii=False, indent=2
+            ),
+            non_black_font_plan=json.dumps(
+                data.non_black_font_plan or [], ensure_ascii=False, indent=2
+            ),
+        ),
+    )
 

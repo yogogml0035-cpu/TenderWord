@@ -1,77 +1,24 @@
 from __future__ import annotations
 
-import datetime
-import re
-import time
-from typing import Callable, Optional
-
-from backend.states import TenderGraphStateBase
-from backend.util.common_util import (
-    LLMTimeoutError,
-    StreamCallbacks,
-    stream_llm_completion,)
-from backend.prompts.generate_prompt import (
-    POLISH_SYSTEM_PROMPT,
-    POLISH_USER_PROMPT,)
-from backend.util.log_util.progress_log import progress_log
-
-# Prompt 注册表：根据 tender_type 选择对应的 prompt
-PROMPT_REGISTRY = {
-    "xjcg": (POLISH_SYSTEM_PROMPT, POLISH_USER_PROMPT),
-    "gngk": (POLISH_SYSTEM_PROMPT, POLISH_USER_PROMPT),}   
-
-def _sanitize_filename(name: str) -> str:
-    return re.sub(r'[<>\":/\\|?*]', "_", name).strip()
-
-import datetime
-from typing import Callable, Optional
 import os
 import pathlib
 import re
-import time
-
-# 直接运行时使用绝对导入
 import sys
+import time
+from typing import Callable, Optional
 
-
+from backend.prompts.generate_prompt import GENERATE_PROMPT_REGISTRY, render_generate_prompt
+from backend.prompts.rewrite_prompt import render_rewrite_prompt
+from backend.prompts.types import GeneratePromptInput, RewritePromptInput
 from backend.states import TenderGraphStateBase
 from backend.util.common_util import (
-    LLMTimeoutError,
     StreamCallbacks,
     stream_llm_completion,
 )
-
-from backend.prompts.generate_prompt import (
-    POLISH_SYSTEM_PROMPT,
-    POLISH_USER_PROMPT,
-)
 from backend.util.log_util.progress_log import progress_log
 
-# Prompt 注册表：根据 tender_type 选择对应的 prompt
-PROMPT_REGISTRY = {
-    "xjcg": (POLISH_SYSTEM_PROMPT, POLISH_USER_PROMPT),
-    "gngk": (POLISH_SYSTEM_PROMPT, POLISH_USER_PROMPT),
-}
+PROMPT_REGISTRY = GENERATE_PROMPT_REGISTRY
 
-REWRITE_SYSTEM_PROMPT = """
-你是招标文档修改助手。
-请根据用户修改指令，在保持文档结构与专业风格的前提下，对现有文本进行定向改写。
-要求：
-1. 只输出最终可直接写回文档的正文文本，不输出解释。
-2. 无指令涉及的段落尽量保持原意。
-3. 避免编造事实，不新增与指令无关的内容。
-""".strip()
-
-REWRITE_USER_PROMPT = """
-【当前文档内容】
-{base_text}
-
-【用户修改指令】
-{user_prompt}
-
-请严格按指令完成修改，输出最终文本：
-""".strip()
-   
 
 def _sanitize_filename(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', "_", name).strip()
@@ -98,9 +45,6 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
     tender_type = state.get("tender_type", "xjcg")  # 默认使用 xjcg
     progress_log.debug(f"[generate_polished_text] 招标类型: {tender_type}")
     
-    if tender_type not in PROMPT_REGISTRY:
-        raise ValueError(f"未知的招标类型: {tender_type}，支持的类型: {list(PROMPT_REGISTRY.keys())}")
-
     rewrite_mode = bool(state.get("rewrite_mode"))
     if rewrite_mode:
         rewrite_base_text = str(
@@ -113,19 +57,24 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
         if not rewrite_user_prompt:
             raise ValueError("rewrite_user_prompt 不能为空")
 
-        system_prompt = REWRITE_SYSTEM_PROMPT
-        user_prompt = REWRITE_USER_PROMPT.format(
-            base_text=rewrite_base_text,
-            user_prompt=rewrite_user_prompt,
+        rendered_prompt = render_rewrite_prompt(
+            RewritePromptInput(
+                base_text=rewrite_base_text,
+                user_prompt=rewrite_user_prompt,
+            )
         )
     else:
-        system_prompt_template, user_prompt_template = PROMPT_REGISTRY[tender_type]
-        system_prompt = system_prompt_template
-        user_prompt = user_prompt_template.format(
-            project_info=state.get("project_content", ""),
-            tender_params=tender_params,
-            origin_tender_params=origin_tender_params,
+        rendered_prompt = render_generate_prompt(
+            GeneratePromptInput(
+                tender_type=tender_type,
+                project_info=str(state.get("project_content", "") or ""),
+                tender_params=tender_params,
+                origin_tender_params=origin_tender_params,
+            )
         )
+
+    system_prompt = rendered_prompt.system_prompt
+    user_prompt = rendered_prompt.user_prompt
     
     # 保存提示词到文件
     prompts_dir = pathlib.Path(__file__).resolve().parents[2] / "prompts_log"

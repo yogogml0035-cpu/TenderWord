@@ -10,9 +10,14 @@ from unittest.mock import Mock, patch
 
 from backend.nodes.common_word_nodes.generate_comments import (
     generate_comments,
-    PROMPT_REGISTRY,
 )
+from backend.prompts.comment_prompt import COMMENT_PROMPT_REGISTRY, render_comment_prompt
+from backend.prompts.types import CommentPromptInput
 from backend.states import XjcgTenderGraphState
+
+
+async def _empty_llm_response(*_args, **_kwargs):
+    return "[]"
 
 
 class TestPromptSelectionAndValidation:
@@ -21,11 +26,11 @@ class TestPromptSelectionAndValidation:
     def test_prompt_registry_structure(self):
         """测试 PROMPT_REGISTRY 包含正确的招标类型"""
         # 验证 PROMPT_REGISTRY 包含 xjcg 和 gngk
-        assert "xjcg" in PROMPT_REGISTRY
-        assert "gngk" in PROMPT_REGISTRY
+        assert "xjcg" in COMMENT_PROMPT_REGISTRY
+        assert "gngk" in COMMENT_PROMPT_REGISTRY
         
         # 验证每个条目是一个包含两个字符串的元组
-        for tender_type, prompts in PROMPT_REGISTRY.items():
+        for tender_type, prompts in COMMENT_PROMPT_REGISTRY.items():
             assert isinstance(prompts, tuple)
             assert len(prompts) == 2
             system_prompt, user_prompt = prompts
@@ -60,7 +65,7 @@ class TestPromptSelectionAndValidation:
         
         # Mock the LLM call to avoid actual API calls
         with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
-            mock_llm.return_value = "[]"  # Return empty JSON array
+            mock_llm.side_effect = _empty_llm_response
             
             # Should not raise ValueError
             try:
@@ -79,7 +84,7 @@ class TestPromptSelectionAndValidation:
         
         # Mock the LLM call to avoid actual API calls
         with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
-            mock_llm.return_value = "[]"  # Return empty JSON array
+            mock_llm.side_effect = _empty_llm_response
             
             # Should not raise ValueError
             try:
@@ -98,7 +103,7 @@ class TestPromptSelectionAndValidation:
         
         # Mock the LLM call to avoid actual API calls
         with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
-            mock_llm.return_value = "[]"  # Return empty JSON array
+            mock_llm.side_effect = _empty_llm_response
             
             # Should not raise ValueError (xjcg is valid)
             try:
@@ -114,22 +119,20 @@ class TestPromptFormatting:
     
     def test_prompt_formatting_includes_all_parameters(self):
         """测试格式化的提示词包含所有四个参数"""
-        import json
-        from backend.prompts.comment_prompt import COMMENT_USER_PROMPT
-        
         # 准备测试数据
         test_polished_text = "这是修改后的文本内容"
         test_comment_plan = [{"content": "批注内容", "scope_text": "范围文本"}]
         test_strikethrough = [{"paragraph_text": "段落", "strikethrough_text": "删除线"}]
         test_non_black_font = [{"paragraph_text": "段落", "font_text": "非黑色字体"}]
         
-        # 直接测试格式化逻辑
-        formatted_prompt = COMMENT_USER_PROMPT.format(
-            polished_text=test_polished_text,
-            comment_plan_detail=json.dumps(test_comment_plan, ensure_ascii=False, indent=2),
-            strikethrough_plan=json.dumps(test_strikethrough, ensure_ascii=False, indent=2),
-            non_black_font_plan=json.dumps(test_non_black_font, ensure_ascii=False, indent=2)
-        )
+        formatted_prompt = render_comment_prompt(
+            CommentPromptInput(
+                polished_text=test_polished_text,
+                comment_plan_detail=test_comment_plan,
+                strikethrough_plan=test_strikethrough,
+                non_black_font_plan=test_non_black_font,
+            )
+        ).user_prompt
         
         # 验证格式化的提示词包含所有参数
         assert test_polished_text in formatted_prompt, "Prompt should contain polished_text"
@@ -139,16 +142,14 @@ class TestPromptFormatting:
     
     def test_prompt_formatting_with_empty_lists(self):
         """测试空列表的提示词格式化"""
-        import json
-        from backend.prompts.comment_prompt import COMMENT_USER_PROMPT
-        
-        # 直接测试格式化逻辑
-        formatted_prompt = COMMENT_USER_PROMPT.format(
-            polished_text="测试文本",
-            comment_plan_detail=json.dumps([], ensure_ascii=False, indent=2),
-            strikethrough_plan=json.dumps([], ensure_ascii=False, indent=2),
-            non_black_font_plan=json.dumps([], ensure_ascii=False, indent=2)
-        )
+        formatted_prompt = render_comment_prompt(
+            CommentPromptInput(
+                polished_text="测试文本",
+                comment_plan_detail=[],
+                strikethrough_plan=[],
+                non_black_font_plan=[],
+            )
+        ).user_prompt
         
         # 验证格式化的提示词包含空数组
         assert "测试文本" in formatted_prompt
@@ -157,18 +158,16 @@ class TestPromptFormatting:
     
     def test_prompt_formatting_preserves_chinese_characters(self):
         """测试提示词格式化保留中文字符"""
-        import json
-        from backend.prompts.comment_prompt import COMMENT_USER_PROMPT
-        
         chinese_text = "这是包含中文字符的测试文本：技术参数、招标要求"
         
-        # 直接测试格式化逻辑
-        formatted_prompt = COMMENT_USER_PROMPT.format(
-            polished_text=chinese_text,
-            comment_plan_detail=json.dumps([{"content": "中文批注", "scope_text": "中文范围"}], ensure_ascii=False, indent=2),
-            strikethrough_plan=json.dumps([], ensure_ascii=False, indent=2),
-            non_black_font_plan=json.dumps([], ensure_ascii=False, indent=2)
-        )
+        formatted_prompt = render_comment_prompt(
+            CommentPromptInput(
+                polished_text=chinese_text,
+                comment_plan_detail=[{"content": "中文批注", "scope_text": "中文范围"}],
+                strikethrough_plan=[],
+                non_black_font_plan=[],
+            )
+        ).user_prompt
         
         # 验证中文字符被正确保留
         assert chinese_text in formatted_prompt
@@ -177,19 +176,18 @@ class TestPromptFormatting:
     
     def test_prompt_formatting_with_gngk_tender_type(self):
         """测试 GNGK 招标类型的提示词格式化"""
-        import json
-        from backend.prompts.comment_prompt import COMMENT_USER_PROMPT
-        
         test_polished_text = "GNGK 招标文本"
         test_comment_plan = [{"content": "GNGK 批注", "scope_text": "GNGK 范围"}]
         
-        # 直接测试格式化逻辑
-        formatted_prompt = COMMENT_USER_PROMPT.format(
-            polished_text=test_polished_text,
-            comment_plan_detail=json.dumps(test_comment_plan, ensure_ascii=False, indent=2),
-            strikethrough_plan=json.dumps([], ensure_ascii=False, indent=2),
-            non_black_font_plan=json.dumps([], ensure_ascii=False, indent=2)
-        )
+        formatted_prompt = render_comment_prompt(
+            CommentPromptInput(
+                tender_type="gngk",
+                polished_text=test_polished_text,
+                comment_plan_detail=test_comment_plan,
+                strikethrough_plan=[],
+                non_black_font_plan=[],
+            )
+        ).user_prompt
         
         # 验证格式化的提示词包含所有参数
         assert test_polished_text in formatted_prompt

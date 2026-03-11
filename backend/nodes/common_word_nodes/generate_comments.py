@@ -11,36 +11,37 @@
 """
 
 from __future__ import annotations
-from backend.util.log_util.progress_log import progress_log
 
 import asyncio
 import json
-import time
 import pathlib
+import re
+import time
 from typing import Callable, Optional
 
+from backend.prompts.comment_prompt import (
+    COMMENT_PROMPT_REGISTRY,
+    render_comment_prompt,
+)
+from backend.prompts.types import CommentPromptInput
 from backend.states import TenderGraphStateBase
 from backend.util.common_util import (
     LLMTimeoutError,
     StreamCallbacks,
     stream_llm_completion,
 )
-from backend.nodes.common_word_nodes.generate_polished_text import _sanitize_filename
-
-from backend.prompts.comment_prompt import (
-    COMMENT_SYSTEM_PROMPT,
-    COMMENT_USER_PROMPT,
-)
+from backend.util.log_util.progress_log import progress_log
 
 # 模块级常量
 TIMEOUT_SECONDS = 10  # LLM 超时时间（秒）
 CHECK_INTERVAL = 3.0  # 心跳检查间隔（秒）
 
 # Prompt 注册表：根据 tender_type 选择对应的 prompt
-PROMPT_REGISTRY = {
-    "xjcg": (COMMENT_SYSTEM_PROMPT, COMMENT_USER_PROMPT),
-    "gngk": (COMMENT_SYSTEM_PROMPT, COMMENT_USER_PROMPT),
-}
+PROMPT_REGISTRY = COMMENT_PROMPT_REGISTRY
+
+
+def _sanitize_filename(name: str) -> str:
+    return re.sub(r'[<>:"/\\|?*]', "_", name).strip()
 
 
 def generate_comments(
@@ -94,25 +95,18 @@ def generate_comments(
     progress_log.debug(f"[generate_comments] 招标类型: {tender_type}")
     
     # 实现提示词选择和验证
-    # 需求引用：5.1, 5.2, 5.3, 5.4, 5.5
-    if tender_type not in PROMPT_REGISTRY:
-        raise ValueError(
-            f"未知的招标类型: {tender_type}。"
-            f"支持的类型: {list(PROMPT_REGISTRY.keys())}"
+    # 需求引用：5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 6.5, 6.6, 6.7, 6.8
+    rendered_prompt = render_comment_prompt(
+        CommentPromptInput(
+            tender_type=str(tender_type or "xjcg"),
+            polished_text=str(polished_text or ""),
+            comment_plan_detail=comment_plan_detail,
+            strikethrough_plan=strikethrough_plan,
+            non_black_font_plan=non_black_font_plan,
         )
-    
-    # 从 PROMPT_REGISTRY 获取 (system_prompt, user_prompt) 元组
-    system_prompt, user_prompt = PROMPT_REGISTRY[tender_type]
-    
-    # 实现提示词格式化
-    # 需求引用：5.6, 6.5, 6.6, 6.7, 6.8
-    # 将输入数据转换为字符串格式，以便插入到提示词中
-    formatted_user_prompt = user_prompt.format(
-        polished_text=polished_text,
-        comment_plan_detail=json.dumps(comment_plan_detail, ensure_ascii=False, indent=2),
-        strikethrough_plan=json.dumps(strikethrough_plan, ensure_ascii=False, indent=2),
-        non_black_font_plan=json.dumps(non_black_font_plan, ensure_ascii=False, indent=2)
     )
+    system_prompt = rendered_prompt.system_prompt
+    formatted_user_prompt = rendered_prompt.user_prompt
 
     # 准备 prompts_log 输出路径：保存大模型生成的批注内容，使用 new_comments 后缀区分
     new_comments_file = None

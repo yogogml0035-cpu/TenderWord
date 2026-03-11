@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from backend.prompts.types import GeneratePromptInput, RenderedPrompt
+
 POLISH_SYSTEM_PROMPT = """
 # Role
 你是一台**高保真招标文件重构引擎**。你的核心任务是将【技术参数】（原材料）完全按照【参考内容】（模具）的结构、语调和格式规范进行重铸。你不仅仅是复制，更是对技术指标的**智能结构化处理**。
@@ -179,4 +183,28 @@ POLISH_USER_PROMPT = """
 
 开始执行：
 """
+
+
+GENERATE_PROMPT_REGISTRY = {
+    "xjcg": (POLISH_SYSTEM_PROMPT, POLISH_USER_PROMPT),
+    "gngk": (POLISH_SYSTEM_PROMPT, POLISH_USER_PROMPT),
+}
+
+
+def render_generate_prompt(data: GeneratePromptInput) -> RenderedPrompt:
+    tender_type = str(data.tender_type or "xjcg")
+    if tender_type not in GENERATE_PROMPT_REGISTRY:
+        raise ValueError(
+            f"未知的招标类型: {tender_type}，支持的类型: {list(GENERATE_PROMPT_REGISTRY.keys())}"
+        )
+
+    system_prompt, user_prompt = GENERATE_PROMPT_REGISTRY[tender_type]
+    return RenderedPrompt(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt.format(
+            project_info=data.project_info,
+            tender_params=data.tender_params,
+            origin_tender_params=data.origin_tender_params,
+        ),
+    )
 
