@@ -56,6 +56,7 @@ test_py/
 # 工具目录
 .kiro/
 .sisyphus/
+.runtime/
 
 
 # 临时 prompt 文件（运行时生成）

@@ -150,6 +150,25 @@ TenderWord 是面向多招标类型的招标文件智能处理系统，当前以
 - 不鼓励在节点函数中长期内联大段 prompt。
 - 生成、修改、批注、分类、抽取等 prompt 应能被单独审阅、复用和测试。
 
+### Prompt Layer 专项规范
+- `backend/` 内所有直接调用 LLM 的能力，包括生成、批注、rewrite、用户路由与 rewrite 目标选择，默认都归 `backend/prompts/` 统一收敛。
+- Prompt Layer 只负责纯渲染，不负责 `prompts_log` 落盘、SSE、日志、副作用或 Word/会话/任务状态管理。
+- 调用侧只做三件事：收集原始业务数据、调用 builder、执行 LLM 与后续副作用；禁止把 prompt 裁剪和拼装逻辑重新散落回 service/node。
+- 所有 prompt 输入都应使用显式类型对象；禁止继续向 builder 透传“万能 dict”或完整 state。
+- 生成与批注 prompt 默认采用“共享主干 + 类型特化 registry”；即使当前 `xjcg` / `gngk` 共用模板，也必须保留类型特化挂点。
+- 与 LLM 契约强绑定的固定字面量必须收口到 Prompt Layer，包括 `rewrite` 路由字面量、`true` / `false` 语义、固定提示语和 force-rewrite 文案。
+- 文档预览截断、历史消息压缩、候选 assistant 列表拼接等规则属于 prompt 渲染逻辑，不得重新散落在调用方。
+- Prompt Layer 输入必须是“最小必要字段”；只需要摘要就传摘要，只需要预览文本就传预览文本，不得把完整 graph state 当成输入捷径。
+- `RewriteStateSnapshot` 一类对象只表达 prompt 所需摘要字段，不等价于完整 graph state；调用侧若需要保留完整状态，必须继续持有原始 state。
+- 任何新增 tender type 若 prompt 有特化需求，应优先在 `backend/prompts/*_prompt.py` 的 registry 中扩展，而不是复制 node/service。
+- 输出存在严格机器契约的 prompt，解析与校验逻辑必须与该 prompt 一起演进，并至少补结构断言测试。
+- 当前 Prompt Layer 关联代码以 `backend/prompts/`、`backend/services/user_routing_service.py`、`backend/nodes/common_word_nodes/`、`backend/nodes/skills_nodes/` 为准；新增变更应优先检查这些入口。
+- 当前 Prompt Layer 关联测试以 `backend/tests/test_prompt_builders.py`、`backend/tests/test_generate_comments.py`、`backend/tests/test_user_routing_service.py` 为准；如契约变化，必须同步补测。
+- 禁止在 node/service 内重新内联大段 system prompt 或 user prompt。
+- 禁止在 Prompt builder 中直接访问文件系统、SSE、Word COM 或会话存储。
+- 禁止为了一个新场景复制现有 prompt 文件再做字符串替换式扩展。
+- 禁止把 Prompt Layer 退化成“只存字符串常量”的目录而把拼装逻辑继续散落在调用方。
+
 ### 新能力方向
 - 新工具、新节点、新能力优先服务“文档理解与比对”方向，例如规则抽取、章节识别、模板对比、版本差异、风险检查、PDF/Word 联合理解。
 - 这类能力默认优先沉到公共工具层，而不是先绑死在某个招标类型里。
@@ -210,6 +229,7 @@ TenderWord 是面向多招标类型的招标文件智能处理系统，当前以
 - 新增一种招标类型，必须新建或更新对应知识包。
 - 新增一个重要公共能力，也应建立能力知识包。
 - 知识包内容必须脱敏，禁止放入客户原文、密钥或其他敏感数据。
+- `assert/prompt_layer_knowledge_pack.md` 是 Prompt Layer 的专项知识包；修改 `backend/prompts/`、rewrite/routing/comment 相关 builder 或其调用侧时，应先阅读该知识包，再同步检查本文件中的 Prompt Layer 专项规范。
 
 ## 10. 常见入口与当前同步点
 
