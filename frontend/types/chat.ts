@@ -22,7 +22,7 @@ export type MessageStatus =
   | 'cancelled';
 
 export type TaskMessageKind = 'task-log' | 'task-content' | 'task-download';
-export type ChatMessageKind = 'normal' | 'rewrite';
+export type ChatMessageKind = 'normal' | 'rewrite' | 'task-notice';
 export type LocalTaskReason = 'backend_restart';
 
 // ============================================

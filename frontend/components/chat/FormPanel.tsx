@@ -160,9 +160,11 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
   const [isSubmitting, setIsSubmitting] = useState(false);
   const mounted = useHydrated();
   const {
+    addMessage,
     getCurrentConversation,
     cancelTask: cancelChatTask,
     completeTask: completeChatTask,
+    deleteMessage,
     discardStaleTask,
     failTask: failChatTask,
     startTask,
@@ -342,20 +344,34 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
     async (formData: TenderFormData) => {
       if (!conversation) return;
 
+      let placeholderMessageId: string | null = null;
       try {
         setIsSubmitting(true);
+        placeholderMessageId = addMessage(conversation.id, {
+          type: 'ai',
+          content: '正在创建生成招标文件任务',
+          status: 'completed',
+          metadata: {
+            chatKind: 'task-notice',
+          },
+        });
         const request = {
           ...tenderFormConverterMap[conversation.tenderType](formData),
           conversation_id: conversation.id,
         };
 
         const result = await createGenerateTask(request);
-        startTask(conversation.id, result.task_id, {
-          task_kind: result.task_kind,
-          status: result.status || 'queued',
-          queue_position: result.queue_position,
-          waiting_count: result.waiting_count,
-        });
+        startTask(
+          conversation.id,
+          result.task_id,
+          {
+            task_kind: result.task_kind,
+            status: result.status || 'queued',
+            queue_position: result.queue_position,
+            waiting_count: result.waiting_count,
+          },
+          placeholderMessageId ? { logMessageId: placeholderMessageId } : undefined
+        );
 
         // 任务创建后立即补拉一次，拿到排队摘要（waiting_count / queue_position 等）
         try {
@@ -376,12 +392,15 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
 
         setIsSubmitting(false);
       } catch (error) {
+        if (placeholderMessageId) {
+          deleteMessage(conversation.id, placeholderMessageId);
+        }
         console.error('Failed to create task:', error);
         setIsSubmitting(false);
         alert('创建任务失败，请重试');
       }
     },
-    [conversation, startTask, upsertTaskSummary]
+    [addMessage, conversation, deleteMessage, startTask, upsertTaskSummary]
   );
 
   const handleDraftChange = useCallback(
@@ -608,7 +627,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-6"
+          className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-4"
         >
           <div
             data-testid={statusOverlayCard.backdropTestId}
@@ -625,7 +644,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
             progressLabel={statusOverlayCard.progressLabel}
             progressBarPercent={statusOverlayCard.progressBarPercent}
             footer={statusOverlayCard.footer}
-            className="relative max-w-lg"
+            className="relative mx-auto max-w-[calc(48rem-12px)]"
             icon={statusOverlayCard.icon}
           />
         </div>

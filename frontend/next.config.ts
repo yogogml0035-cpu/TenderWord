@@ -1,11 +1,15 @@
 import type { NextConfig } from 'next';
+import { resolveApiBaseUrl } from './lib/apiBaseUrl';
 
 const nextConfig: NextConfig = {
   // ========================================
   // API 代理配置 - 开发时转发到后端
   // ========================================
   async rewrites() {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const apiUrl = resolveApiBaseUrl({
+      raw: process.env.NEXT_PUBLIC_API_URL,
+      location: null,
+    });
     return [
       {
         source: '/api/:path*',

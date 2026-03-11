@@ -393,6 +393,13 @@ function mergeTaskMessageGroup(
   };
 }
 
+function hasTaskMessageGroupIds(group?: TaskMessageGroupIds): boolean {
+  if (!group) {
+    return false;
+  }
+  return !!(group.logMessageId || group.contentMessageId || group.downloadMessageId);
+}
+
 function findConversationByTaskIdFromState(
   state: Pick<ChatStore, 'conversations'>,
   taskId: string
@@ -438,7 +445,8 @@ interface ChatStore {
   startTask: (
     conversationId: string,
     taskId: string,
-    initialSummary?: Partial<Omit<TaskSummarySnapshot, 'task_id' | 'updated_at'>>
+    initialSummary?: Partial<Omit<TaskSummarySnapshot, 'task_id' | 'updated_at'>>,
+    initialGroup?: TaskMessageGroupIds
   ) => TaskMessageGroupIds;
   ensureTaskLogMessage: (taskId: string, options?: { status?: Message['status'] }) => string | null;
   ensureTaskContentMessage: (
@@ -671,7 +679,8 @@ export const useChatStore = create<ChatStore>()(
           }));
         },
 
-        startTask: (conversationId, taskId, initialSummary) => {
+        startTask: (conversationId, taskId, initialSummary, initialGroup) => {
+          let nextGroup: TaskMessageGroupIds = {};
           set((state) => {
             const summarySeed = initialSummary?.status
               ? {
@@ -704,6 +713,7 @@ export const useChatStore = create<ChatStore>()(
                   },
                 }
               : {};
+            nextGroup = mergeTaskMessageGroup(state.taskMessageMap[taskId] || {}, initialGroup);
 
             return {
               conversations: state.conversations.map((conv) =>
@@ -714,6 +724,12 @@ export const useChatStore = create<ChatStore>()(
               activeTaskIds: state.activeTaskIds.includes(taskId)
                 ? state.activeTaskIds
                 : [...state.activeTaskIds, taskId],
+              taskMessageMap: hasTaskMessageGroupIds(nextGroup)
+                ? {
+                    ...state.taskMessageMap,
+                    [taskId]: nextGroup,
+                  }
+                : state.taskMessageMap,
               taskSummaries: {
                 ...state.taskSummaries,
                 ...summarySeed,
@@ -721,18 +737,30 @@ export const useChatStore = create<ChatStore>()(
             };
           });
 
-          return {};
+          return nextGroup;
         },
 
         ensureTaskLogMessage: (taskId, options) => {
           const existing = get().findTaskMessageGroup(taskId);
           if (existing?.logMessage) {
-            if (options?.status && existing.logMessage.status !== options.status) {
+            const nextStatus = options?.status || existing.logMessage.status;
+            const nextTaskKind = get().taskSummaries[taskId]?.task_kind;
+            const existingKind = getTaskMessageKind(existing.logMessage);
+            const existingLogs = normalizeLogEntries(existing.logMessage.metadata?.logs);
+            const shouldPromoteToTaskLog =
+              existingKind !== TASK_LOG_KIND || existing.logMessage.taskId !== taskId;
+            const shouldUpdateStatus = existing.logMessage.status !== nextStatus;
+            const shouldUpdateTaskKind = existing.logMessage.metadata?.taskKind !== nextTaskKind;
+
+            if (shouldPromoteToTaskLog || shouldUpdateStatus || shouldUpdateTaskKind) {
               get().updateMessage(existing.conversationId, existing.logMessage.id, {
-                status: options.status,
+                taskId,
+                ...(shouldPromoteToTaskLog ? { content: '' } : {}),
+                status: nextStatus,
                 metadata: {
                   messageKind: TASK_LOG_KIND,
-                  logs: existing.logMessage.metadata?.logs || [],
+                  ...(nextTaskKind ? { taskKind: nextTaskKind } : {}),
+                  logs: existingLogs,
                 },
               });
             }

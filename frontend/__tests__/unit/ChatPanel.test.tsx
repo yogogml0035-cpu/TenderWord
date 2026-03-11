@@ -328,7 +328,16 @@ describe('ChatPanel', () => {
         const draft = useChatStore.getState().getConversationDraft('conv-1');
         expect(conversation.currentTaskId).toBe('task-rewrite');
         expect(draft?.pending_rewrite_task_id).toBe('task-rewrite');
+        expect(conversation.messages).toHaveLength(2);
         expect(conversation.messages[0].metadata?.chatKind).toBe('rewrite');
+        expect(conversation.messages[1]).toMatchObject({
+          type: 'ai',
+          content: '正在创建修改重写任务',
+          status: 'completed',
+          metadata: {
+            chatKind: 'rewrite',
+          },
+        });
       });
 
       expect(fetchMock).toHaveBeenCalled();
@@ -390,6 +399,156 @@ describe('ChatPanel', () => {
         expect(conversation.messages).toHaveLength(2);
         expect(conversation.messages[1].type).toBe('ai');
         expect(conversation.messages[1].status).toBe('completed');
+      });
+    } finally {
+      (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
+    }
+  });
+
+  it('excludes task-notice ai bubbles from normal chat context', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+          messages: [
+            {
+              id: 'msg-task-notice',
+              conversationId: 'conv-1',
+              type: 'ai',
+              content: '正在创建生成招标文件任务',
+              timestamp: Date.now(),
+              status: 'completed',
+              metadata: {
+                chatKind: 'task-notice',
+              },
+            },
+          ],
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '继续帮我解释一下',
+        },
+      },
+    }));
+
+    const encoder = new TextEncoder();
+    const streamPayload =
+      JSON.stringify({ event: 'done', data: { content: '好的，我继续说明。' } }) + '\n';
+    const originalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      body: {
+        getReader: () => {
+          let consumed = false;
+          return {
+            read: async () => {
+              if (consumed) {
+                return { value: undefined, done: true };
+              }
+              consumed = true;
+              return { value: encoder.encode(streamPayload), done: false };
+            },
+          };
+        },
+      },
+    } as unknown as Response);
+    (globalThis as { fetch?: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      render(<ChatPanel />);
+
+      fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      });
+
+      const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+      const body =
+        requestInit && typeof requestInit.body === 'string'
+          ? JSON.parse(requestInit.body)
+          : null;
+
+      expect(body?.messages).toEqual([{ role: 'user', content: '继续帮我解释一下' }]);
+    } finally {
+      (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
+    }
+  });
+
+  it('removes the rewrite placeholder bubble when the rewrite stream fails before task acceptance', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请帮我修改这一段内容',
+        },
+      },
+    }));
+
+    const encoder = new TextEncoder();
+    const streamPayload = [
+      JSON.stringify({ event: 'route', data: { route: 'rewrite' } }),
+      JSON.stringify({
+        event: 'error',
+        data: {
+          message: '修改任务创建失败',
+        },
+      }),
+    ].join('\n') + '\n';
+    const originalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      body: {
+        getReader: () => {
+          let consumed = false;
+          return {
+            read: async () => {
+              if (consumed) {
+                return { value: undefined, done: true };
+              }
+              consumed = true;
+              return { value: encoder.encode(streamPayload), done: false };
+            },
+          };
+        },
+      },
+    } as unknown as Response);
+    (globalThis as { fetch?: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      render(<ChatPanel />);
+
+      fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+      await waitFor(() => {
+        const conversation = useChatStore.getState().conversations[0];
+        expect(conversation.currentTaskId).toBeUndefined();
+        expect(conversation.messages).toHaveLength(2);
+        expect(conversation.messages[0]).toMatchObject({
+          type: 'user',
+          metadata: {
+            chatKind: 'rewrite',
+          },
+        });
+        expect(conversation.messages[1]).toMatchObject({
+          type: 'system',
+          content: '修改任务创建失败',
+          status: 'completed',
+        });
+        expect(conversation.messages.find((message) => message.content === '正在创建修改重写任务')).toBeUndefined();
       });
     } finally {
       (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;

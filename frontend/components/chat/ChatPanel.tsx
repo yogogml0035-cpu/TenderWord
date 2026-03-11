@@ -62,6 +62,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     updateConversationDraft,
     addMessage,
     updateMessage,
+    deleteMessage,
     startTask,
     taskSummaries,
   } =
@@ -239,6 +240,16 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       let accumulatedText = '';
       let streamFinished = false;
       let activeRoute: 'reply' | 'rewrite' | null = null;
+      let rewritePlaceholderMessageId: string | undefined;
+      let rewriteTaskAccepted = false;
+
+      const cleanupRewritePlaceholder = () => {
+        if (!rewritePlaceholderMessageId || rewriteTaskAccepted) {
+          return;
+        }
+        deleteMessage(conversationId, rewritePlaceholderMessageId);
+        rewritePlaceholderMessageId = undefined;
+      };
 
       try {
         const response = await fetch(`${API_BASE_URL}/api/user/stream`, {
@@ -298,8 +309,18 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
           if (event.event === 'route') {
             activeRoute = event.data.route;
-            if (userMessageId) {
+            if (event.data.route === 'rewrite' && userMessageId) {
               updateMessage(conversationId, userMessageId, {
+                metadata: {
+                  chatKind: 'rewrite',
+                },
+              });
+            }
+            if (event.data.route === 'rewrite' && !rewritePlaceholderMessageId) {
+              rewritePlaceholderMessageId = addMessage(conversationId, {
+                type: 'ai',
+                content: '正在创建修改重写任务',
+                status: 'completed',
                 metadata: {
                   chatKind: 'rewrite',
                 },
@@ -309,6 +330,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           }
 
           if (event.event === 'task_accepted') {
+            rewriteTaskAccepted = true;
             if (userMessageId) {
               updateMessage(conversationId, userMessageId, {
                 metadata: {
@@ -316,12 +338,19 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
                 },
               });
             }
-            startTask(conversation.id, event.data.task_id, {
-              task_kind: event.data.task_kind,
-              status: event.data.status || 'queued',
-              queue_position: event.data.queue_position,
-              waiting_count: event.data.waiting_count,
-            });
+            startTask(
+              conversation.id,
+              event.data.task_id,
+              {
+                task_kind: event.data.task_kind,
+                status: event.data.status || 'queued',
+                queue_position: event.data.queue_position,
+                waiting_count: event.data.waiting_count,
+              },
+              rewritePlaceholderMessageId
+                ? { logMessageId: rewritePlaceholderMessageId }
+                : undefined
+            );
             updateConversationDraft(conversation.id, {
               chat_input: '',
               pending_rewrite_prompt: prompt,
@@ -368,6 +397,9 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           }
 
           if (event.event === 'error') {
+            if (activeRoute === 'rewrite') {
+              cleanupRewritePlaceholder();
+            }
             const errorMessage = event.data.message || '聊天失败';
             const shouldBindToReplyBubble = activeRoute !== 'rewrite' || !!options.reuseAiMessageId;
             if (shouldBindToReplyBubble) {
@@ -418,6 +450,9 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           }
         }
       } catch (error) {
+        if (activeRoute === 'rewrite') {
+          cleanupRewritePlaceholder();
+        }
         const isAbort =
           error instanceof DOMException
             ? error.name === 'AbortError'
@@ -452,6 +487,9 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           }
         }
       } finally {
+        if (activeRoute === 'rewrite') {
+          cleanupRewritePlaceholder();
+        }
         delete normalChatAbortRef.current[conversationId];
         setNormalChatActive(conversationId, false);
       }
@@ -459,6 +497,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     [
       addMessage,
       conversation,
+      deleteMessage,
       isTaskBusy,
       selectedModel,
       setNormalChatActive,

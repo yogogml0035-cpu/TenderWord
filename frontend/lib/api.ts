@@ -22,12 +22,13 @@ import type {
   TaskStatus,
 } from '@/types/api';
 import type { Conversation } from '@/types/chat';
+import { resolveApiBaseUrl } from '@/lib/apiBaseUrl';
 
 // ============================================
 // Configuration
 // ============================================
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = resolveApiBaseUrl();
 
 // ============================================
 // Helper Functions

@@ -56,6 +56,82 @@ describe('chatStore task message grouping', () => {
     expect(group?.logMessage?.metadata?.messageKind).toBe('task-log');
   });
 
+  it('reuses the rewrite placeholder bubble as the task-log message when the task starts', () => {
+    let placeholderMessageId = '';
+
+    act(() => {
+      placeholderMessageId = useChatStore.getState().addMessage('conv-1', {
+        type: 'ai',
+        content: '正在创建修改重写任务',
+        status: 'completed',
+        metadata: {
+          chatKind: 'rewrite',
+        },
+      });
+      useChatStore.getState().startTask(
+        'conv-1',
+        'task-1',
+        {
+          task_kind: 'rewrite',
+          status: 'queued',
+        },
+        {
+          logMessageId: placeholderMessageId,
+        }
+      );
+      useChatStore.getState().ensureTaskLogMessage('task-1', { status: 'generating' });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const group = useChatStore.getState().findTaskMessageGroup('task-1');
+
+    expect(conversation?.messages).toHaveLength(1);
+    expect(group?.logMessage?.id).toBe(placeholderMessageId);
+    expect(group?.logMessage?.taskId).toBe('task-1');
+    expect(group?.logMessage?.status).toBe('generating');
+    expect(group?.logMessage?.content).toBe('');
+    expect(group?.logMessage?.metadata?.messageKind).toBe('task-log');
+    expect(group?.logMessage?.metadata?.taskKind).toBe('rewrite');
+  });
+
+  it('reuses the generate placeholder bubble as the task-log message when the task starts', () => {
+    let placeholderMessageId = '';
+
+    act(() => {
+      placeholderMessageId = useChatStore.getState().addMessage('conv-1', {
+        type: 'ai',
+        content: '正在创建生成招标文件任务',
+        status: 'completed',
+        metadata: {
+          chatKind: 'task-notice',
+        },
+      });
+      useChatStore.getState().startTask(
+        'conv-1',
+        'task-1',
+        {
+          task_kind: 'generate',
+          status: 'queued',
+        },
+        {
+          logMessageId: placeholderMessageId,
+        }
+      );
+      useChatStore.getState().ensureTaskLogMessage('task-1', { status: 'generating' });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const group = useChatStore.getState().findTaskMessageGroup('task-1');
+
+    expect(conversation?.messages).toHaveLength(1);
+    expect(group?.logMessage?.id).toBe(placeholderMessageId);
+    expect(group?.logMessage?.taskId).toBe('task-1');
+    expect(group?.logMessage?.status).toBe('generating');
+    expect(group?.logMessage?.content).toBe('');
+    expect(group?.logMessage?.metadata?.messageKind).toBe('task-log');
+    expect(group?.logMessage?.metadata?.taskKind).toBe('generate');
+  });
+
   it('ensureTaskContentMessage lazily creates task-content message', () => {
     act(() => {
       useChatStore.getState().startTask('conv-1', 'task-1');

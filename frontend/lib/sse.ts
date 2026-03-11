@@ -3,6 +3,8 @@
  * Features: Auto-reconnect, Last-Event-ID support, heartbeat detection
  */
 
+import { resolveApiBaseUrl } from '@/lib/apiBaseUrl';
+
 export interface SSEMessage {
   event: string;
   data: unknown;
@@ -85,7 +87,7 @@ export function createSSEConnection(endpoint: string, options: SSEOptions = {}):
     closeNotified: false,
   };
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const apiUrl = resolveApiBaseUrl();
 
   const clearTimers = () => {
     if (state.reconnectTimer) {

@@ -35,6 +35,7 @@ class MockEventSource {
 
 describe('createSSEConnection', () => {
   const originalEventSource = global.EventSource;
+  const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
 
   beforeEach(() => {
     jest.useFakeTimers();
@@ -45,7 +46,16 @@ describe('createSSEConnection', () => {
   afterEach(() => {
     jest.useRealTimers();
     global.EventSource = originalEventSource;
+    process.env.NEXT_PUBLIC_API_URL = originalApiUrl;
     jest.restoreAllMocks();
+  });
+
+  it('selects a single valid API base URL when NEXT_PUBLIC_API_URL contains multiple candidates', () => {
+    process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8000,http://10.11.11.44:8000';
+
+    createSSEConnection('/api/stream/task-1');
+
+    expect(MockEventSource.instances[0]?.url).toBe('http://localhost:8000/api/stream/task-1');
   });
 
   it('does not log or reconnect when the server closes the stream normally', () => {

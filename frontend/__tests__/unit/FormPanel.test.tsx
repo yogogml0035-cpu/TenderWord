@@ -203,6 +203,7 @@ describe('FormPanel', () => {
 
     mockCreateGenerateTask.mockResolvedValue({
       task_id: 'task-created',
+      task_kind: 'generate',
       status: 'queued',
       queue_position: 1,
       waiting_count: 0,
@@ -210,6 +211,7 @@ describe('FormPanel', () => {
 
     mockGetTaskStatus.mockResolvedValue({
       task_id: 'task-created',
+      task_kind: 'generate',
       status: 'queued',
       progress: {
         completed_nodes: [],
@@ -342,6 +344,53 @@ describe('FormPanel', () => {
       });
     });
     expect(mockConvertGngkFormToApiRequest).not.toHaveBeenCalled();
+  });
+
+  it('adds a generate placeholder ai message and binds it to the created task', async () => {
+    const user = userEvent.setup();
+    render(<FormPanel />);
+
+    await user.click(screen.getByRole('button', { name: '提交XJCG表单' }));
+
+    await waitFor(() => {
+      const conversation = useChatStore.getState().getCurrentConversation();
+      expect(conversation?.currentTaskId).toBe('task-created');
+      expect(conversation?.messages).toHaveLength(1);
+      expect(conversation?.messages[0]).toMatchObject({
+        type: 'ai',
+        content: '正在创建生成招标文件任务',
+        status: 'completed',
+        metadata: {
+          chatKind: 'task-notice',
+        },
+      });
+      expect(useChatStore.getState().taskMessageMap['task-created']).toMatchObject({
+        logMessageId: conversation?.messages[0].id,
+      });
+    });
+  });
+
+  it('removes the generate placeholder ai message when task creation fails', async () => {
+    const user = userEvent.setup();
+    const alertSpy = jest.spyOn(window, 'alert').mockImplementation(() => undefined);
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    mockCreateGenerateTask.mockRejectedValueOnce(new Error('create failed'));
+
+    render(<FormPanel />);
+
+    try {
+      await user.click(screen.getByRole('button', { name: '提交XJCG表单' }));
+
+      await waitFor(() => {
+        expect(alertSpy).toHaveBeenCalledWith('创建任务失败，请重试');
+        const conversation = useChatStore.getState().getCurrentConversation();
+        expect(conversation?.currentTaskId).toBeUndefined();
+        expect(conversation?.messages).toHaveLength(0);
+      });
+    } finally {
+      consoleErrorSpy.mockRestore();
+      alertSpy.mockRestore();
+    }
   });
 
   it('uses gngk converter mapping when submitting gngk form', async () => {
