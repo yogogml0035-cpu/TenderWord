@@ -249,11 +249,6 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     """
     start_time = time.perf_counter()
 
-    from backend.util.log_util import log_task_start, log_task_end
-
-    logged_end = False
-    log_task_start(state, "update_word")
-
     print("[update_word] 开始执行...")
 
     prepared_doc_path = state.get("prepared_doc_path")
@@ -1798,16 +1793,10 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 wait_time=0.0,
                 node_name="update_word",
             )
-            if not logged_end:
-                log_task_end(state, "update_word")
-                logged_end = True
 
     except Exception as e:
         error_msg = f"初始化 Word COM 时出错: {e}"
         insertion_log_parts.append(error_msg)
-        if not logged_end:
-            log_task_end(state, "update_word")
-            logged_end = True
         raise
 
     # 使用插入日志更新状态

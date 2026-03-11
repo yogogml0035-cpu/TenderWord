@@ -22,10 +22,7 @@ from util.word_util import (
 
 def prepare_template(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     start_time = time.time()
-    
-    
-    from backend.util.log_util import log_task_start
-    log_task_start(state, "prepare_template")
+
     tender_type = state.get("tender_type")
     progress_log.debug(f"[Start] 当前类型：{tender_type}")
     progress_log.debug(f"[prepare_template] 开始执行...")

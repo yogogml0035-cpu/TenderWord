@@ -1,29 +1,9 @@
-"""Execution log module for user behavior auditing.
+"""Execution log module for generate-task success auditing.
 
-This module provides logging functionality for tracking user actions
-and task execution. Logs are stored in daily files with INFO level only.
-
-Uses QueueHandler + QueueListener pattern for thread-safety in async FastAPI environment.
-
-Log file: backend/logs/execution-YYYYMMDD.log
-
-Usage:
-    from backend.util.log_util.execution_log import (
-        logger,
-        log_task_start,
-        log_task_end,
-        start_execution_log_listener,
-        stop_execution_log_listener,
-    )
-
-    # At application startup
-    start_execution_log_listener()
-
-    # Log task execution
-    log_task_start(state, "node_name")
-
-    # At application shutdown
-    stop_execution_log_listener()
+This module writes a single kind of audit record:
+- generate task completed successfully
+- required fields are complete
+- fixed output format with the final node name `update_word`
 """
 
 import logging
@@ -99,11 +79,11 @@ _listener = logging.handlers.QueueListener(
     respect_handler_level=True,
 )
 
-# 主日志记录器
-logger = logging.getLogger("TenderWord")
-logger.addHandler(_queue_handler)
-logger.setLevel(logging.INFO)
-logger.propagate = False  # 阻止日志传播到根 logger，避免输出到控制台
+# 主日志记录器（模块内部使用）
+_execution_logger = logging.getLogger("TenderWord")
+_execution_logger.addHandler(_queue_handler)
+_execution_logger.setLevel(logging.INFO)
+_execution_logger.propagate = False  # 阻止日志传播到根 logger，避免输出到控制台
 
 
 def start_execution_log_listener() -> None:
@@ -125,35 +105,36 @@ def stop_execution_log_listener() -> None:
     _listener.stop()
 
 
-def log_task_start(state: Mapping[str, Any], task_name: str) -> None:
-    """记录任务开始执行"""
-    project_zbr_xbr = state.get("project_zbr_xbr", "")
-    project_number = state.get("project_number", "")
-    project_name = state.get("project_name", "")
-    project_info = (
-        f"{project_number}-{project_name}" if project_number or project_name else ""
-    )
-    logger.info(f"{project_zbr_xbr}-{project_info}开始生成，当前进入{task_name}")
+def _normalize_required_field(state: Mapping[str, Any], key: str) -> str:
+    return str(state.get(key, "") or "").strip()
 
 
-def log_task_end(state: Mapping[str, Any], task_name: str) -> None:
-    """记录任务结束执行"""
-    project_zbr_xbr = state.get("project_zbr_xbr", "")
-    project_number = state.get("project_number", "")
-    project_name = state.get("project_name", "")
-    project_info = (
-        f"{project_number}-{project_name}" if project_number or project_name else ""
+def _build_generate_success_message(state: Mapping[str, Any]) -> str | None:
+    project_zbr_xbr = _normalize_required_field(state, "project_zbr_xbr")
+    project_number = _normalize_required_field(state, "project_number")
+    project_name = _normalize_required_field(state, "project_name")
+
+    if not (project_zbr_xbr and project_number and project_name):
+        return None
+
+    return (
+        f"{project_zbr_xbr}-{project_number}-{project_name}"
     )
-    logger.info(f"{project_zbr_xbr}-{project_info}结束生成，当前进入{task_name}")
+
+
+def log_generate_task_success(state: Mapping[str, Any]) -> None:
+    """记录正式生成任务成功完成的审计日志。"""
+    message = _build_generate_success_message(state)
+    if message is None:
+        return
+    _execution_logger.info(message)
 
 # 任务执行日志文件路径（向后兼容）
 TASK_EXECUTION_LOG_FILE = str(_file_handler.baseFilename)
 
 
 __all__ = [
-    "logger",
-    "log_task_start",
-    "log_task_end",
+    "log_generate_task_success",
     "TASK_EXECUTION_LOG_FILE",
     "start_execution_log_listener",
     "stop_execution_log_listener",

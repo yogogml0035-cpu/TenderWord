@@ -6,8 +6,8 @@
 - log_util: 日志工具
 - common_util: 通用工具（LLM 流式调用、招标数据获取）
 
-向后兼容导出：
-以下导出保持与重构前相同的 API，现有代码无需修改即可继续使用。
+对外导出：
+仅保留当前仓库仍支持的工具函数入口。
 """
 
 # Word 工具（向后兼容导出）
@@ -33,11 +33,9 @@ from backend.util.word_util import (
     extract_text_with_superscript_subscript,
 )
 
-# 日志工具（向后兼容导出）
+# 日志工具导出
 from backend.util.log_util import (
-    logger,
-    log_task_start,
-    log_task_end,
+    log_generate_task_success,
 )
 
 # 通用工具（向后兼容导出）
@@ -72,9 +70,7 @@ __all__ = [
     "extract_text_with_list_numbers",
     "extract_text_with_superscript_subscript",
     # log_util
-    "logger",
-    "log_task_start",
-    "log_task_end",
+    "log_generate_task_success",
     # llm_stream_utils
     "LLMTimeoutError",
     "HeartbeatMonitor",

@@ -1,6 +1,8 @@
 import logging
 from datetime import datetime
+from unittest.mock import Mock
 
+import backend.util.log_util.execution_log as execution_log_module
 from backend.util.log_util.daily_file_handler import DailyFileHandler
 from backend.util.log_util.log_cleanup import get_log_files
 
@@ -88,3 +90,35 @@ def test_get_log_files_includes_legacy_rotated_files(tmp_path):
     log_files = sorted(path.name for path in get_log_files(tmp_path))
 
     assert log_files == filenames
+
+
+def test_log_generate_task_success_writes_fixed_audit_line(monkeypatch):
+    mock_info = Mock()
+    monkeypatch.setattr(execution_log_module._execution_logger, "info", mock_info)
+
+    execution_log_module.log_generate_task_success(
+        {
+            "project_zbr_xbr": "徐旭东、任彧晟",
+            "project_number": "253505",
+            "project_name": "细胞电转仪",
+        }
+    )
+
+    mock_info.assert_called_once_with(
+        "徐旭东、任彧晟-253505-细胞电转仪结束生成，当前进入update_word"
+    )
+
+
+def test_log_generate_task_success_skips_incomplete_state(monkeypatch):
+    mock_info = Mock()
+    monkeypatch.setattr(execution_log_module._execution_logger, "info", mock_info)
+
+    execution_log_module.log_generate_task_success(
+        {
+            "project_zbr_xbr": "徐旭东、任彧晟",
+            "project_number": "253505",
+            "project_name": "",
+        }
+    )
+
+    mock_info.assert_not_called()

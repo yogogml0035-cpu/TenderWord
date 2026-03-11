@@ -100,9 +100,6 @@ export function ChatModelPicker({
         >
           <div className="border-b border-slate-100 bg-gradient-to-r from-slate-50 via-white to-blue-50/60 px-5 py-4">
             <p className="text-base font-semibold text-slate-900">选择当前聊天模型</p>
-            <p className="mt-1 text-sm text-slate-500">
-              当前项目已配置 3 个模型，可按推理深度和响应速度切换。
-            </p>
           </div>
 
           <div className="space-y-2 p-2.5">

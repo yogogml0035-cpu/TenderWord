@@ -30,7 +30,7 @@ from backend.services.conversation_service import get_conversation_service
 from backend.services.user_routing_service import get_user_routing_service
 from backend.task.task_queue_manager import get_task_queue
 from backend.util.common_util import LLMTimeoutError
-from backend.util.log_util.execution_log import logger as execution_logger
+from backend.util.log_util.execution_log import log_generate_task_success
 from backend.util.log_util.progress_log import progress_log
 from backend.util.log_util.sse_log_handler import task_log_context
 
@@ -76,35 +76,14 @@ TASK_KIND_TO_LLM_NODE = {
     "rewrite": "rewrite_text",
 }
 
-class _BufferedLoggerWriter:
-    """将 stdout/stderr 文本按行转发到执行日志。"""
-
-    def __init__(self, level: str = "info"):
-        self._level = level.lower()
-        self._buffer = ""
+class _DiscardingWriter:
+    """吞掉 Graph 运行期间的 stdout/stderr，避免污染 execution_log。"""
 
     def write(self, data: str) -> int:
-        if not data:
-            return 0
-        self._buffer += data
-        while "\n" in self._buffer:
-            line, self._buffer = self._buffer.split("\n", 1)
-            self._emit(line)
-        return len(data)
+        return len(data or "")
 
     def flush(self) -> None:
-        if self._buffer:
-            self._emit(self._buffer)
-            self._buffer = ""
-
-    def _emit(self, line: str) -> None:
-        text = line.strip()
-        if not text:
-            return
-        if self._level == "error":
-            execution_logger.error(text)
-        else:
-            execution_logger.info(text)
+        return None
 
 
 class _LLMSnapshotRelay:
@@ -743,8 +722,8 @@ class DocumentService:
         success_message = "修改任务完成" if task_kind == "rewrite" else "文档生成完成"
         callback.push_log(f"开始执行{task_label}: {task_id}")
         progress_log.info(f"[Task] 开始执行任务: {task_id}")
-        stdout_writer = _BufferedLoggerWriter(level="info")
-        stderr_writer = _BufferedLoggerWriter(level="error")
+        stdout_writer = _DiscardingWriter()
+        stderr_writer = _DiscardingWriter()
         rewrite_cleanup_holder: Dict[str, str] = {}
 
         try:
@@ -806,6 +785,12 @@ class DocumentService:
                             )
                     except Exception:
                         logger.exception("写入 rewrite 会话历史失败: task_id=%s", task_id)
+
+                if task_kind == "generate":
+                    audit_state = dict(initial_state)
+                    if isinstance(result_state, dict):
+                        audit_state.update(result_state)
+                    log_generate_task_success(audit_state)
 
                 callback.push_done(
                     DoneEventData(
