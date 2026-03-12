@@ -695,6 +695,73 @@ describe('useChatSSE', () => {
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
 
+  it('ignores late SSE events after a task is locally cancelled', async () => {
+    mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
+
+    useChatStreamStore.getState().replaceStream('task-1', {
+      logs: [
+        {
+          id: 'log-stream',
+          timestamp: Date.now(),
+          level: 'info',
+          message: '正在修改',
+        },
+      ],
+      aiText: '部分修改内容',
+      aiComplete: false,
+      lastEventId: '10',
+    });
+    useChatTaskSessionStore.getState().upsertSession('task-1', { lastEventId: '10' });
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      useChatStore.getState().cancelTask('task-1', {
+        logs: [
+          {
+            id: 'log-stream',
+            timestamp: Date.now(),
+            level: 'info',
+            message: '正在修改',
+          },
+        ],
+        aiText: '部分修改内容',
+      });
+      useChatStreamStore.getState().clearStream('task-1');
+      useChatTaskSessionStore.getState().removeSession('task-1');
+    });
+
+    expect(getTaskGroup()?.logMessage?.status).toBe('cancelled');
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'log',
+        id: '11',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          level: 'INFO',
+          message: '[delete_tender_param] 开始修复',
+          node: 'delete_tender_param',
+        },
+      });
+    });
+
+    const group = getTaskGroup();
+    expect(group?.logMessage?.status).toBe('cancelled');
+    expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
+    expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
+  });
+
   it('treats rewrite_text as the AI content trigger for rewrite tasks', async () => {
     useChatStore.setState((state) => ({
       ...state,

@@ -166,18 +166,19 @@ $backendDir = Join-Path $repoRoot "backend"
 $frontendDir = Join-Path $repoRoot "frontend"
 
 $backendEntry = Join-Path $backendDir "main.py"
+$backendPython = Join-Path $backendDir ".venv\Scripts\python.exe"
 $frontendPackage = Join-Path $frontendDir "package.json"
 $backendEnv = Join-Path $backendDir ".env"
 $frontendEnv = Join-Path $frontendDir ".env.local"
 $frontendNodeModules = Join-Path $frontendDir "node_modules"
 
 Assert-PathExists -Path $backendEntry -FailureMessage "未找到 backend\main.py。请确认当前目录是项目根目录。"
+Assert-PathExists -Path $backendPython -FailureMessage "缺少 backend\.venv\Scripts\python.exe。请先在 backend 目录创建并安装虚拟环境。"
 Assert-PathExists -Path $frontendPackage -FailureMessage "未找到 frontend\package.json。请确认当前目录是项目根目录。"
 Assert-PathExists -Path $backendEnv -FailureMessage "缺少 backend\.env。请先参考 backend\.env.example 创建环境文件。"
 Assert-PathExists -Path $frontendEnv -FailureMessage "缺少 frontend\.env.local。请先参考 frontend\.env.local.example 创建环境文件。"
 Assert-PathExists -Path $frontendNodeModules -FailureMessage "缺少 frontend\node_modules。请先进入 frontend 执行 npm install。"
 
-$pythonPath = Get-CommandPath -Name "python" -FailureMessage "未找到 python 命令。请先激活后端 Python 环境。"
 $null = Get-CommandPath -Name "npm" -FailureMessage "未找到 npm 命令。请先安装 Node.js 或确保 npm 在 PATH 中。"
 $shellPath = Get-PowerShellHostPath
 
@@ -190,7 +191,7 @@ $frontendTitle = "TenderWord Frontend Dev (8502)"
 $frontendSummary = "dev (npm run dev)"
 
 Write-Info "运行后端预检查..."
-$backendCheckOutput = & $pythonPath -c "import asyncio; import fastapi; import uvicorn; import pydantic_settings; import backend.main" 2>&1
+$backendCheckOutput = & $backendPython -c "import asyncio; import fastapi; import uvicorn; import pydantic_settings; import backend.main" 2>&1
 if ($LASTEXITCODE -ne 0) {
     $details = ($backendCheckOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
     Fail "后端预检查失败。请先修复 Python/依赖/本机环境问题后再启动。`n$details"
@@ -201,12 +202,13 @@ $backendProcess = $null
 $frontendProcess = $null
 
 try {
+    $backendPythonLiteral = "'" + (Escape-SingleQuotedText -Text $backendPython) + "'"
     $backendProcess = Start-ServiceWindow `
         -ShellPath $shellPath `
         -Title "TenderWord Backend (8000)" `
         -WorkingDirectory $backendDir `
-        -Banner "[backend] 正在执行 python main.py" `
-        -CommandText "python main.py"
+        -Banner "[backend] 正在执行 backend\\.venv\\Scripts\\python.exe main.py" `
+        -CommandText "& $backendPythonLiteral main.py"
 
     Start-Sleep -Seconds 1
 

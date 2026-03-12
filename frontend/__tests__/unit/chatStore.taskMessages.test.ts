@@ -203,6 +203,32 @@ describe('chatStore task message grouping', () => {
     expect(useChatStore.getState().activeTaskIds).toHaveLength(0);
   });
 
+  it('does not downgrade a cancelled task-log message back to generating', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'rewrite',
+        status: 'running',
+      });
+      useChatStore.getState().ensureTaskLogMessage('task-1');
+      useChatStore.getState().cancelTask('task-1', {
+        logs: [
+          {
+            id: 'log-1',
+            timestamp: Date.now(),
+            level: 'info',
+            message: '任务已取消',
+          },
+        ],
+      });
+      useChatStore.getState().ensureTaskLogMessage('task-1', { status: 'generating' });
+    });
+
+    const group = useChatStore.getState().findTaskMessageGroup('task-1');
+    expect(group?.logMessage?.status).toBe('cancelled');
+    expect(group?.logMessage?.metadata?.messageKind).toBe('task-log');
+    expect(group?.logMessage?.metadata?.taskKind).toBe('rewrite');
+  });
+
   it('interrupts active tasks on backend restart while preserving streamed logs and ai text', () => {
     act(() => {
       useChatStore.getState().startTask('conv-1', 'task-1', {

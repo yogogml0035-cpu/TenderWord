@@ -26,6 +26,20 @@ interface UseChatSSEOptions {
   onError?: (error: string) => void;
 }
 
+function isTaskTrackedForStreaming(taskId: string): boolean {
+  const state = useChatStore.getState();
+  if (state.activeTaskIds.includes(taskId)) {
+    return true;
+  }
+
+  const summary = state.taskSummaries[taskId];
+  if (summary && (summary.status === 'queued' || summary.status === 'running')) {
+    return true;
+  }
+
+  return state.conversations.some((conversation) => conversation.currentTaskId === taskId);
+}
+
 function getAIContentTriggerNode(taskKind: TaskKind): string {
   return taskKind === 'rewrite' ? 'rewrite_text' : 'generate_polished_text';
 }
@@ -219,6 +233,10 @@ export function useChatSSE({
   const handleMessage = useCallback(
     (sseMessage: { event: string; data: unknown; id?: string }) => {
       if (!taskId) {
+        return;
+      }
+
+      if (handledTerminalTasksRef.current.has(taskId) || !isTaskTrackedForStreaming(taskId)) {
         return;
       }
 

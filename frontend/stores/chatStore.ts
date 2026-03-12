@@ -104,12 +104,20 @@ interface TaskScopeState {
 }
 
 const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(['completed', 'failed', 'cancelled']);
+const TERMINAL_MESSAGE_STATUSES = new Set<Message['status']>(['completed', 'error', 'cancelled']);
 
 function isTerminalTaskStatus(status?: TaskStatus): boolean {
   if (!status) {
     return false;
   }
   return TERMINAL_TASK_STATUSES.has(status);
+}
+
+function isTerminalMessageStatus(status?: Message['status']): boolean {
+  if (!status) {
+    return false;
+  }
+  return TERMINAL_MESSAGE_STATUSES.has(status);
 }
 
 function normalizeDraftFile(file: ConversationDraftFile | undefined): ConversationDraftFile | undefined {
@@ -760,12 +768,18 @@ export const useChatStore = create<ChatStore>()(
         ensureTaskLogMessage: (taskId, options) => {
           const existing = get().findTaskMessageGroup(taskId);
           if (existing?.logMessage) {
-            const nextStatus = options?.status || existing.logMessage.status;
-            const nextTaskKind = get().taskSummaries[taskId]?.task_kind;
             const existingKind = getTaskMessageKind(existing.logMessage);
-            const existingLogs = normalizeLogEntries(existing.logMessage.metadata?.logs);
             const shouldPromoteToTaskLog =
               existingKind !== TASK_LOG_KIND || existing.logMessage.taskId !== taskId;
+            const requestedStatus = options?.status || existing.logMessage.status;
+            const nextStatus =
+              !shouldPromoteToTaskLog &&
+              isTerminalMessageStatus(existing.logMessage.status) &&
+              requestedStatus === 'generating'
+                ? existing.logMessage.status
+                : requestedStatus;
+            const nextTaskKind = get().taskSummaries[taskId]?.task_kind;
+            const existingLogs = normalizeLogEntries(existing.logMessage.metadata?.logs);
             const shouldUpdateStatus = existing.logMessage.status !== nextStatus;
             const shouldUpdateTaskKind = existing.logMessage.metadata?.taskKind !== nextTaskKind;
 
