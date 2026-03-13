@@ -302,8 +302,7 @@ AGENTS.md                     Agent 执行规范
 | 下载 | `backend/api/download.py` -> `/api/download` |
 | 上传 | `backend/api/upload.py` -> `/api/upload` |
 | 招标基础数据 | `backend/api/tender.py` -> `/api/tender/{tender_no}` |
-| 聊天 / rewrite | `backend/api/chat.py`、`backend/api/rewrite.py` |
-| 用户 / 会话 | `backend/api/user.py`、`backend/api/conversations.py` |
+| 用户消息路由 / 会话 | `backend/api/user.py` -> `/api/user/stream`、`backend/api/conversations.py` |
 
 当前已支持的 LLM 模型：
 

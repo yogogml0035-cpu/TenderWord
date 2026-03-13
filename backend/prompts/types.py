@@ -83,12 +83,6 @@ class RewriteAssistantCandidate:
 
 
 @dataclass(frozen=True)
-class RewriteRelevancePromptInput:
-    prompt: str
-    latest_rewrite_state: Optional[RewriteStateSnapshot] = None
-
-
-@dataclass(frozen=True)
 class RouteOrReplyPromptInput:
     messages: Sequence[RouteHistoryMessage]
     latest_user_message: str

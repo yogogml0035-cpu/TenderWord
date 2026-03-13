@@ -8,7 +8,6 @@ from backend.prompts.rewrite_prompt import render_rewrite_prompt
 from backend.prompts.routing_prompt import (
     build_rewrite_target_selection_bundle,
     parse_rewrite_target_selection,
-    render_rewrite_relevance_prompt,
     render_route_or_reply_prompt,
 )
 from backend.prompts.types import (
@@ -16,7 +15,6 @@ from backend.prompts.types import (
     GeneratePromptInput,
     RewriteHistoryMessage,
     RewritePromptInput,
-    RewriteRelevancePromptInput,
     RewriteStateSnapshot,
     RewriteTargetSelectionPromptInput,
     RouteHistoryMessage,
@@ -70,26 +68,6 @@ def test_render_rewrite_prompt_keeps_base_text_and_user_instruction():
     assert "招标文档修改助手" in rendered.system_prompt
     assert "原始正文" in rendered.user_prompt
     assert "把第三章写得更正式" in rendered.user_prompt
-
-
-def test_render_rewrite_relevance_prompt_truncates_document_preview():
-    rendered = render_rewrite_relevance_prompt(
-        RewriteRelevancePromptInput(
-            prompt="请补充售后要求",
-            latest_rewrite_state=RewriteStateSnapshot(
-                project_number="ZB-001",
-                project_name="测试项目",
-                tender_type="xjcg",
-                polished_text="A" * 700,
-            ),
-        )
-    )
-
-    assert "只输出 true 或 false" in rendered.user_prompt
-    assert "project_number=ZB-001" in rendered.user_prompt
-    assert "latest_polished_preview=" in rendered.user_prompt
-    assert "A" * 601 not in rendered.user_prompt
-    assert "..." in rendered.user_prompt
 
 
 def test_render_route_or_reply_prompt_compresses_history_and_uses_shared_prompt():

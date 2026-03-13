@@ -89,7 +89,6 @@ class UserGraph:
             conversation_id=str(state.get("conversation_id") or "").strip(),
             user_prompt=str(state.get("latest_user_message") or "").strip(),
             model_provider=str(state.get("model_provider") or "deepseek"),
-            skip_prompt_validation=True,
         )
 
         if not response.success:

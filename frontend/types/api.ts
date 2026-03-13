@@ -68,12 +68,6 @@ export interface GenerateRequest {
   model: 'deepseek' | 'qwen' | 'doubao';
 }
 
-export interface RewriteRequest {
-  conversation_id: string;
-  user_prompt: string;
-  model: 'deepseek' | 'qwen' | 'doubao';
-}
-
 // ============================================
 // Task Progress Types
 // ============================================
@@ -227,42 +221,38 @@ export interface CreateTaskData {
 
 export type CreateTaskResponse = ApiResponse<CreateTaskData>;
 
-export interface ChatStreamMessage {
+export interface UserStreamMessage {
   role: 'user' | 'assistant';
   content: string;
 }
 
-export interface ChatStreamRequest {
+export interface UserStreamRequest {
   conversation_id: string;
   model: 'deepseek' | 'qwen' | 'doubao';
-  messages: ChatStreamMessage[];
+  messages: UserStreamMessage[];
 }
 
-export type UserStreamRequest = ChatStreamRequest;
-
-export interface ChatStreamChunkEvent {
+export interface UserStreamChunkEvent {
   event: 'chunk';
   data: {
     content: string;
   };
 }
 
-export interface ChatStreamDoneEvent {
+export interface UserStreamDoneEvent {
   event: 'done';
   data: {
     content: string;
   };
 }
 
-export interface ChatStreamErrorEvent {
+export interface UserStreamErrorEvent {
   event: 'error';
   data: {
     code?: string;
     message: string;
   };
 }
-
-export type ChatStreamEvent = ChatStreamChunkEvent | ChatStreamDoneEvent | ChatStreamErrorEvent;
 
 export interface UserStreamRouteEvent {
   event: 'route';
@@ -285,9 +275,9 @@ export interface UserStreamTaskAcceptedEvent {
 export type UserStreamEvent =
   | UserStreamRouteEvent
   | UserStreamTaskAcceptedEvent
-  | ChatStreamChunkEvent
-  | ChatStreamDoneEvent
-  | ChatStreamErrorEvent;
+  | UserStreamChunkEvent
+  | UserStreamDoneEvent
+  | UserStreamErrorEvent;
 
 export interface ConversationHeartbeatData {
   conversation_id: string;
@@ -421,13 +411,8 @@ export const ErrorCodes = {
   LLM_SERVICE_ERROR: 'LLM_SERVICE_ERROR',
   LLM_INVALID_MODEL: 'LLM_INVALID_MODEL',
 
-  // Rewrite / Chat
-  REWRITE_NO_DOCUMENT: 'REWRITE_NO_DOCUMENT',
-  REWRITE_PROMPT_INVALID: 'REWRITE_PROMPT_INVALID',
-  REWRITE_HISTORY_NOT_FOUND: 'REWRITE_HISTORY_NOT_FOUND',
+  // Rewrite / User Stream
   REWRITE_TARGET_NOT_RESOLVED: 'REWRITE_TARGET_NOT_RESOLVED',
-  CHAT_MODE_REQUIRES_REWRITE: 'CHAT_MODE_REQUIRES_REWRITE',
-  CHAT_DOC_CONTEXT_REQUIRED: 'CHAT_DOC_CONTEXT_REQUIRED',
   CONVERSATION_INSTANCE_RESET: 'CONVERSATION_INSTANCE_RESET',
 } as const;
 

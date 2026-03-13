@@ -3,20 +3,15 @@
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Sequence
 
 from backend.prompts.routing_prompt import (
-    NON_REWRITE_HINT_TEXT,
-    NO_DOCUMENT_HINT_TEXT,
     REPLY_ROUTE_LITERAL,
     REWRITE_ROUTE_LITERAL,
-    render_rewrite_relevance_prompt,
     render_route_or_reply_prompt,
 )
 from backend.prompts.types import (
-    RewriteRelevancePromptInput,
     RewriteStateSnapshot,
     RouteHistoryMessage,
     RouteOrReplyPromptInput,
@@ -26,67 +21,8 @@ from backend.util.common_util import StreamCallbacks, stream_llm_completion
 
 logger = logging.getLogger(__name__)
 
-# Deprecated legacy heuristics, kept for legacy stream compatibility only.
-REWRITE_TOKENS = (
-    "修改",
-    "改写",
-    "修改文档",
-    "帮我改",
-    "替换文案",
-    "重写",
-    "修订",
-    "增补",
-    "删掉",
-    "删去",
-    "去掉",
-    "补充",
-    "调整",
-    "完善",
-    "精简",
-    "扩写",
-    "压缩",
-    "改成",
-    "改为",
-    "删除",
-    "移除",
-    "去除",
-    "取消",
-    "替换",
-    "新增",
-    "增加",
-    "优化措辞",
-)
-
-STRUCTURED_EDIT_ACTION_TOKENS = (
-    "删除",
-    "移除",
-    "去除",
-    "取消",
-    "删掉",
-    "删去",
-    "去掉",
-    "替换",
-    "改成",
-    "改为",
-    "修改为",
-    "新增",
-    "增加",
-    "补充",
-    "保留",
-)
-
-DOC_CONTEXT_TOKENS = (
-    "当前文档",
-    "这个文档",
-    "刚生成的文档",
-    "上一版文档",
-    "你刚才生成",
-    "文档内容",
-    "全文",
-    "第几章",
-    "哪一章",
-    "这份文档",
-)
+NO_DOCUMENT_HINT_TEXT = "当前会话没有可用文档，请先完成一次生成。"
+NON_REWRITE_HINT_TEXT = "我这边暂时没收到有效回复，请重试一次。"
 
 
 @dataclass(frozen=True)
@@ -96,28 +32,6 @@ class UserRouteDecision:
     reply_text: str = ""
     reply_streamed: bool = False
     used_llm: bool = False
-
-
-def looks_like_structured_edit_instruction(text: str) -> bool:
-    lowered = str(text or "").strip().lower()
-    has_section_reference = bool(
-        re.search(r"\b\d+(?:\.\d+){1,3}\b", lowered)
-        or re.search(r"第[一二三四五六七八九十百零0-9]+[章节条款项]", lowered)
-    )
-    has_edit_action = any(token in lowered for token in STRUCTURED_EDIT_ACTION_TOKENS)
-    return has_section_reference and has_edit_action
-
-
-def looks_like_rewrite_intent(text: str) -> bool:
-    lowered = str(text or "").strip().lower()
-    return any(token in lowered for token in REWRITE_TOKENS) or looks_like_structured_edit_instruction(
-        lowered
-    )
-
-
-def looks_like_doc_context_query(text: str) -> bool:
-    lowered = str(text or "").strip().lower()
-    return any(token in lowered for token in DOC_CONTEXT_TOKENS)
 
 
 def _to_route_history_messages(
@@ -135,42 +49,6 @@ def _to_route_history_messages(
 class UserRoutingService:
     def __init__(self, conversation_service: Optional[ConversationService] = None):
         self._conversation_service = conversation_service or get_conversation_service()
-
-    async def is_rewrite_prompt_related(
-        self,
-        *,
-        prompt: str,
-        model_provider: str,
-        latest_rewrite_state: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        normalized_prompt = str(prompt or "").strip()
-        if not normalized_prompt:
-            return False
-
-        rendered_prompt = render_rewrite_relevance_prompt(
-            RewriteRelevancePromptInput(
-                prompt=normalized_prompt,
-                latest_rewrite_state=RewriteStateSnapshot.from_mapping(
-                    latest_rewrite_state
-                ),
-            )
-        )
-        raw_output = await stream_llm_completion(
-            model_provider=model_provider,
-            system_prompt=rendered_prompt.system_prompt,
-            user_prompt=rendered_prompt.user_prompt,
-            extra_params_override={"temperature": 0.0, "max_tokens": 4},
-            timeout_seconds=8,
-            check_interval=2.0,
-        )
-        normalized_output = str(raw_output or "").strip().lower()
-        logger.info(
-            "rewrite 指令相关性校验完成: model=%s, output=%r, prompt=%r",
-            model_provider,
-            normalized_output,
-            normalized_prompt,
-        )
-        return normalized_output == "true"
 
     async def stream_route_or_reply(
         self,
@@ -273,20 +151,6 @@ class UserRoutingService:
             reply_text=reply_text,
             reply_streamed=reply_streamed,
             used_llm=True,
-        )
-
-    async def route_message(
-        self,
-        *,
-        conversation_id: str,
-        prompt: str,
-        model_provider: str,
-    ) -> UserRouteDecision:
-        return await self.stream_route_or_reply(
-            conversation_id=conversation_id,
-            messages=[{"role": "user", "content": prompt}],
-            latest_user_message=prompt,
-            model_provider=model_provider,
         )
 
 

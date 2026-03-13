@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from backend.services.user_routing_service import (
+    NON_REWRITE_HINT_TEXT,
     NO_DOCUMENT_HINT_TEXT,
     UserRoutingService,
 )
@@ -104,3 +105,33 @@ def test_stream_route_or_reply_flushes_prefix_buffer_once_reply_diverges(monkeyp
     assert emitted_chunks[0] == "rewrite您好"
     assert decision.reply_text == "rewrite您好，这里是答复。"
     assert decision.used_llm is True
+
+
+def test_stream_route_or_reply_uses_service_fallback_when_model_returns_empty(monkeypatch):
+    latest_rewrite_state = {"project_name": "示例项目", "polished_text": "原始内容"}
+    service = UserRoutingService(
+        conversation_service=DummyConversationService(latest_rewrite_state=latest_rewrite_state)
+    )
+
+    async def _fake_stream_llm_completion(*_args, callbacks=None, **_kwargs):
+        if callbacks and callbacks.on_chunk:
+            callbacks.on_chunk("")
+        return ""
+
+    monkeypatch.setattr(
+        "backend.services.user_routing_service.stream_llm_completion",
+        _fake_stream_llm_completion,
+    )
+
+    decision = asyncio.run(
+        service.stream_route_or_reply(
+            conversation_id="conv-1",
+            messages=[{"role": "user", "content": "你好"}],
+            latest_user_message="你好",
+            model_provider="deepseek",
+        )
+    )
+
+    assert decision.route == "reply"
+    assert decision.reply_text == NON_REWRITE_HINT_TEXT
+    assert decision.reply_streamed is False

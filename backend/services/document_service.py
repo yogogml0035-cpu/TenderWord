@@ -27,9 +27,7 @@ from backend.models import (
     SSEEventType,
 )
 from backend.services.conversation_service import get_conversation_service
-from backend.services.user_routing_service import get_user_routing_service
 from backend.task.task_queue_manager import get_task_queue
-from backend.util.common_util import LLMTimeoutError
 from backend.util.log_util.execution_log import log_generate_task_success
 from backend.util.log_util.progress_log import progress_log
 from backend.util.log_util.sse_log_handler import task_log_context
@@ -321,7 +319,6 @@ class DocumentService:
         _init_graph_registry()
         self._task_queue = get_task_queue()
         self._conversation_service = get_conversation_service()
-        self._user_routing_service = get_user_routing_service()
         # 任务ID -> SSE 回调的映射
         self._callbacks: Dict[str, SSECallback] = {}
         self._callbacks_lock = threading.Lock()
@@ -378,7 +375,6 @@ class DocumentService:
         conversation_id: str,
         user_prompt: str,
         model_provider: str,
-        skip_prompt_validation: bool = False,
     ) -> GenerateResponse:
         """创建 rewrite 任务（复用文档任务队列 + SSE 三卡片链路）。"""
         normalized_conversation_id = str(conversation_id or "").strip()
@@ -390,7 +386,7 @@ class DocumentService:
                 success=False,
                 task_id=task_id,
                 message="conversation_id 不能为空",
-                error="REWRITE_HISTORY_NOT_FOUND",
+                error="REQ_MISSING_FIELD",
             )
 
         if not normalized_prompt:
@@ -398,7 +394,7 @@ class DocumentService:
                 success=False,
                 task_id=task_id,
                 message="修改指令不能为空",
-                error="REWRITE_PROMPT_INVALID",
+                error="REQ_MISSING_FIELD",
             )
 
         if not self._conversation_service.has_rewrite_history(normalized_conversation_id):
@@ -409,48 +405,13 @@ class DocumentService:
                 error="REWRITE_NO_DOCUMENT",
             )
 
-        latest_rewrite_state = self._conversation_service.get_latest_rewrite_state(
-            normalized_conversation_id
-        )
-        if not latest_rewrite_state:
+        if not self._conversation_service.get_latest_rewrite_state(normalized_conversation_id):
             return GenerateResponse(
                 success=False,
                 task_id=task_id,
                 message="当前会话没有可用文档，请先完成一次生成",
                 error="REWRITE_NO_DOCUMENT",
             )
-
-        if not skip_prompt_validation:
-            try:
-                is_related = await self._user_routing_service.is_rewrite_prompt_related(
-                    prompt=normalized_prompt,
-                    model_provider=model_provider,
-                    latest_rewrite_state=latest_rewrite_state,
-                )
-            except LLMTimeoutError:
-                logger.exception("rewrite 指令相关性校验超时: conversation_id=%s", normalized_conversation_id)
-                return GenerateResponse(
-                    success=False,
-                    task_id=task_id,
-                    message="修改指令校验超时，请稍后重试",
-                    error="LLM_TIMEOUT",
-                )
-            except Exception:
-                logger.exception("rewrite 指令相关性校验失败: conversation_id=%s", normalized_conversation_id)
-                return GenerateResponse(
-                    success=False,
-                    task_id=task_id,
-                    message="修改指令校验失败，请稍后重试",
-                    error="LLM_SERVICE_ERROR",
-                )
-
-            if not is_related:
-                return GenerateResponse(
-                    success=False,
-                    task_id=task_id,
-                    message="当前输入不属于可执行的修改指令",
-                    error="REWRITE_PROMPT_INVALID",
-                )
 
         if not REWRITE_GRAPH_CLASS:
             return GenerateResponse(

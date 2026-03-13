@@ -149,7 +149,6 @@ def test_user_graph_dispatches_rewrite_task_accepted():
             "conversation_id": "conv-1",
             "user_prompt": "请帮我修改",
             "model_provider": "deepseek",
-            "skip_prompt_validation": True,
         }
     ]
 

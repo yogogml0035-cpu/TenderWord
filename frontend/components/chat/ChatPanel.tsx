@@ -467,7 +467,6 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           }
         } else {
           const message = error instanceof ApiError ? error.message : '聊天失败，请稍后重试';
-          const errorCode = error instanceof ApiError ? error.code : '';
           if (aiMessagePrepared && aiMessageId) {
             updateMessage(conversationId, aiMessageId, {
               content: accumulatedText,
@@ -475,10 +474,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
               error: message,
             });
           }
-          if (
-            errorCode === 'CHAT_MODE_REQUIRES_REWRITE' ||
-            !aiMessagePrepared
-          ) {
+          if (!aiMessagePrepared) {
             addMessage(conversationId, {
               type: 'system',
               content: message,

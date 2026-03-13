@@ -15,7 +15,6 @@ import type {
   CancelTaskData,
   CreateTaskData,
   GenerateRequest,
-  RewriteRequest,
   ConversationHeartbeatData,
   ApiSuccessResponse,
   FileType,
@@ -181,13 +180,6 @@ export async function uploadFiles(
 
 export async function createGenerateTask(params: GenerateRequest): Promise<CreateTaskData> {
   return request<CreateTaskData>('/api/generate', {
-    method: 'POST',
-    body: JSON.stringify(params),
-  });
-}
-
-export async function createRewriteTask(params: RewriteRequest): Promise<CreateTaskData> {
-  return request<CreateTaskData>('/api/rewrite', {
     method: 'POST',
     body: JSON.stringify(params),
   });

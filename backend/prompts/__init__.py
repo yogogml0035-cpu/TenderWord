@@ -18,18 +18,12 @@ from backend.prompts.rewrite_prompt import (
     render_rewrite_prompt,
 )
 from backend.prompts.routing_prompt import (
-    CHAT_REWRITE_SWITCH_HINT_TEXT,
-    DOC_CONTEXT_HINT_TEXT,
     JUDGE_TARGET_SYSTEM_PROMPT,
-    NON_REWRITE_HINT_TEXT,
-    NO_DOCUMENT_HINT_TEXT,
     REPLY_ROUTE_LITERAL,
-    REWRITE_PROMPT_RELEVANCE_SYSTEM_PROMPT,
     REWRITE_ROUTE_LITERAL,
     ROUTE_OR_REPLY_SYSTEM_PROMPT,
     build_rewrite_target_selection_bundle,
     parse_rewrite_target_selection,
-    render_rewrite_relevance_prompt,
     render_route_or_reply_prompt,
 )
 from backend.prompts.types import (
@@ -39,7 +33,6 @@ from backend.prompts.types import (
     RewriteAssistantCandidate,
     RewriteHistoryMessage,
     RewritePromptInput,
-    RewriteRelevancePromptInput,
     RewriteStateSnapshot,
     RewriteTargetSelectionBundle,
     RewriteTargetSelectionPromptInput,
@@ -48,21 +41,16 @@ from backend.prompts.types import (
 )
 
 __all__ = [
-    "CHAT_REWRITE_SWITCH_HINT_TEXT",
     "COMMENT_PROMPT_REGISTRY",
     "COMMENT_SYSTEM_PROMPT",
     "COMMENT_USER_PROMPT",
     "CommentPromptInput",
-    "DOC_CONTEXT_HINT_TEXT",
     "GENERATE_PROMPT_REGISTRY",
     "GeneratePromptInput",
     "JUDGE_TARGET_SYSTEM_PROMPT",
-    "NON_REWRITE_HINT_TEXT",
-    "NO_DOCUMENT_HINT_TEXT",
     "POLISH_SYSTEM_PROMPT",
     "POLISH_USER_PROMPT",
     "REPLY_ROUTE_LITERAL",
-    "REWRITE_PROMPT_RELEVANCE_SYSTEM_PROMPT",
     "REWRITE_ROUTE_LITERAL",
     "REWRITE_SYSTEM_PROMPT",
     "REWRITE_USER_PROMPT",
@@ -71,7 +59,6 @@ __all__ = [
     "RewriteAssistantCandidate",
     "RewriteHistoryMessage",
     "RewritePromptInput",
-    "RewriteRelevancePromptInput",
     "RewriteStateSnapshot",
     "RewriteTargetSelectionBundle",
     "RewriteTargetSelectionPromptInput",
@@ -82,6 +69,5 @@ __all__ = [
     "render_comment_prompt",
     "render_generate_prompt",
     "render_rewrite_prompt",
-    "render_rewrite_relevance_prompt",
     "render_route_or_reply_prompt",
 ]

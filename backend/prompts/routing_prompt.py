@@ -6,7 +6,6 @@ from backend.prompts.types import (
     RenderedPrompt,
     RewriteAssistantCandidate,
     RewriteHistoryMessage,
-    RewriteRelevancePromptInput,
     RewriteTargetSelectionBundle,
     RewriteTargetSelectionPromptInput,
     RouteOrReplyPromptInput,
@@ -15,31 +14,6 @@ from backend.prompts.types import (
 
 REWRITE_ROUTE_LITERAL = "rewrite"
 REPLY_ROUTE_LITERAL = "reply"
-
-CHAT_REWRITE_SWITCH_HINT_TEXT = "当前问题更适合使用“修改”模式，请切换后再发送。"
-DOC_CONTEXT_HINT_TEXT = (
-    "当前不会自动携带文档正文，如需我分析具体内容，请粘贴相关段落；"
-    "如果是想修改已生成的招标文件，请直接告诉我需要修改或重写的部分。"
-)
-NO_DOCUMENT_HINT_TEXT = "当前会话没有可用文档，请先完成一次生成。"
-NON_REWRITE_HINT_TEXT = (
-    "当前支持在生成招标文件后继续修改或重写，如果生成结果不满意，"
-    "可以直接告诉我需要修改或重写的部分。"
-)
-
-REWRITE_PROMPT_RELEVANCE_SYSTEM_PROMPT = """
-你是招标文档修改指令分类器。
-你的任务是判断用户输入是否是在要求修改当前招标文档内容。
-
-如果用户输入是在要求对当前文档进行修改、改写、补充、删除、替换、重写、调整、修订，输出 true。
-如果用户输入是闲聊、提问、解释、总结、翻译、评价、问候、与文档修改无关的话题，输出 false。
-
-规则：
-1. 只能输出小写 true 或 false。
-2. 不要输出解释、标点、JSON、代码块或任何额外文本。
-3. 即使没有出现“修改”等明确关键词，只要语义上是在要求改当前文档，也输出 true。
-4. 无法明确判断时，输出 false。
-""".strip()
 
 ROUTE_OR_REPLY_SYSTEM_PROMPT = """
 你是东松招标文件智能生成助手。
@@ -77,36 +51,6 @@ def _truncate(text: str, limit: int) -> str:
     if len(normalized) > limit:
         return normalized[:limit] + "..."
     return normalized
-
-
-def render_rewrite_relevance_prompt(
-    data: RewriteRelevancePromptInput,
-) -> RenderedPrompt:
-    latest_rewrite_state = data.latest_rewrite_state
-    if latest_rewrite_state is None:
-        user_prompt = (
-            "【用户输入】\n"
-            f"{data.prompt}\n\n"
-            "请判断该输入是否是在要求修改一份招标文档内容。"
-            "只输出 true 或 false。"
-        )
-    else:
-        user_prompt = (
-            "【当前会话文档信息】\n"
-            f"project_number={latest_rewrite_state.project_number}\n"
-            f"project_name={latest_rewrite_state.project_name}\n"
-            f"tender_type={latest_rewrite_state.tender_type}\n"
-            f"latest_polished_preview={_truncate(latest_rewrite_state.polished_text, 600)}\n\n"
-            "【用户输入】\n"
-            f"{data.prompt}\n\n"
-            "请判断该输入是否是在要求修改当前招标文档内容。"
-            "只输出 true 或 false。"
-        )
-
-    return RenderedPrompt(
-        system_prompt=REWRITE_PROMPT_RELEVANCE_SYSTEM_PROMPT,
-        user_prompt=user_prompt,
-    )
 
 
 def render_route_or_reply_prompt(data: RouteOrReplyPromptInput) -> RenderedPrompt:
