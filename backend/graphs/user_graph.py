@@ -54,16 +54,25 @@ class UserGraph:
 
     async def route_or_reply(self, state: UserGraphState, config=None) -> UserGraphState:
         stream_writer = self._get_stream_writer(config)
+        reply_route_emitted = False
+
+        def emit_reply_chunk(text: str) -> None:
+            nonlocal reply_route_emitted
+            if not reply_route_emitted:
+                self._emit_event(stream_writer, "route", {"route": REPLY_ROUTE_LITERAL})
+                reply_route_emitted = True
+            self._emit_event(
+                stream_writer,
+                "chunk",
+                {"content": text},
+            )
+
         decision = await self._routing_service.stream_route_or_reply(
             conversation_id=str(state.get("conversation_id") or "").strip(),
             messages=state.get("messages") or [],
             latest_user_message=str(state.get("latest_user_message") or "").strip(),
             model_provider=str(state.get("model_provider") or "deepseek"),
-            on_reply_chunk=lambda text: self._emit_event(
-                stream_writer,
-                "chunk",
-                {"content": text},
-            ),
+            on_reply_chunk=emit_reply_chunk,
         )
 
         next_state = dict(state)
@@ -77,6 +86,8 @@ class UserGraph:
         )
 
         if decision.route != REWRITE_ROUTE_LITERAL:
+            if not reply_route_emitted:
+                self._emit_event(stream_writer, "route", {"route": REPLY_ROUTE_LITERAL})
             if decision.reply_text and not decision.reply_streamed:
                 self._emit_event(stream_writer, "chunk", {"content": decision.reply_text})
             self._emit_event(stream_writer, "done", {"content": decision.reply_text})
@@ -95,6 +106,7 @@ class UserGraph:
             error_code = str(response.error or "REWRITE_FAILED")
             error_message = str(response.message or "修改任务创建失败")
             if error_code == "REWRITE_NO_DOCUMENT":
+                self._emit_event(stream_writer, "route", {"route": REPLY_ROUTE_LITERAL})
                 self._emit_event(stream_writer, "chunk", {"content": error_message})
                 self._emit_event(stream_writer, "done", {"content": error_message})
                 next_state = dict(state)

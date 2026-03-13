@@ -53,7 +53,7 @@ async def _collect_lines(graph: UserGraph, state: dict) -> list[dict]:
     return lines
 
 
-def test_user_graph_streams_reply_without_route_event():
+def test_user_graph_streams_reply_with_route_event():
     graph = UserGraph(
         document_service=DocumentServiceStub(
             GenerateResponse(success=True, task_id="unused", task_kind=TaskKind.REWRITE)
@@ -76,6 +76,7 @@ def test_user_graph_streams_reply_without_route_event():
     )
 
     assert lines == [
+        {"event": "route", "data": {"route": "reply"}},
         {"event": "chunk", "data": {"content": "你好"}},
         {"event": "done", "data": {"content": "你好"}},
     ]
@@ -105,6 +106,7 @@ def test_user_graph_preserves_streamed_reply_chunks():
     )
 
     assert lines == [
+        {"event": "route", "data": {"route": "reply"}},
         {"event": "chunk", "data": {"content": "你"}},
         {"event": "chunk", "data": {"content": "好"}},
         {"event": "done", "data": {"content": "你好"}},
@@ -180,6 +182,7 @@ def test_user_graph_falls_back_to_reply_when_rewrite_task_has_no_document():
     )
 
     assert lines == [
+        {"event": "route", "data": {"route": "reply"}},
         {"event": "chunk", "data": {"content": "当前会话没有可用文档，请先完成一次生成。"}},
         {"event": "done", "data": {"content": "当前会话没有可用文档，请先完成一次生成。"}},
     ]

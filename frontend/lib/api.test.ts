@@ -6,9 +6,11 @@ import {
   fetchTenderData,
   getTaskStatus,
   sendTaskHeartbeat,
+  streamNdjson,
+  streamUserMessage,
   uploadFile,
 } from '@/lib/api';
-import type { GenerateRequest } from '@/types/api';
+import type { GenerateRequest, UserStreamEvent } from '@/types/api';
 
 type FetchMock = jest.MockedFunction<typeof fetch>;
 
@@ -31,6 +33,35 @@ function mockFetchBlob(value: Blob, options?: { ok?: boolean; status?: number })
     ok,
     status,
     blob: async () => value,
+  } as unknown as Response) as unknown as FetchMock;
+}
+
+function mockFetchStream(lines: string[], options?: { ok?: boolean; status?: number; json?: unknown }): FetchMock {
+  const ok = options?.ok ?? true;
+  const status = options?.status ?? 200;
+  const encodedLines = lines.map((line) => new TextEncoder().encode(line));
+
+  return jest.fn().mockResolvedValue({
+    ok,
+    status,
+    json: async () => options?.json,
+    body: ok
+      ? {
+          getReader: () => {
+            let index = 0;
+            return {
+              read: async () => {
+                if (index >= encodedLines.length) {
+                  return { value: undefined, done: true };
+                }
+                const nextValue = encodedLines[index];
+                index += 1;
+                return { value: nextValue, done: false };
+              },
+            };
+          },
+        }
+      : undefined,
   } as unknown as Response) as unknown as FetchMock;
 }
 
@@ -276,6 +307,157 @@ describe('API Client', () => {
       expect(result.task_id).toBe('test-task-123');
       expect(result.alive).toBe(true);
       expect(result.status).toBe('running');
+    });
+  });
+
+  describe('streamNdjson', () => {
+    it('dispatches parsed events line by line', async () => {
+      globalThis.fetch = mockFetchStream([
+        JSON.stringify({ event: 'known', data: { value: 'first' } }) + '\n',
+        JSON.stringify({ event: 'known', data: { value: 'second' } }) + '\n',
+      ]);
+
+      const events: string[] = [];
+
+      await streamNdjson<{ event: 'known'; data: { value: string } }>({
+        endpoint: '/api/test-stream',
+        parseEvent: (payload) => {
+          const event = payload as { event?: string; data?: { value?: string } };
+          if (event.event !== 'known' || typeof event.data?.value !== 'string') {
+            return null;
+          }
+          return { event: 'known', data: { value: event.data.value } };
+        },
+        onEvent: (event) => {
+          events.push(event.data.value);
+        },
+      });
+
+      expect(events).toEqual(['first', 'second']);
+    });
+
+    it('throws ApiError on malformed NDJSON lines', async () => {
+      globalThis.fetch = mockFetchStream(['{"event":"known","data":{"value":"ok"}}\n', 'not-json\n']);
+
+      await expect(
+        streamNdjson({
+          endpoint: '/api/test-stream',
+          parseEvent: (payload) => payload as { event: 'known'; data: { value: string } },
+        })
+      ).rejects.toMatchObject({
+        name: 'ApiError',
+        code: 'STREAM_PROTOCOL_ERROR',
+      });
+    });
+
+    it('ignores events dropped by the parser without aborting the stream', async () => {
+      globalThis.fetch = mockFetchStream([
+        JSON.stringify({ event: 'known', data: { value: 'first' } }) + '\n',
+        JSON.stringify({ event: 'unknown', data: { value: 'skip' } }) + '\n',
+        JSON.stringify({ event: 'known', data: { value: 'last' } }) + '\n',
+      ]);
+
+      const events: string[] = [];
+
+      await streamNdjson<{ event: 'known'; data: { value: string } }>({
+        endpoint: '/api/test-stream',
+        parseEvent: (payload) => {
+          const event = payload as { event?: string; data?: { value?: string } };
+          if (event.event !== 'known' || typeof event.data?.value !== 'string') {
+            return null;
+          }
+          return { event: 'known', data: { value: event.data.value } };
+        },
+        onEvent: (event) => {
+          events.push(event.data.value);
+        },
+      });
+
+      expect(events).toEqual(['first', 'last']);
+    });
+
+    it('rethrows AbortError from the underlying fetch', async () => {
+      const controller = new AbortController();
+      globalThis.fetch = jest
+        .fn()
+        .mockImplementation(
+          async (_url, init) =>
+            await new Promise<Response>((_resolve, reject) => {
+              (init?.signal as AbortSignal | undefined)?.addEventListener(
+                'abort',
+                () => reject(new DOMException('Aborted', 'AbortError')),
+                { once: true }
+              );
+            })
+        ) as unknown as typeof fetch;
+
+      const promise = streamNdjson({
+        endpoint: '/api/test-stream',
+        signal: controller.signal,
+        parseEvent: () => null,
+      });
+
+      controller.abort();
+
+      await expect(promise).rejects.toHaveProperty('name', 'AbortError');
+    });
+  });
+
+  describe('streamUserMessage', () => {
+    it('parses reply-route events and ignores unknown events', async () => {
+      globalThis.fetch = mockFetchStream([
+        JSON.stringify({ event: 'route', data: { route: 'reply' } }) + '\n',
+        JSON.stringify({ event: 'mystery', data: { ignored: true } }) + '\n',
+        JSON.stringify({ event: 'done', data: { content: '你好' } }) + '\n',
+      ]);
+
+      const events: UserStreamEvent[] = [];
+
+      await streamUserMessage(
+        {
+          conversation_id: 'conv-1',
+          model: 'deepseek',
+          messages: [{ role: 'user', content: '你好' }],
+        },
+        {
+          onEvent: (event) => {
+            events.push(event);
+          },
+        }
+      );
+
+      expect(events).toEqual([
+        { event: 'route', data: { route: 'reply' } },
+        { event: 'done', data: { content: '你好' } },
+      ]);
+    });
+
+    it('converts HTTP error payloads into ApiError', async () => {
+      globalThis.fetch = mockFetchStream([], {
+        ok: false,
+        status: 400,
+        json: {
+          detail: {
+            success: false,
+            error: {
+              code: 'REQ_MISSING_FIELD',
+              message: 'messages 不能为空',
+            },
+          },
+        },
+      });
+
+      await expect(
+        streamUserMessage({
+          conversation_id: 'conv-1',
+          model: 'deepseek',
+          messages: [{ role: 'user', content: '你好' }],
+        })
+      ).rejects.toMatchObject({
+        name: 'ApiError',
+        code: 'REQ_MISSING_FIELD',
+        status: 400,
+      });
     });
   });
 

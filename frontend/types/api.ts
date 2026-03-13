@@ -254,10 +254,12 @@ export interface UserStreamErrorEvent {
   };
 }
 
+export type UserStreamRoute = 'reply' | 'rewrite';
+
 export interface UserStreamRouteEvent {
   event: 'route';
   data: {
-    route: 'rewrite';
+    route: UserStreamRoute;
   };
 }
 

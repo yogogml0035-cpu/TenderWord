@@ -70,7 +70,7 @@ TenderWord 是面向多招标类型的招标文件智能处理系统，当前以
 - `sse_log_handler` 负责把进度日志转为前端可消费事件；任务失败时必须能收敛为 `error` 或 `done` 事件，不能让 SSE 静默中断。
 
 ### 前后端调用约束
-- 前端所有网络请求统一走 `frontend/lib/api.ts` 的 `request` 封装，不直接写裸 `fetch`。
+- 前端所有网络请求统一经由 `frontend/lib/api.ts`；JSON 请求走 `request` 封装，流式/下载走专用 helper，不直接在组件中写裸 `fetch`。
 - 前端错误统一收敛为 `ApiError` 风格，UI 至少展示 `message`，保留 `code`/`status` 以便排障。
 - API 形状变化时，必须同步更新前端类型、API 客户端、相关测试。
 

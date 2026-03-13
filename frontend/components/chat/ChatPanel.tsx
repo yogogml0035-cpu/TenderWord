@@ -8,10 +8,10 @@ import { useCurrentConversationTaskStatus } from '@/hooks/useCurrentConversation
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import {
-  API_BASE_URL,
   ApiError,
   cancelTask,
   downloadFile,
+  streamUserMessage,
 } from '@/lib/api';
 import type { UserStreamEvent } from '@/types/api';
 import type { Message } from '@/types/chat';
@@ -252,61 +252,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       };
 
       try {
-        const response = await fetch(`${API_BASE_URL}/api/user/stream`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            conversation_id: conversationId,
-            model: modelForRequest,
-            messages: contextMessages,
-          }),
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          let errorMessage = '聊天请求失败';
-          let errorCode = 'CHAT_STREAM_ERROR';
-          try {
-            const errorPayload = await response.json();
-            const detailError = errorPayload?.detail?.error;
-            if (detailError?.message) {
-              errorMessage = String(detailError.message);
-            }
-            if (detailError?.code) {
-              errorCode = String(detailError.code);
-            }
-          } catch {
-            // ignore json parse errors
-          }
-          throw new ApiError(errorMessage, errorCode, response.status);
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) {
-          throw new ApiError('聊天流不可用', 'CHAT_STREAM_ERROR', 500);
-        }
-
-        const decoder = new TextDecoder('utf-8');
-        let buffer = '';
-
-        const handleEventLine = (rawLine: string) => {
-          const trimmed = rawLine.trim();
-          if (!trimmed) {
-            return;
-          }
-
-          let event: UserStreamEvent | null = null;
-          try {
-            event = JSON.parse(trimmed) as UserStreamEvent;
-          } catch {
-            event = null;
-          }
-          if (!event) {
-            return;
-          }
-
+        const handleStreamEvent = (event: UserStreamEvent) => {
           if (event.event === 'route') {
             activeRoute = event.data.route;
             if (event.data.route === 'rewrite' && userMessageId) {
@@ -421,24 +367,17 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           }
         };
 
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) {
-            break;
+        await streamUserMessage(
+          {
+            conversation_id: conversationId,
+            model: modelForRequest,
+            messages: contextMessages,
+          },
+          {
+            signal: controller.signal,
+            onEvent: handleStreamEvent,
           }
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            handleEventLine(line);
-          }
-        }
-
-        if (buffer.trim()) {
-          handleEventLine(buffer);
-        }
+        );
 
         if (!streamFinished) {
           if (activeRoute !== 'rewrite' && aiMessagePrepared && aiMessageId) {

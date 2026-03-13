@@ -1,8 +1,20 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ChatPanel } from '@/components/chat/ChatPanel';
+import { cancelTask, streamUserMessage } from '@/lib/api';
 import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
+import type { UserStreamEvent } from '@/types/api';
 import type { Message } from '@/types/chat';
+
+jest.mock('@/lib/api', () => {
+  const actual = jest.requireActual('@/lib/api');
+  return {
+    ...actual,
+    cancelTask: jest.fn(),
+    downloadFile: jest.fn(),
+    streamUserMessage: jest.fn(),
+  };
+});
 
 jest.mock('@/hooks/useHydrated', () => ({
   useHydrated: () => true,
@@ -49,6 +61,7 @@ jest.mock('@/components/chat/ChatInput', () => ({
     placeholder,
     selectedModel,
     onModelChange,
+    onCancel,
     onSend,
   }: {
     value?: string;
@@ -57,6 +70,7 @@ jest.mock('@/components/chat/ChatInput', () => ({
     placeholder?: string;
     selectedModel?: string;
     onModelChange?: (model: string) => void;
+    onCancel?: () => void;
     onSend?: (message: string) => void;
   }) => (
     <div
@@ -76,14 +90,39 @@ jest.mock('@/components/chat/ChatInput', () => ({
       >
         send current input
       </button>
+      <button type="button" data-testid="cancel-chat-button" onClick={() => onCancel?.()}>
+        cancel chat
+      </button>
     </div>
   ),
 }));
+
+const mockStreamUserMessage = streamUserMessage as jest.MockedFunction<typeof streamUserMessage>;
+const mockCancelTask = cancelTask as jest.MockedFunction<typeof cancelTask>;
+
+function mockUserStream(events: UserStreamEvent[], terminalError?: unknown) {
+  mockStreamUserMessage.mockImplementationOnce(async (_payload, options = {}) => {
+    for (const event of events) {
+      await options.onEvent?.(event);
+    }
+    if (terminalError) {
+      throw terminalError;
+    }
+  });
+}
 
 describe('ChatPanel', () => {
   beforeEach(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
+    mockStreamUserMessage.mockReset();
+    mockCancelTask.mockReset();
+    mockCancelTask.mockResolvedValue({
+      success: true,
+      task_id: 'task-1',
+      message: '任务已取消',
+      was_running: true,
+    });
 
     useChatStore.setState((state) => ({
       ...state,
@@ -225,45 +264,24 @@ describe('ChatPanel', () => {
       taskSummaries: {},
     }));
 
-    const encoder = new TextEncoder();
-    const streamPayload = `${JSON.stringify({ event: 'done', data: { content: '重试成功内容' } })}\n`;
-    const originalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      body: {
-        getReader: () => {
-          let consumed = false;
-          return {
-            read: async () => {
-              if (consumed) {
-                return { value: undefined, done: true };
-              }
-              consumed = true;
-              return { value: encoder.encode(streamPayload), done: false };
-            },
-          };
-        },
-      },
-    } as unknown as Response);
-    (globalThis as { fetch?: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+    mockUserStream([
+      { event: 'route', data: { route: 'reply' } },
+      { event: 'done', data: { content: '重试成功内容' } },
+    ]);
 
-    try {
-      render(<ChatPanel />);
+    render(<ChatPanel />);
 
-      fireEvent.click(screen.getByTestId('retry-message-button'));
+    fireEvent.click(screen.getByTestId('retry-message-button'));
 
-      await waitFor(() => {
-        const conversation = useChatStore.getState().conversations[0];
-        expect(conversation.messages).toHaveLength(1);
-        expect(conversation.messages[0].id).toBe('msg-ai-failed');
-        expect(conversation.messages[0].status).toBe('completed');
-        expect(conversation.messages[0].content).toBe('重试成功内容');
-      });
+    await waitFor(() => {
+      const conversation = useChatStore.getState().conversations[0];
+      expect(conversation.messages).toHaveLength(1);
+      expect(conversation.messages[0].id).toBe('msg-ai-failed');
+      expect(conversation.messages[0].status).toBe('completed');
+      expect(conversation.messages[0].content).toBe('重试成功内容');
+    });
 
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    } finally {
-      (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
-    }
+    expect(mockStreamUserMessage).toHaveBeenCalledTimes(1);
   });
 
   it('auto routes rewrite-like input in normal mode to rewrite task flow', async () => {
@@ -284,10 +302,9 @@ describe('ChatPanel', () => {
       },
     }));
 
-    const encoder = new TextEncoder();
-    const streamPayload = [
-      JSON.stringify({ event: 'route', data: { route: 'rewrite' } }),
-      JSON.stringify({
+    mockUserStream([
+      { event: 'route', data: { route: 'rewrite' } },
+      {
         event: 'task_accepted',
         data: {
           task_id: 'task-rewrite',
@@ -296,55 +313,36 @@ describe('ChatPanel', () => {
           queue_position: 0,
           waiting_count: 0,
         },
-      }),
-    ].join('\n') + '\n';
-    const originalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      body: {
-        getReader: () => {
-          let consumed = false;
-          return {
-            read: async () => {
-              if (consumed) {
-                return { value: undefined, done: true };
-              }
-              consumed = true;
-              return { value: encoder.encode(streamPayload), done: false };
-            },
-          };
-        },
       },
-    } as unknown as Response);
-    (globalThis as { fetch?: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+    ]);
 
-    try {
-      render(<ChatPanel />);
+    render(<ChatPanel />);
 
-      fireEvent.click(screen.getByTestId('send-current-input-button'));
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
 
-      await waitFor(() => {
-        const conversation = useChatStore.getState().conversations[0];
-        const draft = useChatStore.getState().getConversationDraft('conv-1');
-        expect(conversation.currentTaskId).toBe('task-rewrite');
-        expect(draft?.pending_rewrite_task_id).toBe('task-rewrite');
-        expect(conversation.messages).toHaveLength(2);
-        expect(conversation.messages[0].metadata?.chatKind).toBe('rewrite');
-        expect(conversation.messages[1]).toMatchObject({
-          type: 'ai',
-          content: '正在创建修改重写任务',
-          status: 'completed',
-          metadata: {
-            chatKind: 'rewrite',
-          },
-        });
+    await waitFor(() => {
+      const conversation = useChatStore.getState().conversations[0];
+      const draft = useChatStore.getState().getConversationDraft('conv-1');
+      expect(conversation.currentTaskId).toBe('task-rewrite');
+      expect(draft?.pending_rewrite_task_id).toBe('task-rewrite');
+      expect(conversation.messages).toHaveLength(2);
+      expect(conversation.messages[0].metadata?.chatKind).toBe('rewrite');
+      expect(conversation.messages[1]).toMatchObject({
+        type: 'ai',
+        content: '正在创建修改重写任务',
+        status: 'completed',
+        metadata: {
+          chatKind: 'rewrite',
+        },
       });
+    });
 
-      expect(fetchMock).toHaveBeenCalled();
-      expect(fetchMock.mock.calls[0][0]).toContain('/api/user/stream');
-    } finally {
-      (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
-    }
+    expect(mockStreamUserMessage).toHaveBeenCalledTimes(1);
+    expect(mockStreamUserMessage.mock.calls[0]?.[0]).toMatchObject({
+      conversation_id: 'conv-1',
+      model: 'deepseek',
+      messages: [{ role: 'user', content: '请帮我修改这一段内容' }],
+    });
   });
 
   it('keeps ordinary chat on the streaming path without creating a task', async () => {
@@ -365,44 +363,22 @@ describe('ChatPanel', () => {
       },
     }));
 
-    const encoder = new TextEncoder();
-    const streamPayload =
-      JSON.stringify({ event: 'done', data: { content: '你好，请问有什么可以帮你？' } }) + '\n';
-    const originalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      body: {
-        getReader: () => {
-          let consumed = false;
-          return {
-            read: async () => {
-              if (consumed) {
-                return { value: undefined, done: true };
-              }
-              consumed = true;
-              return { value: encoder.encode(streamPayload), done: false };
-            },
-          };
-        },
-      },
-    } as unknown as Response);
-    (globalThis as { fetch?: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+    mockUserStream([
+      { event: 'route', data: { route: 'reply' } },
+      { event: 'done', data: { content: '你好，请问有什么可以帮你？' } },
+    ]);
 
-    try {
-      render(<ChatPanel />);
+    render(<ChatPanel />);
 
-      fireEvent.click(screen.getByTestId('send-current-input-button'));
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
 
-      await waitFor(() => {
-        const conversation = useChatStore.getState().conversations[0];
-        expect(conversation.currentTaskId).toBeUndefined();
-        expect(conversation.messages).toHaveLength(2);
-        expect(conversation.messages[1].type).toBe('ai');
-        expect(conversation.messages[1].status).toBe('completed');
-      });
-    } finally {
-      (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
-    }
+    await waitFor(() => {
+      const conversation = useChatStore.getState().conversations[0];
+      expect(conversation.currentTaskId).toBeUndefined();
+      expect(conversation.messages).toHaveLength(2);
+      expect(conversation.messages[1].type).toBe('ai');
+      expect(conversation.messages[1].status).toBe('completed');
+    });
   });
 
   it('excludes task-notice ai bubbles from normal chat context', async () => {
@@ -436,48 +412,22 @@ describe('ChatPanel', () => {
       },
     }));
 
-    const encoder = new TextEncoder();
-    const streamPayload =
-      JSON.stringify({ event: 'done', data: { content: '好的，我继续说明。' } }) + '\n';
-    const originalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      body: {
-        getReader: () => {
-          let consumed = false;
-          return {
-            read: async () => {
-              if (consumed) {
-                return { value: undefined, done: true };
-              }
-              consumed = true;
-              return { value: encoder.encode(streamPayload), done: false };
-            },
-          };
-        },
-      },
-    } as unknown as Response);
-    (globalThis as { fetch?: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+    mockUserStream([
+      { event: 'route', data: { route: 'reply' } },
+      { event: 'done', data: { content: '好的，我继续说明。' } },
+    ]);
 
-    try {
-      render(<ChatPanel />);
+    render(<ChatPanel />);
 
-      fireEvent.click(screen.getByTestId('send-current-input-button'));
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
 
-      await waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-      });
+    await waitFor(() => {
+      expect(mockStreamUserMessage).toHaveBeenCalledTimes(1);
+    });
 
-      const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
-      const body =
-        requestInit && typeof requestInit.body === 'string'
-          ? JSON.parse(requestInit.body)
-          : null;
-
-      expect(body?.messages).toEqual([{ role: 'user', content: '继续帮我解释一下' }]);
-    } finally {
-      (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
-    }
+    expect(mockStreamUserMessage.mock.calls[0]?.[0].messages).toEqual([
+      { role: 'user', content: '继续帮我解释一下' },
+    ]);
   });
 
   it('removes the rewrite placeholder bubble when the rewrite stream fails before task acceptance', async () => {
@@ -498,60 +448,94 @@ describe('ChatPanel', () => {
       },
     }));
 
-    const encoder = new TextEncoder();
-    const streamPayload = [
-      JSON.stringify({ event: 'route', data: { route: 'rewrite' } }),
-      JSON.stringify({
+    mockUserStream([
+      { event: 'route', data: { route: 'rewrite' } },
+      {
         event: 'error',
         data: {
           message: '修改任务创建失败',
         },
-      }),
-    ].join('\n') + '\n';
-    const originalFetch = (globalThis as { fetch?: typeof fetch }).fetch;
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      body: {
-        getReader: () => {
-          let consumed = false;
-          return {
-            read: async () => {
-              if (consumed) {
-                return { value: undefined, done: true };
-              }
-              consumed = true;
-              return { value: encoder.encode(streamPayload), done: false };
-            },
-          };
+      },
+    ]);
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      const conversation = useChatStore.getState().conversations[0];
+      expect(conversation.currentTaskId).toBeUndefined();
+      expect(conversation.messages).toHaveLength(2);
+      expect(conversation.messages[0]).toMatchObject({
+        type: 'user',
+        metadata: {
+          chatKind: 'rewrite',
+        },
+      });
+      expect(conversation.messages[1]).toMatchObject({
+        type: 'system',
+        content: '修改任务创建失败',
+        status: 'completed',
+      });
+      expect(conversation.messages.find((message) => message.content === '正在创建修改重写任务')).toBeUndefined();
+    });
+  });
+
+  it('cancels an active normal chat stream through the shared AbortSignal path', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '帮我写一段说明',
         },
       },
-    } as unknown as Response);
-    (globalThis as { fetch?: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+    }));
 
-    try {
-      render(<ChatPanel />);
+    mockStreamUserMessage.mockImplementationOnce(
+      async (_payload, options = {}) =>
+        new Promise<void>((_resolve, reject) => {
+          void (async () => {
+            await options.onEvent?.({ event: 'route', data: { route: 'reply' } });
+            await options.onEvent?.({ event: 'chunk', data: { content: '正在生成中' } });
+          })();
+          options.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true }
+          );
+        })
+    );
 
-      fireEvent.click(screen.getByTestId('send-current-input-button'));
+    render(<ChatPanel />);
 
-      await waitFor(() => {
-        const conversation = useChatStore.getState().conversations[0];
-        expect(conversation.currentTaskId).toBeUndefined();
-        expect(conversation.messages).toHaveLength(2);
-        expect(conversation.messages[0]).toMatchObject({
-          type: 'user',
-          metadata: {
-            chatKind: 'rewrite',
-          },
-        });
-        expect(conversation.messages[1]).toMatchObject({
-          type: 'system',
-          content: '修改任务创建失败',
-          status: 'completed',
-        });
-        expect(conversation.messages.find((message) => message.content === '正在创建修改重写任务')).toBeUndefined();
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      const conversation = useChatStore.getState().conversations[0];
+      expect(conversation.messages[1]).toMatchObject({
+        type: 'ai',
+        status: 'generating',
+        content: '正在生成中',
       });
-    } finally {
-      (globalThis as { fetch?: typeof fetch }).fetch = originalFetch;
-    }
+    });
+
+    fireEvent.click(screen.getByTestId('cancel-chat-button'));
+
+    await waitFor(() => {
+      const conversation = useChatStore.getState().conversations[0];
+      expect(conversation.messages[1]).toMatchObject({
+        type: 'ai',
+        status: 'cancelled',
+        content: '正在生成中',
+      });
+    });
   });
 });

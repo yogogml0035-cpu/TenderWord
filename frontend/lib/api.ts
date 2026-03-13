@@ -18,7 +18,10 @@ import type {
   ConversationHeartbeatData,
   ApiSuccessResponse,
   FileType,
+  TaskKind,
   TaskStatus,
+  UserStreamEvent,
+  UserStreamRequest,
 } from '@/types/api';
 import type { Conversation } from '@/types/chat';
 import { resolveApiBaseUrl } from '@/lib/apiBaseUrl';
@@ -29,9 +32,207 @@ import { resolveApiBaseUrl } from '@/lib/apiBaseUrl';
 
 const API_BASE_URL = resolveApiBaseUrl();
 
+type JsonRecord = Record<string, unknown>;
+
+type StreamEventParser<TEvent> = (payload: unknown) => TEvent | null;
+
+interface StreamNdjsonOptions<TEvent> extends Omit<RequestInit, 'body'> {
+  endpoint: string;
+  body?: unknown;
+  onEvent?: (event: TEvent) => void | Promise<void>;
+  parseEvent: StreamEventParser<TEvent>;
+  defaultErrorMessage?: string;
+  defaultErrorCode?: string;
+  protocolErrorMessage?: string;
+  protocolErrorCode?: string;
+  noBodyMessage?: string;
+}
+
 // ============================================
 // Helper Functions
 // ============================================
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === 'AbortError'
+    : error instanceof Error && error.name === 'AbortError';
+}
+
+function extractErrorInfo(payload: unknown): {
+  explicitFailure: boolean;
+  errorMessage?: string;
+  errorCode?: string;
+} {
+  const payloadRecord = isRecord(payload) ? payload : {};
+  const nestedDetail = isRecord(payloadRecord.detail) ? payloadRecord.detail : {};
+  const errorObj =
+    (isRecord(payloadRecord.error) ? payloadRecord.error : undefined) ||
+    (isRecord(nestedDetail.error) ? nestedDetail.error : undefined);
+
+  return {
+    explicitFailure: payloadRecord.success === false || nestedDetail.success === false,
+    errorMessage: typeof errorObj?.message === 'string' ? errorObj.message : undefined,
+    errorCode: typeof errorObj?.code === 'string' ? errorObj.code : undefined,
+  };
+}
+
+function buildApiError(
+  payload: unknown,
+  status: number,
+  fallbackMessage: string,
+  fallbackCode: string
+): ApiError {
+  const errorInfo = extractErrorInfo(payload);
+  return new ApiError(
+    errorInfo.errorMessage || fallbackMessage,
+    errorInfo.errorCode || fallbackCode,
+    status
+  );
+}
+
+async function parseJsonSafely(response: Response): Promise<unknown | undefined> {
+  try {
+    return await response.json();
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeRequestConfig(options: RequestInit = {}): RequestInit {
+  return {
+    headers: {
+      ...(!(options.body instanceof FormData) && { 'Content-Type': 'application/json' }),
+      ...options.headers,
+    },
+    ...options,
+  };
+}
+
+function serializeRequestBody(body: unknown): RequestInit['body'] | undefined {
+  if (body === undefined) {
+    return undefined;
+  }
+  if (body === null) {
+    return null;
+  }
+  if (
+    typeof body === 'string' ||
+    body instanceof FormData ||
+    body instanceof URLSearchParams ||
+    body instanceof Blob ||
+    body instanceof ArrayBuffer ||
+    ArrayBuffer.isView(body) ||
+    (typeof ReadableStream !== 'undefined' && body instanceof ReadableStream)
+  ) {
+    return body as RequestInit['body'];
+  }
+  return JSON.stringify(body);
+}
+
+function createStreamRequestConfig(
+  options: Omit<
+    StreamNdjsonOptions<unknown>,
+    | 'endpoint'
+    | 'parseEvent'
+    | 'onEvent'
+    | 'defaultErrorMessage'
+    | 'defaultErrorCode'
+    | 'protocolErrorMessage'
+    | 'protocolErrorCode'
+    | 'noBodyMessage'
+  >
+) {
+  const serializedBody = serializeRequestBody(options.body);
+  const headers = new Headers(options.headers);
+
+  if (
+    serializedBody !== undefined &&
+    !(options.body instanceof FormData) &&
+    !headers.has('Content-Type')
+  ) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  return {
+    ...options,
+    headers,
+    body: serializedBody,
+  } satisfies RequestInit;
+}
+
+function parseUserStreamEvent(payload: unknown): UserStreamEvent | null {
+  if (!isRecord(payload) || typeof payload.event !== 'string' || !('data' in payload) || !isRecord(payload.data)) {
+    return null;
+  }
+
+  switch (payload.event) {
+    case 'route': {
+      const route = payload.data.route;
+      if (route !== 'reply' && route !== 'rewrite') {
+        return null;
+      }
+      return {
+        event: 'route',
+        data: { route },
+      };
+    }
+    case 'task_accepted': {
+      const taskKind = payload.data.task_kind;
+      const taskId = payload.data.task_id;
+      if (taskKind !== 'generate' && taskKind !== 'rewrite') {
+        return null;
+      }
+      if (typeof taskId !== 'string' || !taskId) {
+        return null;
+      }
+
+      const status = payload.data.status;
+      const taskStatus =
+        status === 'queued' ||
+        status === 'running' ||
+        status === 'completed' ||
+        status === 'failed' ||
+        status === 'cancelled'
+          ? status
+          : undefined;
+
+      return {
+        event: 'task_accepted',
+        data: {
+          task_id: taskId,
+          task_kind: taskKind as TaskKind,
+          status: taskStatus as TaskStatus | undefined,
+          queue_position:
+            typeof payload.data.queue_position === 'number' ? payload.data.queue_position : undefined,
+          waiting_count:
+            typeof payload.data.waiting_count === 'number' ? payload.data.waiting_count : undefined,
+        },
+      };
+    }
+    case 'chunk':
+    case 'done':
+      return {
+        event: payload.event,
+        data: {
+          content: typeof payload.data.content === 'string' ? payload.data.content : '',
+        },
+      };
+    case 'error':
+      return {
+        event: 'error',
+        data: {
+          code: typeof payload.data.code === 'string' ? payload.data.code : undefined,
+          message: typeof payload.data.message === 'string' ? payload.data.message : '',
+        },
+      };
+    default:
+      return null;
+  }
+}
 
 /**
  * Generic API request function with error handling
@@ -39,13 +240,7 @@ const API_BASE_URL = resolveApiBaseUrl();
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
 
-  const config: RequestInit = {
-    headers: {
-      ...(!(options.body instanceof FormData) && { 'Content-Type': 'application/json' }),
-      ...options.headers,
-    },
-    ...options,
-  };
+  const config = normalizeRequestConfig(options);
 
   let response: Response;
   try {
@@ -59,22 +254,14 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   const data: unknown = await response.json();
-  const payload = (data ?? {}) as Record<string, unknown>;
-  const nestedDetail = (payload.detail ?? {}) as Record<string, unknown>;
-  const errorObj =
-    (payload.error as Record<string, unknown> | undefined) ||
-    (nestedDetail.error as Record<string, unknown> | undefined);
-  const isExplicitFailure = payload.success === false || nestedDetail.success === false;
+  const { explicitFailure } = extractErrorInfo(data);
 
-  if (!response.ok || isExplicitFailure) {
-    throw new ApiError(
-      (errorObj?.message as string) || `HTTP error! status: ${response.status}`,
-      (errorObj?.code as string) || 'UNKNOWN_ERROR',
-      response.status
-    );
+  if (!response.ok || explicitFailure) {
+    throw buildApiError(data, response.status, `HTTP error! status: ${response.status}`, 'UNKNOWN_ERROR');
   }
 
   // Prefer wrapped success payload: { success: true, data: ... }
+  const payload = (data ?? {}) as Record<string, unknown>;
   if ('data' in payload) {
     const successData = data as ApiSuccessResponse<T>;
     return successData.data;
@@ -124,6 +311,111 @@ export const api = {
   delete: <T>(endpoint: string, options?: RequestInit) =>
     request<T>(endpoint, { ...options, method: 'DELETE' }),
 };
+
+export async function streamNdjson<TEvent>({
+  endpoint,
+  onEvent,
+  parseEvent,
+  defaultErrorMessage = '流式请求失败',
+  defaultErrorCode = 'STREAM_REQUEST_ERROR',
+  protocolErrorMessage = '流式响应协议错误',
+  protocolErrorCode = 'STREAM_PROTOCOL_ERROR',
+  noBodyMessage = '流式响应不可用',
+  ...options
+}: StreamNdjsonOptions<TEvent>): Promise<void> {
+  const url = `${API_BASE_URL}${endpoint}`;
+  const config = createStreamRequestConfig(options);
+
+  let response: Response;
+  try {
+    response = await fetch(url, config);
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+    throw new ApiError(
+      `Network request failed: ${endpoint}. Please check backend availability and CORS configuration.`,
+      'NETWORK_ERROR',
+      0
+    );
+  }
+
+  if (!response.ok) {
+    const payload = await parseJsonSafely(response);
+    throw buildApiError(payload, response.status, defaultErrorMessage, defaultErrorCode);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new ApiError(noBodyMessage, defaultErrorCode, response.status || 500);
+  }
+
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+
+  const dispatchLine = async (rawLine: string) => {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    let parsedPayload: unknown;
+    try {
+      parsedPayload = JSON.parse(trimmed);
+    } catch {
+      throw new ApiError(protocolErrorMessage, protocolErrorCode, response.status || 500);
+    }
+
+    const event = parseEvent(parsedPayload);
+    if (!event) {
+      return;
+    }
+
+    await onEvent?.(event);
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      await dispatchLine(line);
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    await dispatchLine(buffer);
+  }
+}
+
+export async function streamUserMessage(
+  payload: UserStreamRequest,
+  options: {
+    signal?: AbortSignal;
+    onEvent?: (event: UserStreamEvent) => void | Promise<void>;
+  } = {}
+): Promise<void> {
+  return streamNdjson<UserStreamEvent>({
+    endpoint: '/api/user/stream',
+    method: 'POST',
+    body: payload,
+    signal: options.signal,
+    onEvent: options.onEvent,
+    parseEvent: parseUserStreamEvent,
+    defaultErrorMessage: '聊天请求失败',
+    defaultErrorCode: 'CHAT_STREAM_ERROR',
+    protocolErrorMessage: '聊天流协议错误',
+    protocolErrorCode: 'CHAT_STREAM_PROTOCOL_ERROR',
+    noBodyMessage: '聊天流不可用',
+  });
+}
 
 // ============================================
 // Tender API
