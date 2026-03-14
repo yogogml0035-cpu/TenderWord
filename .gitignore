@@ -1,22 +1,32 @@
 # 日志
-logs/
-prompts
+*.log
+backend/logs/*
 
 # Python 缓存文件
-__pycache__
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 
-# 虚拟环境（如果有）
+# Python 测试和工具缓存
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 虚拟环境
 venv/
 env/
 ENV/
 .venv/
-.env
 
-# IDE 配置（可选）
+# 环境变量（敏感信息）
+.env
+.env.local
+.env.*.local
+
+# IDE 配置
 .vscode/
 .claude/
 .idea/
@@ -27,11 +37,28 @@ ENV/
 # 系统文件
 .DS_Store
 Thumbs.db
+nul
 
-docs
+# Next.js 构建产物
+.next/
+out/
+
+# Node.js
+node_modules/
+*.tsbuildinfo
+
+# 文档和测试目录
+docs/
 test_word/
 test_py/
 用户使用手册.md
 
+# 工具目录
 .kiro/
+.sisyphus/
+.runtime/
 
+
+# 临时 prompt 文件（运行时生成）
+backend/prompts_log/prompt_*.txt
+docs/
