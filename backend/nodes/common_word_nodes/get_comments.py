@@ -78,7 +78,16 @@ def _pick_anchor(hits, prefer_last: bool = True):
     return pool[-1] if prefer_last else pool[0]
 
 
-def _get_insertion_range(doc, word_app, before_text: str, after_text: str, target_size: float):
+def _get_insertion_range(
+    doc,
+    word_app,
+    before_text: str,
+    after_text: str,
+    target_size: float,
+    *,
+    node_name: str = "get_comments",
+    strict: bool = False,
+):
     """
     根据 insertion_before_text / insertion_after_text 在文档中定位锚点，返回抽取范围 (range_start, range_end)。
     与 gngk_extract_tender_params 中的锚点逻辑一致：仅批注会按此范围过滤。
@@ -91,7 +100,10 @@ def _get_insertion_range(doc, word_app, before_text: str, after_text: str, targe
     before_hits = _iter_paragraph_hits(doc, before_text, target_size)
     before_hit = _pick_anchor(before_hits, prefer_last=True)
     if not before_hit:
-        logger.info("get_comments 未找到前置锚点 '%s'，不按范围过滤批注", before_text)
+        if strict:
+            logger.warning("%s 未找到前置锚点 '%s'", node_name, before_text)
+        else:
+            logger.info("%s 未找到前置锚点 '%s'，不按范围过滤批注", node_name, before_text)
         return None, None
     before_end_pos = before_hit["end"]
     before_page = before_hit["page"]
@@ -107,10 +119,17 @@ def _get_insertion_range(doc, word_app, before_text: str, after_text: str, targe
     after_hits = [h for h in after_hits if h["start"] >= before_end_pos]
     after_hit = _pick_anchor(after_hits, prefer_last=False)
     if not after_hit:
-        logger.info("get_comments 未找到后置锚点 '%s'，不按范围过滤批注", after_text)
+        if strict:
+            logger.warning("%s 未找到后置锚点 '%s'", node_name, after_text)
+        else:
+            logger.info("%s 未找到后置锚点 '%s'，不按范围过滤批注", node_name, after_text)
         return None, None
     after_start_pos = after_hit["start"]
     return before_end_pos, after_start_pos
+
+
+def _resolve_target_size(tender_type: str | None) -> float:
+    return 18.0 if tender_type == "xjcg" else 22.0
 
 
 def _empty_plan_state(state: TenderGraphStateBase) -> TenderGraphStateBase:
@@ -158,6 +177,113 @@ def _result_to_state_updates(result: DocumentAnalysisResult) -> dict:
     }
 
 
+def result_to_polished_comments(result: DocumentAnalysisResult) -> list[dict[str, str]]:
+    """将提取到的 Word 批注转为 update_word 可复用的 polished_comments。"""
+    return [
+        {
+            "reference_text": c.reference_text or "",
+            "comment_text": c.content or "",
+        }
+        for c in result.comments
+    ]
+
+
+def extract_document_analysis_result(
+    *,
+    file_path: Path,
+    before_text: str | None,
+    after_text: str | None,
+    tender_type: str | None,
+    node_name: str,
+    require_anchor_range: bool = False,
+) -> DocumentAnalysisResult:
+    """
+    打开 Word 文档并按锚点区间提取批注/删除线/非黑字。
+
+    Args:
+        file_path: 待分析的 Word 文档路径
+        before_text: 前置锚点文本
+        after_text: 后置锚点文本
+        tender_type: 招标类型，用于推导锚点目标字号
+        node_name: 当前节点名，用于日志输出
+        require_anchor_range: 为 True 时，必须成功定位锚点区间
+    """
+    word_app = None
+    doc = None
+    com_initialized = False
+
+    try:
+        progress_log.debug(f"[{node_name}] 开始执行...")
+        logger.info("%s 开始执行，文档路径: %s", node_name, file_path)
+        progress_log.debug(f"[{node_name}] 正在创建 Word 并打开文档...")
+        word_app, com_initialized = create_word_application(
+            initial_delay=0.3,
+            post_init_delay=0.2,
+            use_existing=False,
+            node_name=node_name,
+        )
+        doc = open_document_with_retry(
+            word_app,
+            str(file_path),
+            read_only=True,
+            node_name=node_name,
+        )
+        inspector = WordDocumentInspector(
+            word_app=word_app,
+            doc=doc,
+            node_name=node_name,
+        )
+
+        range_start, range_end = None, None
+        if require_anchor_range and (not before_text or not after_text):
+            raise ValueError(
+                f"{node_name} 需要 insertion_before_text 和 insertion_after_text 来定位修改范围"
+            )
+
+        if before_text and after_text:
+            range_start, range_end = _get_insertion_range(
+                doc,
+                word_app,
+                before_text,
+                after_text,
+                _resolve_target_size(tender_type),
+                node_name=node_name,
+                strict=require_anchor_range,
+            )
+            if range_start is not None and range_end is not None:
+                progress_log.debug(
+                    f"[{node_name}] 锚点范围仅计算一次 -> [{range_start}, {range_end})，批注/删除线/非黑字均只在此范围内统计"
+                )
+            elif require_anchor_range:
+                raise ValueError(
+                    f"{node_name} 未能定位锚点范围: before_text={before_text!r}, after_text={after_text!r}"
+                )
+        else:
+            logger.info(
+                "%s 未提供 insertion_before_text / insertion_after_text，将在整篇文档内统计批注/删除线/非黑字",
+                node_name,
+            )
+
+        return inspector.analyze_document(
+            range_start=range_start,
+            range_end=range_end,
+        )
+    finally:
+        if doc is not None:
+            try:
+                doc.Close(SaveChanges=False)
+            except Exception as e:
+                logger.warning("关闭 %s 文档时出错: %s", node_name, e)
+            doc = None
+        close_word_application(
+            word_app=word_app,
+            doc=doc,
+            com_initialized=com_initialized,
+            wait_time=0.0,
+            node_name=node_name,
+        )
+
+
 def get_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     """
     从送审稿 Word 文档中提取批注、删除线、非黑色字体。
@@ -187,72 +313,17 @@ def get_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
         logger.warning("送审稿文件不存在: %s", origin_tender_path)
         return _empty_plan_state(state)
 
-    progress_log.debug("[get_comments] 开始执行...")
-    logger.info("get_comments 开始执行，送审稿路径: %s", origin_tender_path)
-
-    word_app = None
-    doc = None
-    com_initialized = False
-
     try:
-        progress_log.debug("[get_comments] 正在创建 Word 并打开送审稿...")
-        word_app, com_initialized = create_word_application(
-            initial_delay=0.3,
-            post_init_delay=0.2,
-            use_existing=False,
+        result = extract_document_analysis_result(
+            file_path=file_path,
+            before_text=state.get("insertion_before_text"),
+            after_text=state.get("insertion_after_text"),
+            tender_type=state.get("tender_type"),
             node_name="get_comments",
-        )
-        doc = open_document_with_retry(
-            word_app,
-            str(file_path),
-            read_only=True,
-            node_name="get_comments",
-        )
-        inspector = WordDocumentInspector(
-            word_app=word_app,
-            doc=doc,
-            node_name="get_comments",
-        )
-        # 锚点范围只计算一次：根据 insertion_before_text / insertion_after_text 定位 [range_start, range_end)，
-        # 然后一次性传入 inspector，批注/删除线/非黑字均只在该范围内统计（不再重复算范围）
-        range_start, range_end = None, None
-        before_text = state.get("insertion_before_text")
-        after_text = state.get("insertion_after_text")
-        if not before_text or not after_text:
-            logger.info(
-                "get_comments 未提供 insertion_before_text / insertion_after_text，将在整篇文档内统计批注/删除线/非黑字"
-            )
-        if before_text and after_text:
-            target_size = 18.0 if state.get("tender_type") == "xjcg" else 22.0
-            range_start, range_end = _get_insertion_range(
-                doc, word_app, before_text, after_text, target_size
-            )
-            if range_start is not None and range_end is not None:
-                progress_log.debug(
-                    "[get_comments] 锚点范围仅计算一次 -> [%d, %d)，批注/删除线/非黑字均只在此范围内统计"
-                    % (range_start, range_end),
-                )
-        result = inspector.analyze_document(
-            range_start=range_start,
-            range_end=range_end,
         )
     except Exception as e:
         logger.error("送审稿文档分析失败: %s", e, exc_info=True)
         return _empty_plan_state(state)
-    finally:
-        if doc is not None:
-            try:
-                doc.Close(SaveChanges=False)
-            except Exception as e:
-                logger.warning("关闭送审稿文档时出错: %s", e)
-            doc = None
-        close_word_application(
-            word_app=word_app,
-            doc=doc,
-            com_initialized=com_initialized,
-            wait_time=0.0,
-            node_name="get_comments",
-        )
 
     updates = _result_to_state_updates(result)
     elapsed = time.perf_counter() - start_time

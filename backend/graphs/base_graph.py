@@ -248,6 +248,7 @@ TRACKED_PROGRESS_NODES = {
     "copy_comments",
     "extract_tender_params",
     "resolve_rewrite_target",
+    "get_rewrite_comments",
     "delete_section",
     "delete_tender_param",
     "get_replacements",

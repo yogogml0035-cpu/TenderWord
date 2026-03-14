@@ -7,7 +7,11 @@ from __future__ import annotations
 from langgraph.graph import END, START, StateGraph
 
 from backend.graphs.base_graph import BaseGraph
-from backend.nodes.common_word_nodes import delete_tender_param, update_word
+from backend.nodes.common_word_nodes import (
+    delete_tender_param,
+    get_rewrite_comments,
+    update_word,
+)
 from backend.nodes.skills_nodes.rewrite_nodes import resolve_rewrite_target, rewrite_text
 from backend.states import RewriteGraphState
 
@@ -19,13 +23,17 @@ class RewriteGraph(BaseGraph):
         return self.STATE_CLS
 
     def estimate_total_nodes(self, initial_state: dict) -> int:
-        return 4
+        return 5
 
     def build_graph(self) -> StateGraph:
         builder = StateGraph(self.STATE_CLS)
         builder.add_node(
             "resolve_rewrite_target",
             self.wrap_node("resolve_rewrite_target", resolve_rewrite_target),
+        )
+        builder.add_node(
+            "get_rewrite_comments",
+            self.wrap_node("get_rewrite_comments", get_rewrite_comments),
         )
         builder.add_node(
             "delete_section",
@@ -41,7 +49,8 @@ class RewriteGraph(BaseGraph):
         )
 
         builder.add_edge(START, "resolve_rewrite_target")
-        builder.add_edge("resolve_rewrite_target", "delete_section")
+        builder.add_edge("resolve_rewrite_target", "get_rewrite_comments")
+        builder.add_edge("get_rewrite_comments", "delete_section")
         builder.add_edge("resolve_rewrite_target", "rewrite_text")
         builder.add_edge(["delete_section", "rewrite_text"], "update_word")
         builder.add_edge("update_word", END)

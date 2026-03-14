@@ -45,6 +45,7 @@ class NodeName(Enum):
     GENERATE_POLISHED_TEXT = "generate_polished_text"
     GENERATE_COMMENTS = "generate_comments"
     RESOLVE_REWRITE_TARGET = "resolve_rewrite_target"
+    GET_REWRITE_COMMENTS = "get_rewrite_comments"
     DELETE_SECTION = "delete_section"
     REWRITE_TEXT = "rewrite_text"
     UPDATE_WORD = "update_word"
@@ -62,6 +63,7 @@ NODE_DISPLAY_NAMES = {
     NodeName.GENERATE_POLISHED_TEXT: "AI生成采购需求",
     NodeName.GENERATE_COMMENTS: "AI生成批注建议",
     NodeName.RESOLVE_REWRITE_TARGET: "选择修改版本",
+    NodeName.GET_REWRITE_COMMENTS: "提取原批注",
     NodeName.DELETE_SECTION: "删除原段落",
     NodeName.REWRITE_TEXT: "AI重写内容",
     NodeName.UPDATE_WORD: "生成招标文件",
@@ -936,4 +938,3 @@ _task_queue = TaskQueueManager()
 def get_task_queue() -> TaskQueueManager:
     """获取全局任务队列管理器实例"""
     return _task_queue
-
