@@ -375,6 +375,7 @@ class DocumentService:
         conversation_id: str,
         user_prompt: str,
         model_provider: str,
+        rewrite_log_path: Optional[str] = None,
     ) -> GenerateResponse:
         """创建 rewrite 任务（复用文档任务队列 + SSE 三卡片链路）。"""
         normalized_conversation_id = str(conversation_id or "").strip()
@@ -436,6 +437,7 @@ class DocumentService:
             task_kind="rewrite",
             conversation_id=normalized_conversation_id,
             rewrite_user_prompt=normalized_prompt,
+            rewrite_log_path=str(rewrite_log_path or "").strip() or None,
             llm_node_name=TASK_KIND_TO_LLM_NODE["rewrite"],
         )
 
@@ -457,6 +459,7 @@ class DocumentService:
         task_kind: str,
         conversation_id: Optional[str] = None,
         rewrite_user_prompt: Optional[str] = None,
+        rewrite_log_path: Optional[str] = None,
         llm_node_name: Optional[str] = None,
     ) -> GenerateResponse:
         self._task_queue.add_task(
@@ -475,6 +478,7 @@ class DocumentService:
             task_kind,
             conversation_id,
             rewrite_user_prompt,
+            rewrite_log_path,
             llm_node_name,
         )
         self._task_queue.register_worker_future(task_id, future)
@@ -663,6 +667,7 @@ class DocumentService:
         task_kind: str = "generate",
         conversation_id: Optional[str] = None,
         rewrite_user_prompt: Optional[str] = None,
+        rewrite_log_path: Optional[str] = None,
         llm_node_name: Optional[str] = None,
     ) -> None:
         """在后台线程中执行 Graph.
@@ -713,6 +718,7 @@ class DocumentService:
                             callback,
                             model_provider,
                             llm_node_name=llm_node_name or TASK_KIND_TO_LLM_NODE.get(task_kind, "generate_polished_text"),
+                            rewrite_log_path=rewrite_log_path,
                             rewrite_cleanup_holder=rewrite_cleanup_holder,
                             stdout_writer=stdout_writer,
                             stderr_writer=stderr_writer,
@@ -903,6 +909,7 @@ class DocumentService:
         callback: SSECallback,
         model_provider: str,
         llm_node_name: str = "generate_polished_text",
+        rewrite_log_path: Optional[str] = None,
         rewrite_cleanup_holder: Optional[Dict[str, str]] = None,
         stdout_writer: Optional[Any] = None,
         stderr_writer: Optional[Any] = None,
@@ -941,6 +948,7 @@ class DocumentService:
                 "llm_stream_complete_callback": llm_relay.flush,
                 "suppress_llm_stdout": True,
                 "model_provider": model_provider,
+                "rewrite_log_path": str(rewrite_log_path or "").strip(),
                 "rewrite_cleanup_holder": rewrite_cleanup_holder
                 if rewrite_cleanup_holder is not None
                 else {},

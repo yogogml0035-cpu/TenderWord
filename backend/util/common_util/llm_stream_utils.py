@@ -105,6 +105,9 @@ class StreamCallbacks:
     on_update: Optional[Callable[[str], None]] = (
         None  # 内容更新时的回调（用于流式推送完整内容）
     )
+    on_request_messages: Optional[Callable[[list[dict[str, Any]]], None]] = (
+        None  # 请求 messages 已组装完成时的回调
+    )
 
 
 @dataclass
@@ -238,6 +241,7 @@ async def stream_llm_completion(
             timeout_seconds=timeout_seconds,
             heartbeat=heartbeat,
             on_chunk=_on_chunk_received,
+            on_request_messages=callbacks.on_request_messages,
         )
         progress_log.debug("LLM 流式响应完成")
         return content
@@ -259,6 +263,7 @@ async def _stream_openai_compatible(
     timeout_seconds: int,
     heartbeat: HeartbeatMonitor,
     on_chunk: Callable[[str], None],
+    on_request_messages: Optional[Callable[[list[dict[str, Any]]], None]],
     prompt: Optional[str] = None,
     system_prompt: Optional[str] = None,
     user_prompt: Optional[str] = None,
@@ -317,6 +322,12 @@ async def _stream_openai_compatible(
             raise ValueError(
                 "必须提供 prompt 或者 system_prompt/user_prompt 中的至少一个"
             )
+
+    if on_request_messages:
+        try:
+            on_request_messages([dict(message) for message in messages])
+        except Exception as callback_error:
+            progress_log.debug(f"请求 messages 回调失败: {callback_error}")
 
     # 构建请求参数
     create_params: dict[str, Any] = {

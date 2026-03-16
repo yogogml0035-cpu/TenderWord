@@ -82,6 +82,7 @@ class UserGraph:
                 "reply_text": decision.reply_text,
                 "reply_streamed": decision.reply_streamed,
                 "latest_rewrite_state": decision.latest_rewrite_state,
+                "rewrite_log_path": decision.rewrite_log_path,
             }
         )
 
@@ -100,6 +101,7 @@ class UserGraph:
             conversation_id=str(state.get("conversation_id") or "").strip(),
             user_prompt=str(state.get("latest_user_message") or "").strip(),
             model_provider=str(state.get("model_provider") or "deepseek"),
+            rewrite_log_path=str(state.get("rewrite_log_path") or "").strip() or None,
         )
 
         if not response.success:

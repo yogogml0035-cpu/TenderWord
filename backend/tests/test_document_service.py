@@ -270,3 +270,72 @@ def test_document_service_run_graph_does_not_log_audit_for_rewrite(monkeypatch):
     )
 
     mock_info.assert_not_called()
+
+
+def test_document_service_create_rewrite_task_forwards_rewrite_log_path(monkeypatch):
+    service = DocumentService()
+    captured: dict[str, object] = {}
+
+    class ConversationStub:
+        def has_rewrite_history(self, _conversation_id: str) -> bool:
+            return True
+
+        def get_latest_rewrite_state(self, _conversation_id: str):
+            return {"prepared_doc_path": "D:/existing.docx", "polished_text": "原文"}
+
+    def _fake_submit_graph_task(**kwargs):
+        captured.update(kwargs)
+        return GenerateResponse(success=True, task_id="task-9", task_kind="rewrite")
+
+    service._conversation_service = ConversationStub()
+    monkeypatch.setattr(document_service_module, "REWRITE_GRAPH_CLASS", _DummyGraph)
+    monkeypatch.setattr(service, "_submit_graph_task", _fake_submit_graph_task)
+
+    response = asyncio.run(
+        service.create_rewrite_task(
+            conversation_id="conv-9",
+            user_prompt="请把第三章写正式",
+            model_provider="deepseek",
+            rewrite_log_path="D:/logs/rewrite.json",
+        )
+    )
+
+    assert response.success is True
+    assert captured["rewrite_log_path"] == "D:/logs/rewrite.json"
+    assert captured["task_kind"] == "rewrite"
+    assert captured["conversation_id"] == "conv-9"
+    assert captured["rewrite_user_prompt"] == "请把第三章写正式"
+
+
+def test_document_service_invoke_graph_async_includes_rewrite_log_path_in_config(monkeypatch):
+    service = DocumentService()
+    callback = Mock()
+    captured_config: dict[str, object] = {}
+
+    async def _fake_invoke_with_timing_async(
+        _compiled_graph,
+        _initial_state,
+        *,
+        verbose,
+        config,
+    ):
+        assert verbose is True
+        captured_config.update(config)
+        return {"polished_text": "改写结果"}, 0.25
+
+    graphs_module = importlib.import_module("backend.graphs")
+    monkeypatch.setattr(graphs_module, "invoke_with_timing_async", _fake_invoke_with_timing_async)
+
+    asyncio.run(
+        service._invoke_graph_async(
+            compiled_graph=Mock(),
+            initial_state={},
+            task_id="task-10",
+            callback=callback,
+            model_provider="deepseek",
+            llm_node_name="rewrite_text",
+            rewrite_log_path="D:/logs/rewrite.json",
+        )
+    )
+
+    assert captured_config["configurable"]["rewrite_log_path"] == "D:/logs/rewrite.json"
