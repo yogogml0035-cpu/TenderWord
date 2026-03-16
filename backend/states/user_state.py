@@ -15,6 +15,7 @@ class UserGraphState(TypedDict, total=False):
     model_provider: str
     messages: List[UserGraphMessage]
     latest_user_message: str
+    rewrite_log_path: Optional[str]
     route: str
     reply_text: str
     reply_streamed: bool

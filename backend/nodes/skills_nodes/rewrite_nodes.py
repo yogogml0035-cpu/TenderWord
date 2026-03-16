@@ -21,6 +21,10 @@ from backend.services.conversation_service import RewriteMessage, get_conversati
 from backend.states import RewriteGraphState
 from backend.util.common_util import StreamCallbacks, stream_llm_completion
 from backend.util.log_util.progress_log import progress_log
+from backend.util.log_util.rewrite_audit_log import (
+    REWRITE_STAGE_TARGET_SELECTION,
+    write_rewrite_audit_stage,
+)
 
 
 def _get_model_provider(config: Dict[str, Any] | None) -> str:
@@ -53,6 +57,11 @@ def _list_assistant_messages(rewrite_messages: List[RewriteMessage]) -> List[Rew
     ]
 
 
+def _get_rewrite_log_path(config: Dict[str, Any] | None) -> str:
+    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+    return str(configurable.get("rewrite_log_path") or "").strip()
+
+
 def _select_rewrite_target_index(user_prompt: str, rewrite_messages: List[RewriteMessage], config) -> int:
     rendered_bundle = build_rewrite_target_selection_bundle(
         RewriteTargetSelectionPromptInput(
@@ -64,7 +73,18 @@ def _select_rewrite_target_index(user_prompt: str, rewrite_messages: List[Rewrit
         raise ValueError("当前会话没有可用的 rewrite 版本候选")
 
     model_provider = _get_model_provider(config)
-    callbacks = StreamCallbacks()
+    rewrite_log_path = _get_rewrite_log_path(config)
+
+    def _capture_request_messages(messages: list[dict[str, Any]]) -> None:
+        if not rewrite_log_path:
+            return
+        write_rewrite_audit_stage(
+            rewrite_log_path,
+            REWRITE_STAGE_TARGET_SELECTION,
+            messages,
+        )
+
+    callbacks = StreamCallbacks(on_request_messages=_capture_request_messages)
 
     try:
         loop = asyncio.get_event_loop()

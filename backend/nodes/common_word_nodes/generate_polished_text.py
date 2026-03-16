@@ -16,6 +16,10 @@ from backend.util.common_util import (
     stream_llm_completion,
 )
 from backend.util.log_util.progress_log import progress_log
+from backend.util.log_util.rewrite_audit_log import (
+    REWRITE_STAGE_TEXT,
+    write_rewrite_audit_stage,
+)
 
 PROMPT_REGISTRY = GENERATE_PROMPT_REGISTRY
 
@@ -39,6 +43,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
     # 获取配置的 model_provider，默认为 deepseek
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     model_provider = configurable.get("model_provider", "deepseek")
+    rewrite_log_path = str(configurable.get("rewrite_log_path") or "").strip()
     progress_log.debug(f"[generate_polished_text] 使用模型: {model_provider}")
 
     # 根据 tender_type 从 PROMPT_REGISTRY 中选择对应的 prompt
@@ -119,6 +124,15 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
             return
         progress_log.debug(text)
 
+    def _capture_request_messages(messages: list[dict[str, object]]) -> None:
+        if not rewrite_mode or not rewrite_log_path:
+            return
+        write_rewrite_audit_stage(
+            rewrite_log_path,
+            REWRITE_STAGE_TEXT,
+            messages,
+        )
+
     # 超时配置
     TIMEOUT_SECONDS = 10  # 超时时间
     CHECK_INTERVAL = 3.0  # 检查间隔
@@ -127,6 +141,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
     callbacks = StreamCallbacks(
         on_chunk=_log_chunk,
         on_update=_push_stream_update,
+        on_request_messages=_capture_request_messages,
     )
     
     # 调用统一的流式 LLM 接口，使用 system_prompt 和 user_prompt

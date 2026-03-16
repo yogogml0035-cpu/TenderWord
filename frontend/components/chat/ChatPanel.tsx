@@ -13,7 +13,7 @@ import {
   downloadFile,
   streamUserMessage,
 } from '@/lib/api';
-import type { UserStreamEvent } from '@/types/api';
+import type { UserStreamEvent, UserStreamMessage } from '@/types/api';
 import type { Message } from '@/types/chat';
 import type { ModelType } from '@/components/forms/ModelSelector';
 
@@ -21,7 +21,7 @@ interface ChatPanelProps {
   className?: string;
 }
 
-function collectNormalChatContext(messages: Message[]) {
+function collectNormalChatContext(messages: Message[]): UserStreamMessage[] {
   const candidates = messages.filter((message) => {
     if (message.metadata?.messageKind) {
       return false;
@@ -38,13 +38,13 @@ function collectNormalChatContext(messages: Message[]) {
     return false;
   });
 
-  return candidates.slice(-6).map((message) => ({
+  return candidates.slice(-6).map<UserStreamMessage>((message) => ({
     role: message.type === 'user' ? 'user' : 'assistant',
     content: typeof message.content === 'string' ? message.content : '',
   }));
 }
 
-function collectUserRouteContext(messages: Message[], latestPrompt: string) {
+function collectUserRouteContext(messages: Message[], latestPrompt: string): UserStreamMessage[] {
   const history = collectNormalChatContext(messages).slice(-5);
   return [...history, { role: 'user' as const, content: latestPrompt }];
 }
