@@ -18,6 +18,11 @@ from backend.prompts.types import (
 )
 from backend.services.conversation_service import ConversationService, get_conversation_service
 from backend.util.common_util import StreamCallbacks, stream_llm_completion
+from backend.util.log_util.rewrite_audit_log import (
+    REWRITE_STAGE_ROUTE_OR_REPLY,
+    create_rewrite_audit_log,
+    write_rewrite_audit_stage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +37,7 @@ class UserRouteDecision:
     reply_text: str = ""
     reply_streamed: bool = False
     used_llm: bool = False
+    rewrite_log_path: Optional[str] = None
 
 
 def _to_route_history_messages(
@@ -63,6 +69,7 @@ class UserRoutingService:
         latest_rewrite_state = self._conversation_service.get_latest_rewrite_state(conversation_id)
         latest_rewrite_snapshot = RewriteStateSnapshot.from_mapping(latest_rewrite_state)
         has_rewrite_history = latest_rewrite_state is not None
+        request_messages: list[dict[str, Any]] = []
 
         prefix_buffer = ""
         reply_parts: list[str] = []
@@ -98,6 +105,10 @@ class UserRoutingService:
             _emit_reply_text(prefix_buffer)
             prefix_buffer = ""
 
+        def _capture_request_messages(items: list[dict[str, Any]]) -> None:
+            request_messages.clear()
+            request_messages.extend(dict(item) for item in items)
+
         rendered_prompt = render_route_or_reply_prompt(
             RouteOrReplyPromptInput(
                 messages=_to_route_history_messages(messages),
@@ -110,7 +121,10 @@ class UserRoutingService:
             model_provider=model_provider,
             system_prompt=rendered_prompt.system_prompt,
             user_prompt=rendered_prompt.user_prompt,
-            callbacks=StreamCallbacks(on_chunk=_handle_stream_chunk),
+            callbacks=StreamCallbacks(
+                on_chunk=_handle_stream_chunk,
+                on_request_messages=_capture_request_messages,
+            ),
             timeout_seconds=30,
             check_interval=2.0,
         )
@@ -122,16 +136,24 @@ class UserRoutingService:
         )
 
         if raw_output == REWRITE_ROUTE_LITERAL:
+            rewrite_log_path = self._write_rewrite_route_audit(
+                conversation_id=conversation_id,
+                request_messages=request_messages,
+                rendered_system_prompt=rendered_prompt.system_prompt,
+                rendered_user_prompt=rendered_prompt.user_prompt,
+            )
             if not has_rewrite_history:
                 return UserRouteDecision(
                     route=REPLY_ROUTE_LITERAL,
                     latest_rewrite_state=latest_rewrite_state,
                     reply_text=NO_DOCUMENT_HINT_TEXT,
+                    rewrite_log_path=rewrite_log_path,
                 )
             return UserRouteDecision(
                 route=REWRITE_ROUTE_LITERAL,
                 latest_rewrite_state=latest_rewrite_state,
                 used_llm=True,
+                rewrite_log_path=rewrite_log_path,
             )
 
         if prefix_buffer:
@@ -152,6 +174,34 @@ class UserRoutingService:
             reply_streamed=reply_streamed,
             used_llm=True,
         )
+
+    def _write_rewrite_route_audit(
+        self,
+        *,
+        conversation_id: str,
+        request_messages: Sequence[Dict[str, Any]],
+        rendered_system_prompt: str,
+        rendered_user_prompt: str,
+    ) -> Optional[str]:
+        payload_messages = list(request_messages)
+        if not payload_messages:
+            payload_messages = []
+            if rendered_system_prompt:
+                payload_messages.append({"role": "system", "content": rendered_system_prompt})
+            if rendered_user_prompt:
+                payload_messages.append({"role": "user", "content": rendered_user_prompt})
+
+        try:
+            log_path = create_rewrite_audit_log(conversation_id)
+            write_rewrite_audit_stage(
+                log_path,
+                REWRITE_STAGE_ROUTE_OR_REPLY,
+                payload_messages,
+            )
+            return log_path
+        except Exception:
+            logger.exception("写入 rewrite route 审计日志失败: conversation_id=%s", conversation_id)
+            return None
 
 
 _user_routing_service: Optional[UserRoutingService] = None

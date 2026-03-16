@@ -50,7 +50,7 @@ node_modules/
 # 文档和测试目录
 docs/
 test_word/
-test_py/
+test_doc/
 用户使用手册.md
 
 # 工具目录

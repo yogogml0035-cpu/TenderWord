@@ -8,6 +8,7 @@
 import pytest
 from unittest.mock import Mock, patch
 
+import backend.nodes.common_word_nodes.generate_comments as generate_comments_module
 from backend.nodes.common_word_nodes.generate_comments import (
     generate_comments,
 )
@@ -561,3 +562,34 @@ class TestStateReturnAndLogging:
                 assert any("执行完成，耗时:" in msg for msg in messages)
                 assert any("秒" in msg for msg in messages)
                 assert any("毫秒" in msg for msg in messages)
+
+    def test_generate_comments_writes_prompt_outputs_to_generate_log(self, monkeypatch, tmp_path):
+        fake_node_path = (
+            tmp_path / "backend" / "nodes" / "common_word_nodes" / "generate_comments.py"
+        )
+        fake_node_path.parent.mkdir(parents=True, exist_ok=True)
+        fake_node_path.touch()
+        monkeypatch.setattr(generate_comments_module, "__file__", str(fake_node_path))
+
+        async def mock_stream(*_args, **_kwargs):
+            return "[]"
+
+        monkeypatch.setattr(
+            generate_comments_module,
+            "stream_llm_completion",
+            mock_stream,
+        )
+
+        state = XjcgTenderGraphState(
+            polished_text="测试文本",
+            tender_type="xjcg",
+            project_number="260069",
+            project_name="耳科及鼻科手术器械一批",
+        )
+        result = generate_comments(state, config={})
+
+        generate_log_dir = tmp_path / "backend" / "prompts_log" / "generate_log"
+        assert result["polished_comments"] == []
+        assert generate_log_dir.is_dir()
+        assert len(list(generate_log_dir.glob("prompt_*_comments_prompt_*.txt"))) == 1
+        assert len(list(generate_log_dir.glob("prompt_*_new_comments_*.txt"))) == 1
