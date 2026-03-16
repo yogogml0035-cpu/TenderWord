@@ -164,3 +164,36 @@ def test_generate_polished_text_writes_rewrite_messages_to_existing_log(monkeypa
     payload = json.loads(Path(log_path).read_text(encoding="utf-8"))
     assert result["polished_text"] == "改写完成"
     assert payload[REWRITE_STAGE_TEXT] == request_messages
+
+
+def test_generate_polished_text_writes_prompt_outputs_to_generate_log(monkeypatch, tmp_path):
+    fake_node_path = (
+        tmp_path / "backend" / "nodes" / "common_word_nodes" / "generate_polished_text.py"
+    )
+    fake_node_path.parent.mkdir(parents=True, exist_ok=True)
+    fake_node_path.touch()
+    monkeypatch.setattr(generate_polished_text_module, "__file__", str(fake_node_path))
+
+    async def _fake_stream_llm_completion(*_args, **_kwargs):
+        return "生成完成"
+
+    monkeypatch.setattr(
+        generate_polished_text_module,
+        "stream_llm_completion",
+        _fake_stream_llm_completion,
+    )
+
+    result = generate_polished_text_module.generate_polished_text(
+        {
+            "project_number": "260069",
+            "project_name": "耳科及鼻科手术器械一批",
+            "project_content": "项目概况",
+        },
+        {"configurable": {"model_provider": "deepseek"}},
+    )
+
+    generate_log_dir = tmp_path / "backend" / "prompts_log" / "generate_log"
+    assert result["polished_text"] == "生成完成"
+    assert generate_log_dir.is_dir()
+    assert len(list(generate_log_dir.glob("prompt_*_polish_prompt_*.txt"))) == 1
+    assert len(list(generate_log_dir.glob("prompt_*_polished_text_*.txt"))) == 1
