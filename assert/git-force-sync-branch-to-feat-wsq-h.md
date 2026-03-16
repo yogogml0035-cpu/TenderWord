@@ -44,7 +44,7 @@ Assert ($LASTEXITCODE -eq 0) 'origin/feat-wsq-h does not exist locally.'
 git reset --hard $target
 Assert ($LASTEXITCODE -eq 0) 'git reset --hard failed.'
 
-git branch --set-upstream-to=origin/feat-wsq-h
+git branch --set-upstream-to=("origin/" + $branch)
 Assert ($LASTEXITCODE -eq 0) 'set upstream failed.'
 
 $newHead = (git rev-parse HEAD).Trim()
@@ -67,7 +67,7 @@ git log --oneline --decorate -n 5
 git status --porcelain
 git fetch --no-tags origin feat-wsq-h --prune
 git reset --hard origin/feat-wsq-h
-git branch --set-upstream-to=origin/feat-wsq-h
+git branch --set-upstream-to=origin/<current-branch>
 git status -sb
 ```
 
@@ -82,7 +82,7 @@ git rev-parse origin/feat-wsq-h
 ```
 
 预期：
-- `git status -sb` 显示形如：`## <current-branch>...origin/feat-wsq-h`
+- `git status -sb` 显示形如：`## <current-branch>...origin/<current-branch> [ahead N]`
 - `HEAD` 与 `origin/feat-wsq-h` 的 commit id 完全一致
 
 ---
