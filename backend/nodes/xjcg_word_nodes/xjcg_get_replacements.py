@@ -8,7 +8,7 @@ import pathlib
 import sys
 
 # 添加项目根目录到 sys.path
-ROOT = pathlib.Path(__file__).resolve().parents[2]
+ROOT = pathlib.Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -678,14 +678,7 @@ if __name__ == "__main__":
     from backend.states import XjcgTenderGraphState
 
     # 测试文档路径列表
-    test_doc_paths = [
-        "test_doc/251918-询价文件-发售稿.doc",
-        "test_doc/252699-原位杂交仪-询价文件-发售稿.doc",
-        "test_doc/252700-荧光细胞计数仪、超低温冰箱、PCR仪-询价文件-初稿1.doc",
-        "test_doc/253000-细胞自动计数仪-询价文件-发售稿.doc",
-        "test_doc/253392-询价文件-初稿.doc",
-        "test_doc/253505-细胞电转仪-询价文件-初稿1.doc",
-    ]
+    test_doc_paths = ["test_doc\五官科综合治疗台2502979-询价通知书-发售稿.doc"]
 
     # 循环测试每个文件
     for doc_idx, test_doc_path_str in enumerate(test_doc_paths, 1):
@@ -706,7 +699,7 @@ if __name__ == "__main__":
 
         # 创建测试状态
         test_state: XjcgTenderGraphState = {
-            "origin_tender_path": str(test_doc_path),
+            "prepared_doc_path": str(test_doc_path),
             "project_number": "253505",
             "project_name": "细胞电转仪",
             "project_content": "项目名称及数量：细胞电转仪   壹套",
