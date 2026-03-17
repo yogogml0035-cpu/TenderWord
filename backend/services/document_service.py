@@ -47,6 +47,7 @@ REWRITE_STATE_KEYS = [
     "tender_type",
     "prepared_doc_path",
     "polished_text",
+    "tender_params",
     "insertion_before_text",
     "insertion_after_text",
     "project_name",

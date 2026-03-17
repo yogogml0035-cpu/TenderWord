@@ -6,8 +6,9 @@ import pytest
 
 import backend.services.document_service as document_service_module
 import backend.util.log_util.execution_log as execution_log_module
-from backend.models.generate import FormType, GenerateRequest, LLMModel
+from backend.models.generate import FormType, GenerateRequest, GenerateResponse, LLMModel
 from backend.models.tender import TenderData
+from backend.services.conversation_service import ConversationService
 from backend.services.document_service import DocumentService, _LLMSnapshotRelay
 from backend.task.task_queue_manager import TaskQueueManager
 
@@ -339,3 +340,56 @@ def test_document_service_invoke_graph_async_includes_rewrite_log_path_in_config
     )
 
     assert captured_config["configurable"]["rewrite_log_path"] == "D:/logs/rewrite.json"
+
+
+def test_build_rewrite_state_snapshot_persists_tender_params():
+    service = DocumentService()
+
+    snapshot = service._build_rewrite_state_snapshot(
+        result_state={
+            "prepared_doc_path": "D:/rewrite.docx",
+            "polished_text": "改写结果",
+            "tender_params": "完整技术参数",
+        },
+        initial_state={
+            "tender_type": "xjcg",
+            "insertion_before_text": "第三章  采购需求",
+            "insertion_after_text": "第四章  响应文件有关格式",
+        },
+    )
+
+    assert snapshot["tender_params"] == "完整技术参数"
+    assert snapshot["polished_text"] == "改写结果"
+
+
+def test_rewrite_snapshot_keeps_tender_params_across_generate_and_rewrite_success():
+    conversation_service = ConversationService()
+
+    conversation_service.seed_generate_success(
+        "conv-1",
+        {
+            "prepared_doc_path": "D:/origin.docx",
+            "polished_text": "首版正文",
+            "tender_params": "首版技术参数",
+            "tender_type": "xjcg",
+        },
+    )
+    first_snapshot = conversation_service.get_latest_rewrite_state("conv-1")
+    assert first_snapshot is not None
+    assert first_snapshot["tender_params"] == "首版技术参数"
+
+    conversation_service.append_rewrite_success(
+        "conv-1",
+        user_prompt="请修改",
+        rewrite_state={
+            "prepared_doc_path": "D:/rewrite.docx",
+            "polished_text": "二版正文",
+            "tender_params": first_snapshot["tender_params"],
+            "tender_type": "xjcg",
+        },
+    )
+
+    latest_snapshot = conversation_service.get_latest_rewrite_state("conv-1")
+    assert latest_snapshot is not None
+    assert latest_snapshot["tender_params"] == "首版技术参数"
+    assert latest_snapshot["polished_text"] == "二版正文"

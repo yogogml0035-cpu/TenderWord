@@ -21,7 +21,7 @@
   - `CommentPromptInput(tender_type, polished_text, comment_plan_detail, strikethrough_plan, non_black_font_plan)`
   - 输出 `RenderedPrompt(system_prompt, user_prompt)`
 - rewrite prompt 输入：
-  - `RewritePromptInput(base_text, user_prompt)`
+  - `RewritePromptInput(base_text, tender_params, user_prompt)`
   - 输出 `RenderedPrompt(system_prompt, user_prompt)`
 - 路由 prompt 输入：
   - `RouteOrReplyPromptInput(messages, latest_user_message, latest_rewrite_state, has_rewrite_history)`
@@ -33,6 +33,7 @@
 ## 边界条件与已知坑点
 - Prompt 层输入必须是最小必要字段；如果某个 builder 只需要预览文本，不要把整个 state 透传进去。
 - `RewriteStateSnapshot` 只表达 prompt 需要的摘要字段，不等价于完整 graph state；调用侧若需要保留完整状态，必须继续持有原始 state。
+- rewrite prompt 可携带完整 `tender_params` 作为参考资料，但该字段默认只进入 `rewrite_text` prompt，不进入路由 prompt 或 rewrite 目标选择 prompt。
 - Prompt 层可以暴露 registry 和机器契约常量，但不能承担调用 `stream_llm_completion` 的职责，也不应承载普通用户回复文案。
 - 任何新增 tender type 时，若 prompt 有特化需求，应优先在 `backend/prompts/*_prompt.py` registry 中扩展，而不是复制 node/service。
 - 若某个 prompt 的输出有严格机器契约，解析与校验逻辑应与该 prompt 一起演进，并至少有结构断言测试。

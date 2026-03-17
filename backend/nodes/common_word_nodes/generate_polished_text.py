@@ -65,6 +65,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
         rendered_prompt = render_rewrite_prompt(
             RewritePromptInput(
                 base_text=rewrite_base_text,
+                tender_params=str(tender_params or ""),
                 user_prompt=rewrite_user_prompt,
             )
         )
