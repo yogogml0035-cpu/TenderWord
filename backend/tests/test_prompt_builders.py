@@ -60,13 +60,20 @@ def test_render_comment_prompt_serializes_structured_inputs():
     assert "蓝色字体" in rendered.user_prompt
 
 
-def test_render_rewrite_prompt_keeps_base_text_and_user_instruction():
+def test_render_rewrite_prompt_includes_tender_params_as_reference_context():
     rendered = render_rewrite_prompt(
-        RewritePromptInput(base_text="原始正文", user_prompt="把第三章写得更正式")
+        RewritePromptInput(
+            base_text="原始正文",
+            tender_params="1. 电压 220V\n2. 功率 500W",
+            user_prompt="把第三章写得更正式",
+        )
     )
 
     assert "招标文档修改助手" in rendered.system_prompt
     assert "原始正文" in rendered.user_prompt
+    assert "技术参数参考资料" in rendered.user_prompt
+    assert "仅作为改写时的背景参考" in rendered.user_prompt
+    assert "1. 电压 220V\n2. 功率 500W" in rendered.user_prompt
     assert "把第三章写得更正式" in rendered.user_prompt
 
 
@@ -83,6 +90,7 @@ def test_render_route_or_reply_prompt_compresses_history_and_uses_shared_prompt(
                 project_name="示例项目",
                 tender_type="gngk",
                 polished_text="C" * 500,
+                tender_params="不应出现在路由摘要中的技术参数",
             ),
             has_rewrite_history=True,
         )
@@ -95,6 +103,21 @@ def test_render_route_or_reply_prompt_compresses_history_and_uses_shared_prompt(
     assert "助手: 欢迎使用" in rendered.user_prompt
     assert "B" * 301 not in rendered.user_prompt
     assert "C" * 401 not in rendered.user_prompt
+    assert "不应出现在路由摘要中的技术参数" not in rendered.user_prompt
+
+
+def test_rewrite_state_snapshot_from_mapping_reads_tender_params():
+    snapshot = RewriteStateSnapshot.from_mapping(
+        {
+            "project_name": "示例项目",
+            "polished_text": "正文",
+            "tender_params": "原始技术参数全文",
+        }
+    )
+
+    assert snapshot is not None
+    assert snapshot.project_name == "示例项目"
+    assert snapshot.tender_params == "原始技术参数全文"
 
 
 def test_build_rewrite_target_selection_bundle_preserves_candidate_order_and_contract():
@@ -109,6 +132,7 @@ def test_build_rewrite_target_selection_bundle_preserves_candidate_order_and_con
                         tender_type="xjcg",
                         prepared_doc_path="D:/one.docx",
                         polished_text="第一版内容",
+                        tender_params="候选一技术参数",
                     ),
                     created_at=1.0,
                 ),
@@ -120,6 +144,7 @@ def test_build_rewrite_target_selection_bundle_preserves_candidate_order_and_con
                         tender_type="xjcg",
                         prepared_doc_path="D:/two.docx",
                         polished_text="第二版内容",
+                        tender_params="候选二技术参数",
                     ),
                     created_at=2.0,
                 ),
@@ -135,6 +160,8 @@ def test_build_rewrite_target_selection_bundle_preserves_candidate_order_and_con
     assert "candidate_index=1" in bundle.rendered_prompt.user_prompt
     assert "把上一版第三章写正式" in bundle.rendered_prompt.user_prompt
     assert "请只输出一个纯数字索引。" in bundle.rendered_prompt.user_prompt
+    assert "候选一技术参数" not in bundle.rendered_prompt.user_prompt
+    assert "候选二技术参数" not in bundle.rendered_prompt.user_prompt
 
 
 def test_parse_rewrite_target_selection_validates_output_shape():

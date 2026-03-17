@@ -16,6 +16,10 @@ REWRITE_USER_PROMPT = """
 【当前文档内容】
 {base_text}
 
+【技术参数参考资料】
+以下内容仅作为改写时的背景参考，用于补充原始技术参数上下文；如用户没有要求，不要无关扩写。
+{tender_params}
+
 【用户修改指令】
 {user_prompt}
 
@@ -28,6 +32,7 @@ def render_rewrite_prompt(data: RewritePromptInput) -> RenderedPrompt:
         system_prompt=REWRITE_SYSTEM_PROMPT,
         user_prompt=REWRITE_USER_PROMPT.format(
             base_text=data.base_text,
+            tender_params=data.tender_params,
             user_prompt=data.user_prompt,
         ),
     )

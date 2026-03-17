@@ -33,6 +33,7 @@ class CommentPromptInput:
 @dataclass(frozen=True)
 class RewritePromptInput:
     base_text: str = ""
+    tender_params: str = ""
     user_prompt: str = ""
 
 
@@ -43,6 +44,7 @@ class RewriteStateSnapshot:
     tender_type: str = ""
     prepared_doc_path: str = ""
     polished_text: str = ""
+    tender_params: str = ""
 
     @classmethod
     def from_mapping(
@@ -57,6 +59,7 @@ class RewriteStateSnapshot:
             tender_type=str(data.get("tender_type") or "").strip(),
             prepared_doc_path=str(data.get("prepared_doc_path") or "").strip(),
             polished_text=str(data.get("polished_text") or "").strip(),
+            tender_params=str(data.get("tender_params") or "").strip(),
         )
 
 
