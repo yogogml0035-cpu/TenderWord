@@ -46,6 +46,7 @@ LLM_SNAPSHOT_INTERVAL_SECONDS = 0.25
 REWRITE_STATE_KEYS = [
     "tender_type",
     "prepared_doc_path",
+    "source_origin_tender_path",
     "polished_text",
     "tender_params",
     "insertion_before_text",
@@ -407,7 +408,10 @@ class DocumentService:
                 error="REWRITE_NO_DOCUMENT",
             )
 
-        if not self._conversation_service.get_latest_rewrite_state(normalized_conversation_id):
+        latest_rewrite_state = self._conversation_service.get_latest_rewrite_state(
+            normalized_conversation_id
+        )
+        if not latest_rewrite_state:
             return GenerateResponse(
                 success=False,
                 task_id=task_id,
@@ -427,6 +431,7 @@ class DocumentService:
             task_id=task_id,
             conversation_id=normalized_conversation_id,
             user_prompt=normalized_prompt,
+            latest_rewrite_state=latest_rewrite_state,
         )
 
         return self._submit_graph_task(
@@ -570,14 +575,20 @@ class DocumentService:
         task_id: str,
         conversation_id: str,
         user_prompt: str,
+        latest_rewrite_state: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        return {
+        initial_state = {
             "task_id": task_id,
             "conversation_id": conversation_id,
             "user_session_id": conversation_id,
             "rewrite_user_prompt": user_prompt,
             "rewrite_mode": True,
         }
+        if latest_rewrite_state is not None and "source_origin_tender_path" in latest_rewrite_state:
+            initial_state["source_origin_tender_path"] = str(
+                latest_rewrite_state.get("source_origin_tender_path") or ""
+            ).strip()
+        return initial_state
 
     def _build_initial_state(self, request: GenerateRequest, task_id: str) -> Dict[str, Any]:
         """构建 Graph 初始状态.
@@ -635,9 +646,15 @@ class DocumentService:
 
         # 文件路径
         # origin_tender_path: 送审稿（可选）
-        origin_tender = file_paths.get("origin_tender") or file_paths.get("template")
+        explicit_origin_tender = file_paths.get("origin_tender")
+        origin_tender = explicit_origin_tender or file_paths.get("template")
         if origin_tender and isinstance(origin_tender, str):
             state["origin_tender_path"] = origin_tender
+        state["source_origin_tender_path"] = (
+            explicit_origin_tender.strip()
+            if isinstance(explicit_origin_tender, str)
+            else ""
+        )
 
         # clean_draft_path: 清洁稿（可选）
         clean_draft = file_paths.get("clean_draft") or file_paths.get("clean_draft_path")

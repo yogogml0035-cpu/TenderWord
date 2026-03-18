@@ -6,9 +6,14 @@ import sys
 import time
 from typing import Callable, Optional
 
+from backend.skills import get_skill_registry
 from backend.prompts.generate_prompt import GENERATE_PROMPT_REGISTRY, render_generate_prompt
-from backend.prompts.rewrite_prompt import render_rewrite_prompt
-from backend.prompts.types import GeneratePromptInput, RewritePromptInput
+from backend.prompts.skill_prompt import render_task_skill_prompt
+from backend.prompts.types import (
+    GeneratePromptInput,
+    TaskSkillPromptInput,
+    TaskSkillPromptSection,
+)
 from backend.states import TenderGraphStateBase
 from backend.util.common_util import (
     StreamCallbacks,
@@ -17,6 +22,7 @@ from backend.util.common_util import (
 from backend.util.log_util.prompt_log import get_generate_prompt_log_dir
 from backend.util.log_util.progress_log import progress_log
 from backend.util.log_util.rewrite_audit_log import (
+    REWRITE_STAGE_SKILL_PROMPT_RENDER,
     REWRITE_STAGE_TEXT,
     write_rewrite_audit_stage,
 )
@@ -52,6 +58,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
     
     rewrite_mode = bool(state.get("rewrite_mode"))
     if rewrite_mode:
+        rewrite_skill = get_skill_registry().get_definition("rewrite")
         rewrite_base_text = str(
             state.get("rewrite_base_text")
             or state.get("polished_text")
@@ -62,11 +69,21 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
         if not rewrite_user_prompt:
             raise ValueError("rewrite_user_prompt 不能为空")
 
-        rendered_prompt = render_rewrite_prompt(
-            RewritePromptInput(
-                base_text=rewrite_base_text,
-                tender_params=str(tender_params or ""),
-                user_prompt=rewrite_user_prompt,
+        rendered_prompt = render_task_skill_prompt(
+            TaskSkillPromptInput(
+                skill_id=rewrite_skill.name,
+                instruction=rewrite_skill.instruction,
+                sections=(
+                    TaskSkillPromptSection(title="当前文档内容", content=rewrite_base_text),
+                    TaskSkillPromptSection(
+                        title="技术参数参考资料",
+                        content=str(tender_params or ""),
+                    ),
+                    TaskSkillPromptSection(
+                        title="用户修改指令",
+                        content=rewrite_user_prompt,
+                    ),
+                ),
             )
         )
     else:
@@ -81,6 +98,15 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
 
     system_prompt = rendered_prompt.system_prompt
     user_prompt = rendered_prompt.user_prompt
+    if rewrite_mode and rewrite_log_path:
+        write_rewrite_audit_stage(
+            rewrite_log_path,
+            REWRITE_STAGE_SKILL_PROMPT_RENDER,
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
     
     # 保存提示词到文件
     prompts_dir = get_generate_prompt_log_dir(__file__)

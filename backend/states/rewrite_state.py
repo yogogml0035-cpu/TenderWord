@@ -23,5 +23,6 @@ class RewriteGraphState(TenderGraphStateBase, total=False):
     rewrite_target_index: int
     rewrite_history_messages: List[RewriteHistoryMessage]
     source_prepared_doc_path: str
+    source_origin_tender_path: str
     rewrite_temp_output_path: str
     current_node_display_override: Optional[str]

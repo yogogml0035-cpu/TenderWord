@@ -23,7 +23,21 @@ class RewriteGraph(BaseGraph):
         return self.STATE_CLS
 
     def estimate_total_nodes(self, initial_state: dict) -> int:
-        return 5
+        return 5 if self._has_uploaded_origin_tender(initial_state) else 4
+
+    @staticmethod
+    def _has_uploaded_origin_tender(state: RewriteGraphState | dict) -> bool:
+        if "source_origin_tender_path" not in state:
+            return True
+        path = state.get("source_origin_tender_path")
+        return bool(path and str(path).strip())
+
+    def _select_comment_branch(self, state: RewriteGraphState) -> str:
+        return (
+            "get_rewrite_comments"
+            if self._has_uploaded_origin_tender(state)
+            else "delete_section"
+        )
 
     def build_graph(self) -> StateGraph:
         builder = StateGraph(self.STATE_CLS)
@@ -49,7 +63,14 @@ class RewriteGraph(BaseGraph):
         )
 
         builder.add_edge(START, "resolve_rewrite_target")
-        builder.add_edge("resolve_rewrite_target", "get_rewrite_comments")
+        builder.add_conditional_edges(
+            "resolve_rewrite_target",
+            self._select_comment_branch,
+            {
+                "get_rewrite_comments": "get_rewrite_comments",
+                "delete_section": "delete_section",
+            },
+        )
         builder.add_edge("get_rewrite_comments", "delete_section")
         builder.add_edge("resolve_rewrite_target", "rewrite_text")
         builder.add_edge(["delete_section", "rewrite_text"], "update_word")
