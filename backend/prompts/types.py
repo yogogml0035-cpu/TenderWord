@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Sequence, Tuple
 
+from backend.skills.types import SkillSummary
+
 
 @dataclass(frozen=True)
 class RenderedPrompt:
@@ -28,13 +30,6 @@ class CommentPromptInput:
     comment_plan_detail: Any = None
     strikethrough_plan: Any = None
     non_black_font_plan: Any = None
-
-
-@dataclass(frozen=True)
-class RewritePromptInput:
-    base_text: str = ""
-    tender_params: str = ""
-    user_prompt: str = ""
 
 
 @dataclass(frozen=True)
@@ -70,6 +65,19 @@ class RouteHistoryMessage:
 
 
 @dataclass(frozen=True)
+class TaskSkillPromptSection:
+    title: str
+    content: str
+
+
+@dataclass(frozen=True)
+class TaskSkillPromptInput:
+    skill_id: str
+    instruction: str
+    sections: Sequence[TaskSkillPromptSection]
+
+
+@dataclass(frozen=True)
 class RewriteHistoryMessage:
     role: str
     content: str
@@ -87,6 +95,7 @@ class RewriteAssistantCandidate:
 
 @dataclass(frozen=True)
 class RouteOrReplyPromptInput:
+    skills: Sequence[SkillSummary]
     messages: Sequence[RouteHistoryMessage]
     latest_user_message: str
     latest_rewrite_state: Optional[RewriteStateSnapshot]

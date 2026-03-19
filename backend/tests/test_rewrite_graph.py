@@ -43,6 +43,7 @@ def _load_rewrite_graph_module(monkeypatch):
             self.nodes = {}
             self.edges = set()
             self.waiting_edges = set()
+            self.conditional_edges = []
 
         def add_node(self, node_name, node_func):
             self.nodes[node_name] = node_func
@@ -53,6 +54,16 @@ def _load_rewrite_graph_module(monkeypatch):
                 self.waiting_edges.add((tuple(start), end))
             else:
                 self.edges.add((start, end))
+            return self
+
+        def add_conditional_edges(self, start, condition, mapping):
+            self.conditional_edges.append(
+                {
+                    "start": start,
+                    "condition": condition,
+                    "mapping": dict(mapping),
+                }
+            )
             return self
 
         def compile(self):
@@ -129,9 +140,22 @@ def test_rewrite_graph_orders_comment_extraction_before_delete_section(monkeypat
     rewrite_graph_module = _load_rewrite_graph_module(monkeypatch)
     builder = rewrite_graph_module.RewriteGraph().build_graph()
 
-    assert ("resolve_rewrite_target", "get_rewrite_comments") in builder.edges
     assert ("get_rewrite_comments", "delete_section") in builder.edges
     assert ("resolve_rewrite_target", "delete_section") not in builder.edges
+
+    conditional_edge = next(
+        item for item in builder.conditional_edges if item["start"] == "resolve_rewrite_target"
+    )
+    assert conditional_edge["mapping"] == {
+        "get_rewrite_comments": "get_rewrite_comments",
+        "delete_section": "delete_section",
+    }
+    assert (
+        conditional_edge["condition"]({"source_origin_tender_path": "D:/origin.docx"})
+        == "get_rewrite_comments"
+    )
+    assert conditional_edge["condition"]({"source_origin_tender_path": ""}) == "delete_section"
+    assert conditional_edge["condition"]({}) == "get_rewrite_comments"
 
 
 def test_rewrite_graph_keeps_parallel_join_and_updates_total_nodes(monkeypatch):
@@ -140,6 +164,8 @@ def test_rewrite_graph_keeps_parallel_join_and_updates_total_nodes(monkeypatch):
     builder = graph.build_graph()
 
     assert graph.estimate_total_nodes({}) == 5
+    assert graph.estimate_total_nodes({"source_origin_tender_path": ""}) == 4
+    assert graph.estimate_total_nodes({"source_origin_tender_path": "D:/origin.docx"}) == 5
     assert ("resolve_rewrite_target", "rewrite_text") in builder.edges
     assert (("delete_section", "rewrite_text"), "update_word") in builder.waiting_edges
 

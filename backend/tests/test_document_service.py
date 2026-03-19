@@ -282,7 +282,11 @@ def test_document_service_create_rewrite_task_forwards_rewrite_log_path(monkeypa
             return True
 
         def get_latest_rewrite_state(self, _conversation_id: str):
-            return {"prepared_doc_path": "D:/existing.docx", "polished_text": "原文"}
+            return {
+                "prepared_doc_path": "D:/existing.docx",
+                "polished_text": "原文",
+                "source_origin_tender_path": "D:/origin.docx",
+            }
 
     def _fake_submit_graph_task(**kwargs):
         captured.update(kwargs)
@@ -306,6 +310,7 @@ def test_document_service_create_rewrite_task_forwards_rewrite_log_path(monkeypa
     assert captured["task_kind"] == "rewrite"
     assert captured["conversation_id"] == "conv-9"
     assert captured["rewrite_user_prompt"] == "请把第三章写正式"
+    assert captured["initial_state"]["source_origin_tender_path"] == "D:/origin.docx"
 
 
 def test_document_service_invoke_graph_async_includes_rewrite_log_path_in_config(monkeypatch):
@@ -362,6 +367,21 @@ def test_build_rewrite_state_snapshot_persists_tender_params():
     assert snapshot["polished_text"] == "改写结果"
 
 
+def test_build_rewrite_state_snapshot_persists_uploaded_origin_path():
+    service = DocumentService()
+
+    snapshot = service._build_rewrite_state_snapshot(
+        result_state={},
+        initial_state={
+            "tender_type": "xjcg",
+            "prepared_doc_path": "D:/rewrite.docx",
+            "source_origin_tender_path": "D:/origin.docx",
+        },
+    )
+
+    assert snapshot["source_origin_tender_path"] == "D:/origin.docx"
+
+
 def test_rewrite_snapshot_keeps_tender_params_across_generate_and_rewrite_success():
     conversation_service = ConversationService()
 
@@ -393,3 +413,35 @@ def test_rewrite_snapshot_keeps_tender_params_across_generate_and_rewrite_succes
     assert latest_snapshot is not None
     assert latest_snapshot["tender_params"] == "首版技术参数"
     assert latest_snapshot["polished_text"] == "二版正文"
+
+
+def test_rewrite_snapshot_keeps_uploaded_origin_path_across_generate_and_rewrite_success():
+    conversation_service = ConversationService()
+
+    conversation_service.seed_generate_success(
+        "conv-2",
+        {
+            "prepared_doc_path": "D:/origin.docx",
+            "polished_text": "首版正文",
+            "source_origin_tender_path": "D:/origin-review.docx",
+            "tender_type": "xjcg",
+        },
+    )
+    first_snapshot = conversation_service.get_latest_rewrite_state("conv-2")
+    assert first_snapshot is not None
+    assert first_snapshot["source_origin_tender_path"] == "D:/origin-review.docx"
+
+    conversation_service.append_rewrite_success(
+        "conv-2",
+        user_prompt="请修改",
+        rewrite_state={
+            "prepared_doc_path": "D:/rewrite.docx",
+            "polished_text": "二版正文",
+            "source_origin_tender_path": first_snapshot["source_origin_tender_path"],
+            "tender_type": "xjcg",
+        },
+    )
+
+    latest_snapshot = conversation_service.get_latest_rewrite_state("conv-2")
+    assert latest_snapshot is not None
+    assert latest_snapshot["source_origin_tender_path"] == "D:/origin-review.docx"

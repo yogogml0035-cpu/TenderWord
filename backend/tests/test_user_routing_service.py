@@ -4,13 +4,14 @@ import asyncio
 import json
 from pathlib import Path
 
+from backend.skills import get_skill_registry
 import backend.util.log_util.rewrite_audit_log as rewrite_audit_log_module
 from backend.services.user_routing_service import (
     NON_REWRITE_HINT_TEXT,
     NO_DOCUMENT_HINT_TEXT,
     UserRoutingService,
 )
-from backend.util.log_util.rewrite_audit_log import REWRITE_STAGE_ROUTE_OR_REPLY
+from backend.util.log_util.rewrite_audit_log import REWRITE_STAGE_SKILL_DIRECTORY_ROUTE
 
 
 class DummyConversationService:
@@ -61,11 +62,12 @@ def test_stream_route_or_reply_returns_no_document_reply_when_exact_rewrite_has_
     )
 
     assert decision.route == "reply"
+    assert decision.skill_id == "rewrite"
     assert decision.reply_text == NO_DOCUMENT_HINT_TEXT
     assert decision.reply_streamed is False
     assert decision.rewrite_log_path
     payload = json.loads(Path(decision.rewrite_log_path).read_text(encoding="utf-8"))
-    assert payload[REWRITE_STAGE_ROUTE_OR_REPLY] == request_messages
+    assert payload[REWRITE_STAGE_SKILL_DIRECTORY_ROUTE] == request_messages
     assert len(list(audit_dir.glob("*.json"))) == 1
 
 
@@ -102,10 +104,11 @@ def test_stream_route_or_reply_returns_rewrite_when_output_is_exact_literal(monk
     )
 
     assert decision.route == "rewrite"
+    assert decision.skill_id == "rewrite"
     assert decision.reply_text == ""
     assert decision.rewrite_log_path
     payload = json.loads(Path(decision.rewrite_log_path).read_text(encoding="utf-8"))
-    assert payload[REWRITE_STAGE_ROUTE_OR_REPLY] == request_messages
+    assert payload[REWRITE_STAGE_SKILL_DIRECTORY_ROUTE] == request_messages
 
 
 def test_stream_route_or_reply_flushes_prefix_buffer_once_reply_diverges(monkeypatch, tmp_path):
@@ -176,3 +179,36 @@ def test_stream_route_or_reply_uses_service_fallback_when_model_returns_empty(mo
     assert decision.reply_streamed is False
     assert decision.rewrite_log_path is None
     assert not list(audit_dir.glob("*.json"))
+
+
+def test_stream_route_or_reply_uses_skill_description_without_leaking_instruction(monkeypatch):
+    service = UserRoutingService(conversation_service=DummyConversationService())
+    rewrite_skill = get_skill_registry().get_definition("rewrite")
+    captured_prompts: dict[str, str] = {}
+
+    async def _fake_stream_llm_completion(*_args, system_prompt, user_prompt, **_kwargs):
+        captured_prompts["system_prompt"] = system_prompt
+        captured_prompts["user_prompt"] = user_prompt
+        return "你好"
+
+    monkeypatch.setattr(
+        "backend.services.user_routing_service.stream_llm_completion",
+        _fake_stream_llm_completion,
+    )
+
+    decision = asyncio.run(
+        service.stream_route_or_reply(
+            conversation_id="conv-1",
+            messages=[{"role": "user", "content": "你是谁"}],
+            latest_user_message="你是谁",
+            model_provider="deepseek",
+        )
+    )
+
+    unique_instruction_line = "只依据输入里提供的当前文档内容、技术参数参考资料和用户修改指令完成改写"
+
+    assert decision.route == "reply"
+    assert rewrite_skill.description in captured_prompts["system_prompt"]
+    assert unique_instruction_line in rewrite_skill.instruction
+    assert unique_instruction_line not in captured_prompts["system_prompt"]
+    assert unique_instruction_line not in captured_prompts["user_prompt"]

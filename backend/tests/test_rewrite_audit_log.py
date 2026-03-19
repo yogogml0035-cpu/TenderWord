@@ -6,9 +6,11 @@ from pathlib import Path
 import backend.nodes.common_word_nodes.generate_polished_text as generate_polished_text_module
 import backend.nodes.skills_nodes.rewrite_nodes as rewrite_nodes_module
 import backend.util.log_util.rewrite_audit_log as rewrite_audit_log_module
+from backend.skills.types import SkillDefinition
 from backend.services.conversation_service import RewriteMessage
 from backend.util.log_util.rewrite_audit_log import (
-    REWRITE_STAGE_ROUTE_OR_REPLY,
+    REWRITE_STAGE_SKILL_DIRECTORY_ROUTE,
+    REWRITE_STAGE_SKILL_PROMPT_RENDER,
     REWRITE_STAGE_TARGET_SELECTION,
     REWRITE_STAGE_TEXT,
     create_rewrite_audit_log,
@@ -30,8 +32,13 @@ def test_rewrite_audit_log_creates_and_updates_grouped_json(monkeypatch, tmp_pat
 
     write_rewrite_audit_stage(
         log_path,
-        REWRITE_STAGE_ROUTE_OR_REPLY,
+        REWRITE_STAGE_SKILL_DIRECTORY_ROUTE,
         [{"role": "system", "content": "route"}],
+    )
+    write_rewrite_audit_stage(
+        log_path,
+        REWRITE_STAGE_SKILL_PROMPT_RENDER,
+        [{"role": "user", "content": "skill render"}],
     )
     write_rewrite_audit_stage(
         log_path,
@@ -40,13 +47,14 @@ def test_rewrite_audit_log_creates_and_updates_grouped_json(monkeypatch, tmp_pat
     )
     write_rewrite_audit_stage(
         log_path,
-        REWRITE_STAGE_ROUTE_OR_REPLY,
+        REWRITE_STAGE_SKILL_DIRECTORY_ROUTE,
         [{"role": "system", "content": "route-updated"}],
     )
 
     payload = json.loads(Path(log_path).read_text(encoding="utf-8"))
     assert payload == {
-        REWRITE_STAGE_ROUTE_OR_REPLY: [{"role": "system", "content": "route-updated"}],
+        REWRITE_STAGE_SKILL_DIRECTORY_ROUTE: [{"role": "system", "content": "route-updated"}],
+        REWRITE_STAGE_SKILL_PROMPT_RENDER: [{"role": "user", "content": "skill render"}],
         REWRITE_STAGE_TARGET_SELECTION: [{"role": "user", "content": "target"}],
     }
     assert Path(log_path).parent == audit_dir
@@ -163,6 +171,18 @@ def test_generate_polished_text_writes_rewrite_messages_to_existing_log(monkeypa
 
     payload = json.loads(Path(log_path).read_text(encoding="utf-8"))
     assert result["polished_text"] == "改写完成"
+    assert payload[REWRITE_STAGE_SKILL_PROMPT_RENDER] == [
+        {
+            "role": "system",
+            "content": generate_polished_text_module.get_skill_registry()
+            .get_definition("rewrite")
+            .instruction,
+        },
+        {
+            "role": "user",
+            "content": "【当前文档内容】\n原始正文\n\n【技术参数参考资料】\n（无）\n\n【用户修改指令】\n请改写第三章",
+        },
+    ]
     assert payload[REWRITE_STAGE_TEXT] == request_messages
 
 
@@ -197,3 +217,49 @@ def test_generate_polished_text_writes_prompt_outputs_to_generate_log(monkeypatc
     assert generate_log_dir.is_dir()
     assert len(list(generate_log_dir.glob("prompt_*_polish_prompt_*.txt"))) == 1
     assert len(list(generate_log_dir.glob("prompt_*_polished_text_*.txt"))) == 1
+
+
+def test_generate_polished_text_uses_rewrite_skill_instruction(monkeypatch):
+    captured_prompt: dict[str, str] = {}
+
+    class FakeSkillRegistry:
+        def get_definition(self, skill_id: str) -> SkillDefinition:
+            assert skill_id == "rewrite"
+            return SkillDefinition(
+                name="rewrite",
+                description="desc",
+                instruction="自定义 rewrite instruction",
+                source_path="D:/fake/rewrite/SKILL.md",
+            )
+
+    async def _fake_stream_llm_completion(*_args, system_prompt, user_prompt, **_kwargs):
+        captured_prompt["system_prompt"] = system_prompt
+        captured_prompt["user_prompt"] = user_prompt
+        return "改写完成"
+
+    monkeypatch.setattr(
+        generate_polished_text_module,
+        "get_skill_registry",
+        lambda: FakeSkillRegistry(),
+    )
+    monkeypatch.setattr(
+        generate_polished_text_module,
+        "stream_llm_completion",
+        _fake_stream_llm_completion,
+    )
+
+    result = generate_polished_text_module.generate_polished_text(
+        {
+            "rewrite_mode": True,
+            "rewrite_user_prompt": "请改写第三章",
+            "rewrite_base_text": "原始正文",
+            "tender_params": "参考参数",
+        },
+        {"configurable": {"model_provider": "deepseek"}},
+    )
+
+    assert result["polished_text"] == "改写完成"
+    assert captured_prompt["system_prompt"] == "自定义 rewrite instruction"
+    assert "【当前文档内容】\n原始正文" in captured_prompt["user_prompt"]
+    assert "【技术参数参考资料】\n参考参数" in captured_prompt["user_prompt"]
+    assert "【用户修改指令】\n请改写第三章" in captured_prompt["user_prompt"]

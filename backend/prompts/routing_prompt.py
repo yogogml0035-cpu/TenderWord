@@ -15,20 +15,23 @@ from backend.prompts.types import (
 REWRITE_ROUTE_LITERAL = "rewrite"
 REPLY_ROUTE_LITERAL = "reply"
 
-ROUTE_OR_REPLY_SYSTEM_PROMPT = """
+ROUTE_OR_REPLY_SYSTEM_PROMPT_TEMPLATE = """
 你是东松招标文件智能生成助手。
-如果用户输入和修改、改写、重写已生成的招标文本有关，只输出 rewrite。
+你当前可命中的后端 skill 目录如下：
+{skill_directory}
+
+当且仅当最新用户消息明确命中某个 skill 时，才允许输出该 skill 的标准 id；否则直接输出给用户的中文回复。
 如果用户输入无关，就直接正常回答问题，并在合适时自然提醒用户：当前支持在生成招标文件后继续修改或重写，不满意时可以直接下达修改重写指令。
-如果用户的问题依赖“当前文档”“这份文档”“第几章”等正文内容，但消息本身不是要求修改重写，不要假装看过文档；要直接说明当前不会自动携带文档正文，建议用户粘贴相关段落或直接下达修改重写指令。
+如果用户的问题依赖“当前文档”“这份文档”“第几章”等正文内容，但消息本身不是要求执行某个 skill，不要假装看过文档；要直接说明当前不会自动携带文档正文，建议用户粘贴相关段落或直接下达修改重写指令。
 如果用户是在打招呼、询问你是谁、你能做什么，请简短自我介绍，并明确自称“东松招标文件智能生成助手”。
 
 规则：
-1. 只有确定是修改、改写、重写当前招标文本时，才能输出 rewrite。
-2. 输出 rewrite 时只能输出这一个单词，小写，不得带任何额外字符。
-3. 其他情况直接输出给用户的中文回复，不要输出 JSON、标签、解释、分析过程。
-4. 如果不确定是否属于修改重写，按普通回复处理。
-5. 对“支持生成后继续修改或重写”的提醒最多说一次，不要重复改写同一提醒。
+1. 命中 skill 时，只能输出一个 skill id，且只能从以下候选中选择：{skill_ids}。
+2. 未命中 skill 或不确定时，直接输出给用户的正常中文回复，不要输出 JSON、标签、解释或分析过程。
+3. 不要同时命中多个 skill，不做多 skill 组合。
+4. 对“支持生成后继续修改或重写”的提醒最多说一次，不要重复改写同一提醒。
 """.strip()
+ROUTE_OR_REPLY_SYSTEM_PROMPT = ROUTE_OR_REPLY_SYSTEM_PROMPT_TEMPLATE
 
 JUDGE_TARGET_SYSTEM_PROMPT = """
 你是文档修改版本选择助手。
@@ -51,6 +54,20 @@ def _truncate(text: str, limit: int) -> str:
     if len(normalized) > limit:
         return normalized[:limit] + "..."
     return normalized
+
+
+def build_route_or_reply_system_prompt(data: RouteOrReplyPromptInput) -> str:
+    if not data.skills:
+        raise ValueError("路由 prompt 至少需要一个已注册 skill")
+
+    skill_directory = "\n".join(
+        f"- {skill.name}: {skill.description}" for skill in data.skills
+    )
+    skill_ids = ", ".join(skill.name for skill in data.skills)
+    return ROUTE_OR_REPLY_SYSTEM_PROMPT_TEMPLATE.format(
+        skill_directory=skill_directory,
+        skill_ids=skill_ids,
+    )
 
 
 def render_route_or_reply_prompt(data: RouteOrReplyPromptInput) -> RenderedPrompt:
@@ -84,7 +101,7 @@ def render_route_or_reply_prompt(data: RouteOrReplyPromptInput) -> RenderedPromp
     )
 
     return RenderedPrompt(
-        system_prompt=ROUTE_OR_REPLY_SYSTEM_PROMPT,
+        system_prompt=build_route_or_reply_system_prompt(data),
         user_prompt=user_prompt,
     )
 

@@ -27,6 +27,8 @@
 
 ## 边界条件与已知坑点
 - `get_rewrite_comments` 必须先于 `delete_section`，避免同一临时文档读写并发。
+- 只有用户实际上传过送审稿时，rewrite graph 才应进入 `get_rewrite_comments`；当前通过 `source_origin_tender_path` 保留该事实，不能再用 rewrite 过程里的 `origin_tender_path` 判断，因为它会被改写成临时副本路径。
+- 兼容修复前已存在的 rewrite 历史时，若快照里根本没有 `source_origin_tender_path`，仍按旧行为执行 `get_rewrite_comments`；新快照会显式写入“路径或空字符串”，后续即可稳定跳过。
 - `rewrite_text` 可以继续与文件操作分支并行，因为它只做 LLM 改写，不直接修改 Word。
 - `reference_text` 为空的批注无法稳定回写，当前不增加 `scope_text` 兜底匹配。
 

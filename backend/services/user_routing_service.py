@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Sequence
 
+from backend.skills import SkillRegistry, get_skill_registry
 from backend.prompts.routing_prompt import (
     REPLY_ROUTE_LITERAL,
     REWRITE_ROUTE_LITERAL,
@@ -19,7 +20,7 @@ from backend.prompts.types import (
 from backend.services.conversation_service import ConversationService, get_conversation_service
 from backend.util.common_util import StreamCallbacks, stream_llm_completion
 from backend.util.log_util.rewrite_audit_log import (
-    REWRITE_STAGE_ROUTE_OR_REPLY,
+    REWRITE_STAGE_SKILL_DIRECTORY_ROUTE,
     create_rewrite_audit_log,
     write_rewrite_audit_stage,
 )
@@ -33,6 +34,7 @@ NON_REWRITE_HINT_TEXT = "我这边暂时没收到有效回复，请重试一次�
 @dataclass(frozen=True)
 class UserRouteDecision:
     route: str
+    skill_id: Optional[str] = None
     latest_rewrite_state: Optional[Dict[str, Any]] = None
     reply_text: str = ""
     reply_streamed: bool = False
@@ -53,8 +55,13 @@ def _to_route_history_messages(
 
 
 class UserRoutingService:
-    def __init__(self, conversation_service: Optional[ConversationService] = None):
+    def __init__(
+        self,
+        conversation_service: Optional[ConversationService] = None,
+        skill_registry: Optional[SkillRegistry] = None,
+    ):
         self._conversation_service = conversation_service or get_conversation_service()
+        self._skill_registry = skill_registry or get_skill_registry()
 
     async def stream_route_or_reply(
         self,
@@ -69,12 +76,17 @@ class UserRoutingService:
         latest_rewrite_state = self._conversation_service.get_latest_rewrite_state(conversation_id)
         latest_rewrite_snapshot = RewriteStateSnapshot.from_mapping(latest_rewrite_state)
         has_rewrite_history = latest_rewrite_state is not None
+        route_skill_summaries = self._skill_registry.list_skill_summaries()
+        skill_ids = self._skill_registry.list_skill_ids()
         request_messages: list[dict[str, Any]] = []
 
         prefix_buffer = ""
         reply_parts: list[str] = []
         reply_started = False
         reply_streamed = False
+
+        def _prefix_matches_registered_skill(prefix: str) -> bool:
+            return any(skill_id.startswith(prefix) for skill_id in skill_ids)
 
         def _emit_reply_text(text: str) -> None:
             nonlocal reply_started, reply_streamed
@@ -96,10 +108,7 @@ class UserRoutingService:
                 return
 
             prefix_buffer += chunk_text
-            if (
-                len(prefix_buffer) <= len(REWRITE_ROUTE_LITERAL)
-                and REWRITE_ROUTE_LITERAL.startswith(prefix_buffer)
-            ):
+            if prefix_buffer and _prefix_matches_registered_skill(prefix_buffer):
                 return
 
             _emit_reply_text(prefix_buffer)
@@ -111,6 +120,7 @@ class UserRoutingService:
 
         rendered_prompt = render_route_or_reply_prompt(
             RouteOrReplyPromptInput(
+                skills=route_skill_summaries,
                 messages=_to_route_history_messages(messages),
                 latest_user_message=normalized_message,
                 latest_rewrite_state=latest_rewrite_snapshot,
@@ -135,22 +145,27 @@ class UserRoutingService:
             raw_output,
         )
 
-        if raw_output == REWRITE_ROUTE_LITERAL:
-            rewrite_log_path = self._write_rewrite_route_audit(
+        normalized_output = str(raw_output or "").strip()
+        if normalized_output in skill_ids:
+            binding = self._skill_registry.get_executor_binding(normalized_output)
+            rewrite_log_path = self._write_skill_directory_route_audit(
                 conversation_id=conversation_id,
                 request_messages=request_messages,
                 rendered_system_prompt=rendered_prompt.system_prompt,
                 rendered_user_prompt=rendered_prompt.user_prompt,
             )
-            if not has_rewrite_history:
+            if binding.route_literal == REWRITE_ROUTE_LITERAL and not has_rewrite_history:
                 return UserRouteDecision(
                     route=REPLY_ROUTE_LITERAL,
+                    skill_id=normalized_output,
                     latest_rewrite_state=latest_rewrite_state,
                     reply_text=NO_DOCUMENT_HINT_TEXT,
+                    used_llm=True,
                     rewrite_log_path=rewrite_log_path,
                 )
             return UserRouteDecision(
-                route=REWRITE_ROUTE_LITERAL,
+                route=binding.route_literal,
+                skill_id=normalized_output,
                 latest_rewrite_state=latest_rewrite_state,
                 used_llm=True,
                 rewrite_log_path=rewrite_log_path,
@@ -175,7 +190,7 @@ class UserRoutingService:
             used_llm=True,
         )
 
-    def _write_rewrite_route_audit(
+    def _write_skill_directory_route_audit(
         self,
         *,
         conversation_id: str,
@@ -195,7 +210,7 @@ class UserRoutingService:
             log_path = create_rewrite_audit_log(conversation_id)
             write_rewrite_audit_stage(
                 log_path,
-                REWRITE_STAGE_ROUTE_OR_REPLY,
+                REWRITE_STAGE_SKILL_DIRECTORY_ROUTE,
                 payload_messages,
             )
             return log_path
