@@ -79,7 +79,7 @@ def test_render_task_skill_prompt_wraps_instruction_and_context_sections():
     )
 
     assert rendered.system_prompt == "你是 rewrite skill。"
-    assert "【skill_id】\nrewrite" in rendered.user_prompt
+    assert "【skill_id】" not in rendered.user_prompt
     assert "原始正文" in rendered.user_prompt
     assert "1. 电压 220V\n2. 功率 500W" in rendered.user_prompt
     assert "把第三章写得更正式" in rendered.user_prompt

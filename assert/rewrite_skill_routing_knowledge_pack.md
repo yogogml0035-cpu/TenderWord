@@ -25,7 +25,7 @@
   - 路由前缀缓冲从固定 `rewrite` 扩展为“任一已注册 skill id”前缀，避免 skill id 误流给前端。
 - 第二阶段 rewrite 执行：
   - 删除 `backend/prompts/rewrite_prompt.py`，rewrite_mode 改为读取 `rewrite` skill instruction。
-  - 新增 `backend/prompts/skill_prompt.py`，统一渲染 `skill_id + instruction + sections`。
+  - 新增 `backend/prompts/skill_prompt.py`，统一渲染 `instruction + sections`，`skill_id` 只保留在注册与分发链路中，不再出现在用户 prompt 正文。
   - `backend/nodes/common_word_nodes/generate_polished_text.py` 统一包装 `当前文档内容 / 技术参数参考资料 / 用户修改指令`。
 - 审计与可观测性：
   - rewrite 审计日志新增 `skill_directory_route` 与 `skill_prompt_render` 两个阶段。
@@ -59,6 +59,7 @@
   - skill id 对应的 executor binding
   - 是否复用当前前端 route 字面量，还是新增前端可见 route 契约
 - `generate_polished_text` 的 rewrite_mode 现在依赖 `SkillRegistry`；如果 skill instruction 被误删或 frontmatter 非法，rewrite 不会再降级为旧 prompt，而是直接失败。
+- `skill_id` 仍用于路由命中和 executor binding，但不应再被拼进第二阶段 user prompt；否则会把内部实现细节暴露给模型输入，增加无效噪音。
 
 ## 后续扩展建议
 - 若后续出现更多 task 型 skill，可把 `UserRouteDecision.skill_id` 往 graph state 继续透传，为后续多分支 dispatch 做准备。

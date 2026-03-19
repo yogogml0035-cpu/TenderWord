@@ -40,6 +40,7 @@
 - `backend/skills/*/SKILL.md` 是行为说明资源，不等价于 executor；Skill Registry 必须同时校验 `SKILL.md` 与执行器绑定，缺一即失败。
 - 任何新增 tender type 时，若 prompt 有特化需求，应优先在 `backend/prompts/*_prompt.py` registry 中扩展，而不是复制 node/service。
 - 任何新增 task 型 skill 时，应优先扩展 `backend/skills/registry.py` 的 binding 与 `backend/skills/<dir>/SKILL.md`，不要重新把完整 instruction 散回 node/service。
+- `TaskSkillPromptInput.skill_id` 属于路由/注册元数据；默认不应渲染进第二阶段 user prompt，避免把内部标识混入模型正文上下文。
 - 若某个 prompt 的输出有严格机器契约，解析与校验逻辑应与该 prompt 一起演进，并至少有结构断言测试。
 - rewrite relevance classifier 已下线；rewrite 显式入口不再额外做 LLM 语义校验。
 

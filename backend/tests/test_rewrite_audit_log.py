@@ -180,7 +180,7 @@ def test_generate_polished_text_writes_rewrite_messages_to_existing_log(monkeypa
         },
         {
             "role": "user",
-            "content": "【skill_id】\nrewrite\n\n【当前文档内容】\n原始正文\n\n【技术参数参考资料】\n（无）\n\n【用户修改指令】\n请改写第三章",
+            "content": "【当前文档内容】\n原始正文\n\n【技术参数参考资料】\n（无）\n\n【用户修改指令】\n请改写第三章",
         },
     ]
     assert payload[REWRITE_STAGE_TEXT] == request_messages
