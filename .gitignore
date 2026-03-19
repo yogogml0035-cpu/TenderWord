@@ -1,8 +1,8 @@
 # 日志
 *.log
 backend/logs/*
-backend/prompts_log/generate_log/*
-backend/prompts_log/rewrite_log/*
+backend/prompts_log/*
+
 
 # Python 缓存文件
 __pycache__/
