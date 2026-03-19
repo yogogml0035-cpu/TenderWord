@@ -84,7 +84,6 @@ def generate_comments(
     progress_log.debug("[generate_comments] 开始执行...")
     
     # 从 state 读取输入数据，使用防御性默认值
-    # 需求引用：2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 7.1, 8.2
     polished_text = state.get("polished_text", "")
     comment_plan_detail = state.get("comment_plan_detail", [])
     strikethrough_plan = state.get("strikethrough_plan", [])
@@ -95,7 +94,6 @@ def generate_comments(
     progress_log.debug(f"[generate_comments] 招标类型: {tender_type}")
     
     # 实现提示词选择和验证
-    # 需求引用：5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 6.5, 6.6, 6.7, 6.8
     rendered_prompt = render_comment_prompt(
         CommentPromptInput(
             tender_type=str(tender_type or "xjcg"),
@@ -132,7 +130,6 @@ def generate_comments(
         progress_log.warning(f"[generate_comments] 警告: 准备批注输出文件路径失败: {e}")
     
     # 实现配置提取和回调设置
-    # 需求引用：4.2, 4.4, 8.3
     
     # 从 config 提取 model_provider，默认为 "deepseek"
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
@@ -188,7 +185,6 @@ def generate_comments(
     )
     
     # 实现带错误处理的 LLM 流式调用
-    # 需求引用：4.1, 4.2, 4.3, 4.4, 7.2, 7.4, 7.5, 7.6
     
     # 设置 asyncio 事件循环（获取现有或创建新的）
     try:
@@ -223,7 +219,6 @@ def generate_comments(
         return TenderGraphStateBase(polished_comments=[])
     
     # 实现带错误处理的 JSON 解析
-    # 需求引用：4.5, 4.6, 7.3, 7.4, 7.5, 8.4
     
     # 确保输出后有换行
     if not suppress_llm_stdout:
@@ -289,5 +284,4 @@ def generate_comments(
     
     # 创建仅包含 polished_comments 字段的新状态字典
     # 确保不修改输入状态对象（不可变性）
-    # 需求引用：1.5, 3.1, 3.4, 7.5, 8.5, 8.6, 9.1, 9.2, 9.3, 9.4
     return TenderGraphStateBase(polished_comments=polished_comments)
