@@ -170,7 +170,10 @@ test.describe('URL-driven Conversation Flow', () => {
     await expect(page.getByText('询价采购')).toBeVisible();
   });
 
-  test('Recent conversations are scoped to the current page session', async ({ page, context }) => {
+  test('Current-page conversations stay scoped to the current page session', async ({
+    page,
+    context,
+  }) => {
     await page.addInitScript(() => {
       window.sessionStorage.setItem(
         'chat-storage',
@@ -197,9 +200,8 @@ test.describe('URL-driven Conversation Flow', () => {
     await page.goto('/tender');
     await page.waitForLoadState('networkidle');
 
-    await page.getByRole('button', { name: '询价采购' }).hover();
-    await expect(page.getByText('最近对话')).toBeVisible();
-    await expect(page.getByRole('button', { name: /HISTORY-TEST-001/ }).last()).toBeVisible();
+    await expect(page.getByText('当前页面会话')).toBeVisible();
+    await expect(page.getByText('HISTORY-TEST-001')).toBeVisible();
 
     await page.close();
 
@@ -207,9 +209,92 @@ test.describe('URL-driven Conversation Flow', () => {
     await freshPage.goto('/tender');
     await freshPage.waitForLoadState('networkidle');
 
-    await freshPage.getByRole('button', { name: '询价采购' }).hover();
-    await expect(freshPage.getByText('最近对话')).toHaveCount(0);
+    await expect(freshPage.getByText('当前页面会话')).toHaveCount(0);
     await expect(freshPage.getByText('HISTORY-TEST-001')).toHaveCount(0);
+  });
+
+  test('Expanded sidebar shows all type conversations, scrolls, and auto-creates a new conversation for an empty type', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      window.sessionStorage.setItem(
+        'chat-storage',
+        JSON.stringify({
+          state: {
+            conversations: Array.from({ length: 12 }, (_, index) => ({
+              id: `conv-xjcg-${index + 1}`,
+              title: `XJCG-HISTORY-${index + 1}`,
+              tenderType: 'xjcg',
+              createdAt: index + 1,
+              updatedAt: 100 - index,
+              messages: [],
+            })),
+            currentConversationId: 'conv-xjcg-1',
+            selectedTenderType: 'xjcg',
+            conversationDrafts: {},
+          },
+          version: 0,
+        })
+      );
+    });
+
+    await page.goto('/tender');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.getByText('当前页面会话')).toBeVisible();
+    await expect(page.locator('[data-testid^="conversation-item-conv-xjcg-"]')).toHaveCount(12);
+
+    const sidebarIsScrollable = await page
+      .getByTestId('tender-type-sidebar-scroll')
+      .evaluate((element) => element.scrollHeight > element.clientHeight);
+    expect(sidebarIsScrollable).toBe(true);
+
+    const gngkButton = page.getByTestId('tender-type-button-gngk');
+    const beforeClickY = await gngkButton.evaluate(
+      (element) => element.getBoundingClientRect().top
+    );
+    await gngkButton.click();
+
+    await expect(page.locator('[data-testid^="conversation-item-conv-xjcg-"]')).toHaveCount(0);
+    await expect(page.getByText('新对话')).toBeVisible();
+
+    const afterClickY = await gngkButton.evaluate((element) => element.getBoundingClientRect().top);
+    expect(beforeClickY).toBeGreaterThan(afterClickY);
+
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const raw = window.sessionStorage.getItem('chat-storage');
+          if (!raw) {
+            return null;
+          }
+
+          const parsed = JSON.parse(raw) as {
+            state?: {
+              conversations?: Array<{ id: string; tenderType: string }>;
+              currentConversationId?: string | null;
+              selectedTenderType?: string | null;
+            };
+          };
+
+          const conversations = parsed.state?.conversations ?? [];
+          const currentConversation =
+            conversations.find(
+              (conversation) => conversation.id === parsed.state?.currentConversationId
+            ) || null;
+
+          return {
+            conversationCount: conversations.length,
+            currentTenderType: currentConversation?.tenderType ?? null,
+            selectedTenderType: parsed.state?.selectedTenderType ?? null,
+          };
+        })
+      )
+      .toEqual({
+        conversationCount: 13,
+        currentTenderType: 'gngk',
+        selectedTenderType: 'gngk',
+      });
   });
 
   test('Stale generating task is preserved as interrupted when backend reports TASK_NOT_FOUND', async ({

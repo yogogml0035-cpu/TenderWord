@@ -440,6 +440,23 @@ function findConversationByTaskIdFromState(
   return byMessage || null;
 }
 
+function sortConversationsByUpdatedAtDesc<T extends Pick<Conversation, 'updatedAt'>>(
+  conversations: T[]
+): T[] {
+  return [...conversations].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+function getMostRecentConversationByTypeFromState(
+  state: Pick<ChatStore, 'conversations'>,
+  type: TenderType
+): Conversation | null {
+  return (
+    sortConversationsByUpdatedAtDesc(
+      state.conversations.filter((conversation) => conversation.tenderType === type)
+    )[0] || null
+  );
+}
+
 interface ChatStore {
   conversations: Conversation[];
   currentConversationId: string | null;
@@ -576,20 +593,27 @@ export const useChatStore = create<ChatStore>()(
             const newConversations = state.conversations.filter((conv) => conv.id !== id);
 
             let newCurrentId = state.currentConversationId;
+            let nextSelectedTenderType = state.selectedTenderType;
             if (state.currentConversationId === id) {
               if (conversationToDelete) {
-                const sameTypeConversations = newConversations
-                  .filter((conv) => conv.tenderType === conversationToDelete.tenderType)
-                  .sort((a, b) => b.createdAt - a.createdAt);
+                const sameTypeConversations = sortConversationsByUpdatedAtDesc(
+                  newConversations.filter((conv) => conv.tenderType === conversationToDelete.tenderType)
+                );
                 newCurrentId = sameTypeConversations[0]?.id || null;
+                nextSelectedTenderType =
+                  sameTypeConversations[0]?.tenderType || conversationToDelete.tenderType;
               } else {
-                newCurrentId = newConversations[0]?.id || null;
+                newCurrentId = sortConversationsByUpdatedAtDesc(newConversations)[0]?.id || null;
+                nextSelectedTenderType =
+                  newConversations.find((conversation) => conversation.id === newCurrentId)?.tenderType ||
+                  nextSelectedTenderType;
               }
             }
 
             return {
               conversations: newConversations,
               currentConversationId: newCurrentId,
+              selectedTenderType: nextSelectedTenderType,
               activeTaskIds: state.activeTaskIds.filter((taskId) => !deletedTaskIds.has(taskId)),
               taskMessageMap: Object.fromEntries(
                 Object.entries(state.taskMessageMap).filter(([taskId]) => !deletedTaskIds.has(taskId))
@@ -612,16 +636,23 @@ export const useChatStore = create<ChatStore>()(
         },
 
         setCurrentConversation: (id) =>
-          set((state) => ({
-            currentConversationId: id,
-            unreadConversationResults: id
-              ? Object.fromEntries(
-                  Object.entries(state.unreadConversationResults).filter(
-                    ([conversationId]) => conversationId !== id
+          set((state) => {
+            const nextConversation = id
+              ? state.conversations.find((conversation) => conversation.id === id) || null
+              : null;
+
+            return {
+              currentConversationId: id,
+              selectedTenderType: nextConversation?.tenderType || state.selectedTenderType,
+              unreadConversationResults: id
+                ? Object.fromEntries(
+                    Object.entries(state.unreadConversationResults).filter(
+                      ([conversationId]) => conversationId !== id
+                    )
                   )
-                )
-              : state.unreadConversationResults,
-          })),
+                : state.unreadConversationResults,
+            };
+          }),
 
         updateConversationDraft: (conversationId, updates) => {
           set((state) => ({
@@ -1600,16 +1631,12 @@ export const useChatStore = create<ChatStore>()(
 
         getSortedConversations: () => {
           const state = get();
-          return [...state.conversations].sort((a, b) => b.createdAt - a.createdAt);
+          return sortConversationsByUpdatedAtDesc(state.conversations);
         },
 
         getMostRecentConversationByType: (type: TenderType) => {
           const state = get();
-          return (
-            state.conversations
-              .filter((conv) => conv.tenderType === type)
-              .sort((a, b) => b.createdAt - a.createdAt)[0] || null
-          );
+          return getMostRecentConversationByTypeFromState(state, type);
         },
 
         resetSessionState: () =>

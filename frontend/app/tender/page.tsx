@@ -245,7 +245,7 @@ function TenderPageContent() {
 
   return (
     <div className="grid h-screen grid-cols-[auto_minmax(0,2fr)_minmax(0,3fr)] overflow-hidden bg-gray-100">
-      <div className="flex-shrink-0">
+      <div className="min-h-0 min-w-0 flex-shrink-0">
         <TenderTypeSidebar />
       </div>
 
