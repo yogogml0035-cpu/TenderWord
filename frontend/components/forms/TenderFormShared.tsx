@@ -211,7 +211,10 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       tenderNo,
       updateDraft: applyTenderDraftUpdates,
       onSuccess: () => {
-        if (currentConversation && shouldAutoUpdateConversationTitle(currentConversation.title)) {
+        if (
+          currentConversation &&
+          shouldAutoUpdateConversationTitle(currentConversation.title, tenderNo)
+        ) {
           updateConversation(currentConversation.id, {
             title: generateConversationTitle(tenderNo.trim()),
           });

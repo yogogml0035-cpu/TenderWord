@@ -155,7 +155,7 @@ describe('chatStore conversation scoped selectors', () => {
         },
         {
           id: 'conv-xjcg-new',
-          title: '自定义标题',
+          title: '25-3505',
           tenderType: 'xjcg',
           createdAt: 2,
           updatedAt: 20,

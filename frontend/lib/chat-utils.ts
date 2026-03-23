@@ -244,12 +244,27 @@ export function truncateText(text: string, maxLength: number): string {
 
 /**
  * Generate conversation title from tender number
- * Format: {tenderNo}
+ * Format: {YY}-{last four digits}
  * @param tenderNo - Tender number string
+ * @param currentDate - Date used to derive the current year
  * @returns Conversation title
  */
-export function generateConversationTitle(tenderNo: string): string {
-  return tenderNo;
+export function generateConversationTitle(
+  tenderNo: string,
+  currentDate: Date = new Date()
+): string {
+  const normalizedTenderNo = normalizeTenderNo(tenderNo) || tenderNo.trim();
+  const digitsOnly = normalizedTenderNo.replace(/\D/g, '');
+  const fallbackSuffix = normalizedTenderNo.replace(/[^A-Za-z0-9]/g, '');
+  const suffixSource =
+    digitsOnly.length > 0 ? digitsOnly.slice(-4) : fallbackSuffix.slice(-4);
+  const suffix = (suffixSource || normalizedTenderNo.slice(-4) || '0000')
+    .slice(-4)
+    .padStart(4, '0')
+    .toUpperCase();
+  const year = currentDate.getFullYear().toString().slice(-2);
+
+  return `${year}-${suffix}`;
 }
 
 export function normalizeTenderNo(tenderNo: string | null | undefined): string | null {
@@ -265,8 +280,21 @@ export function isDefaultConversationTitle(title: string): boolean {
   return title.trim() === '新对话';
 }
 
-export function shouldAutoUpdateConversationTitle(title: string): boolean {
-  return isDefaultConversationTitle(title) || inferTenderNoFromConversationTitle(title) !== null;
+function isCompactGeneratedConversationTitle(title: string): boolean {
+  return /^\d{2}-\d{4}$/.test(title.trim());
+}
+
+export function shouldAutoUpdateConversationTitle(title: string, tenderNo?: string): boolean {
+  if (isDefaultConversationTitle(title) || isCompactGeneratedConversationTitle(title)) {
+    return true;
+  }
+
+  const normalizedTenderNo = normalizeTenderNo(tenderNo);
+  if (normalizedTenderNo && title.trim().toUpperCase() === normalizedTenderNo) {
+    return true;
+  }
+
+  return inferTenderNoFromConversationTitle(title) !== null;
 }
 
 /**
@@ -276,6 +304,7 @@ export function shouldAutoUpdateConversationTitle(title: string): boolean {
 export function inferTenderNoFromConversationTitle(title: string): string | null {
   const candidate = title.trim();
   if (!candidate) return null;
+  if (isCompactGeneratedConversationTitle(candidate)) return null;
 
   // Skip human labels such as "测试会话 1" or Chinese titles.
   if (/[\u4e00-\u9fff]/.test(candidate)) return null;

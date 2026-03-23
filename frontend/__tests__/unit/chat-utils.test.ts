@@ -18,6 +18,7 @@ import {
   truncateText,
   generateConversationTitle,
   inferTenderNoFromConversationTitle,
+  shouldAutoUpdateConversationTitle,
 } from '@/lib/chat-utils';
 import { ConversationFactory, MessageFactory } from '../mocks/data-factories';
 
@@ -300,35 +301,37 @@ describe('chat-utils', () => {
   });
 
   describe('generateConversationTitle', () => {
-    it('should use tender number as title directly', () => {
-      const tenderNo = 'ZBGG-2024-001';
-      const title = generateConversationTitle(tenderNo);
+    const referenceDate = new Date('2026-03-23T12:00:00+08:00');
 
-      expect(title).toBe('ZBGG-2024-001');
+    it('should use the current year and last four digits of tender number', () => {
+      const tenderNo = '0811-26DSITC0069';
+      const title = generateConversationTitle(tenderNo, referenceDate);
+
+      expect(title).toBe('26-0069');
     });
 
-    it('should include tender number in title', () => {
-      const tenderNo = 'TEST-2024-123';
-      const title = generateConversationTitle(tenderNo);
+    it('should fall back to the last four numeric characters across separators', () => {
+      const tenderNo = 'TEST-2026-6789';
+      const title = generateConversationTitle(tenderNo, referenceDate);
 
-      expect(title).toBe('TEST-2024-123');
+      expect(title).toBe('26-6789');
     });
 
-    it('should generate same title at different times', () => {
-      const tenderNo = 'SAME-NO';
-      const title1 = generateConversationTitle(tenderNo);
-      const title2 = generateConversationTitle(tenderNo);
+    it('should generate the same title for the same tender number on the same date', () => {
+      const tenderNo = 'SAME-0069';
+      const title1 = generateConversationTitle(tenderNo, referenceDate);
+      const title2 = generateConversationTitle(tenderNo, referenceDate);
 
-      expect(title1).toBe('SAME-NO');
-      expect(title2).toBe('SAME-NO');
+      expect(title1).toBe('26-0069');
+      expect(title2).toBe('26-0069');
       expect(title1).toBe(title2);
     });
 
-    it('should handle tender numbers with special characters', () => {
-      const tenderNo = 'TEST_NO-2024.001';
-      const title = generateConversationTitle(tenderNo);
+    it('should follow the current year instead of the year embedded in tender number', () => {
+      const tenderNo = '0811-24DSITC0069';
+      const title = generateConversationTitle(tenderNo, referenceDate);
 
-      expect(title).toBe('TEST_NO-2024.001');
+      expect(title).toBe('26-0069');
     });
   });
 
@@ -342,6 +345,17 @@ describe('chat-utils', () => {
       expect(inferTenderNoFromConversationTitle('我的询价项目')).toBeNull();
       expect(inferTenderNoFromConversationTitle('test conversation')).toBeNull();
       expect(inferTenderNoFromConversationTitle('NO_DIGITS')).toBeNull();
+      expect(inferTenderNoFromConversationTitle('26-0069')).toBeNull();
+    });
+  });
+
+  describe('shouldAutoUpdateConversationTitle', () => {
+    it('should keep auto-updating compact generated titles', () => {
+      expect(shouldAutoUpdateConversationTitle('26-0069', '0811-26DSITC0069')).toBe(true);
+    });
+
+    it('should not overwrite custom titles', () => {
+      expect(shouldAutoUpdateConversationTitle('我的重点项目', '0811-26DSITC0069')).toBe(false);
     });
   });
 });

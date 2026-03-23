@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import ChatPage from '@/app/tender/page';
+import { generateConversationTitle } from '@/lib/chat-utils';
 import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
@@ -335,7 +336,7 @@ describe('ChatPage', () => {
       useChatStore.getState();
     expect(conversations).toHaveLength(1);
     expect(currentConversationId).toBe(conversations[0]?.id || null);
-    expect(conversations[0]?.title).toBe('0811-DSITC251534');
+    expect(conversations[0]?.title).toBe(generateConversationTitle('0811-DSITC251534'));
     expect(selectedTenderType).toBe('gngk');
     expect(getConversationDraft(conversations[0]?.id || null)?.tender_no).toBe('0811-DSITC251534');
     expect(getConversationDraft(conversations[0]?.id || null)?.tender_fetch).toEqual({
