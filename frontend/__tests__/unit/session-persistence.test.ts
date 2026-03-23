@@ -22,12 +22,12 @@ function resetStores() {
   useChatTaskSessionStore.setState({ sessions: {} });
 }
 
-describe('session-scoped persistence', () => {
+describe('current-page session persistence', () => {
   beforeEach(() => {
     resetStores();
   });
 
-  it('persists chat conversations in sessionStorage', async () => {
+  it('persists current-page chat conversations in sessionStorage only', async () => {
     act(() => {
       useChatStore.getState().createConversation('SESSION-CHAT-001', 'xjcg');
     });
@@ -38,7 +38,7 @@ describe('session-scoped persistence', () => {
     expect(window.localStorage.getItem('chat-storage')).toBeNull();
   });
 
-  it('persists generation history in sessionStorage', async () => {
+  it('persists current-page generation history in sessionStorage only', async () => {
     act(() => {
       useHistoryStore.getState().addToHistory({
         taskId: 'task-history-1',
@@ -59,7 +59,7 @@ describe('session-scoped persistence', () => {
     expect(window.localStorage.getItem('tender-history-storage')).toBeNull();
   });
 
-  it('persists task sessions in sessionStorage', async () => {
+  it('persists current-page task sessions in sessionStorage only', async () => {
     act(() => {
       useChatTaskSessionStore.getState().upsertSession('task-session-1', { lastEventId: '7' });
     });

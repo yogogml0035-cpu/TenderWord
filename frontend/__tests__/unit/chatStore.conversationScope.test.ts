@@ -155,7 +155,7 @@ describe('chatStore conversation scoped selectors', () => {
         },
         {
           id: 'conv-xjcg-new',
-          title: '自定义标题',
+          title: '25-3505',
           tenderType: 'xjcg',
           createdAt: 2,
           updatedAt: 20,
@@ -183,5 +183,81 @@ describe('chatStore conversation scoped selectors', () => {
       'conv-xjcg-new'
     );
     expect(store.findConversationByTenderNo('0811-dsitc253505', 'gngk')?.id).toBe('conv-gngk');
+  });
+
+  it('returns the most recent conversation for a type by updatedAt', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          id: 'conv-updated-late',
+          title: 'UPDATED-LATE',
+          tenderType: 'xjcg',
+          createdAt: 1,
+          updatedAt: 50,
+          messages: [],
+        },
+        {
+          id: 'conv-created-late',
+          title: 'CREATED-LATE',
+          tenderType: 'xjcg',
+          createdAt: 99,
+          updatedAt: 20,
+          messages: [],
+        },
+      ],
+    }));
+
+    expect(useChatStore.getState().getMostRecentConversationByType('xjcg')?.id).toBe(
+      'conv-updated-late'
+    );
+  });
+
+  it('falls back to the same tender type conversation with the latest updatedAt after deletion', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          id: 'conv-current',
+          title: 'CURRENT',
+          tenderType: 'xjcg',
+          createdAt: 1,
+          updatedAt: 10,
+          messages: [],
+        },
+        {
+          id: 'conv-fallback-new',
+          title: 'FALLBACK-NEW',
+          tenderType: 'xjcg',
+          createdAt: 2,
+          updatedAt: 40,
+          messages: [],
+        },
+        {
+          id: 'conv-fallback-old',
+          title: 'FALLBACK-OLD',
+          tenderType: 'xjcg',
+          createdAt: 3,
+          updatedAt: 15,
+          messages: [],
+        },
+        {
+          id: 'conv-other-type',
+          title: 'OTHER-TYPE',
+          tenderType: 'gngk',
+          createdAt: 4,
+          updatedAt: 100,
+          messages: [],
+        },
+      ],
+      currentConversationId: 'conv-current',
+      selectedTenderType: 'xjcg',
+    }));
+
+    useChatStore.getState().deleteConversation('conv-current');
+
+    const state = useChatStore.getState();
+    expect(state.currentConversationId).toBe('conv-fallback-new');
+    expect(state.selectedTenderType).toBe('xjcg');
   });
 });

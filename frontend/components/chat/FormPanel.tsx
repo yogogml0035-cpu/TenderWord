@@ -603,8 +603,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
       {/* Header */}
       <div className="relative z-20 border-b border-gray-200 bg-white px-4 py-3">
         <div>
-          <h2 className="font-medium text-gray-900">招标信息</h2>
-          <p className="text-xs text-gray-500">{tenderTypeDisplayName}</p>
+          <h2 className="font-medium text-gray-900">{tenderTypeDisplayName}</h2>
         </div>
       </div>
 

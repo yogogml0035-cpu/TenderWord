@@ -9,7 +9,11 @@ import { useUrlParams } from '@/hooks/useUrlParams';
 import { useHydrated } from '@/hooks/useHydrated';
 import { useChatStore } from '@/stores/chatStore';
 import { sendConversationHeartbeat } from '@/lib/api';
-import { generateConversationTitle, isDefaultConversationTitle, normalizeTenderNo } from '@/lib/chat-utils';
+import {
+  generateConversationTitle,
+  normalizeTenderNo,
+  shouldAutoUpdateConversationTitle,
+} from '@/lib/chat-utils';
 import { createTenderFetchState, syncTenderDataDraft } from '@/lib/tenderFetch';
 
 /**
@@ -73,13 +77,19 @@ function TenderPageContent() {
     processedUrlConversationKeyRef.current = urlConversationKey;
 
     const existingConversation = findConversationByTenderNo(normalizedTenderNo, tenderType);
+    const generatedTitle = generateConversationTitle(normalizedTenderNo);
     const conversationId =
-      existingConversation?.id || createConversation(normalizedTenderNo, tenderType);
+      existingConversation?.id ||
+      createConversation(normalizedTenderNo, tenderType, generatedTitle);
     setCurrentConversation(conversationId);
 
-    if (existingConversation && isDefaultConversationTitle(existingConversation.title)) {
+    if (
+      existingConversation &&
+      shouldAutoUpdateConversationTitle(existingConversation.title, normalizedTenderNo) &&
+      existingConversation.title !== generatedTitle
+    ) {
       updateConversation(conversationId, {
-        title: generateConversationTitle(normalizedTenderNo),
+        title: generatedTitle,
       });
     }
 
@@ -245,7 +255,7 @@ function TenderPageContent() {
 
   return (
     <div className="grid h-screen grid-cols-[auto_minmax(0,2fr)_minmax(0,3fr)] overflow-hidden bg-gray-100">
-      <div className="flex-shrink-0">
+      <div className="min-h-0 min-w-0 flex-shrink-0">
         <TenderTypeSidebar />
       </div>
 
