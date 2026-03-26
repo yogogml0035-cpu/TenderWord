@@ -16,6 +16,8 @@ export interface FormSectionProps {
   badge?: string;
   /** Badge variant */
   badgeVariant?: 'default' | 'required' | 'optional';
+  /** Optional content rendered on the right side of the header */
+  headerAction?: React.ReactNode;
 }
 
 /**
@@ -34,6 +36,7 @@ export function FormSection({
   className,
   badge,
   badgeVariant = 'default',
+  headerAction,
 }: FormSectionProps) {
   const badgeStyles = {
     default: 'bg-[var(--secondary-bg)] text-[var(--text-muted)]',
@@ -48,25 +51,28 @@ export function FormSection({
         className
       )}
     >
-      <div className="mb-3.5 flex items-center gap-2.5">
-        {index !== undefined && (
-          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-[var(--primary)] text-sm font-semibold text-white">
-            {index}
-          </div>
-        )}
-        <h3 className="text-[17px] font-semibold text-[var(--foreground)]">
-          {title}
-        </h3>
-        {badge && (
-          <span
-            className={cn(
-              'rounded-full px-2 py-0.5 text-[11px] font-semibold',
-              badgeStyles[badgeVariant]
-            )}
-          >
-            {badge}
-          </span>
-        )}
+      <div className="mb-3.5 flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          {index !== undefined && (
+            <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-[var(--primary)] text-sm font-semibold text-white">
+              {index}
+            </div>
+          )}
+          <h3 className="text-[17px] font-semibold text-[var(--foreground)]">
+            {title}
+          </h3>
+          {badge && (
+            <span
+              className={cn(
+                'rounded-full px-2 py-0.5 text-[11px] font-semibold',
+                badgeStyles[badgeVariant]
+              )}
+            >
+              {badge}
+            </span>
+          )}
+        </div>
+        {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
       </div>
       {children}
     </div>

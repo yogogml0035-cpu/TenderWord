@@ -3,6 +3,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import type { TenderType } from '@/types';
+import { useUrlParams } from '@/hooks/useUrlParams';
 import type { ConversationDraftFile, ConversationFormDraft } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
 import {
@@ -13,11 +14,22 @@ import {
   type TenderFetchState,
 } from '@/lib/tenderFetch';
 import {
+  ApiError,
+  fetchTemplateCandidates,
+  getTemplateCandidateDownloadUrl,
+  selectTemplateCandidate,
+} from '@/lib/api';
+import type {
+  TemplateCandidate,
+  TemplateSelectedFile,
+} from '@/types/api';
+import {
   generateConversationTitle,
   shouldAutoUpdateConversationTitle,
 } from '@/lib/chat-utils';
 import { TenderNoInput, type TenderData } from './TenderNoInput';
 import { FileUploader, type UploadedFile } from './FileUploader';
+import { TemplateCandidateDialog } from './TemplateCandidateDialog';
 import type { ModelType } from './ModelSelector';
 import { FormSection, FormField, ErrorDisplay, InfoCard, type TenderInfoItem } from './shared';
 import {
@@ -61,6 +73,8 @@ const sharedUploadCopy = {
   },
 } as const;
 
+const oldTemplateSelectionMessage = '该模板过旧不能选择，仅供下载参考';
+
 function toDraftFile(file: UploadedFile | null | undefined): ConversationDraftFile | undefined {
   if (!file) {
     return undefined;
@@ -73,6 +87,22 @@ function toDraftFile(file: UploadedFile | null | undefined): ConversationDraftFi
     size: file.size,
     upload_time: file.upload_time,
     ...(file.file_type ? { file_type: file.file_type } : {}),
+  };
+}
+
+function normalizeTemplateTenderNo(value: string | null | undefined): string | null {
+  const normalizedValue = value?.trim();
+  return normalizedValue ? normalizedValue : null;
+}
+
+function toSelectedUploadedFile(file: TemplateSelectedFile): UploadedFile {
+  return {
+    id: Math.random().toString(36).slice(2),
+    file_path: file.file_path,
+    file_name: file.file_name,
+    original_name: file.original_name,
+    size: file.size,
+    upload_time: file.upload_time || new Date().toISOString(),
   };
 }
 
@@ -111,6 +141,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   onCancel,
 }: TenderFormSharedProps<TFormData>) {
   const variantConfig = tenderFormVariantConfigMap[tenderType];
+  const { tenderno: urlTenderNo } = useUrlParams();
   const updateConversation = useChatStore((state) => state.updateConversation);
   const currentConversation = useChatStore((state) =>
     state.conversations.find((conversation) => conversation.id === state.currentConversationId) || null
@@ -140,6 +171,16 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       variantConfig.insertionConfigDefaults.after_text,
   });
   const [error, setError] = useState<string | null>(null);
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [templateCandidates, setTemplateCandidates] = useState<TemplateCandidate[]>([]);
+  const [templateCandidateCache, setTemplateCandidateCache] = useState<
+    Record<string, TemplateCandidate[]>
+  >({});
+  const [templateDialogError, setTemplateDialogError] = useState<string | null>(null);
+  const [templateDialogNotice, setTemplateDialogNotice] = useState<string | null>(null);
+  const [templateCandidatesLoading, setTemplateCandidatesLoading] = useState(false);
+  const [templateCandidatesRefreshing, setTemplateCandidatesRefreshing] = useState(false);
+  const [selectingTemplateRowKey, setSelectingTemplateRowKey] = useState<string | null>(null);
   const selectedModel: ModelType = initialDraft?.model || 'deepseek';
   const tenderNo = onDraftChange ? initialDraft?.tender_no || initialTenderNo : localTenderNo;
   const tenderData = onDraftChange
@@ -148,6 +189,10 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const tenderFetchState = onDraftChange
     ? resolveTenderFetchState(initialDraft?.tender_fetch, initialDraft?.tender_data || initialTenderData)
     : localTenderFetchState;
+  const effectiveTemplateTenderNo = useMemo(
+    () => normalizeTemplateTenderNo(tenderNo) || normalizeTemplateTenderNo(urlTenderNo),
+    [tenderNo, urlTenderNo]
+  );
 
   const applyTenderDraftUpdates = useCallback(
     (updates: TenderDraftUpdates) => {
@@ -255,6 +300,164 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const tenderInfoItems = useMemo(() => toTenderInfoItems(tenderData), [tenderData]);
   const showCancelAction = isSubmitting && canCancel && typeof onCancel === 'function';
 
+  const loadTemplateCandidates = useCallback(
+    async (forceRefresh = false, tenderNoOverride?: string | null) => {
+      const activeTemplateTenderNo = normalizeTemplateTenderNo(tenderNoOverride) || effectiveTemplateTenderNo;
+      if (!activeTemplateTenderNo) {
+        return;
+      }
+
+      const cachedCandidates = templateCandidateCache[activeTemplateTenderNo];
+      if (!forceRefresh && cachedCandidates) {
+        setTemplateCandidates(cachedCandidates);
+        return;
+      }
+
+      if (!cachedCandidates) {
+        setTemplateCandidates([]);
+      }
+
+      setTemplateDialogError(null);
+      setTemplateDialogNotice(null);
+      if (forceRefresh) {
+        setTemplateCandidatesRefreshing(true);
+      } else {
+        setTemplateCandidatesLoading(true);
+      }
+
+      try {
+        const response = await fetchTemplateCandidates({
+          tenderno: activeTemplateTenderNo,
+        });
+        setTemplateCandidates(response.candidates);
+        setTemplateCandidateCache((prev) => ({
+          ...prev,
+          [activeTemplateTenderNo]: response.candidates,
+        }));
+      } catch (templateError) {
+        const message =
+          templateError instanceof ApiError
+            ? templateError.message
+            : '模板候选获取失败，请稍后重试';
+        setTemplateDialogError(message);
+        if (!cachedCandidates) {
+          setTemplateCandidates([]);
+        }
+      } finally {
+        setTemplateCandidatesLoading(false);
+        setTemplateCandidatesRefreshing(false);
+      }
+    },
+    [effectiveTemplateTenderNo, templateCandidateCache]
+  );
+
+  const resolveAndLoadTemplateCandidates = useCallback(
+    async (forceRefresh = false) => {
+      setTemplateDialogOpen(true);
+      setTemplateDialogError(null);
+      setTemplateDialogNotice(null);
+
+      if (!effectiveTemplateTenderNo) {
+        setTemplateCandidates([]);
+        setTemplateDialogError('请先输入招标编号，再智能抽取模板');
+        return;
+      }
+
+      await loadTemplateCandidates(forceRefresh, effectiveTemplateTenderNo);
+    },
+    [effectiveTemplateTenderNo, loadTemplateCandidates]
+  );
+
+  const handleOpenTemplateDialog = useCallback(() => {
+    void resolveAndLoadTemplateCandidates(false);
+  }, [resolveAndLoadTemplateCandidates]);
+
+  const handleCloseTemplateDialog = useCallback(() => {
+    setTemplateDialogOpen(false);
+    setTemplateDialogError(null);
+    setTemplateDialogNotice(null);
+    setSelectingTemplateRowKey(null);
+  }, []);
+
+  const handleRefreshTemplateDialog = useCallback(() => {
+    void resolveAndLoadTemplateCandidates(true);
+  }, [resolveAndLoadTemplateCandidates]);
+
+  const handleTemplateSelect = useCallback(
+    async (candidate: TemplateCandidate, rowKey: string) => {
+      setTemplateDialogError(null);
+      setTemplateDialogNotice(null);
+
+      if (!candidate.selectable) {
+        setTemplateDialogNotice(candidate.blocked_reason || oldTemplateSelectionMessage);
+        return;
+      }
+
+      setSelectingTemplateRowKey(rowKey);
+
+      try {
+        const response = await selectTemplateCandidate({
+          candidate: {
+            tendername: candidate.tendername,
+            year: candidate.year ?? null,
+            fsg: null,
+            shener: candidate.shener ?? null,
+          },
+        });
+
+        const nextCleanDraftFile = response.selected_files.clean_draft
+          ? toSelectedUploadedFile(response.selected_files.clean_draft)
+          : cleanDraftFile;
+        const nextOriginFile = response.selected_files.origin_tender
+          ? toSelectedUploadedFile(response.selected_files.origin_tender)
+          : originFile;
+
+        if (response.selected_files.clean_draft) {
+          setCleanDraftFile(nextCleanDraftFile);
+        }
+        if (response.selected_files.origin_tender) {
+          setOriginFile(nextOriginFile);
+        }
+
+        syncDraftFiles(nextOriginFile, nextCleanDraftFile, paramFiles);
+        setTemplateDialogOpen(false);
+        setTemplateDialogError(null);
+        setTemplateDialogNotice(null);
+      } catch (templateError) {
+        const message =
+          templateError instanceof ApiError
+            ? templateError.message
+            : '模板文件选择失败，请稍后重试';
+
+        if (templateError instanceof ApiError && templateError.code === 'TEMPLATE_TOO_OLD') {
+          setTemplateDialogNotice(message);
+        } else {
+          setTemplateDialogError(message);
+        }
+      } finally {
+        setSelectingTemplateRowKey(null);
+      }
+    },
+    [cleanDraftFile, originFile, paramFiles, syncDraftFiles]
+  );
+
+  const uploadSectionAction = (
+    <button
+      type="button"
+      onClick={handleOpenTemplateDialog}
+      disabled={isSubmitting}
+      className={cn(
+        'inline-flex h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border px-4 text-sm font-semibold transition-all',
+        'border-blue-200 bg-blue-50 text-blue-700',
+        'hover:border-blue-300 hover:bg-blue-100',
+        'focus:ring-2 focus:ring-blue-500/15 focus:outline-none',
+        'disabled:cursor-not-allowed disabled:opacity-50'
+      )}
+    >
+      智能抽取模板
+    </button>
+  );
+
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -328,7 +531,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         {tenderData && <InfoCard items={tenderInfoItems} columns={2} />}
       </FormSection>
 
-      <FormSection title="文件上传" index={2}>
+      <FormSection title="文件上传" index={2} headerAction={uploadSectionAction}>
         <div className="space-y-5">
           <FileUploader
             label={sharedUploadCopy.cleanDraftUpload.label}
@@ -407,6 +610,22 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       </FormSection>
 
       {error && <ErrorDisplay message={error} onDismiss={() => setError(null)} />}
+
+      <TemplateCandidateDialog
+        open={templateDialogOpen}
+        candidates={templateCandidates}
+        loading={templateCandidatesLoading}
+        refreshing={templateCandidatesRefreshing}
+        selectingRowKey={selectingTemplateRowKey}
+        error={templateDialogError}
+        notice={templateDialogNotice}
+        onClose={handleCloseTemplateDialog}
+        onRefresh={handleRefreshTemplateDialog}
+        onSelect={handleTemplateSelect}
+        getDownloadUrl={(fileUrl, downloadName) =>
+          getTemplateCandidateDownloadUrl(fileUrl, downloadName)
+        }
+      />
 
       <button
         type={showCancelAction ? 'button' : 'submit'}

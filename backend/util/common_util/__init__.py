@@ -19,6 +19,25 @@ from backend.util.common_util.llm_stream_utils import (
 from backend.util.common_util.fetch_tender_data import (
     fetch_tender_data,
 )
+from backend.util.common_util.template_candidates import (
+    OLD_TEMPLATE_MESSAGE,
+    INVALID_TEMPLATE_YEAR_MESSAGE,
+    build_template_download_name,
+    derive_template_blocked_reason,
+    extract_template_year,
+    fetch_template_candidates,
+    fetch_template_file,
+    infer_remote_filename,
+    iter_response_content,
+    validate_template_download_url,
+)
+from backend.util.common_util.upload_storage import (
+    ensure_upload_dir,
+    generate_unique_filename,
+    persist_file_bytes,
+    validate_file_extension,
+    validate_file_size,
+)
 
 __all__ = [
     # llm_stream_utils
@@ -31,4 +50,21 @@ __all__ = [
     "stream_llm_completion",
     # fetch_tender_data
     "fetch_tender_data",
+    # template_candidates
+    "OLD_TEMPLATE_MESSAGE",
+    "INVALID_TEMPLATE_YEAR_MESSAGE",
+    "build_template_download_name",
+    "derive_template_blocked_reason",
+    "extract_template_year",
+    "fetch_template_candidates",
+    "fetch_template_file",
+    "infer_remote_filename",
+    "iter_response_content",
+    "validate_template_download_url",
+    # upload_storage
+    "ensure_upload_dir",
+    "generate_unique_filename",
+    "persist_file_bytes",
+    "validate_file_extension",
+    "validate_file_size",
 ]

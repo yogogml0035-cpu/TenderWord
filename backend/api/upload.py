@@ -3,17 +3,14 @@
 提供单文件和多文件上传功能，支持文件类型验证和大小限制.
 """
 
-import pathlib
-import time
-import uuid
 from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
-from backend.config.settings import settings
 from backend.models.common import ErrorResponse
+from backend.util.common_util.upload_storage import persist_file_bytes
 
 router = APIRouter(prefix="/upload", tags=["File Upload"])
 
@@ -56,61 +53,6 @@ class MultiFileUploadResponse(BaseModel):
     upload_time: str = Field(..., description="上传时间（ISO 格式）")
 
 
-# ========================================
-# 文件上传工具函数
-# ========================================
-def validate_file_extension(filename: str) -> bool:
-    """验证文件扩展名是否在允许列表中.
-
-    Args:
-        filename: 原始文件名
-
-    Returns:
-        是否允许上传
-    """
-    suffix = pathlib.Path(filename).suffix.lower()
-    return suffix in settings.ALLOWED_EXTENSIONS
-
-
-def validate_file_size(file_size: int) -> bool:
-    """验证文件大小是否超过限制.
-
-    Args:
-        file_size: 文件大小（字节）
-
-    Returns:
-        是否在允许范围内
-    """
-    return file_size <= settings.MAX_UPLOAD_SIZE
-
-
-def generate_unique_filename(original_name: str) -> str:
-    """生成唯一文件名，处理重名情况.
-
-    如果文件已存在，在文件名后添加时间戳和随机后缀.
-
-    Args:
-        original_name: 原始文件名
-
-    Returns:
-        唯一文件名
-    """
-    upload_dir = pathlib.Path(settings.UPLOAD_DIR)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
-    file_path = upload_dir / original_name
-
-    if file_path.exists():
-        # 添加时间戳和随机后缀
-        timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
-        stem = file_path.stem
-        suffix = file_path.suffix
-        unique_suffix = uuid.uuid4().hex[:8]
-        file_path = upload_dir / f"{stem}_{timestamp}_{unique_suffix}{suffix}"
-
-    return str(file_path)
-
-
 async def save_upload_file(upload_file: UploadFile) -> dict:
     """保存单个上传文件.
 
@@ -125,57 +67,13 @@ async def save_upload_file(upload_file: UploadFile) -> dict:
     """
     original_name = upload_file.filename
 
-    # 验证文件扩展名
-    if not validate_file_extension(original_name):
-        allowed = ", ".join(settings.ALLOWED_EXTENSIONS)
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail={
-                "code": "FILE_INVALID_TYPE",
-                "message": f"不支持的文件类型。允许的类型: {allowed}",
-                "details": f"文件名: {original_name}",
-            },
-        )
-
     # 读取文件内容
     content = await upload_file.read()
-    file_size = len(content)
-
-    # 验证文件大小
-    if not validate_file_size(file_size):
-        max_size_mb = settings.MAX_UPLOAD_SIZE / (1024 * 1024)
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail={
-                "code": "FILE_TOO_LARGE",
-                "message": f"文件大小超过限制（最大 {max_size_mb}MB）",
-                "details": f"文件大小: {file_size / (1024 * 1024):.2f}MB",
-            },
-        )
-
-    # 生成唯一文件名并保存
-    save_path = generate_unique_filename(original_name)
-
-    try:
-        with open(save_path, "wb") as f:
-            f.write(content)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "code": "FILE_UPLOAD_FAILED",
-                "message": "文件保存失败",
-                "details": str(e),
-            },
-        )
-
-    return {
-        "file_path": str(pathlib.Path(save_path).resolve()),
-        "file_name": pathlib.Path(save_path).name,
-        "original_name": original_name,
-        "file_size": file_size,
-        "content_type": upload_file.content_type or "application/octet-stream",
-    }
+    return persist_file_bytes(
+        original_name=original_name,
+        content=content,
+        content_type=upload_file.content_type or "application/octet-stream",
+    )
 
 
 # ========================================
