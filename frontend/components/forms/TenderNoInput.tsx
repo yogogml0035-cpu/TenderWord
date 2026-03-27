@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useCallback } from 'react';
-import { cn } from '@/lib/utils';
 import { Search, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import type { TenderData } from '@/types/api';
+import { cn } from '@/lib/utils';
+import { secondaryActionButtonClassName } from './shared';
 
 // Re-export TenderData for backward compatibility
 export type { TenderData };
@@ -94,10 +95,7 @@ export function TenderNoInput({
           onClick={() => void handleFetchData()}
           disabled={disabled || isLoading || !value.trim() || !onFetch}
           className={cn(
-            'inline-flex h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-[var(--border)] bg-[var(--secondary-bg)] px-4 text-sm font-semibold text-[var(--foreground)] transition-all',
-            'hover:border-[var(--primary)]/20 hover:bg-slate-100',
-            'focus:ring-2 focus:ring-[var(--primary)]/15 focus:outline-none',
-            'disabled:cursor-not-allowed disabled:opacity-50'
+            secondaryActionButtonClassName
           )}
         >
           {isLoading ? (

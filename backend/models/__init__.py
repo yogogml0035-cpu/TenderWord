@@ -61,11 +61,33 @@ from .common import (
     ErrorResponse,
     SuccessResponse,
 )
+from .template_candidates import (
+    TemplateCandidate,
+    TemplateCandidateListData,
+    TemplateCandidateListResponse,
+    TemplateCandidateSelectPayload,
+    TemplateCandidateSelectRequest,
+    TemplateSelectedFile,
+    TemplateSelectedFiles,
+    TemplateSelectFailure,
+    TemplateSelectData,
+    TemplateSelectResponse,
+)
 
 __all__ = [
     # 通用响应
     "ErrorResponse",
     "SuccessResponse",
+    "TemplateCandidate",
+    "TemplateCandidateListData",
+    "TemplateCandidateListResponse",
+    "TemplateCandidateSelectPayload",
+    "TemplateCandidateSelectRequest",
+    "TemplateSelectedFile",
+    "TemplateSelectedFiles",
+    "TemplateSelectFailure",
+    "TemplateSelectData",
+    "TemplateSelectResponse",
     
     # 招标数据
     "TenderData",

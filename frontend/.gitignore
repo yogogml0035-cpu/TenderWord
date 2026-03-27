@@ -41,6 +41,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-
-test-results/
+# local build and test artifacts
+.swc/
+test-results*/
 playwright-report/
+temp-e2e-results*/
+
+# local scratch files
+*.bak

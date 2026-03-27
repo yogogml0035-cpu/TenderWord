@@ -7,6 +7,11 @@
 
 import type {
   TenderData,
+  TenderLookupResponse,
+  TenderTypeInfo,
+  TemplateCandidateListResponse,
+  TemplateCandidateSelectRequest,
+  TemplateSelectResponse,
   UploadedFile,
   MultipleUploadResult,
   TaskData,
@@ -425,8 +430,91 @@ export async function streamUserMessage(
  * 获取招标数据
  * GET /api/tender/{tender_no}
  */
+function parseTenderTypeInfo(payload: unknown): TenderTypeInfo | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const tender_lx = payload.tender_lx;
+  const purchase_method = payload.purchase_method;
+  const fund_lx = payload.fund_lx;
+
+  if (
+    typeof tender_lx !== 'number' ||
+    typeof purchase_method !== 'number' ||
+    typeof fund_lx !== 'number'
+  ) {
+    return null;
+  }
+
+  return {
+    tender_lx,
+    purchase_method,
+    fund_lx,
+  };
+}
+
+export async function fetchTenderDataWithType(tenderNo: string): Promise<TenderLookupResponse> {
+  const url = `${API_BASE_URL}/api/tender/${encodeURIComponent(tenderNo)}`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, normalizeRequestConfig({ method: 'GET' }));
+  } catch {
+    throw new ApiError(
+      `Network request failed: /api/tender/${encodeURIComponent(tenderNo)}. Please check backend availability and CORS configuration.`,
+      'NETWORK_ERROR',
+      0
+    );
+  }
+
+  const data: unknown = await response.json();
+  const { explicitFailure } = extractErrorInfo(data);
+
+  if (!response.ok || explicitFailure) {
+    throw buildApiError(data, response.status, `HTTP error! status: ${response.status}`, 'UNKNOWN_ERROR');
+  }
+
+  const payload = isRecord(data) ? data : {};
+  const tenderData = 'data' in payload ? (payload.data as TenderData) : (data as TenderData);
+  const tenderTypeInfo = parseTenderTypeInfo(payload.type);
+
+  return {
+    data: tenderData,
+    type: tenderTypeInfo,
+  };
+}
+
 export async function fetchTenderData(tenderNo: string): Promise<TenderData> {
-  return request<TenderData>(`/api/tender/${encodeURIComponent(tenderNo)}`);
+  const result = await fetchTenderDataWithType(tenderNo);
+  return result.data;
+}
+
+export async function fetchTemplateCandidates(params: {
+  tenderno: string;
+}): Promise<TemplateCandidateListResponse> {
+  const query = new URLSearchParams({
+    tenderno: params.tenderno,
+  });
+  return request<TemplateCandidateListResponse>(`/api/template-candidates?${query.toString()}`);
+}
+
+export async function selectTemplateCandidate(
+  payload: TemplateCandidateSelectRequest
+): Promise<TemplateSelectResponse> {
+  return request<TemplateSelectResponse>('/api/template-candidates/select', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getTemplateCandidateDownloadUrl(fileUrl: string, downloadName?: string): string {
+  const query = new URLSearchParams();
+  query.append('file_url', fileUrl);
+  if (downloadName) {
+    query.append('download_name', downloadName);
+  }
+  return `${API_BASE_URL}/api/template-candidates/download?${query.toString()}`;
 }
 
 // ============================================

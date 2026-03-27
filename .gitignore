@@ -64,3 +64,6 @@ test_doc/
 # 临时 prompt 文件（运行时生成）
 backend/prompts_log/prompt_*.txt
 docs/
+
+frontend/temp-e2e-results*/
+frontend/test-results*/

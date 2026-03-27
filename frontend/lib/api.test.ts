@@ -3,14 +3,18 @@ import {
   cancelTask,
   createGenerateTask,
   downloadFile,
+  fetchTemplateCandidates,
   fetchTenderData,
+  fetchTenderDataWithType,
+  getTemplateCandidateDownloadUrl,
   getTaskStatus,
+  selectTemplateCandidate,
   sendTaskHeartbeat,
   streamNdjson,
   streamUserMessage,
   uploadFile,
 } from '@/lib/api';
-import type { GenerateRequest, UserStreamEvent } from '@/types/api';
+import type { GenerateRequest, TemplateCandidateSelectRequest, UserStreamEvent } from '@/types/api';
 
 type FetchMock = jest.MockedFunction<typeof fetch>;
 
@@ -86,6 +90,15 @@ const validGenerateRequest: GenerateRequest = {
     tender_params: ['/uploads/params.xlsx'],
   },
   model: 'deepseek',
+};
+
+const validTemplateSelectRequest: TemplateCandidateSelectRequest = {
+  candidate: {
+    tendername: '测试模板',
+    year: 2026,
+    fsg: 'http://10.11.1.224/fsg',
+    shener: 'http://10.11.1.224/shener',
+  },
 };
 
 describe('API Client', () => {
@@ -201,6 +214,28 @@ describe('API Client', () => {
   });
 
   describe('fetchTenderData', () => {
+    it('returns tender data and type info together when requested', async () => {
+      globalThis.fetch = mockFetchJson({
+        success: true,
+        data: { project_name: 'Test Project' },
+        type: {
+          tender_lx: 0,
+          purchase_method: 2,
+          fund_lx: 0,
+        },
+        message: 'OK',
+        timestamp: new Date().toISOString(),
+      });
+
+      const result = await fetchTenderDataWithType('ZBGG-2024-001');
+      expect(result.data.project_name).toBe('Test Project');
+      expect(result.type).toEqual({
+        tender_lx: 0,
+        purchase_method: 2,
+        fund_lx: 0,
+      });
+    });
+
     it('should return tender data on success', async () => {
       globalThis.fetch = mockFetchJson({
         success: true,
@@ -225,6 +260,92 @@ describe('API Client', () => {
       await fetchTenderData('ZB/2024-001');
       const [url] = fetchSpy.mock.calls[0];
       expect(String(url)).toContain('ZB%2F2024-001');
+    });
+  });
+
+  describe('template candidate API', () => {
+    it('fetches template candidates with encoded query params', async () => {
+      const fetchSpy = mockFetchJson({
+        success: true,
+        data: {
+          candidates: [
+            {
+              tenderno: '0811-DSITC260194',
+              tendername: '测试模板',
+              tname: '上海市中医医院',
+              bm: '采购处',
+              hytype: '医疗行业',
+              tendertype: '国内公开',
+              hwlx: '货物',
+              yxj: '1',
+              zbr: '张三',
+              xbr: '李四',
+              year: 2026,
+              selectable: true,
+            },
+          ],
+        },
+        message: 'OK',
+        timestamp: new Date().toISOString(),
+      });
+      globalThis.fetch = fetchSpy;
+
+      const result = await fetchTemplateCandidates({
+        tenderno: '0811/TEST',
+      });
+
+      expect(result.candidates[0]).toMatchObject({
+        tenderno: '0811-DSITC260194',
+        tendername: '测试模板',
+        tname: '上海市中医医院',
+        bm: '采购处',
+        hytype: '医疗行业',
+        tendertype: '国内公开',
+        hwlx: '货物',
+        yxj: '1',
+      });
+      const [url] = fetchSpy.mock.calls[0];
+      expect(String(url)).toContain('tenderno=0811%2FTEST');
+      expect(String(url)).not.toContain('purchase_method=');
+    });
+
+    it('posts template selection payload', async () => {
+      const fetchSpy = mockFetchJson({
+        success: true,
+        data: {
+          selected_files: {
+            clean_draft: {
+              file_path: 'D:/UploadFiles/test.docx',
+              file_name: 'test.docx',
+              original_name: 'test.docx',
+              size: 100,
+              upload_time: new Date().toISOString(),
+            },
+          },
+          failed_slots: [],
+          partial_success: false,
+        },
+        message: 'OK',
+        timestamp: new Date().toISOString(),
+      });
+      globalThis.fetch = fetchSpy;
+
+      const result = await selectTemplateCandidate(validTemplateSelectRequest);
+
+      expect(result.selected_files.clean_draft?.file_name).toBe('test.docx');
+      const [, init] = fetchSpy.mock.calls[0];
+      expect(JSON.parse(String((init as RequestInit).body))).toEqual(validTemplateSelectRequest);
+    });
+
+    it('builds template candidate download URL with encoded params', () => {
+      const url = getTemplateCandidateDownloadUrl(
+        'http://10.11.1.224/dongsong/servlet/export.DownLoad?fileID=123',
+        '测试模板-发售稿'
+      );
+
+      expect(url).toContain('/api/template-candidates/download?');
+      expect(url).toContain('file_url=http%3A%2F%2F10.11.1.224%2Fdongsong%2Fservlet%2Fexport.DownLoad%3FfileID%3D123');
+      expect(url).toContain('download_name=%E6%B5%8B%E8%AF%95%E6%A8%A1%E6%9D%BF-%E5%8F%91%E5%94%AE%E7%A8%BF');
     });
   });
 

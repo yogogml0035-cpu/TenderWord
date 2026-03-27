@@ -30,6 +30,72 @@ export interface TenderData {
   service_fee: string;
 }
 
+export interface TenderTypeInfo {
+  tender_lx: number;
+  purchase_method: number;
+  fund_lx: number;
+}
+
+export interface TenderLookupResponse {
+  data: TenderData;
+  type: TenderTypeInfo | null;
+}
+
+// ============================================
+// Template Candidate Types
+// ============================================
+
+export interface TemplateCandidate {
+  tenderno: string;
+  tendername: string;
+  tname: string;
+  bm: string;
+  hytype: string;
+  tendertype: string;
+  hwlx: string;
+  yxj: string;
+  zbr: string;
+  xbr: string;
+  year?: number | null;
+  fsg?: string | null;
+  shener?: string | null;
+  selectable: boolean;
+  blocked_reason?: string | null;
+}
+
+export interface TemplateCandidateListResponse {
+  candidates: TemplateCandidate[];
+}
+
+export interface TemplateCandidateSelectPayload {
+  tendername: string;
+  year?: number | null;
+  fsg?: string | null;
+  shener?: string | null;
+}
+
+export interface TemplateCandidateSelectRequest {
+  candidate: TemplateCandidateSelectPayload;
+}
+
+export type TemplateSelectedFile = UploadedFile;
+
+export interface TemplateSelectedFiles {
+  clean_draft?: TemplateSelectedFile | null;
+  origin_tender?: TemplateSelectedFile | null;
+}
+
+export interface TemplateSelectFailure {
+  slot: 'clean_draft' | 'origin_tender';
+  message: string;
+}
+
+export interface TemplateSelectResponse {
+  selected_files: TemplateSelectedFiles;
+  failed_slots: TemplateSelectFailure[];
+  partial_success: boolean;
+}
+
 // ============================================
 // File Upload Types
 // ============================================
