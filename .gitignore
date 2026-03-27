@@ -70,4 +70,4 @@ frontend/test-results*/
 
 # Agent 规范与知识包（不纳入版本管理）
 AGENTS.md
-assert/
+asset/
