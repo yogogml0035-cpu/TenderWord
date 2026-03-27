@@ -83,7 +83,7 @@ describe('ChatInput', () => {
 
     render(<ControlledChatInput onSend={handleSend} />);
 
-    const textarea = screen.getByPlaceholderText('输入消息...');
+    const textarea = screen.getByPlaceholderText('输入文字即可进行对话');
 
     fireEvent.change(textarea, { target: { value: '  测试消息  ' } });
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
@@ -96,7 +96,7 @@ describe('ChatInput', () => {
   it('auto-resizes the textarea and clamps it at the configured max height', () => {
     render(<ControlledChatInput />);
 
-    const textarea = screen.getByPlaceholderText('输入消息...') as HTMLTextAreaElement;
+    const textarea = screen.getByPlaceholderText('输入文字即可进行对话') as HTMLTextAreaElement;
 
     Object.defineProperty(textarea, 'scrollHeight', {
       configurable: true,
@@ -122,7 +122,7 @@ describe('ChatInput', () => {
   it('resizes the textarea when the draft is updated programmatically', () => {
     render(<ProgrammaticValueChatInput />);
 
-    const textarea = screen.getByPlaceholderText('输入消息...') as HTMLTextAreaElement;
+    const textarea = screen.getByPlaceholderText('输入文字即可进行对话') as HTMLTextAreaElement;
     Object.defineProperty(textarea, 'scrollHeight', {
       configurable: true,
       value: 96,
@@ -139,7 +139,7 @@ describe('ChatInput', () => {
 
     render(<ControlledChatInput onSend={handleSend} loading actionMode="cancel" />);
 
-    const textarea = screen.getByPlaceholderText('输入消息...');
+    const textarea = screen.getByPlaceholderText('输入文字即可进行对话');
     expect(textarea).not.toBeDisabled();
 
     fireEvent.change(textarea, { target: { value: '这条消息先写好，等生成结束再发' } });

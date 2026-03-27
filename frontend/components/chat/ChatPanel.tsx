@@ -730,7 +730,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         onModelChange={handleModelChange}
         actionMode={isBusy ? 'cancel' : 'send'}
         loading={isBusy}
-        placeholder={isBusy ? '回复生成中，请稍候...' : '输入消息...'}
+        placeholder={isBusy ? '回复生成中，请稍候...' : '输入文字并发送即可对话...'}
       />
     </div>
   );

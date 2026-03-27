@@ -380,7 +380,7 @@ test.describe('URL-driven Conversation Flow', () => {
     await page.goto('/tender');
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByPlaceholder('输入消息...')).toBeVisible();
+    await expect(page.getByPlaceholder('输入文字并发送即可对话...')).toBeVisible();
     await expect(page.getByText('服务已重启，任务已中断，可重试')).toHaveCount(1);
 
     await expect

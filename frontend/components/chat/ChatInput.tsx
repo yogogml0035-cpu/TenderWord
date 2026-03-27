@@ -31,7 +31,7 @@ export function ChatInput({
   onModelChange,
   actionMode = 'send',
   disabled = false,
-  placeholder = '输入消息...',
+  placeholder = '输入文字并发送即可对话...',
   loading = false,
 }: ChatInputProps) {
   const internalTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -99,11 +99,11 @@ export function ChatInput({
   const isEmpty = !value.trim();
 
   return (
-    <div className="border-t border-slate-200 bg-gradient-to-b from-white via-slate-50/60 to-white px-4 py-2.5">
+    <div className="border-t border-slate-200/80 bg-gradient-to-b from-white via-slate-50/80 to-white px-4 py-3">
       <div
         className={cn(
-          'rounded-[26px] border border-slate-200 bg-white px-3 py-2.5 shadow-lg shadow-slate-200/70 transition-all duration-200',
-          controlsLocked && 'opacity-90'
+          'rounded-[28px] border-2 border-slate-300/80 bg-gradient-to-br from-white via-white to-slate-50/80 px-3 py-3 shadow-[0_18px_40px_-24px_rgba(15,23,42,0.45)] ring-1 ring-white/90 transition-all duration-200 focus-within:-translate-y-0.5 focus-within:border-blue-400/90 focus-within:shadow-[0_24px_50px_-24px_rgba(59,130,246,0.35)] focus-within:ring-4 focus-within:ring-blue-100/80',
+          controlsLocked && 'opacity-95'
         )}
       >
         <div className="flex flex-col gap-3">
@@ -117,7 +117,7 @@ export function ChatInput({
               disabled={inputDisabled}
               rows={1}
               className={cn(
-                'block w-full resize-none bg-transparent px-2 py-2.5 text-[15px] leading-6 text-slate-800 transition-colors duration-200 placeholder:text-slate-400 focus:outline-none',
+                'block w-full resize-none bg-transparent px-2 py-2.5 text-[15px] leading-6 text-slate-800 transition-colors duration-200 placeholder:text-slate-500/90 focus:outline-none',
                 inputDisabled && 'cursor-not-allowed text-slate-500'
               )}
               style={{

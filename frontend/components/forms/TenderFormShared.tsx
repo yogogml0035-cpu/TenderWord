@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useMemo } from 'react';
+import { Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { TenderType } from '@/types';
 import { useUrlParams } from '@/hooks/useUrlParams';
@@ -31,7 +32,14 @@ import { TenderNoInput, type TenderData } from './TenderNoInput';
 import { FileUploader, type UploadedFile } from './FileUploader';
 import { TemplateCandidateDialog } from './TemplateCandidateDialog';
 import type { ModelType } from './ModelSelector';
-import { FormSection, FormField, ErrorDisplay, InfoCard, type TenderInfoItem } from './shared';
+import {
+  FormSection,
+  FormField,
+  ErrorDisplay,
+  InfoCard,
+  secondaryActionButtonClassName,
+  type TenderInfoItem,
+} from './shared';
 import {
   tenderFormVariantConfigMap,
   type TenderInsertionConfig,
@@ -446,14 +454,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       type="button"
       onClick={handleOpenTemplateDialog}
       disabled={isSubmitting}
-      className={cn(
-        'inline-flex h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border px-4 text-sm font-semibold transition-all',
-        'border-blue-200 bg-blue-50 text-blue-700',
-        'hover:border-blue-300 hover:bg-blue-100',
-        'focus:ring-2 focus:ring-blue-500/15 focus:outline-none',
-        'disabled:cursor-not-allowed disabled:opacity-50'
-      )}
+      className={secondaryActionButtonClassName}
     >
+      <Search className="h-4 w-4" />
       智能抽取模板
     </button>
   );

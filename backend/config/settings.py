@@ -150,7 +150,7 @@ class Settings(BaseSettings):
         description="允许上传的文件扩展名",
     )
     TEMPLATE_CANDIDATE_API_URL: str = Field(
-        default="http://10.11.0.213:8080/dongsong/servlet/tender.TenderJsonActionMb",
+        default="http://10.11.1.224/dongsong/servlet/tender.TenderJsonActionMb",
         description="模板候选列表外部接口地址",
     )
     TEMPLATE_CANDIDATE_ALLOWED_HOSTS: List[str] = Field(
