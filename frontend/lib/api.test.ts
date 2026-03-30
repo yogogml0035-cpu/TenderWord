@@ -284,6 +284,12 @@ describe('API Client', () => {
               selectable: true,
             },
           ],
+          ranking: {
+            applied: true,
+            mode: 'ai',
+            reason: 'ai_ranked',
+            message: '已按优先级排序；同优先级模板已按项目名称相关性重排。',
+          },
         },
         message: 'OK',
         timestamp: new Date().toISOString(),
@@ -292,6 +298,7 @@ describe('API Client', () => {
 
       const result = await fetchTemplateCandidates({
         tenderno: '0811/TEST',
+        project_name: '细胞电转仪',
       });
 
       expect(result.candidates[0]).toMatchObject({
@@ -304,8 +311,10 @@ describe('API Client', () => {
         hwlx: '货物',
         yxj: '1',
       });
+      expect(result.ranking?.reason).toBe('ai_ranked');
       const [url] = fetchSpy.mock.calls[0];
       expect(String(url)).toContain('tenderno=0811%2FTEST');
+      expect(String(url)).toContain('project_name=%E7%BB%86%E8%83%9E%E7%94%B5%E8%BD%AC%E4%BB%AA');
       expect(String(url)).not.toContain('purchase_method=');
     });
 

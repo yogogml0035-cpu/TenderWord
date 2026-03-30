@@ -22,6 +22,7 @@ import {
 } from '@/lib/api';
 import type {
   TemplateCandidate,
+  TemplateCandidateRanking,
   TemplateSelectedFile,
 } from '@/types/api';
 import {
@@ -103,6 +104,18 @@ function normalizeTemplateTenderNo(value: string | null | undefined): string | n
   return normalizedValue ? normalizedValue : null;
 }
 
+function normalizeTemplateProjectName(value: string | null | undefined): string | null {
+  const normalizedValue = value?.trim();
+  return normalizedValue ? normalizedValue : null;
+}
+
+function buildTemplateCandidateCacheKey(
+  tenderNo: string,
+  projectName: string | null
+): string {
+  return `${tenderNo}::${projectName || '__no_project_name__'}`;
+}
+
 function toSelectedUploadedFile(file: TemplateSelectedFile): UploadedFile {
   return {
     id: Math.random().toString(36).slice(2),
@@ -182,8 +195,15 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [templateCandidates, setTemplateCandidates] = useState<TemplateCandidate[]>([]);
   const [templateCandidateCache, setTemplateCandidateCache] = useState<
-    Record<string, TemplateCandidate[]>
+    Record<
+      string,
+      {
+        candidates: TemplateCandidate[];
+        ranking: TemplateCandidateRanking | null;
+      }
+    >
   >({});
+  const [templateCandidateRanking, setTemplateCandidateRanking] = useState<TemplateCandidateRanking | null>(null);
   const [templateDialogError, setTemplateDialogError] = useState<string | null>(null);
   const [templateDialogNotice, setTemplateDialogNotice] = useState<string | null>(null);
   const [templateCandidatesLoading, setTemplateCandidatesLoading] = useState(false);
@@ -200,6 +220,10 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const effectiveTemplateTenderNo = useMemo(
     () => normalizeTemplateTenderNo(tenderNo) || normalizeTemplateTenderNo(urlTenderNo),
     [tenderNo, urlTenderNo]
+  );
+  const effectiveTemplateProjectName = useMemo(
+    () => normalizeTemplateProjectName(tenderData?.project_name),
+    [tenderData]
   );
 
   const applyTenderDraftUpdates = useCallback(
@@ -309,24 +333,36 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const showCancelAction = isSubmitting && canCancel && typeof onCancel === 'function';
 
   const loadTemplateCandidates = useCallback(
-    async (forceRefresh = false, tenderNoOverride?: string | null) => {
+    async (
+      forceRefresh = false,
+      tenderNoOverride?: string | null,
+      projectNameOverride?: string | null
+    ) => {
       const activeTemplateTenderNo = normalizeTemplateTenderNo(tenderNoOverride) || effectiveTemplateTenderNo;
+      const activeTemplateProjectName =
+        normalizeTemplateProjectName(projectNameOverride) ?? effectiveTemplateProjectName;
       if (!activeTemplateTenderNo) {
         return;
       }
 
-      const cachedCandidates = templateCandidateCache[activeTemplateTenderNo];
-      if (!forceRefresh && cachedCandidates) {
-        setTemplateCandidates(cachedCandidates);
+      const cacheKey = buildTemplateCandidateCacheKey(
+        activeTemplateTenderNo,
+        activeTemplateProjectName
+      );
+      const cachedEntry = templateCandidateCache[cacheKey];
+      if (!forceRefresh && cachedEntry) {
+        setTemplateCandidates(cachedEntry.candidates);
+        setTemplateCandidateRanking(cachedEntry.ranking);
         return;
       }
 
-      if (!cachedCandidates) {
+      if (!cachedEntry) {
         setTemplateCandidates([]);
       }
 
       setTemplateDialogError(null);
       setTemplateDialogNotice(null);
+      setTemplateCandidateRanking(null);
       if (forceRefresh) {
         setTemplateCandidatesRefreshing(true);
       } else {
@@ -336,11 +372,16 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       try {
         const response = await fetchTemplateCandidates({
           tenderno: activeTemplateTenderNo,
+          project_name: activeTemplateProjectName || undefined,
         });
         setTemplateCandidates(response.candidates);
+        setTemplateCandidateRanking(response.ranking || null);
         setTemplateCandidateCache((prev) => ({
           ...prev,
-          [activeTemplateTenderNo]: response.candidates,
+          [cacheKey]: {
+            candidates: response.candidates,
+            ranking: response.ranking || null,
+          },
         }));
       } catch (templateError) {
         const message =
@@ -348,15 +389,16 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
             ? templateError.message
             : '模板候选获取失败，请稍后重试';
         setTemplateDialogError(message);
-        if (!cachedCandidates) {
+        if (!cachedEntry) {
           setTemplateCandidates([]);
+          setTemplateCandidateRanking(null);
         }
       } finally {
         setTemplateCandidatesLoading(false);
         setTemplateCandidatesRefreshing(false);
       }
     },
-    [effectiveTemplateTenderNo, templateCandidateCache]
+    [effectiveTemplateProjectName, effectiveTemplateTenderNo, templateCandidateCache]
   );
 
   const resolveAndLoadTemplateCandidates = useCallback(
@@ -367,13 +409,18 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
 
       if (!effectiveTemplateTenderNo) {
         setTemplateCandidates([]);
+        setTemplateCandidateRanking(null);
         setTemplateDialogError('请先输入招标编号，再智能抽取模板');
         return;
       }
 
-      await loadTemplateCandidates(forceRefresh, effectiveTemplateTenderNo);
+      await loadTemplateCandidates(
+        forceRefresh,
+        effectiveTemplateTenderNo,
+        effectiveTemplateProjectName
+      );
     },
-    [effectiveTemplateTenderNo, loadTemplateCandidates]
+    [effectiveTemplateProjectName, effectiveTemplateTenderNo, loadTemplateCandidates]
   );
 
   const handleOpenTemplateDialog = useCallback(() => {
@@ -622,6 +669,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         selectingRowKey={selectingTemplateRowKey}
         error={templateDialogError}
         notice={templateDialogNotice}
+        rankingMessage={templateCandidateRanking?.message || null}
         onClose={handleCloseTemplateDialog}
         onRefresh={handleRefreshTemplateDialog}
         onSelect={handleTemplateSelect}

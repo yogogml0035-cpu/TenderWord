@@ -14,6 +14,7 @@ export interface TemplateCandidateDialogProps {
   selectingRowKey?: string | null;
   error?: string | null;
   notice?: string | null;
+  rankingMessage?: string | null;
   onClose: () => void;
   onRefresh: () => void;
   onSelect: (candidate: TemplateCandidate, rowKey: string) => void;
@@ -66,6 +67,7 @@ export function TemplateCandidateDialog({
   selectingRowKey,
   error,
   notice,
+  rankingMessage,
   onClose,
   onRefresh,
   onSelect,
@@ -115,6 +117,12 @@ export function TemplateCandidateDialog({
             </button>
           </div>
         </div>
+
+        {rankingMessage ? (
+          <div className="border-b border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-sky-800">
+            {rankingMessage}
+          </div>
+        ) : null}
 
         {error || notice ? (
           <div className="space-y-3 border-b border-slate-100 px-4 py-3">

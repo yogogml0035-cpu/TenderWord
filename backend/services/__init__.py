@@ -10,6 +10,10 @@ from backend.services.conversation_service import (
     get_conversation_service,
     SERVICE_INSTANCE_ID,
 )
+from backend.services.template_candidate_ranking_service import (
+    TemplateCandidateRankingService,
+    get_template_candidate_ranking_service,
+)
 
 __all__ = [
     "TaskService",
@@ -20,4 +24,6 @@ __all__ = [
     "ConversationService",
     "get_conversation_service",
     "SERVICE_INSTANCE_ID",
+    "TemplateCandidateRankingService",
+    "get_template_candidate_ranking_service",
 ]

@@ -26,10 +26,24 @@ class TemplateCandidate(BaseModel):
     blocked_reason: Optional[str] = Field(default=None, description="不可选原因")
 
 
+class TemplateCandidateRanking(BaseModel):
+    applied: bool = Field(default=False, description="本次是否实际应用了 AI 重排")
+    mode: Literal["ai", "priority_only"] = Field(
+        default="priority_only",
+        description="排序模式",
+    )
+    reason: str = Field(default="", description="排序结果原因")
+    message: str = Field(default="", description="排序结果提示")
+
+
 class TemplateCandidateListData(BaseModel):
     candidates: List[TemplateCandidate] = Field(
         default_factory=list,
         description="模板候选列表",
+    )
+    ranking: TemplateCandidateRanking = Field(
+        default_factory=TemplateCandidateRanking,
+        description="模板候选排序元信息",
     )
 
 

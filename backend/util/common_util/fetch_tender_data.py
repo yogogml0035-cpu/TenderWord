@@ -5,6 +5,12 @@ from typing import Dict
 
 import requests
 
+from backend.config.settings import settings
+
+
+def _request_timeout_seconds() -> float:
+    return float(settings.EXTERNAL_REQUEST_TIMEOUT_SECONDS)
+
 
 def fetch_tender_data(tender_no: str) -> Dict:
     """
@@ -27,10 +33,12 @@ def fetch_tender_data(tender_no: str) -> Dict:
         requests.RequestException: 当接口请求失败时
         ValueError: 当返回数据格式不正确时
     """
-    url = f"http://dserp.dongsong-cn.com/dongsong//servlet/tender.TenderJsonAction?tenderno={tender_no}"
-
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(
+            settings.TENDER_DATA_API_URL,
+            params={"tenderno": tender_no},
+            timeout=_request_timeout_seconds(),
+        )
         response.raise_for_status()  # 如果状态码不是 200，会抛出异常
 
         # 解析 JSON 响应

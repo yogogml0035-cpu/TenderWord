@@ -150,8 +150,12 @@ class Settings(BaseSettings):
         description="允许上传的文件扩展名",
     )
     TEMPLATE_CANDIDATE_API_URL: str = Field(
-        default="http://10.11.1.224/dongsong/servlet/tender.TenderJsonActionMb",
+        default="http://dserp.dongsong-cn.com/dongsong/servlet/tender.TenderJsonActionMb",
         description="模板候选列表外部接口地址",
+    )
+    TENDER_DATA_API_URL: str = Field(
+        default="http://dserp.dongsong-cn.com/dongsong//servlet/tender.TenderJsonAction",
+        description="招标详情外部接口地址",
     )
     TEMPLATE_CANDIDATE_ALLOWED_HOSTS: List[str] = Field(
         default=["10.11.0.213", "10.11.1.224"],
@@ -160,6 +164,10 @@ class Settings(BaseSettings):
     EXTERNAL_REQUEST_TIMEOUT_SECONDS: float = Field(
         default=15.0,
         description="外部 HTTP 请求超时时间（秒）",
+    )
+    TEMPLATE_CANDIDATE_RANKING_LLM_PROVIDER: str = Field(
+        default="deepseek",
+        description="模板候选 AI 排序使用的模型提供商",
     )
 
     # ========================================

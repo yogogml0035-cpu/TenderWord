@@ -112,3 +112,15 @@ class RewriteTargetSelectionPromptInput:
 class RewriteTargetSelectionBundle:
     rendered_prompt: RenderedPrompt
     assistant_candidates: Tuple[RewriteAssistantCandidate, ...]
+
+
+@dataclass(frozen=True)
+class TemplateCandidateRankingItem:
+    row_index: int
+    tendername: str
+
+
+@dataclass(frozen=True)
+class TemplateCandidateRankingPromptInput:
+    project_name: str
+    candidates: Sequence[TemplateCandidateRankingItem]

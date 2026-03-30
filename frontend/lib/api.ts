@@ -492,10 +492,15 @@ export async function fetchTenderData(tenderNo: string): Promise<TenderData> {
 
 export async function fetchTemplateCandidates(params: {
   tenderno: string;
+  project_name?: string | null;
 }): Promise<TemplateCandidateListResponse> {
   const query = new URLSearchParams({
     tenderno: params.tenderno,
   });
+  const projectName = params.project_name?.trim();
+  if (projectName) {
+    query.append('project_name', projectName);
+  }
   return request<TemplateCandidateListResponse>(`/api/template-candidates?${query.toString()}`);
 }
 

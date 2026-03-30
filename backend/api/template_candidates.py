@@ -23,6 +23,9 @@ from backend.models.template_candidates import (
     TemplateSelectFailure,
     TemplateSelectResponse,
 )
+from backend.services.template_candidate_ranking_service import (
+    get_template_candidate_ranking_service,
+)
 from backend.util.common_util.template_candidates import (
     INVALID_TEMPLATE_YEAR_MESSAGE,
     OLD_TEMPLATE_MESSAGE,
@@ -88,6 +91,10 @@ def _build_selected_file(file_info: dict) -> TemplateSelectedFile:
 )
 async def get_template_candidates(
     tenderno: str = Query(..., min_length=1, description="招标编号"),
+    project_name: Optional[str] = Query(
+        None,
+        description="当前项目名称；提供后仅在同优先级候选内启用 AI 重排",
+    ),
 ) -> TemplateCandidateListResponse:
     try:
         candidates = fetch_template_candidates(
@@ -110,9 +117,16 @@ async def get_template_candidates(
             details=str(exc),
         ) from exc
 
+    ranking_result = await get_template_candidate_ranking_service().rank_candidates(
+        candidates=candidates,
+        project_name=project_name,
+    )
     return TemplateCandidateListResponse(
         success=True,
-        data=TemplateCandidateListData(candidates=candidates),
+        data=TemplateCandidateListData(
+            candidates=ranking_result.candidates,
+            ranking=ranking_result.ranking,
+        ),
         message="模板候选获取成功",
     )
 
