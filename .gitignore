@@ -40,6 +40,9 @@ ENV/
 .DS_Store
 Thumbs.db
 nul
+AGENTS.md
+asset/
+
 
 # Next.js 构建产物
 .next/
@@ -68,6 +71,3 @@ docs/
 frontend/temp-e2e-results*/
 frontend/test-results*/
 
-# Agent 规范与知识包（不纳入版本管理）
-AGENTS.md
-asset/
