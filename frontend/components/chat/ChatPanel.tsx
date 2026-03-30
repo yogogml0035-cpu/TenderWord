@@ -16,6 +16,7 @@ import {
 import type { UserStreamEvent, UserStreamMessage } from '@/types/api';
 import type { Message } from '@/types/chat';
 import type { ModelType } from '@/components/forms/ModelSelector';
+import { tenderTypeDisplayNameMap } from './tenderFormRegistry';
 
 interface ChatPanelProps {
   className?: string;
@@ -674,7 +675,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         <div>
           <h2 className="font-medium text-gray-900">{conversation.title}</h2>
           <p className="text-xs text-gray-500">
-            {conversation.tenderType === 'xjcg' ? '询价采购' : '国内公开'}
+            {tenderTypeDisplayNameMap[conversation.tenderType]}
           </p>
         </div>
         <div className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-400">

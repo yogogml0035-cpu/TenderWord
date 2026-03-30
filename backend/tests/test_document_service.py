@@ -383,6 +383,53 @@ def test_build_rewrite_state_snapshot_persists_uploaded_origin_path():
     assert snapshot["source_origin_tender_path"] == "D:/origin.docx"
 
 
+def test_build_initial_state_for_gjgk_uses_anchor_defaults_and_derived_fields():
+    service = DocumentService()
+
+    state = service._build_initial_state(
+        GenerateRequest(
+            form_type=FormType.GJGK_TENDER,
+            tender_data=TenderData(
+                project_name="国际项目",
+                project_number="GJ-001",
+                project_content="国际采购内容",
+                buyer_name="国际采购人",
+                fund_source_lx=1,
+            ),
+            file_paths={"template": "D:/UploadFiles/template.docx", "params": []},
+            model=LLMModel.DEEPSEEK,
+        ),
+        task_id="task-gjgk",
+    )
+
+    assert state["tender_type"] == "gjgk"
+    assert state["insertion_before_text"] == "技术规格及要求"
+    assert state["insertion_after_text"] == "附件1：投标文件封面（格式）"
+    assert state["fund_source_lx"] == "1"
+    assert state["tender_invitation"] == "项目名称：国际项目，招标编号：GJ-001"
+
+
+def test_build_rewrite_state_snapshot_persists_gjgk_specific_fields():
+    service = DocumentService()
+
+    snapshot = service._build_rewrite_state_snapshot(
+        result_state={
+            "prepared_doc_path": "D:/rewrite.docx",
+            "polished_text": "改写结果",
+            "fund_source_lx": "0",
+            "tender_invitation": "项目名称：国际项目，招标编号：GJ-001",
+            "delivery_location": "上海市浦东新区",
+        },
+        initial_state={
+            "tender_type": "gjgk",
+        },
+    )
+
+    assert snapshot["fund_source_lx"] == "0"
+    assert snapshot["tender_invitation"] == "项目名称：国际项目，招标编号：GJ-001"
+    assert snapshot["delivery_location"] == "上海市浦东新区"
+
+
 def test_rewrite_snapshot_keeps_tender_params_across_generate_and_rewrite_success():
     conversation_service = ConversationService()
 

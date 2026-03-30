@@ -85,6 +85,7 @@ const validGenerateRequest: GenerateRequest = {
     submit_date: '2024-02-01',
     platform: 'Test Platform',
     service_fee: '1000',
+    fund_source_lx: 1,
   },
   file_paths: {
     tender_params: ['/uploads/params.xlsx'],
@@ -220,8 +221,8 @@ describe('API Client', () => {
         data: { project_name: 'Test Project' },
         type: {
           tender_lx: 0,
-          purchase_method: 2,
-          fund_lx: 0,
+          purchase_method: 0,
+          fund_lx: 2,
         },
         message: 'OK',
         timestamp: new Date().toISOString(),
@@ -231,8 +232,8 @@ describe('API Client', () => {
       expect(result.data.project_name).toBe('Test Project');
       expect(result.type).toEqual({
         tender_lx: 0,
-        purchase_method: 2,
-        fund_lx: 0,
+        purchase_method: 0,
+        fund_lx: 2,
       });
     });
 

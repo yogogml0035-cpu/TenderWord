@@ -22,4 +22,10 @@ export const tenderFormVariantConfigMap: Record<TenderType, TenderFormVariantCon
       after_text: '第四章 投标文件有关格式',
     },
   },
+  gjgk: {
+    insertionConfigDefaults: {
+      before_text: '技术规格及要求',
+      after_text: '附件1：投标文件封面（格式）',
+    },
+  },
 };

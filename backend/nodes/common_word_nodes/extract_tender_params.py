@@ -24,7 +24,7 @@ if str(ROOT) not in sys.path:
 from typing import Dict, List, Tuple, Any, Optional
 
 from backend.states import TenderGraphStateBase
-from backend.config.tender_config import TARGET_SIZES
+from backend.config.tender_config import get_anchor_target_sizes
 from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
     create_word_application,
@@ -37,6 +37,7 @@ from backend.util.word_util import (
     wdGoToAbsolute,
 )
 from backend.util.word_util.anchor_utils import find_anchor_range
+from backend.util.word_util.anchor_utils import resolve_anchor_content_range
 
 NODE_NAME = "extract_tender_params"
 
@@ -105,9 +106,10 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
     if not os.access(extract_source_path, os.R_OK):
         raise PermissionError(f"无法读取待提取文档: {extract_source_path}")
 
-    # 根据招标类型获取目标字体大小
-    target_size = TARGET_SIZES.get(tender_type, 18.0)
-    print(f"[extract_tender_params] 招标类型: {tender_type}, 目标字号: {target_size}")
+    before_size, after_size = get_anchor_target_sizes(str(tender_type or "xjcg"))
+    print(
+        f"[extract_tender_params] 招标类型: {tender_type}, 前置字号: {before_size}, 后置字号: {after_size}"
+    )
 
     extracted_content = ""
     start_page = None
@@ -149,7 +151,8 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
             doc=doc,
             before_text=before_text,
             after_text=after_text,
-            target_size=target_size,
+            before_size=before_size,
+            after_size=after_size,
             prefer_before="last",  # 前置选页码最大的，避开目录
             prefer_after="first",  # 后置选页码最小的，取第一个后续章节
         )
@@ -177,33 +180,21 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
             f"[extract_tender_params] 后置锚点: 页={after_page}, start={after_start_pos}, 字体={after_hit['font']}, 字号={after_hit['size']}"
         )
 
-        if after_page <= before_page:
-            msg = (
-                f"后置锚点页码不大于前置锚点页码: "
-                f"before_page={before_page}, after_page={after_page}"
-            )
-            print(f"[extract_tender_params] 错误: {msg}")
-            _visible_log(msg)
-            raise ValueError(msg)
-
-        # 将 before_end_pos 对齐到下一页起始
-        try:
-            selection = wps.Selection
-            selection.GoTo(wdGoToPage, wdGoToAbsolute, before_page + 1)
-            next_page_start = selection.Start
-            if next_page_start > before_end_pos:
-                before_end_pos = next_page_start
-                print(
-                    f"[extract_tender_params] 将 before_end_pos 对齐到下一页起始: {before_end_pos}"
-                )
-        except Exception as adj_e:
-            print(
-                f"[extract_tender_params] 警告: 无法对齐 before_end_pos 到下一页起始: {adj_e}"
-            )
+        content_range = resolve_anchor_content_range(
+            doc=doc,
+            word_app=wps,
+            before_hit=before_hit,
+            after_hit=after_hit,
+            tender_type=str(tender_type or "xjcg"),
+        )
+        range_start = int(content_range["range_start"])
+        range_end = int(content_range["range_end"])
+        start_page = int(content_range["start_page"])
+        end_page = int(content_range["end_page"])
 
         # 提取两个锚点之间的内容
-        _visible_log(f"锚点定位完成，开始提取第 {before_page + 1} 至 {after_page - 1} 页内容")
-        between_rng = doc.Range(before_end_pos, after_start_pos)
+        _visible_log(f"锚点定位完成，开始提取第 {start_page} 至 {end_page} 页内容")
+        between_rng = doc.Range(range_start, range_end)
         extracted_content = extract_content_with_tables(between_rng)
 
         # 统计提取结果
@@ -216,9 +207,6 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
             f"[extract_tender_params] 成功提取内容，总长度: {total_chars} 字符，非空白: {non_whitespace_chars} 字符，行数: {line_count}，表格: {table_count} 个"
         )
 
-        # 记录页码范围
-        start_page = before_page + 1
-        end_page = after_page - 1
         print(f"[extract_tender_params] 页码范围: {start_page} - {end_page}")
         _visible_log(
             f"原始采购需求提取完成，页码范围 {start_page}-{end_page}，非空白字符 {non_whitespace_chars}"

@@ -35,6 +35,46 @@ test.describe('URL-driven Conversation Flow', () => {
     await expect(page.getByText('国内公开')).toBeVisible();
   });
 
+  test('URL params with manual gjgk alias route create a gjgk conversation', async ({ page }) => {
+    await page.goto('/tender?tenderno=GJGK001&purchase_method=0&tender_lx=0&fund_lx=0');
+    await expect(page.locator('.animate-spin')).not.toBeVisible({ timeout: 15000 });
+
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const raw = window.sessionStorage.getItem('chat-storage');
+          if (!raw) {
+            return null;
+          }
+
+          const parsed = JSON.parse(raw) as {
+            state?: {
+              conversations?: Array<{ id: string; tenderType: string }>;
+              currentConversationId?: string | null;
+              selectedTenderType?: string | null;
+            };
+          };
+
+          const conversations = parsed.state?.conversations ?? [];
+          const currentConversation =
+            conversations.find(
+              (conversation) => conversation.id === parsed.state?.currentConversationId
+            ) || null;
+
+          return {
+            conversationCount: conversations.length,
+            currentTenderType: currentConversation?.tenderType ?? null,
+            selectedTenderType: parsed.state?.selectedTenderType ?? null,
+          };
+        })
+      )
+      .toEqual({
+        conversationCount: 1,
+        currentTenderType: 'gjgk',
+        selectedTenderType: 'gjgk',
+      });
+  });
+
   test('Matching URL reuses existing same-session conversation', async ({ page }) => {
     await page.addInitScript(() => {
       window.sessionStorage.setItem(

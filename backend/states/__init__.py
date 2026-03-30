@@ -7,6 +7,7 @@ This module exports all state classes.
 from .base_state import BaseState, CommentInstruction, TenderGraphStateBase
 from .xjcg_tender_state import XjcgTenderGraphState
 from .gngk_tender_state import GngkTenderGraphState
+from .gjgk_tender_state import GjgkTenderGraphState
 from .skill_state import TaskSkillGraphState
 from .user_state import UserGraphState
 
@@ -16,6 +17,7 @@ __all__ = [
     "TenderGraphStateBase",
     "XjcgTenderGraphState",
     "GngkTenderGraphState",
+    "GjgkTenderGraphState",
     "TaskSkillGraphState",
     "UserGraphState",
 ]

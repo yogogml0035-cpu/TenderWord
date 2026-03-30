@@ -5,9 +5,9 @@ import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
 import type { TenderType } from '@/types';
-import type { ConversationHeartbeatData, TenderData } from '@/types/api';
+import type { ConversationHeartbeatData, TenderData, TenderLookupResponse } from '@/types/api';
 
-const mockFetchTenderData = jest.fn();
+const mockFetchTenderDataWithType = jest.fn();
 const mockSendConversationHeartbeat = jest.fn();
 const mockUseUrlParams = jest.fn();
 
@@ -49,9 +49,21 @@ jest.mock('@/components/chat/ChatPanel', () => ({
 }));
 
 jest.mock('@/lib/api', () => ({
-  fetchTenderData: (...args: unknown[]) => mockFetchTenderData(...args),
+  fetchTenderDataWithType: (...args: unknown[]) => mockFetchTenderDataWithType(...args),
   sendConversationHeartbeat: (...args: unknown[]) => mockSendConversationHeartbeat(...args),
 }));
+
+const buildTenderLookupResponse = (
+  overrides?: Partial<TenderLookupResponse>
+): TenderLookupResponse => ({
+  data: buildTenderData(),
+  type: {
+    tender_lx: 0,
+    purchase_method: 0,
+    fund_lx: 1,
+  },
+  ...overrides,
+});
 
 function createHeartbeat(instanceId: string, rewriteAvailable: boolean): ConversationHeartbeatData {
   return {
@@ -148,7 +160,7 @@ describe('ChatPage', () => {
       },
     });
 
-    mockFetchTenderData.mockReset();
+    mockFetchTenderDataWithType.mockReset();
     mockSendConversationHeartbeat.mockReset();
     mockUseUrlParams.mockReset();
     mockUseUrlParams.mockReturnValue({
@@ -247,7 +259,7 @@ describe('ChatPage', () => {
     expect(useChatStore.getState().getConversationDraft('conv-existing')?.tender_fetch).toEqual({
       status: 'success',
     });
-    expect(mockFetchTenderData).not.toHaveBeenCalled();
+    expect(mockFetchTenderDataWithType).not.toHaveBeenCalled();
   });
 
   it('reuses an existing matching conversation, fetches missing tender data, and preserves a custom title', async () => {
@@ -258,7 +270,11 @@ describe('ChatPage', () => {
       isValid: true,
       hasParams: true,
     });
-    mockFetchTenderData.mockResolvedValue(fetchedTenderData);
+    mockFetchTenderDataWithType.mockResolvedValue(
+      buildTenderLookupResponse({
+        data: fetchedTenderData,
+      })
+    );
 
     useChatStore.setState((state) => ({
       ...state,
@@ -291,7 +307,7 @@ describe('ChatPage', () => {
     render(<ChatPage />);
 
     await waitFor(() => {
-      expect(mockFetchTenderData).toHaveBeenCalledWith('0811-DSITC253505');
+      expect(mockFetchTenderDataWithType).toHaveBeenCalledWith('0811-DSITC253505');
     });
 
     const conversation = useChatStore.getState().getCurrentConversation();
@@ -300,6 +316,11 @@ describe('ChatPage', () => {
     expect(conversation?.id).toBe('conv-existing');
     expect(conversation?.title).toBe('自定义标题');
     expect(draft?.tender_data).toEqual(fetchedTenderData);
+    expect(draft?.tender_type_info).toEqual({
+      tender_lx: 0,
+      purchase_method: 0,
+      fund_lx: 1,
+    });
     expect(draft?.tender_fetch).toEqual({ status: 'success' });
   });
 
@@ -310,7 +331,7 @@ describe('ChatPage', () => {
       isValid: true,
       hasParams: true,
     });
-    mockFetchTenderData.mockRejectedValue(new Error('接口异常'));
+    mockFetchTenderDataWithType.mockRejectedValue(new Error('接口异常'));
 
     useChatStore.setState((state) => ({
       ...state,
@@ -329,7 +350,7 @@ describe('ChatPage', () => {
     render(<ChatPage />);
 
     await waitFor(() => {
-      expect(mockFetchTenderData).toHaveBeenCalledWith('0811-DSITC251534');
+      expect(mockFetchTenderDataWithType).toHaveBeenCalledWith('0811-DSITC251534');
     });
 
     const { conversations, currentConversationId, selectedTenderType, getConversationDraft } =

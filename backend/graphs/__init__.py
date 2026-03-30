@@ -27,6 +27,7 @@ from .base_graph import (
 from .skill_graph import SkillGraph
 from .xjcg_tender_graph import XjcgTenderGraph
 from .gngk_tender_graph import GngkTenderGraph
+from .gjgk_tender_graph import GjgkTenderGraph
 from .user_graph import UserGraph
 
 __all__ = [
@@ -39,5 +40,6 @@ __all__ = [
     "SkillGraph",
     "XjcgTenderGraph",
     "GngkTenderGraph",
+    "GjgkTenderGraph",
     "UserGraph",
 ]

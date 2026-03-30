@@ -12,10 +12,17 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from backend.config.tender_config import (
+    CONTENT_START_MODE_NEXT_PAGE_START,
+    CONTENT_START_MODE_SAME_PAGE_AFTER_ANCHOR,
+    get_content_start_mode,
+)
 from backend.util.word_util.word_constants import (
     wdActiveEndPageNumber,
     wdCollapseEnd,
     wdFindStop,
+    wdGoToAbsolute,
+    wdGoToPage,
 )
 
 
@@ -241,15 +248,22 @@ def find_anchor_range(
     doc,
     before_text: str,
     after_text: str,
-    target_size: float,
+    target_size: float | None = None,
+    *,
+    before_size: float | None = None,
+    after_size: float | None = None,
     prefer_before: str = "last",
     prefer_after: str = "first",
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """统一查找前后锚点：段落扫描优先，Find.Execute 兜底。"""
+    default_size = 18.0 if target_size is None else float(target_size)
+    resolved_before_size = default_size if before_size is None else float(before_size)
+    resolved_after_size = resolved_before_size if after_size is None else float(after_size)
+
     before_hits, used_before_text = iter_paragraph_anchor_hits_with_variants(
         doc,
         before_text,
-        target_size,
+        resolved_before_size,
         normalize_space=True,
         strip_control=False,
         with_page_info=True,
@@ -263,7 +277,7 @@ def find_anchor_range(
             doc_content=doc.Content,
             text=before_text,
             start_pos=0,
-            target_size=target_size,
+            target_size=resolved_before_size,
         )
     if not before_hit:
         return None, None
@@ -272,7 +286,7 @@ def find_anchor_range(
     after_hits, used_after_text = iter_paragraph_anchor_hits_with_variants(
         doc,
         after_text,
-        target_size,
+        resolved_after_size,
         normalize_space=True,
         strip_control=False,
         with_page_info=True,
@@ -287,10 +301,131 @@ def find_anchor_range(
             doc_content=doc.Content,
             text=after_text,
             start_pos=before_end_pos,
-            target_size=target_size,
+            target_size=resolved_after_size,
         )
 
     return before_hit, after_hit
+
+
+def _probe_range_page(
+    doc,
+    start: int,
+    end: int,
+    *,
+    probe_end: bool,
+    fallback_page: int,
+) -> int:
+    """尽量用实际 range 位置回推页码，失败时回退到锚点页码。"""
+    try:
+        doc_start = max(0, int(start))
+        doc_end = max(doc_start, int(end))
+        if doc_end <= doc_start:
+            probe_start = doc_start
+            probe_end_pos = doc_start + 1
+        elif probe_end:
+            probe_start = max(doc_start, doc_end - 1)
+            probe_end_pos = doc_end
+        else:
+            probe_start = doc_start
+            probe_end_pos = min(doc_end, doc_start + 1)
+        probe_rng = doc.Range(probe_start, probe_end_pos)
+        return int(probe_rng.Information(wdActiveEndPageNumber))
+    except Exception:
+        return int(fallback_page)
+
+
+def resolve_anchor_content_range(
+    *,
+    doc,
+    word_app,
+    before_hit: Dict[str, Any],
+    after_hit: Dict[str, Any],
+    tender_type: str | None = None,
+    content_start_mode: str | None = None,
+    allow_empty: bool = False,
+) -> Dict[str, int]:
+    """根据 tender type 规则，把锚点命中解析为正文区间和真实页码。"""
+    before_page = int(before_hit["page"])
+    before_end_pos = int(before_hit["end"])
+    after_page = int(after_hit["page"])
+    after_start_pos = int(after_hit["start"])
+
+    resolved_start_mode = (
+        str(content_start_mode or "").strip()
+        or get_content_start_mode(str(tender_type or "xjcg"))
+    )
+    if resolved_start_mode not in {
+        CONTENT_START_MODE_NEXT_PAGE_START,
+        CONTENT_START_MODE_SAME_PAGE_AFTER_ANCHOR,
+    }:
+        resolved_start_mode = CONTENT_START_MODE_NEXT_PAGE_START
+
+    range_start = before_end_pos
+    if resolved_start_mode == CONTENT_START_MODE_NEXT_PAGE_START:
+        if after_page <= before_page:
+            raise ValueError(
+                "后置锚点页码不大于前置锚点页码: "
+                f"before_page={before_page}, after_page={after_page}"
+            )
+        try:
+            selection = word_app.Selection
+            selection.GoTo(wdGoToPage, wdGoToAbsolute, before_page + 1)
+            next_page_start = int(selection.Start)
+            if next_page_start > range_start:
+                range_start = next_page_start
+        except Exception:
+            pass
+    else:
+        if after_page < before_page:
+            raise ValueError(
+                "后置锚点页码早于前置锚点页码: "
+                f"before_page={before_page}, after_page={after_page}"
+            )
+
+    range_end = after_start_pos
+    if range_end < range_start or (range_end == range_start and not allow_empty):
+        raise ValueError(
+            "锚点范围非法: "
+            f"range_start={range_start}, range_end={range_end}, "
+            f"before_page={before_page}, after_page={after_page}"
+        )
+
+    fallback_start_page = (
+        before_page + 1
+        if resolved_start_mode == CONTENT_START_MODE_NEXT_PAGE_START
+        else before_page
+    )
+    fallback_end_page = (
+        max(fallback_start_page, after_page - 1)
+        if after_page > fallback_start_page
+        else fallback_start_page
+    )
+
+    start_page = _probe_range_page(
+        doc,
+        range_start,
+        range_end,
+        probe_end=False,
+        fallback_page=fallback_start_page,
+    )
+    end_page = _probe_range_page(
+        doc,
+        range_start,
+        range_end,
+        probe_end=True,
+        fallback_page=fallback_end_page,
+    )
+    if end_page < start_page:
+        end_page = start_page
+
+    return {
+        "range_start": int(range_start),
+        "range_end": int(range_end),
+        "start_page": int(start_page),
+        "end_page": int(end_page),
+        "before_page": before_page,
+        "after_page": after_page,
+    }
 
 
 __all__ = [
@@ -303,6 +438,7 @@ __all__ = [
     "pick_anchor",
     "pick_after_anchor",
     "find_anchor_range",
+    "resolve_anchor_content_range",
     "find_anchor_with_find",
     "_iter_paragraph_hits",
     "_pick_anchor",

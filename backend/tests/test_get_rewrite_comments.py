@@ -43,6 +43,19 @@ class DummyDoc:
         self.closed = True
 
 
+class _SelectionStub:
+    def __init__(self):
+        self.Start = 0
+
+    def GoTo(self, _what, _which, page):
+        self.Start = int(page) * 100
+
+
+class _WordStub:
+    def __init__(self):
+        self.Selection = _SelectionStub()
+
+
 def _make_package(name: str) -> types.ModuleType:
     module = types.ModuleType(name)
     module.__path__ = []
@@ -61,6 +74,7 @@ def _load_module(monkeypatch, module_name: str, file_path: Path):
 def _load_rewrite_comment_modules(monkeypatch):
     for package_name in (
         "backend",
+        "backend.config",
         "backend.nodes",
         "backend.nodes.common_word_nodes",
         "backend.util",
@@ -74,6 +88,7 @@ def _load_rewrite_comment_modules(monkeypatch):
     monkeypatch.setitem(sys.modules, "backend.states", states_module)
 
     word_util_module = types.ModuleType("backend.util.word_util")
+    word_util_module.__path__ = []
     word_util_module.WordDocumentInspector = object
     word_util_module.DocumentAnalysisResult = DocumentAnalysisResultStub
     word_util_module.create_word_application = lambda **kwargs: (object(), True)
@@ -84,12 +99,32 @@ def _load_rewrite_comment_modules(monkeypatch):
     word_util_module.wdActiveEndPageNumber = 1
     monkeypatch.setitem(sys.modules, "backend.util.word_util", word_util_module)
 
+    anchor_utils_module = types.ModuleType("backend.util.word_util.anchor_utils")
+    anchor_utils_module.find_anchor_range = lambda **_kwargs: (None, None)
+    anchor_utils_module.resolve_anchor_content_range = lambda **_kwargs: {
+        "range_start": 0,
+        "range_end": 0,
+    }
+    monkeypatch.setitem(
+        sys.modules,
+        "backend.util.word_util.anchor_utils",
+        anchor_utils_module,
+    )
+
     progress_log_module = types.ModuleType("backend.util.log_util.progress_log")
     progress_log_module.progress_log = ProgressLogStub()
     monkeypatch.setitem(
         sys.modules,
         "backend.util.log_util.progress_log",
         progress_log_module,
+    )
+
+    tender_config_module = types.ModuleType("backend.config.tender_config")
+    tender_config_module.get_anchor_target_sizes = lambda *_args, **_kwargs: (22.0, 22.0)
+    monkeypatch.setitem(
+        sys.modules,
+        "backend.config.tender_config",
+        tender_config_module,
     )
 
     get_comments_module = _load_module(
@@ -288,3 +323,65 @@ def test_get_rewrite_comments_propagates_inspector_errors(monkeypatch):
         )
 
     assert doc.closed is True
+
+
+def test_get_insertion_range_gjgk_keeps_same_anchor_page(monkeypatch):
+    get_comments_module, _rewrite_module = _load_rewrite_comment_modules(monkeypatch)
+
+    monkeypatch.setattr(
+        get_comments_module,
+        "find_anchor_range",
+        lambda **_kwargs: (
+            {"page": 22, "start": 2200, "end": 2250, "font": "宋体", "size": 16.0},
+            {"page": 24, "start": 2900, "end": 2950, "font": "宋体", "size": 14.0},
+        ),
+    )
+    monkeypatch.setattr(
+        get_comments_module,
+        "resolve_anchor_content_range",
+        lambda **_kwargs: {"range_start": 2250, "range_end": 2900},
+    )
+
+    range_start, range_end = get_comments_module._get_insertion_range(
+        DummyDoc(),
+        _WordStub(),
+        "技术规格及要求",
+        "附件1：投标文件封面（格式）",
+        16.0,
+        14.0,
+        tender_type="gjgk",
+    )
+
+    assert range_start == 2250
+    assert range_end == 2900
+
+
+def test_get_insertion_range_xjcg_still_uses_next_page_start(monkeypatch):
+    get_comments_module, _rewrite_module = _load_rewrite_comment_modules(monkeypatch)
+
+    monkeypatch.setattr(
+        get_comments_module,
+        "find_anchor_range",
+        lambda **_kwargs: (
+            {"page": 22, "start": 2200, "end": 2250, "font": "宋体", "size": 18.0},
+            {"page": 24, "start": 2900, "end": 2950, "font": "宋体", "size": 18.0},
+        ),
+    )
+    monkeypatch.setattr(
+        get_comments_module,
+        "resolve_anchor_content_range",
+        lambda **_kwargs: {"range_start": 2300, "range_end": 2900},
+    )
+
+    range_start, range_end = get_comments_module._get_insertion_range(
+        DummyDoc(),
+        _WordStub(),
+        "第三章 采购需求",
+        "第四章 投标文件有关格式",
+        18.0,
+        18.0,
+        tender_type="xjcg",
+    )
+
+    assert range_start == 2300
+    assert range_end == 2900

@@ -8,6 +8,7 @@
 
 import type { XjcgTenderFormData } from '@/components/forms/XjcgTenderForm';
 import type { GngkTenderFormData } from '@/components/forms/GngkTenderForm';
+import type { GjgkTenderFormData } from '@/components/forms/GjgkTenderForm';
 import type { UploadedFile } from '@/components/forms/FileUploader';
 import type { GenerateRequest, FilesConfig } from '@/types/api';
 
@@ -15,7 +16,7 @@ import type { GenerateRequest, FilesConfig } from '@/types/api';
 // Type Exports
 // ============================================
 
-export type { XjcgTenderFormData, GngkTenderFormData };
+export type { XjcgTenderFormData, GngkTenderFormData, GjgkTenderFormData };
 
 // ============================================
 // Helper Functions
@@ -193,6 +194,24 @@ export function convertGngkFormToApiRequest(
   return request;
 }
 
+export function convertGjgkFormToApiRequest(
+  formData: GjgkTenderFormData
+): GenerateRequest {
+  const filesConfig = buildFilesConfig(
+    formData.files.origin_tender,
+    formData.files.clean_draft,
+    formData.files.tender_params
+  );
+
+  return {
+    form_type: 'gjgk_tender',
+    tender_data: formData.tender_data,
+    file_paths: filesConfig,
+    insertion_config: formData.insertion_config,
+    model: formData.model,
+  };
+}
+
 // ============================================
 // Generic Converter
 // ============================================
@@ -200,12 +219,12 @@ export function convertGngkFormToApiRequest(
 /**
  * 招标类型枚举
  */
-export type TenderType = 'xjcg' | 'gngk';
+export type TenderType = 'xjcg' | 'gngk' | 'gjgk';
 
 /**
  * 通用表单数据类型
  */
-export type TenderFormData = XjcgTenderFormData | GngkTenderFormData;
+export type TenderFormData = XjcgTenderFormData | GngkTenderFormData | GjgkTenderFormData;
 
 /**
  * 根据招标类型自动选择转换函数
@@ -229,6 +248,10 @@ export function convertFormToApiRequest(
   formData: GngkTenderFormData
 ): GngkGenerateRequest;
 export function convertFormToApiRequest(
+  type: 'gjgk',
+  formData: GjgkTenderFormData
+): GenerateRequest;
+export function convertFormToApiRequest(
   type: TenderType,
   formData: TenderFormData
 ): GenerateRequest | GngkGenerateRequest {
@@ -237,6 +260,8 @@ export function convertFormToApiRequest(
       return convertXjcgFormToApiRequest(formData as XjcgTenderFormData);
     case 'gngk':
       return convertGngkFormToApiRequest(formData as GngkTenderFormData);
+    case 'gjgk':
+      return convertGjgkFormToApiRequest(formData as GjgkTenderFormData);
     default:
       // Type guard ensures this shouldn't happen, but just in case
       throw new Error(`Unsupported tender type: ${type}`);

@@ -31,6 +31,7 @@ from backend.task.task_queue_manager import get_task_queue
 from backend.util.log_util.execution_log import log_generate_task_success
 from backend.util.log_util.progress_log import progress_log
 from backend.util.log_util.sse_log_handler import task_log_context
+from backend.config.tender_config import get_default_anchor_texts
 
 if TYPE_CHECKING:
     from backend.graphs.base_graph import BaseGraph
@@ -64,11 +65,15 @@ REWRITE_STATE_KEYS = [
     "submit_date",
     "platform",
     "service_fee",
+    "fund_source_lx",
+    "tender_invitation",
+    "delivery_location",
 ]
 
 REWRITE_DEFAULT_ANCHORS = {
     "xjcg": ("第三章  采购需求", "第四章  响应文件有关格式"),
     "gngk": ("第三章 招标内容及要求", "第四章 投标文件有关格式"),
+    "gjgk": ("技术规格及要求", "附件1：投标文件封面（格式）"),
 }
 
 TASK_KIND_TO_LLM_NODE = {
@@ -170,10 +175,11 @@ def _init_graph_registry():
         return
 
     try:
-        from backend.graphs import GngkTenderGraph, SkillGraph, XjcgTenderGraph
+        from backend.graphs import GjgkTenderGraph, GngkTenderGraph, SkillGraph, XjcgTenderGraph
 
         GRAPH_REGISTRY["xjcg_tender"] = XjcgTenderGraph
         GRAPH_REGISTRY["gngk_tender"] = GngkTenderGraph
+        GRAPH_REGISTRY["gjgk_tender"] = GjgkTenderGraph
         TASK_SKILL_GRAPH_CLASSES[REWRITE_SKILL_ID] = SkillGraph.for_skill(REWRITE_SKILL_ID)
         REWRITE_SKILL_GRAPH_CLASS = TASK_SKILL_GRAPH_CLASSES[REWRITE_SKILL_ID]
         logger.info("Graph 注册表初始化完成")
@@ -574,6 +580,9 @@ class DocumentService:
             "platform": tender_data.platform or "",
             "service_fee": tender_data.service_fee or "",
         }
+        fund_source_lx = getattr(tender_data, "fund_source_lx", None)
+        if fund_source_lx not in (None, ""):
+            state["fund_source_lx"] = str(fund_source_lx)
 
         insertion_before_text = None
         insertion_after_text = None
@@ -582,15 +591,18 @@ class DocumentService:
             insertion_before_text = getattr(insertion_config, "before_text", None)
             insertion_after_text = getattr(insertion_config, "after_text", None)
 
+        default_before_text, default_after_text = get_default_anchor_texts(tender_type)
         if not insertion_before_text or not str(insertion_before_text).strip():
-            insertion_before_text = "第三章  采购需求" if tender_type == "xjcg" else "第三章 采购需求"
+            insertion_before_text = default_before_text
         if not insertion_after_text or not str(insertion_after_text).strip():
-            insertion_after_text = (
-                "第四章  响应文件有关格式" if tender_type == "xjcg" else "第四章 投标文件有关格式"
-            )
+            insertion_after_text = default_after_text
 
         state["insertion_before_text"] = str(insertion_before_text)
         state["insertion_after_text"] = str(insertion_after_text)
+        if tender_type == "gjgk":
+            state["tender_invitation"] = (
+                f"项目名称：{state['project_name']}，招标编号：{state['project_number']}"
+            )
 
         # 文件路径
         # origin_tender_path: 送审稿（可选）

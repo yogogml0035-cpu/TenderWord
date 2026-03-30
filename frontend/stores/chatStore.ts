@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, devtools, persist } from 'zustand/middleware';
 import type { TenderType } from '@/types';
-import type { TaskKind, TaskStatus, TenderData } from '@/types/api';
+import type { TaskKind, TaskStatus, TenderData, TenderTypeInfo } from '@/types/api';
 import type { TenderFetchState } from '@/lib/tenderFetch';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
@@ -66,6 +66,7 @@ export interface ConversationDraftFile {
 export interface ConversationFormDraft {
   tender_no?: string;
   tender_data?: TenderData | null;
+  tender_type_info?: TenderTypeInfo | null;
   tender_fetch?: TenderFetchState;
   model?: 'deepseek' | 'qwen' | 'doubao';
   insertion_config?: {

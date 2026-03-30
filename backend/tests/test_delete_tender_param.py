@@ -733,6 +733,87 @@ def test_delete_tender_param_runs_layout_repair_and_save(monkeypatch, tender_typ
     assert repair_calls[0]["tender_type"] == tender_type
 
 
+def test_delete_tender_param_gjgk_direct_replace_skips_layout_repair(monkeypatch):
+    word = _FakeWord()
+    doc = _DeleteFlowDocument(content_end=1000)
+    save_called = {"value": False}
+
+    monkeypatch.setattr(
+        delete_tender_param_module,
+        "create_word_application",
+        lambda **_kwargs: (word, False),
+    )
+    monkeypatch.setattr(
+        delete_tender_param_module,
+        "open_document_with_retry",
+        lambda **_kwargs: doc,
+    )
+    monkeypatch.setattr(
+        delete_tender_param_module,
+        "unprotect_document",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        delete_tender_param_module,
+        "find_anchor_range",
+        lambda **_kwargs: (
+            {
+                "page": 22,
+                "end": 2250,
+                "font": "宋体",
+                "size": 16.0,
+                "used_text": "技术规格及要求",
+            },
+            {
+                "page": 24,
+                "start": 2900,
+                "end": 2950,
+                "font": "宋体",
+                "size": 14.0,
+                "used_text": "附件1：投标文件封面（格式）",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        delete_tender_param_module,
+        "_find_anchor_fast",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("gjgk direct_replace 不应走增量删除")
+        ),
+    )
+    monkeypatch.setattr(
+        delete_tender_param_module,
+        "_restore_protected_field_paragraph_boundaries",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("gjgk direct_replace 不应修复受保护字段边界")
+        ),
+    )
+    monkeypatch.setattr(
+        delete_tender_param_module,
+        "close_word_application",
+        lambda **_kwargs: None,
+    )
+
+    def mark_save(*_args, **_kwargs):
+        save_called["value"] = True
+
+    monkeypatch.setattr(delete_tender_param_module, "save_document_with_retry", mark_save)
+
+    result = delete_tender_param_module.delete_tender_param(
+        {
+            "prepared_doc_path": __file__,
+            "insertion_before_text": "技术规格及要求",
+            "insertion_after_text": "附件1：投标文件封面（格式）",
+            "tender_type": "gjgk",
+        },
+        config={},
+    )
+
+    assert result["tender_type"] == "gjgk"
+    assert doc.delete_calls == [(2250, 2900)]
+    assert save_called["value"] is True
+
+
 def test_find_anchor_range_supports_master_variants_and_candidate_selection():
     doc = _AnchorDocument(
         [
@@ -760,6 +841,120 @@ def test_find_anchor_range_supports_master_variants_and_candidate_selection():
     assert before_hit["used_text"] == "第三章采购需求"
     assert after_hit["page"] == 5
     assert after_hit["used_text"] == "第四章响应文件有关格式"
+
+
+def test_find_anchor_range_supports_distinct_before_and_after_sizes():
+    doc = _AnchorDocument(
+        [
+            ("技术规格及要求\r", 20, 40, 1, "宋体", 16.0),
+            ("附件1：投标文件封面（格式）\r", 200, 240, 3, "宋体", 14.0),
+        ]
+    )
+
+    before_hit, after_hit = anchor_utils_module.find_anchor_range(
+        doc=doc,
+        before_text="技术规格及要求",
+        after_text="附件1：投标文件封面（格式）",
+        before_size=16.0,
+        after_size=14.0,
+        prefer_before="last",
+        prefer_after="first",
+    )
+
+    assert before_hit is not None
+    assert after_hit is not None
+    assert before_hit["size"] == 16.0
+    assert after_hit["size"] == 14.0
+
+
+def test_resolve_anchor_content_range_respects_tender_type_start_mode():
+    class _Selection:
+        Start = 0
+
+        def GoTo(self, _what, _which, page):
+            self.Start = page * 100
+
+    class _Word:
+        def __init__(self):
+            self.Selection = _Selection()
+
+    class _Doc:
+        Content = type("Content", (), {"End": 5000})()
+
+        def Range(self, start, end):
+            return type(
+                "_Range",
+                (),
+                {"Information": lambda self, _kind: 22 if int(start) == 2250 else 23},
+            )()
+
+    gjgk_range = anchor_utils_module.resolve_anchor_content_range(
+        doc=_Doc(),
+        word_app=_Word(),
+        before_hit={"page": 22, "start": 2200, "end": 2250},
+        after_hit={"page": 24, "start": 2900, "end": 2950},
+        tender_type="gjgk",
+    )
+    xjcg_range = anchor_utils_module.resolve_anchor_content_range(
+        doc=_Doc(),
+        word_app=_Word(),
+        before_hit={"page": 22, "start": 2200, "end": 2250},
+        after_hit={"page": 24, "start": 2900, "end": 2950},
+        tender_type="xjcg",
+    )
+
+    assert gjgk_range["range_start"] == 2250
+    assert gjgk_range["start_page"] == 22
+    assert gjgk_range["end_page"] == 23
+    assert xjcg_range["range_start"] == 2300
+
+
+def test_resolve_anchor_content_range_can_allow_empty_cross_page_insert_boundary():
+    class _Selection:
+        Start = 0
+
+        def GoTo(self, _what, _which, page):
+            page_starts = {23: 13686}
+            self.Start = page_starts.get(page, page * 100)
+
+    class _Word:
+        def __init__(self):
+            self.Selection = _Selection()
+
+    class _Doc:
+        Content = type("Content", (), {"End": 50000})()
+
+        def Range(self, start, end):
+            return type(
+                "_Range",
+                (),
+                {
+                    "Information": lambda self, _kind: 23,
+                },
+            )()
+
+    with pytest.raises(ValueError, match="锚点范围非法"):
+        anchor_utils_module.resolve_anchor_content_range(
+            doc=_Doc(),
+            word_app=_Word(),
+            before_hit={"page": 22, "start": 13620, "end": 13660},
+            after_hit={"page": 23, "start": 13686, "end": 13720},
+            tender_type="xjcg",
+        )
+
+    resolved = anchor_utils_module.resolve_anchor_content_range(
+        doc=_Doc(),
+        word_app=_Word(),
+        before_hit={"page": 22, "start": 13620, "end": 13660},
+        after_hit={"page": 23, "start": 13686, "end": 13720},
+        tender_type="xjcg",
+        allow_empty=True,
+    )
+
+    assert resolved["range_start"] == 13686
+    assert resolved["range_end"] == 13686
+    assert resolved["start_page"] == 23
+    assert resolved["end_page"] == 23
 
 
 def test_find_anchor_range_falls_back_to_find_word_anchor(monkeypatch):

@@ -32,6 +32,7 @@ from backend.prompts.types import (
 
 def test_generate_prompt_registry_uses_shared_templates_for_current_tender_types():
     assert GENERATE_PROMPT_REGISTRY["xjcg"] == GENERATE_PROMPT_REGISTRY["gngk"]
+    assert GENERATE_PROMPT_REGISTRY["xjcg"] == GENERATE_PROMPT_REGISTRY["gjgk"]
 
 
 def test_render_generate_prompt_includes_required_sections():
@@ -196,6 +197,7 @@ def test_parse_rewrite_target_selection_validates_output_shape():
 
 def test_comment_prompt_registry_uses_shared_templates_for_current_tender_types():
     assert COMMENT_PROMPT_REGISTRY["xjcg"] == COMMENT_PROMPT_REGISTRY["gngk"]
+    assert COMMENT_PROMPT_REGISTRY["xjcg"] == COMMENT_PROMPT_REGISTRY["gjgk"]
 
 
 def test_render_template_candidate_ranking_prompt_uses_minimum_fields():

@@ -37,6 +37,7 @@ description="""
 **表单类型**：
 - `xjcg_tender`: 询价采购
 - `gngk_tender`: 国内公开
+- `gjgk_tender`: 国际公开
 
 **模型选择**：
 - `deepseek`: DeepSeek 模型（默认）

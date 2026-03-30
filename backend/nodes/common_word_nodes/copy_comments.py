@@ -34,6 +34,7 @@ from backend.util.word_util import (
 )
 from backend.util.word_util import wdFindStop, wdCollapseEnd
 from backend.nodes.common_word_nodes.get_comments import _get_insertion_range
+from backend.config.tender_config import get_anchor_target_sizes
 from backend.util.log_util.progress_log import progress_log
 logger = logging.getLogger(__name__)
 
@@ -404,7 +405,9 @@ def copy_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
         return TenderGraphStateBase(copy_comments_log=f"送审稿不存在，跳过复制批注: {origin_tender_path}", copy_comments_unmatched=[])
 
     context_chars = int(state.get("copy_comments_context_chars") or DEFAULT_CONTEXT_CHARS)
-    target_size = 18.0 if state.get("tender_type") == "xjcg" else 22.0
+    before_size, after_size = get_anchor_target_sizes(
+        str(state.get("tender_type") or "xjcg")
+    )
 
     dst_check_word = None
     dst_check_doc = None
@@ -470,7 +473,13 @@ def copy_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
 
         if before_text and after_text:
             src_range_start, src_range_end = _get_insertion_range(
-                src_doc, word_app, before_text, after_text, target_size
+                src_doc,
+                word_app,
+                before_text,
+                after_text,
+                before_size,
+                after_size,
+                tender_type=str(state.get("tender_type") or "xjcg"),
             )
 
         total = 0
@@ -530,7 +539,13 @@ def copy_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
         dst_range_end: Optional[int] = None
         if before_text and after_text:
             dst_range_start, dst_range_end = _get_insertion_range(
-                dst_doc, dst_word, before_text, after_text, target_size
+                dst_doc,
+                dst_word,
+                before_text,
+                after_text,
+                before_size,
+                after_size,
+                tender_type=str(state.get("tender_type") or "xjcg"),
             )
 
         spans, span_starts, span_max_ends = _build_sorted_comment_spans(dst_doc)

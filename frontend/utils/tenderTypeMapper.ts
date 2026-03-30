@@ -8,6 +8,18 @@ import { TenderType } from '@/types';
 export const TYPE_MAPPING: Record<string, TenderType> = {
   '0-0-2': 'gngk',  // 国内公开 (tender_lx=0, fund_lx=0, purchase_method=2)
   '0-0-5': 'xjcg',  // 询价采购 (tender_lx=0, fund_lx=0, purchase_method=5)
+  '0-0-0': 'gjgk',  // 国际公开手工/兼容 URL 别名
+  '0-1-0': 'gjgk',  // 国际公开 canonical
+  '0-2-0': 'gjgk',  // 国际公开兼容路由
+};
+
+const CANONICAL_TYPE_PARAMS: Record<
+  TenderType,
+  { tender_lx: number; purchase_method: number; fund_lx: number }
+> = {
+  xjcg: { tender_lx: 0, purchase_method: 5, fund_lx: 0 },
+  gngk: { tender_lx: 0, purchase_method: 2, fund_lx: 0 },
+  gjgk: { tender_lx: 0, purchase_method: 0, fund_lx: 1 },
 };
 
 /**
@@ -219,7 +231,7 @@ export function parseTenderUrlParams(
  * @returns 是否为有效的TenderType
  */
 export function isValidTenderType(value: unknown): value is TenderType {
-  return value === 'xjcg' || value === 'gngk';
+  return value === 'xjcg' || value === 'gngk' || value === 'gjgk';
 }
 
 /**
@@ -237,18 +249,5 @@ export function isValidTenderType(value: unknown): value is TenderType {
 export function getUrlParamsForTenderType(
   tenderType: TenderType
 ): { tender_lx: number; purchase_method: number; fund_lx: number } | null {
-  const entry = Object.entries(TYPE_MAPPING).find(([, type]) => type === tenderType);
-  
-  if (!entry) {
-    return null;
-  }
-
-  const [key] = entry;
-  const [tender_lx, fund_lx, purchase_method] = key.split('-').map(Number);
-
-  return {
-    tender_lx,
-    purchase_method,
-    fund_lx,
-  };
+  return CANONICAL_TYPE_PARAMS[tenderType] || null;
 }

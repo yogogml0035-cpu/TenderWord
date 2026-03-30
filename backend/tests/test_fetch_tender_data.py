@@ -45,11 +45,12 @@ def test_fetch_tender_data_uses_settings_url_and_timeout(monkeypatch):
                     "shell_end_date": "2026-03-08",
                     "submit_date": "2026-03-09",
                     "platform": "平台A",
+                    "fund_lx": 1,
                 },
                 "type": {
                     "tender_lx": 0,
-                    "purchase_method": 2,
-                    "fund_lx": 0,
+                    "purchase_method": 0,
+                    "fund_lx": 2,
                 },
             }
         )
@@ -61,8 +62,9 @@ def test_fetch_tender_data_uses_settings_url_and_timeout(monkeypatch):
     assert result["data"]["project_name"] == "示例项目"
     assert result["data"]["shell_start_date"] == "2026-03-01起"
     assert result["data"]["shell_end_date"] == "2026-03-08止"
+    assert result["data"]["fund_source_lx"] == 1
     assert result["type"] == {
         "tender_lx": 0,
-        "purchase_method": 2,
-        "fund_lx": 0,
+        "purchase_method": 0,
+        "fund_lx": 2,
     }

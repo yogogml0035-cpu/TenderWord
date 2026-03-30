@@ -19,7 +19,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.states import TenderGraphStateBase
-from backend.config.tender_config import TARGET_SIZES
+from backend.config.tender_config import (
+    CONTENT_UPDATE_MODE_DIRECT_REPLACE,
+    get_anchor_target_sizes,
+    get_content_update_mode,
+)
 from backend.util.word_util import (
     create_word_application,
     close_word_application,
@@ -37,7 +41,10 @@ from backend.util.word_util import (
     wdFindStop,
     wdWithInTable,
 )
-from backend.util.word_util.anchor_utils import find_anchor_range
+from backend.util.word_util.anchor_utils import (
+    find_anchor_range,
+    resolve_anchor_content_range,
+)
 
 
 REQUIRED_PROTECTED_FIELD_KEYWORDS = ("交付日期", "付款方式")
@@ -266,8 +273,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
             "insertion_before_text 和 insertion_after_text 必须提供，用于定位插入范围"
         )
 
-    # 根据招标类型获取目标字体大小
-    target_size = TARGET_SIZES.get(tender_type, 18.0)
+    before_size, after_size = get_anchor_target_sizes(str(tender_type or "xjcg"))
 
     split_result = split_polished_text_into_blocks(polished_text)
     content_list = split_result["content_list"]
@@ -302,12 +308,15 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 insertion_log_parts.append("已取消文档保护")
 
             # 使用 anchor_utils 的统一函数查找锚点
-            insertion_log_parts.append(f"查找锚点（目标字号: {target_size}）...")
+            insertion_log_parts.append(
+                f"查找锚点（前置字号: {before_size}, 后置字号: {after_size}）..."
+            )
             before_hit, after_hit = find_anchor_range(
                 doc,
                 insertion_before_text,
                 insertion_after_text,
-                target_size,
+                before_size=before_size,
+                after_size=after_size,
                 prefer_before="last",  # 前置锚点选页码最大的（避开目录）
                 prefer_after="first",  # 后置锚点选页码最小的（第一个后续章节）
             )
@@ -334,21 +343,19 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 f"字体={after_hit['font']}, 字号={after_hit['size']}"
             )
 
-            selection = word.Selection
-            try:
-                selection.GoTo(wdGoToPage, wdGoToAbsolute, before_anchor_page + 1)
-                insertion_bound_start = int(selection.Start)
-                if insertion_bound_start < before_anchor_end:
-                    insertion_bound_start = before_anchor_end
-            except Exception:
-                insertion_bound_start = before_anchor_end
-
-            insertion_bound_end = after_anchor_start
-
-            if insertion_bound_end <= insertion_bound_start:
-                raise ValueError(
-                    f"锚点范围非法: start={insertion_bound_start}, end={insertion_bound_end}"
-                )
+            content_range = resolve_anchor_content_range(
+                doc=doc,
+                word_app=word,
+                before_hit=before_hit,
+                after_hit=after_hit,
+                tender_type=str(tender_type or "xjcg"),
+                allow_empty=True,
+            )
+            insertion_bound_start = int(content_range["range_start"])
+            insertion_bound_end = int(content_range["range_end"])
+            computed_start_page = int(content_range["start_page"])
+            computed_end_page = int(content_range["end_page"])
+            content_update_mode = get_content_update_mode(str(tender_type or "xjcg"))
 
             after_anchor_marker = doc.Range(
                 int(after_anchor_start), int(after_anchor_start)
@@ -369,8 +376,8 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
             end_page = state.get("end_page")
 
             if start_page is None or end_page is None:
-                start_page = before_anchor_page + 1
-                end_page = after_anchor_page - 1
+                start_page = computed_start_page
+                end_page = computed_end_page
                 insertion_log_parts.append(f"回退计算页范围: {start_page} - {end_page}")
             else:
                 insertion_log_parts.append(
@@ -430,33 +437,46 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 page_rng = doc.Range(page_start, page_end)
 
                 # 步骤1：优先在目标页定位受保护字段，必要时回查锚点边界范围
-                protected_keywords = list(REQUIRED_PROTECTED_FIELD_KEYWORDS)
+                use_direct_replace = (
+                    content_update_mode == CONTENT_UPDATE_MODE_DIRECT_REPLACE
+                )
+                protected_keywords = (
+                    []
+                    if use_direct_replace
+                    else list(REQUIRED_PROTECTED_FIELD_KEYWORDS)
+                )
                 target_range = (int(page_start), int(page_end))
                 fallback_range = (
                     int(insertion_bound_start),
                     int(get_insertion_bound_end()),
                 )
-                insertion_log_parts.append(
-                    "步骤1：定位关键受保护字段..."
-                    f" 目标页={target_page}({target_range[0]}-{target_range[1]})，"
-                    f" 边界范围={fallback_range[0]}-{fallback_range[1]}"
-                )
-
-                protected_fields = _collect_protected_fields(
-                    doc=doc,
-                    keywords=protected_keywords,
-                    target_range=target_range,
-                    fallback_range=fallback_range,
-                )
-                if not protected_fields:
+                if use_direct_replace:
                     insertion_log_parts.append(
-                        "  未在目标范围内找到受保护字段，将按可编辑边界继续插入。"
+                        "步骤1：gjgk direct_replace 模式，跳过受保护字段定位。"
                     )
+                    protected_fields = {}
                 else:
-                    for keyword, para_rng in protected_fields.items():
+                    insertion_log_parts.append(
+                        "步骤1：定位关键受保护字段..."
+                        f" 目标页={target_page}({target_range[0]}-{target_range[1]})，"
+                        f" 边界范围={fallback_range[0]}-{fallback_range[1]}"
+                    )
+
+                    protected_fields = _collect_protected_fields(
+                        doc=doc,
+                        keywords=protected_keywords,
+                        target_range=target_range,
+                        fallback_range=fallback_range,
+                    )
+                    if not protected_fields:
                         insertion_log_parts.append(
-                            f"  找到受保护字段: {keyword} ({int(para_rng.Start)}-{int(para_rng.End)})"
+                            "  未在目标范围内找到受保护字段，将按可编辑边界继续插入。"
                         )
+                    else:
+                        for keyword, para_rng in protected_fields.items():
+                            insertion_log_parts.append(
+                                f"  找到受保护字段: {keyword} ({int(para_rng.Start)}-{int(para_rng.End)})"
+                            )
 
                 def _range_overlaps(
                     a_start: int, a_end: int, b_start: int, b_end: int
@@ -480,7 +500,11 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     return False
 
                 # 步骤2：根据受保护字段将内容列表拆分为块
-                insertion_log_parts.append("步骤2：按字段拆分内容块...")
+                insertion_log_parts.append(
+                    "步骤2：按字段拆分内容块..."
+                    if not use_direct_replace
+                    else "步骤2：gjgk direct_replace 模式，按完整正文顺序插入。"
+                )
 
                 delivery_date_line = split_result["delivery_date_line"]
                 payment_method_line = split_result["payment_method_line"]
@@ -492,17 +516,22 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 block2 = split_result["block2"]
                 block3 = split_result["block3"]
 
-                insertion_log_parts.append(f"  块1: {len(block1)} 条（交付日期之前）")
-                insertion_log_parts.append(f"  块2: {len(block2)} 条（交付日期区段）")
-                insertion_log_parts.append(f"  块3: {len(block3)} 条（付款方式之后）")
-                if delivery_prefix.strip():
+                if use_direct_replace:
                     insertion_log_parts.append(
-                        f"  交付日期前缀: {delivery_prefix.strip()}"
+                        f"  direct_replace 条目数: {len(content_list)}"
                     )
-                if payment_prefix.strip():
-                    insertion_log_parts.append(
-                        f"  付款方式前缀: {payment_prefix.strip()}"
-                    )
+                else:
+                    insertion_log_parts.append(f"  块1: {len(block1)} 条（交付日期之前）")
+                    insertion_log_parts.append(f"  块2: {len(block2)} 条（交付日期区段）")
+                    insertion_log_parts.append(f"  块3: {len(block3)} 条（付款方式之后）")
+                    if delivery_prefix.strip():
+                        insertion_log_parts.append(
+                            f"  交付日期前缀: {delivery_prefix.strip()}"
+                        )
+                    if payment_prefix.strip():
+                        insertion_log_parts.append(
+                            f"  付款方式前缀: {payment_prefix.strip()}"
+                        )
 
                 # 步骤3：删除所有可编辑内容
                 bound_start_for_delete = int(insertion_bound_start)
@@ -560,14 +589,18 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 insertion_log_parts.append("步骤4：按块插入内容...")
 
                 # 删除后重新获取页面范围
-                selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                page_start_after = selection.Start
-                selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
-                page_end_after = (
-                    selection.Start
-                    if selection.Information(wdActiveEndPageNumber) == next_page
-                    else doc.Content.End
-                )
+                if use_direct_replace:
+                    page_start_after = int(insertion_bound_start)
+                    page_end_after = int(get_insertion_bound_end())
+                else:
+                    selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
+                    page_start_after = selection.Start
+                    selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
+                    page_end_after = (
+                        selection.Start
+                        if selection.Information(wdActiveEndPageNumber) == next_page
+                        else doc.Content.End
+                    )
                 bound_end_for_search = int(get_insertion_bound_end())
                 if int(page_end_after) < bound_end_for_search:
                     page_end_after = bound_end_for_search
@@ -1077,9 +1110,18 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
 
                 # 插入块1（始终执行，优先在交付日期前，否则回退到目标页起始可编辑位置）
                 insertion_log_parts.append("  正在插入块1...")
-                selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                insert_rng = selection.Range
-                insert_rng.Collapse(wdCollapseStart)
+                if use_direct_replace:
+                    insert_rng = doc.Range(
+                        int(insertion_bound_start), int(insertion_bound_start)
+                    )
+                    insert_rng.Collapse(wdCollapseStart)
+                    insertion_log_parts.append(
+                        f"    direct_replace 从锚点后位置开始插入，位置 {int(insertion_bound_start)}"
+                    )
+                else:
+                    selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
+                    insert_rng = selection.Range
+                    insert_rng.Collapse(wdCollapseStart)
 
                 if flow["has_delivery"]:
                     delivery_date_rng = protected_fields["交付日期"]
@@ -1092,7 +1134,9 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     insert_rng.SetRange(safe_before, safe_before)
                     insert_rng.Collapse(wdCollapseStart)
 
-                block1_items = convert_lines_to_items(block1)
+                block1_items = convert_lines_to_items(
+                    content_list if use_direct_replace else block1
+                )
                 for item in block1_items:
                     try:
                         if item["type"] == "text":
@@ -1331,14 +1375,18 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         f"  步骤5.1 第 {pass_num} 轮：删除空段落..."
                     )
 
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                    page_start_final = selection.Start
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
-                    page_end_final = (
-                        selection.Start
-                        if selection.Information(wdActiveEndPageNumber) == next_page
-                        else doc.Content.End
-                    )
+                    if use_direct_replace:
+                        page_start_final = int(insertion_bound_start)
+                        page_end_final = int(get_insertion_bound_end())
+                    else:
+                        selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
+                        page_start_final = selection.Start
+                        selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
+                        page_end_final = (
+                            selection.Start
+                            if selection.Information(wdActiveEndPageNumber) == next_page
+                            else doc.Content.End
+                        )
                     page_rng_final = doc.Range(page_start_final, page_end_final)
 
                     paras_final = list(page_rng_final.Paragraphs)
@@ -1414,14 +1462,18 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 # 第二轮：从可编辑段落中移除换行符
                 insertion_log_parts.append("  步骤5.2：清理可编辑段落中的换行...")
 
-                selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                page_start_clean = selection.Start
-                selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
-                page_end_clean = (
-                    selection.Start
-                    if selection.Information(wdActiveEndPageNumber) == next_page
-                    else doc.Content.End
-                )
+                if use_direct_replace:
+                    page_start_clean = int(insertion_bound_start)
+                    page_end_clean = int(get_insertion_bound_end())
+                else:
+                    selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
+                    page_start_clean = selection.Start
+                    selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
+                    page_end_clean = (
+                        selection.Start
+                        if selection.Information(wdActiveEndPageNumber) == next_page
+                        else doc.Content.End
+                    )
                 page_rng_clean = doc.Range(page_start_clean, page_end_clean)
 
                 cleaned_count = 0
@@ -1500,14 +1552,18 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
 
                 # 最终轮：再次检查是否有剩余的空段落
                 insertion_log_parts.append("  步骤5.3：最终检查剩余空段落...")
-                selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                page_start_final = selection.Start
-                selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
-                page_end_final = (
-                    selection.Start
-                    if selection.Information(wdActiveEndPageNumber) == next_page
-                    else doc.Content.End
-                )
+                if use_direct_replace:
+                    page_start_final = int(insertion_bound_start)
+                    page_end_final = int(get_insertion_bound_end())
+                else:
+                    selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
+                    page_start_final = selection.Start
+                    selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
+                    page_end_final = (
+                        selection.Start
+                        if selection.Information(wdActiveEndPageNumber) == next_page
+                        else doc.Content.End
+                    )
                 page_rng_final = doc.Range(page_start_final, page_end_final)
 
                 final_empty_deleted = 0

@@ -144,3 +144,34 @@ def test_extract_tender_params_success_returns_content_and_pages(monkeypatch):
     assert result["origin_tender_params"] == "提取到的采购需求内容"
     assert result["start_page"] == 3
     assert result["end_page"] == 4
+
+
+def test_extract_tender_params_gjgk_starts_from_same_anchor_page(monkeypatch):
+    _common_monkeypatch(monkeypatch)
+    monkeypatch.setattr(
+        extract_tender_params_module,
+        "find_anchor_range",
+        lambda **_kwargs: (
+            {"page": 22, "start": 2200, "end": 2250, "font": "宋体", "size": 16.0},
+            {"page": 24, "start": 2900, "end": 2950, "font": "宋体", "size": 14.0},
+        ),
+    )
+    monkeypatch.setattr(
+        extract_tender_params_module,
+        "extract_content_with_tables",
+        lambda _rng: "gjgk 技术规格正文",
+    )
+
+    result = extract_tender_params_module.extract_tender_params(
+        {
+            "clean_draft_path": __file__,
+            "insertion_before_text": "技术规格及要求",
+            "insertion_after_text": "附件1：投标文件封面（格式）",
+            "tender_type": "gjgk",
+        },
+        config={},
+    )
+
+    assert result["origin_tender_params"] == "gjgk 技术规格正文"
+    assert result["start_page"] == 22
+    assert result["end_page"] == 23

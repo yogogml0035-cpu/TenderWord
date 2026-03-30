@@ -28,6 +28,7 @@ export interface TenderData {
   submit_date: string;
   platform: string;
   service_fee: string;
+  fund_source_lx?: number;
 }
 
 export interface TenderTypeInfo {
@@ -134,7 +135,7 @@ export interface InsertionConfig {
 }
 
 export interface GenerateRequest {
-  form_type: 'xjcg_tender' | 'gngk_tender';
+  form_type: 'xjcg_tender' | 'gngk_tender' | 'gjgk_tender';
   tender_data: TenderData;
   file_paths: FilesConfig;
   insertion_config?: InsertionConfig;

@@ -26,9 +26,10 @@ class TestPromptSelectionAndValidation:
     
     def test_prompt_registry_structure(self):
         """测试 PROMPT_REGISTRY 包含正确的招标类型"""
-        # 验证 PROMPT_REGISTRY 包含 xjcg 和 gngk
+        # 验证 PROMPT_REGISTRY 包含 xjcg / gngk / gjgk
         assert "xjcg" in COMMENT_PROMPT_REGISTRY
         assert "gngk" in COMMENT_PROMPT_REGISTRY
+        assert "gjgk" in COMMENT_PROMPT_REGISTRY
         
         # 验证每个条目是一个包含两个字符串的元组
         for tender_type, prompts in COMMENT_PROMPT_REGISTRY.items():
@@ -56,6 +57,7 @@ class TestPromptSelectionAndValidation:
         assert "unknown_type" in error_message
         assert "xjcg" in error_message
         assert "gngk" in error_message
+        assert "gjgk" in error_message
     
     def test_valid_xjcg_tender_type_accepted(self):
         """测试 xjcg 招标类型被正确接受"""
@@ -94,6 +96,22 @@ class TestPromptSelectionAndValidation:
                 assert True
             except ValueError:
                 pytest.fail("gngk tender_type should be accepted")
+
+    def test_valid_gjgk_tender_type_accepted(self):
+        """测试 gjgk 招标类型被正确接受"""
+        state = XjcgTenderGraphState(
+            polished_text="测试文本",
+            tender_type="gjgk",
+        )
+
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+            mock_llm.side_effect = _empty_llm_response
+
+            try:
+                generate_comments(state, config={})
+                assert True
+            except ValueError:
+                pytest.fail("gjgk tender_type should be accepted")
     
     def test_default_tender_type_is_xjcg(self):
         """测试默认 tender_type 为 xjcg"""

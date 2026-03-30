@@ -484,10 +484,38 @@ class StandardTenderWorkflowGraph(BaseGraph):
     def get_state_class(self) -> Type[TypedDict]:
         return self.STATE_CLS
 
+    def get_word_operation_steps(self) -> tuple[tuple[str, Callable], ...]:
+        return (
+            ("delete_tender_param", getattr(type(self), "NODE_DELETE_TENDER_PARAM")),
+            ("get_replacements", getattr(type(self), "NODE_GET_REPLACEMENTS")),
+            ("replace_content", getattr(type(self), "NODE_REPLACE_CONTENT")),
+        )
+
+    def get_post_update_steps(self) -> tuple[tuple[str, Callable], ...]:
+        return ()
+
     def estimate_total_nodes(self, initial_state: dict) -> int:
         origin_tender_path = initial_state.get("origin_tender_path")
         has_origin_for_comments = bool(origin_tender_path and str(origin_tender_path).strip())
-        return 10 if has_origin_for_comments else 7
+        base_nodes = {
+            "prepare_template",
+            "extract_tender_params",
+            "generate_polished_text",
+            "update_word",
+        }
+        if has_origin_for_comments:
+            base_nodes.update({"get_comments", "copy_comments", "generate_comments"})
+        base_nodes.update(
+            node_name
+            for node_name, _node_func in self.get_word_operation_steps()
+            if node_name in TRACKED_PROGRESS_NODES
+        )
+        base_nodes.update(
+            node_name
+            for node_name, _node_func in self.get_post_update_steps()
+            if node_name in TRACKED_PROGRESS_NODES
+        )
+        return len(base_nodes)
 
     def build_graph(self) -> StateGraph:
         state_cls = self.STATE_CLS
@@ -531,6 +559,9 @@ class StandardTenderWorkflowGraph(BaseGraph):
         builder.add_node("comments_branch_done", self.wrap_node("comments_branch_done", comments_branch_done))
         builder.add_node("generate_comments", self.wrap_node("generate_comments", node_generate_comments))
         builder.add_node("update_word", self.wrap_node("update_word", node_update_word))
+        post_update_steps = self.get_post_update_steps()
+        for node_name, node_func in post_update_steps:
+            builder.add_node(node_name, self.wrap_node(node_name, node_func))
 
         builder.add_edge(START, "prepare_template")
         builder.add_edge("prepare_template", "extract_tender_params")
@@ -567,34 +598,31 @@ class StandardTenderWorkflowGraph(BaseGraph):
         )
         builder.add_edge("generate_comments", "comments_branch_done")
         builder.add_edge(["word_operations_subgraph", "comments_branch_done"], "update_word")
-        builder.add_edge("update_word", END)
+        if post_update_steps:
+            first_post_node = post_update_steps[0][0]
+            builder.add_edge("update_word", first_post_node)
+            for current_step, next_step in zip(post_update_steps, post_update_steps[1:]):
+                builder.add_edge(current_step[0], next_step[0])
+            builder.add_edge(post_update_steps[-1][0], END)
+        else:
+            builder.add_edge("update_word", END)
 
         return builder
 
     def _build_word_operations_subgraph(self):
         state_cls = self.STATE_CLS
         subgraph_builder = StateGraph(state_cls)
+        steps = self.get_word_operation_steps()
+        if not steps:
+            raise ValueError("word_operations_subgraph 至少需要一个节点")
 
-        node_delete_tender_param = getattr(type(self), "NODE_DELETE_TENDER_PARAM")
-        node_get_replacements = getattr(type(self), "NODE_GET_REPLACEMENTS")
-        node_replace_content = getattr(type(self), "NODE_REPLACE_CONTENT")
+        for node_name, node_func in steps:
+            subgraph_builder.add_node(node_name, self.wrap_node(node_name, node_func))
 
-        subgraph_builder.add_node(
-            "delete_tender_param",
-            self.wrap_node("delete_tender_param", node_delete_tender_param),
-        )
-        subgraph_builder.add_node(
-            "get_replacements",
-            self.wrap_node("get_replacements", node_get_replacements),
-        )
-        subgraph_builder.add_node(
-            "replace_content",
-            self.wrap_node("replace_content", node_replace_content),
-        )
-        subgraph_builder.add_edge(START, "delete_tender_param")
-        subgraph_builder.add_edge("delete_tender_param", "get_replacements")
-        subgraph_builder.add_edge("get_replacements", "replace_content")
-        subgraph_builder.add_edge("replace_content", END)
+        subgraph_builder.add_edge(START, steps[0][0])
+        for current_step, next_step in zip(steps, steps[1:]):
+            subgraph_builder.add_edge(current_step[0], next_step[0])
+        subgraph_builder.add_edge(steps[-1][0], END)
         return subgraph_builder.compile()
 
 

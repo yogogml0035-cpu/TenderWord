@@ -12,13 +12,27 @@ def _request_timeout_seconds() -> float:
     return float(settings.EXTERNAL_REQUEST_TIMEOUT_SECONDS)
 
 
+def _normalize_fund_source_lx(value) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return None
+    return normalized if normalized in (0, 1) else None
+
+
 def fetch_tender_data(tender_no: str) -> Dict:
     """
     从接口获取招标数据
 
     接口返回格式为：
-    {"data": {...}, "type": {"tender_lx": 0, "purchase_method": 2, "fund_lx": 0}}
-    其中 type 用于表单路由（国内公开 0,2,0 / 询价采购 0,5,0）。
+    {"data": {...}, "type": {"tender_lx": 0, "purchase_method": 0, "fund_lx": 1}}
+    其中：
+    - type 用于表单路由（例如 tender_lx=0, purchase_method=2, fund_lx=0 表示国内公开；
+      tender_lx=0, purchase_method=5, fund_lx=0 表示询价采购；
+      tender_lx=0, purchase_method=0, fund_lx in {1, 2} 表示国际公开）
+    - data.fund_lx 会透传为业务字段 fund_source_lx
 
     Args:
         tender_no: 招标编号
@@ -68,6 +82,7 @@ def fetch_tender_data(tender_no: str) -> Dict:
             "submit_date": data.get("submit_date", ""),
             "platform": data.get("platform", ""),
             "service_fee": "",  # data.get("service_fee", ""),
+            "fund_source_lx": _normalize_fund_source_lx(data.get("fund_lx")),
         }
 
         # 接口返回的 type 用于表单路由（不通过 URL 传 tender_lx/purchase_method/fund_lx）

@@ -173,3 +173,20 @@ def test_update_word_main_flow_no_longer_calls_required_field_gate():
 
     assert "_validate_required_protected_fields(" not in source
     assert "付款方式字段位置超出插入边界" in source
+
+
+def test_update_word_gjgk_uses_direct_replace_mode():
+    assert update_word_module.get_content_update_mode("gjgk") == "direct_replace"
+
+
+def test_update_word_source_contains_gjgk_direct_replace_anchor_start():
+    source = inspect.getsource(update_word_module.update_word)
+
+    assert "content_update_mode == CONTENT_UPDATE_MODE_DIRECT_REPLACE" in source
+    assert "direct_replace 从锚点后位置开始插入" in source
+
+
+def test_update_word_source_allows_empty_anchor_insert_range():
+    source = inspect.getsource(update_word_module.update_word)
+
+    assert "allow_empty=True" in source

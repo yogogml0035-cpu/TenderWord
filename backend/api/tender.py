@@ -102,6 +102,7 @@ async def get_tender_data(
             submit_date=tender_data_dict.get("submit_date", ""),
             platform=tender_data_dict.get("platform", ""),
             service_fee=tender_data_dict.get("service_fee", ""),
+            fund_source_lx=tender_data_dict.get("fund_source_lx"),
         )
 
         # 构建 TenderType 模型（可能为 None）

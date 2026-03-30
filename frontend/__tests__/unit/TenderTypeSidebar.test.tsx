@@ -81,6 +81,18 @@ describe('TenderTypeSidebar', () => {
     expect(screen.getByText('新对话')).toBeInTheDocument();
   });
 
+  it('renders and creates conversations for gjgk', () => {
+    render(<TenderTypeSidebar />);
+
+    expect(screen.getByText('国际公开')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('tender-type-button-gjgk'));
+
+    const state = useChatStore.getState();
+    expect(state.selectedTenderType).toBe('gjgk');
+    expect(state.conversations[0]?.tenderType).toBe('gjgk');
+  });
+
   it('shows all conversations for the expanded type instead of truncating to five items', () => {
     useChatStore.setState({
       conversations: Array.from({ length: 6 }, (_, index) =>

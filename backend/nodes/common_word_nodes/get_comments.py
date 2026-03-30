@@ -34,6 +34,9 @@ from backend.util.word_util import (
     wdGoToAbsolute,
     wdActiveEndPageNumber,
 )
+from backend.util.word_util.anchor_utils import find_anchor_range
+from backend.util.word_util.anchor_utils import resolve_anchor_content_range
+from backend.config.tender_config import get_anchor_target_sizes
 from backend.util.log_util.progress_log import progress_log
 
 
@@ -83,8 +86,10 @@ def _get_insertion_range(
     word_app,
     before_text: str,
     after_text: str,
-    target_size: float,
+    before_size: float,
+    after_size: float,
     *,
+    tender_type: str | None = None,
     node_name: str = "get_comments",
     strict: bool = False,
 ):
@@ -97,39 +102,39 @@ def _get_insertion_range(
     """
     if not before_text or not after_text:
         return None, None
-    before_hits = _iter_paragraph_hits(doc, before_text, target_size)
-    before_hit = _pick_anchor(before_hits, prefer_last=True)
+    before_hit, after_hit = find_anchor_range(
+        doc=doc,
+        before_text=before_text,
+        after_text=after_text,
+        before_size=before_size,
+        after_size=after_size,
+        prefer_before="last",
+        prefer_after="first",
+    )
     if not before_hit:
         if strict:
             logger.warning("%s 未找到前置锚点 '%s'", node_name, before_text)
         else:
             logger.info("%s 未找到前置锚点 '%s'，不按范围过滤批注", node_name, before_text)
         return None, None
-    before_end_pos = before_hit["end"]
-    before_page = before_hit["page"]
-    try:
-        selection = word_app.Selection
-        selection.GoTo(wdGoToPage, wdGoToAbsolute, before_page + 1)
-        next_page_start = selection.Start
-        if next_page_start > before_end_pos:
-            before_end_pos = next_page_start
-    except Exception:
-        pass
-    after_hits = _iter_paragraph_hits(doc, after_text, target_size)
-    after_hits = [h for h in after_hits if h["start"] >= before_end_pos]
-    after_hit = _pick_anchor(after_hits, prefer_last=False)
     if not after_hit:
         if strict:
             logger.warning("%s 未找到后置锚点 '%s'", node_name, after_text)
         else:
             logger.info("%s 未找到后置锚点 '%s'，不按范围过滤批注", node_name, after_text)
         return None, None
-    after_start_pos = after_hit["start"]
-    return before_end_pos, after_start_pos
+    content_range = resolve_anchor_content_range(
+        doc=doc,
+        word_app=word_app,
+        before_hit=before_hit,
+        after_hit=after_hit,
+        tender_type=tender_type,
+    )
+    return content_range["range_start"], content_range["range_end"]
 
 
-def _resolve_target_size(tender_type: str | None) -> float:
-    return 18.0 if tender_type == "xjcg" else 22.0
+def _resolve_anchor_sizes(tender_type: str | None) -> tuple[float, float]:
+    return get_anchor_target_sizes(str(tender_type or "xjcg"))
 
 
 def _empty_plan_state(state: TenderGraphStateBase) -> TenderGraphStateBase:
@@ -241,12 +246,15 @@ def extract_document_analysis_result(
             )
 
         if before_text and after_text:
+            before_size, after_size = _resolve_anchor_sizes(tender_type)
             range_start, range_end = _get_insertion_range(
                 doc,
                 word_app,
                 before_text,
                 after_text,
-                _resolve_target_size(tender_type),
+                before_size,
+                after_size,
+                tender_type=tender_type,
                 node_name=node_name,
                 strict=require_anchor_range,
             )

@@ -24,6 +24,7 @@ import type {
   TemplateCandidate,
   TemplateCandidateRanking,
   TemplateSelectedFile,
+  TenderTypeInfo,
 } from '@/types/api';
 import {
   generateConversationTitle,
@@ -127,12 +128,26 @@ function toSelectedUploadedFile(file: TemplateSelectedFile): UploadedFile {
   };
 }
 
-function toTenderInfoItems(tenderData: TenderData | null): TenderInfoItem[] {
+function toGjgkFundLabel(fundLx: TenderTypeInfo['fund_lx'] | undefined): string | undefined {
+  if (fundLx === 0) {
+    return '自筹资金';
+  }
+  if (fundLx === 1) {
+    return '财政资金';
+  }
+  return undefined;
+}
+
+function toTenderInfoItems(
+  tenderType: TenderType,
+  tenderData: TenderData | null,
+  tenderTypeInfo: TenderTypeInfo | null
+): TenderInfoItem[] {
   if (!tenderData) {
     return [];
   }
 
-  return [
+  const items: TenderInfoItem[] = [
     { label: '项目名称', value: tenderData.project_name, key: 'project_name' },
     { label: '项目编号', value: tenderData.project_number, key: 'project_number' },
     { label: '项目内容', value: tenderData.project_content, key: 'project_content' },
@@ -144,9 +159,21 @@ function toTenderInfoItems(tenderData: TenderData | null): TenderInfoItem[] {
     { label: '售标开始时间', value: tenderData.shell_start_date, key: 'shell_start_date' },
     { label: '售标结束时间', value: tenderData.shell_end_date, key: 'shell_end_date' },
     { label: '递交文件截止时间', value: tenderData.submit_date, key: 'submit_date' },
-    { label: '发布平台', value: tenderData.platform, key: 'platform' },
-    { label: '服务费', value: tenderData.service_fee, key: 'service_fee' },
   ];
+
+  if (tenderType === 'gjgk') {
+    items.push({
+      label: '资金性质',
+      value: toGjgkFundLabel(tenderTypeInfo?.fund_lx),
+      key: 'fund_lx',
+    });
+  } else {
+    items.push({ label: '发布平台', value: tenderData.platform, key: 'platform' });
+  }
+
+  items.push({ label: '服务费', value: tenderData.service_fee, key: 'service_fee' });
+
+  return items;
 }
 
 export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTenderFormData>({
@@ -170,6 +197,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const [localTenderNo, setLocalTenderNo] = useState(initialDraft?.tender_no || initialTenderNo);
   const [localTenderData, setLocalTenderData] = useState<TenderData | null>(
     initialDraft?.tender_data || initialTenderData || null
+  );
+  const [localTenderTypeInfo, setLocalTenderTypeInfo] = useState<TenderTypeInfo | null>(
+    initialDraft?.tender_type_info || null
   );
   const [localTenderFetchState, setLocalTenderFetchState] = useState<TenderFetchState>(
     resolveTenderFetchState(initialDraft?.tender_fetch, initialDraft?.tender_data || initialTenderData)
@@ -214,6 +244,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const tenderData = onDraftChange
     ? initialDraft?.tender_data || initialTenderData || null
     : localTenderData;
+  const tenderTypeInfo = onDraftChange
+    ? initialDraft?.tender_type_info || null
+    : localTenderTypeInfo;
   const tenderFetchState = onDraftChange
     ? resolveTenderFetchState(initialDraft?.tender_fetch, initialDraft?.tender_data || initialTenderData)
     : localTenderFetchState;
@@ -233,6 +266,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       }
       if (Object.prototype.hasOwnProperty.call(updates, 'tender_data')) {
         setLocalTenderData(updates.tender_data || null);
+      }
+      if (Object.prototype.hasOwnProperty.call(updates, 'tender_type_info')) {
+        setLocalTenderTypeInfo(updates.tender_type_info || null);
       }
       if (updates.tender_fetch) {
         setLocalTenderFetchState(updates.tender_fetch);
@@ -273,8 +309,10 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       setLocalTenderNo(value);
       const nextFetchState = createTenderFetchState('idle');
       setLocalTenderFetchState(nextFetchState);
+      setLocalTenderTypeInfo(null);
       onDraftChange?.({
         tender_no: value,
+        tender_type_info: null,
         tender_fetch: nextFetchState,
       });
     },
@@ -329,7 +367,10 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     () => (cleanDraftFile ? [cleanDraftFile] : []),
     [cleanDraftFile]
   );
-  const tenderInfoItems = useMemo(() => toTenderInfoItems(tenderData), [tenderData]);
+  const tenderInfoItems = useMemo(
+    () => toTenderInfoItems(tenderType, tenderData, tenderTypeInfo),
+    [tenderData, tenderType, tenderTypeInfo]
+  );
   const showCancelAction = isSubmitting && canCancel && typeof onCancel === 'function';
 
   const loadTemplateCandidates = useCallback(

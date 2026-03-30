@@ -585,6 +585,12 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
                 </span>
                 <span>国内公开</span>
               </div>
+              <div className="flex items-center gap-3 text-sm text-gray-500">
+                <span className="flex h-6 w-6 items-center justify-center rounded bg-indigo-100 text-xs font-semibold text-indigo-600">
+                  国
+                </span>
+                <span>国际公开</span>
+              </div>
             </div>
           </div>
         </div>

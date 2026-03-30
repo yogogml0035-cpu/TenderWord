@@ -18,7 +18,11 @@ if str(ROOT) not in sys.path:
 from typing import Dict, Optional
 
 from backend.states import TenderGraphStateBase
-from backend.config.tender_config import TARGET_SIZES
+from backend.config.tender_config import (
+    CONTENT_UPDATE_MODE_DIRECT_REPLACE,
+    get_anchor_target_sizes,
+    get_content_update_mode,
+)
 from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
     create_word_application,
@@ -34,6 +38,7 @@ from backend.util.word_util import (
 from backend.util.word_util.anchor_utils import (
     find_anchor_range,
     iter_anchor_text_variants,
+    resolve_anchor_content_range,
 )
 
 NODE_NAME = "delete_tender_param"
@@ -245,7 +250,7 @@ def _insert_paragraph_break_before_delivery(
             safe_insert_pos = _find_safe_insert_position(
                 doc,
                 paragraph_candidates,
-                max_forward_scan_chars=24 if tender_type == "gngk" else 8,
+                max_forward_scan_chars=24 if tender_type in {"gngk", "gjgk"} else 8,
                 field_name="交付日期",
                 log=log,
             )
@@ -261,7 +266,7 @@ def _insert_paragraph_break_before_delivery(
     fallback_insert_pos = _find_safe_insert_position(
         doc,
         [fallback_pos],
-        max_forward_scan_chars=24 if tender_type == "gngk" else 8,
+        max_forward_scan_chars=24 if tender_type in {"gngk", "gjgk"} else 8,
         field_name="交付日期",
         log=log,
     )
@@ -309,7 +314,7 @@ def _ensure_paragraph_break_after_payment(
     safe_insert_pos = _find_safe_insert_position(
         doc,
         range(payment_end, max_pos + 1),
-        max_forward_scan_chars=8 if tender_type == "gngk" else 0,
+        max_forward_scan_chars=8 if tender_type in {"gngk", "gjgk"} else 0,
         field_name="付款方式",
         log=log,
     )
@@ -341,7 +346,7 @@ def _restore_protected_field_paragraph_boundaries(
         doc_end = 0
 
     search_start = min(max(0, int(before_end_pos or 0)), doc_end)
-    search_window = 20000 if tender_type == "gngk" else 12000
+    search_window = 20000 if tender_type in {"gngk", "gjgk"} else 12000
     search_end = min(doc_end, search_start + search_window)
 
     if log:
@@ -451,9 +456,10 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
     if not os.access(prepared_doc_path, os.W_OK):
         raise PermissionError(f"无法写入准备好的文档: {prepared_doc_path}")
 
-    # 根据招标类型获取目标字体大小
-    target_size = TARGET_SIZES.get(tender_type, 18.0)
-    print(f"[delete_tender_param] 招标类型: {tender_type}, 目标字号: {target_size}")
+    before_size, after_size = get_anchor_target_sizes(str(tender_type or "xjcg"))
+    print(
+        f"[delete_tender_param] 招标类型: {tender_type}, 前置字号: {before_size}, 后置字号: {after_size}"
+    )
 
     word = None
     doc = None
@@ -494,7 +500,8 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
             doc=doc,
             before_text=before_text,
             after_text=after_text,
-            target_size=target_size,
+            before_size=before_size,
+            after_size=after_size,
             prefer_before="last",  # 前置选页码最大的，避开目录
             prefer_after="first",  # 后置选页码最小的，取第一个后续章节
         )
@@ -536,55 +543,65 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
             f"✅ 后置锚点: 页={after_page}, start={after_start_pos}, end={after_end_pos}, 字体={after_hit['font']}, 字号={after_hit['size']}"
         )
 
-        if after_page <= before_page:
-            msg = (
-                f"后置锚点页码不大于前置锚点页码: "
-                f"before_page={before_page}, after_page={after_page}"
-            )
-            print(f"[delete_tender_param] 错误: {msg}")
-            _visible_log(msg)
-            raise ValueError(msg)
-
-        # 将 before_end_pos 对齐到下一页起始
-        try:
-            selection = word.Selection
-            selection.GoTo(wdGoToPage, wdGoToAbsolute, before_page + 1)
-            next_page_start = selection.Start
-            if next_page_start > before_end_pos:
-                before_end_pos = next_page_start
-                print(f"将 before_end_pos 对齐到下一页起始: {before_end_pos}")
-        except Exception as adj_e:
-            print(f"警告: 无法对齐 before_end_pos 到下一页起始: {adj_e}")
+        content_range = resolve_anchor_content_range(
+            doc=doc,
+            word_app=word,
+            before_hit=before_hit,
+            after_hit=after_hit,
+            tender_type=str(tender_type or "xjcg"),
+        )
+        range_start = int(content_range["range_start"])
+        range_end = int(content_range["range_end"])
+        start_page = int(content_range["start_page"])
+        end_page = int(content_range["end_page"])
+        content_update_mode = get_content_update_mode(str(tender_type or "xjcg"))
 
         # === 开始删除锚点之间的内容 ===
         print("开始删除锚点之间的内容")
-        print(f"删除范围: {before_end_pos} -> {after_start_pos}")
+        print(f"删除范围: {range_start} -> {range_end}")
         _visible_log(
-            f"锚点定位完成，开始删除第 {before_page + 1} 至 {after_page - 1} 页内容"
+            f"锚点定位完成，开始删除第 {start_page} 至 {end_page} 页内容"
         )
 
         # 合法性校验，避免 Range 越界
         doc_end = doc.Content.End
         if (
-            after_start_pos is None
-            or before_end_pos is None
-            or after_start_pos <= before_end_pos
-            or after_start_pos > doc_end
-            or before_end_pos < 0
-            or before_end_pos > doc_end
+            range_end is None
+            or range_start is None
+            or range_end <= range_start
+            or range_end > doc_end
+            or range_start < 0
+            or range_start > doc_end
         ):
             msg = (
                 "锚点位置异常，无法执行删除: "
-                f"before_end_pos={before_end_pos}, after_start_pos={after_start_pos}, doc_end={doc_end}"
+                f"range_start={range_start}, range_end={range_end}, doc_end={doc_end}"
             )
             print(f"[delete_tender_param] 错误: {msg}")
             _visible_log(msg)
             raise ValueError(msg)
 
+        if content_update_mode == CONTENT_UPDATE_MODE_DIRECT_REPLACE:
+            print("[delete_tender_param] gjgk direct_replace 模式，直接删除完整正文区间")
+            _visible_log("gjgk 走 direct_replace 模式，直接删除正文区间")
+            doc.Range(range_start, range_end).Delete()
+            print(f"[delete_tender_param] 内容删除完成，页码范围: {start_page} - {end_page}")
+            _visible_log(f"删除完成，页码范围 {start_page}-{end_page}，准备保存文档")
+            _visible_log("开始保存清理后的文档")
+            save_document_with_retry(doc, node_name=NODE_NAME)
+            _visible_log("文档保存完成")
+            new_state_dict = dict(state)
+            elapsed_time = _calculate_elapsed_seconds(start_time)
+            print(
+                f"[delete_tender_param] 执行完成，耗时: {elapsed_time:.2f} 秒 ({elapsed_time * 1000:.0f} 毫秒)"
+            )
+            _visible_log(f"节点执行完成，耗时 {elapsed_time:.2f} 秒")
+            return TenderGraphStateBase(**new_state_dict)
+
         print("采用优化策略：大块删除 + 失败时逐步缩小")
         max_steps = 500  # 减少最大步数，因为新策略更高效
         step_idx = 0
-        current_pos = before_end_pos
+        current_pos = range_start
 
         # 性能监控
         perf_stats = {
@@ -609,7 +626,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                 doc_content,
                 after_text,
                 min_start=current_pos,
-                target_size=target_size,
+                target_size=after_size,
             )
             perf_stats["refresh_time"] += time.time() - t0
 
@@ -792,9 +809,6 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
         print(f"  表格处理耗时: {perf_stats['table_time']:.2f}秒")
         print(f"  段落处理耗时: {perf_stats['para_time']:.2f}秒")
 
-        # 记录页码范围供后续节点参考
-        start_page = before_page + 1
-        end_page = after_page - 1
         print(f"[delete_tender_param] 内容删除完成，页码范围: {start_page} - {end_page}")
         _visible_log(f"删除完成，页码范围 {start_page}-{end_page}，准备保存文档")
 
@@ -802,8 +816,8 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
             _restore_protected_field_paragraph_boundaries(
                 doc=doc,
                 before_text=before_text,
-                before_end_pos=before_end_pos,
-                target_size=target_size,
+                before_end_pos=range_start,
+                target_size=before_size,
                 tender_type=tender_type,
             )
         except Exception as layout_e:

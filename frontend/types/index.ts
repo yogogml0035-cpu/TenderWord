@@ -3,9 +3,9 @@
  */
 
 // Tender types
-export type TenderType = 'xjcg' | 'gngk'; // 询价采购 | 国内公开
+export type TenderType = 'xjcg' | 'gngk' | 'gjgk'; // 询价采购 | 国内公开 | 国际公开
 export type PurchaseMethod = 0 | 1 | 2 | 5;
-export type FundType = 0 | 1; // 0=国内, 1=国际
+export type FundType = 0 | 1 | 2; // URL 路由资金类型
 
 export interface TenderConfig {
   formId: string;

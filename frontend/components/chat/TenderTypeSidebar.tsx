@@ -28,6 +28,12 @@ const tenderTypes: SidebarTenderType[] = [
     icon: <FileText className="h-5 w-5" />,
     description: '国内公开招标类型',
   },
+  {
+    id: 'gjgk',
+    name: '国际公开',
+    icon: <FileText className="h-5 w-5" />,
+    description: '国际公开招标类型',
+  },
 ];
 
 interface TenderTypeSidebarProps {
@@ -89,6 +95,7 @@ export function TenderTypeSidebar({ onNewChat }: TenderTypeSidebarProps) {
     > = {
       xjcg: { unread: false, running: false, queued: false },
       gngk: { unread: false, running: false, queued: false },
+      gjgk: { unread: false, running: false, queued: false },
     };
 
     for (const conversation of conversations) {

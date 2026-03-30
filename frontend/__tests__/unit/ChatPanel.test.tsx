@@ -186,6 +186,26 @@ describe('ChatPanel', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('shows the registered tender type label for gjgk conversations', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          tenderType: 'gjgk',
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      selectedTenderType: 'gjgk',
+    }));
+
+    render(<ChatPanel />);
+
+    expect(screen.getByText('国际公开')).toBeInTheDocument();
+  });
+
   it('suppresses the default empty state while starting without showing a top status bar', () => {
     useChatStore.setState((state) => ({
       ...state,

@@ -4,9 +4,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { MessageSquarePlus, History, Trash2, Edit2, MoreHorizontal } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
+import type { TenderType } from '@/types';
 
 interface NewChatPopupProps {
-  type: 'xjcg' | 'gngk';
+  type: TenderType;
   typeName: string;
   description: string;
   isVisible: boolean;

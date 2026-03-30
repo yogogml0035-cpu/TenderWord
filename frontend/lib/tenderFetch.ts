@@ -1,5 +1,5 @@
-import { ApiError, fetchTenderData } from '@/lib/api';
-import type { TenderData } from '@/types/api';
+import { ApiError, fetchTenderDataWithType } from '@/lib/api';
+import type { TenderData, TenderTypeInfo } from '@/types/api';
 
 export type TenderFetchStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -11,6 +11,7 @@ export interface TenderFetchState {
 export interface TenderDraftUpdates {
   tender_no?: string;
   tender_data?: TenderData | null;
+  tender_type_info?: TenderTypeInfo | null;
   tender_fetch?: TenderFetchState;
 }
 
@@ -74,10 +75,12 @@ export async function syncTenderDataDraft({
   });
 
   try {
-    const data = await fetchTenderData(normalizedTenderNo);
+    const result = await fetchTenderDataWithType(normalizedTenderNo);
+    const data = result.data;
     updateDraft({
       tender_no: normalizedTenderNo,
       tender_data: data,
+      tender_type_info: result.type,
       tender_fetch: createTenderFetchState('success'),
     });
     onSuccess?.(data);
@@ -86,6 +89,7 @@ export async function syncTenderDataDraft({
     const errorMessage = getTenderFetchErrorMessage(error);
     updateDraft({
       tender_no: normalizedTenderNo,
+      tender_type_info: null,
       tender_fetch: createTenderFetchState('error', errorMessage),
     });
     onError?.(errorMessage);

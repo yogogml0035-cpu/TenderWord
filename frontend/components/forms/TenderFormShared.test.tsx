@@ -5,7 +5,7 @@ import { TenderFormShared, type BaseTenderFormData } from './TenderFormShared';
 import type { UploadedFile } from './FileUploader';
 import type { ConversationFormDraft } from '@/stores/chatStore';
 import { ApiError } from '@/lib/api';
-import type { TenderData, TemplateCandidate, TemplateCandidateRanking } from '@/types/api';
+import type { TenderData, TemplateCandidate, TemplateCandidateRanking, TenderTypeInfo } from '@/types/api';
 
 const mockSyncTenderDataDraft = jest.fn();
 const mockUseUrlParams = jest.fn();
@@ -28,6 +28,13 @@ const mockTenderData: TenderData = {
   platform: '测试平台',
   service_fee: '1000',
 };
+
+const buildTenderTypeInfo = (overrides?: Partial<TenderTypeInfo>): TenderTypeInfo => ({
+  tender_lx: 0,
+  purchase_method: 0,
+  fund_lx: 1,
+  ...overrides,
+});
 
 const mockUploadFactoryByType: Record<string, () => UploadedFile[]> = {};
 
@@ -163,7 +170,7 @@ jest.mock('./FileUploader', () => ({
 }));
 
 function renderSharedForm(options?: {
-  tenderType?: 'xjcg' | 'gngk';
+  tenderType?: 'xjcg' | 'gngk' | 'gjgk';
   onSubmit?: (data: BaseTenderFormData) => Promise<void> | void;
   initialDraft?: ConversationFormDraft | null;
   initialTenderNo?: string;
@@ -189,17 +196,19 @@ function renderSharedForm(options?: {
 }
 
 function setUrlParams(options?: {
-  tenderType?: 'xjcg' | 'gngk';
+  tenderType?: 'xjcg' | 'gngk' | 'gjgk';
   hasParams?: boolean;
   isValid?: boolean;
 }) {
   const searchParams =
     options?.hasParams === false
-      ? new URLSearchParams('')
-      : new URLSearchParams(
+        ? new URLSearchParams('')
+        : new URLSearchParams(
           options?.tenderType === 'gngk'
             ? 'tenderno=TEST-001&tender_lx=0&purchase_method=2&fund_lx=0'
-            : 'tenderno=TEST-001&tender_lx=0&purchase_method=5&fund_lx=0'
+            : options?.tenderType === 'gjgk'
+              ? 'tenderno=TEST-001&tender_lx=0&purchase_method=0&fund_lx=1'
+              : 'tenderno=TEST-001&tender_lx=0&purchase_method=5&fund_lx=0'
         );
 
   mockUseUrlParams.mockReturnValue({
@@ -285,6 +294,7 @@ describe('TenderFormShared', () => {
         updateDraft({
           tender_no: tenderNo,
           tender_data: mockTenderData,
+          tender_type_info: buildTenderTypeInfo(),
           tender_fetch: { status: 'success' },
         });
         return mockTenderData;
@@ -304,6 +314,7 @@ describe('TenderFormShared', () => {
   it.each([
     ['xjcg', '模板文件（可选）', '第三章  采购需求', '第四章  响应文件有关格式'],
     ['gngk', '模板文件（可选）', '第三章 招标内容及要求', '第四章 投标文件有关格式'],
+    ['gjgk', '模板文件（可选）', '技术规格及要求', '附件1：投标文件封面（格式）'],
   ] as const)(
     'injects variant defaults for %s',
     (tenderType, cleanLabel, beforeText, afterText) => {
@@ -331,6 +342,66 @@ describe('TenderFormShared', () => {
     expect(screen.getByText('测试采购人')).toBeInTheDocument();
     expect(screen.getByTestId('tender-no-input')).toHaveAttribute('data-fetch-status', 'success');
   });
+
+  it.each([
+    [0, '自筹资金'],
+    [1, '财政资金'],
+  ] as const)(
+    'shows 资金性质 instead of 发布平台 for gjgk when type.fund_lx is %s',
+    (fundLx, expectedLabel) => {
+      renderSharedForm({
+        tenderType: 'gjgk',
+        initialDraft: {
+          tender_data: mockTenderData,
+          tender_type_info: buildTenderTypeInfo({ fund_lx: fundLx }),
+        },
+      });
+
+      expect(screen.getByText('资金性质')).toBeInTheDocument();
+      expect(screen.getByText(expectedLabel)).toBeInTheDocument();
+      expect(screen.queryByText('发布平台')).not.toBeInTheDocument();
+      expect(screen.queryByText('测试平台')).not.toBeInTheDocument();
+    }
+  );
+
+  it.each([
+    [null, 'missing type info'],
+    [2, 'unsupported fund_lx'],
+  ] as const)(
+    'hides both 资金性质 and 发布平台 for gjgk when %s',
+    (fundLx) => {
+      renderSharedForm({
+        tenderType: 'gjgk',
+        initialDraft:
+          fundLx === null
+            ? {
+                tender_data: mockTenderData,
+              }
+            : {
+                tender_data: mockTenderData,
+                tender_type_info: buildTenderTypeInfo({ fund_lx: fundLx }),
+              },
+      });
+
+      expect(screen.queryByText('资金性质')).not.toBeInTheDocument();
+      expect(screen.queryByText('发布平台')).not.toBeInTheDocument();
+      expect(screen.queryByText('测试平台')).not.toBeInTheDocument();
+    }
+  );
+
+  it.each(['xjcg', 'gngk'] as const)(
+    'keeps 发布平台 visible for non-gjgk tender type %s',
+    (tenderType) => {
+      renderSharedForm({
+        tenderType,
+        initialTenderData: mockTenderData,
+      });
+
+      expect(screen.getByText('发布平台')).toBeInTheDocument();
+      expect(screen.getByText('测试平台')).toBeInTheDocument();
+      expect(screen.queryByText('资金性质')).not.toBeInTheDocument();
+    }
+  );
 
   it('validates tender number is required', async () => {
     const user = userEvent.setup();
@@ -433,6 +504,7 @@ describe('TenderFormShared', () => {
     const initialDraft: ConversationFormDraft = {
       tender_no: 'INIT-001',
       tender_data: mockTenderData,
+      tender_type_info: buildTenderTypeInfo(),
       tender_fetch: {
         status: 'success',
       },

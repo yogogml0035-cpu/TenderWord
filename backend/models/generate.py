@@ -34,6 +34,7 @@ class FormType(str, Enum):
 
     XJCG_TENDER = "xjcg_tender"  # 询价采购
     GNGK_TENDER = "gngk_tender"  # 国内公开
+    GJGK_TENDER = "gjgk_tender"  # 国际公开
 
 
 class InsertionConfig(BaseModel):
@@ -46,7 +47,7 @@ class GenerateRequest(BaseModel):
     文档生成请求模型
 
     Attributes:
-        form_type: 表单类型（xjcg_tender | gngk_tender）
+        form_type: 表单类型（xjcg_tender | gngk_tender | gjgk_tender）
         tender_data: 招标数据
         file_paths: 文件路径字典
             - template: 模板文件路径
@@ -55,7 +56,7 @@ class GenerateRequest(BaseModel):
     """
 
     form_type: FormType = Field(
-        ..., description="表单类型", examples=["xjcg_tender", "gngk_tender"]
+        ..., description="表单类型", examples=["xjcg_tender", "gngk_tender", "gjgk_tender"]
     )
     tender_data: TenderData = Field(..., description="招标数据")
     file_paths: Dict[str, str | List[str]] = Field(..., description="文件路径字典")
@@ -85,6 +86,7 @@ class GenerateRequest(BaseModel):
                     "submit_date": "2024-03-20",
                     "platform": "中国政府采购网",
                     "service_fee": "5000元",
+                    "fund_source_lx": 1,
                 },
                 "file_paths": {
                     "template": "D:/UploadFiles/template.docx",

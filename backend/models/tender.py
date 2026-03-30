@@ -21,9 +21,14 @@ class TenderType(BaseModel):
         ..., description="招标类型（0=询价, 1=国内公开, 2=邀请招标）", ge=0, le=2
     )
     purchase_method: int = Field(
-        ..., description="采购方式（5=询价采购, 1=国内公开, 2=邀请招标）", ge=0, le=5
+        ..., description="采购方式（0=公开招标, 5=询价采购）", ge=0, le=5
     )
-    fund_lx: int = Field(..., description="资金类型（0=国内, 1=国际）", ge=0, le=1)
+    fund_lx: int = Field(
+        ...,
+        description="路由资金类型（0=国内公开, 1/2=国际公开不同来源）",
+        ge=0,
+        le=2,
+    )
 
 
 class TenderData(BaseModel):
@@ -94,6 +99,12 @@ class TenderData(BaseModel):
         default="", description="招标平台名称", examples=["中国政府采购网"]
     )
     service_fee: str = Field(default="", description="服务费金额", examples=["5000元"])
+    fund_source_lx: int | None = Field(
+        default=None,
+        description="业务资金来源编码（0=自筹资金, 1=财政资金）",
+        ge=0,
+        le=1,
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -111,6 +122,7 @@ class TenderData(BaseModel):
                 "submit_date": "2024-03-20",
                 "platform": "中国政府采购网",
                 "service_fee": "5000元",
+                "fund_source_lx": 1,
             }
         }
     }

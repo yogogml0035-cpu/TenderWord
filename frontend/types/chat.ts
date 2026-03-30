@@ -152,7 +152,7 @@ export function isConversation(obj: unknown): obj is Conversation {
     typeof conversation.id === 'string' &&
     typeof conversation.title === 'string' &&
     typeof conversation.tenderType === 'string' &&
-    ['xjcg', 'gngk'].includes(conversation.tenderType) &&
+    ['xjcg', 'gngk', 'gjgk'].includes(conversation.tenderType) &&
     Array.isArray(conversation.messages) &&
     typeof conversation.createdAt === 'number' &&
     typeof conversation.updatedAt === 'number'
