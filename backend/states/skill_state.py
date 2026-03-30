@@ -1,6 +1,4 @@
-"""
-Rewrite Graph state definitions.
-"""
+"""Task skill graph state definitions."""
 
 from __future__ import annotations
 
@@ -16,8 +14,10 @@ class RewriteHistoryMessage(TypedDict, total=False):
     rewrite_state: Dict[str, str]
 
 
-class RewriteGraphState(TenderGraphStateBase, total=False):
+class TaskSkillGraphState(TenderGraphStateBase, total=False):
+    skill_id: str
     conversation_id: str
+    rewrite_mode: bool
     rewrite_user_prompt: str
     rewrite_base_text: str
     rewrite_target_index: int

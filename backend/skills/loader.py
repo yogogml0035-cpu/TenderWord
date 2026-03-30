@@ -3,10 +3,19 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from backend.skills.types import SkillDefinition
+from backend.skills.types import SkillDefinition, SkillExecutorBinding
 
 
-_SUPPORTED_FRONTMATTER_FIELDS = frozenset({"name", "description"})
+_SUPPORTED_FRONTMATTER_FIELDS = frozenset(
+    {
+        "name",
+        "description",
+        "executor_kind",
+        "dispatch_key",
+        "route_literal",
+        "workflow_entry",
+    }
+)
 _FRONTMATTER_PATTERN = re.compile(
     r"\A---\s*\r?\n(?P<frontmatter>.*?)\r?\n---\s*\r?\n?(?P<body>.*)\Z",
     re.DOTALL,
@@ -69,6 +78,13 @@ def _parse_skill_definition(skill_file: Path) -> SkillDefinition:
         description=metadata["description"],
         instruction=instruction,
         source_path=str(skill_file.resolve()),
+        executor_binding=SkillExecutorBinding(
+            skill_id=metadata["name"],
+            executor_kind=metadata["executor_kind"],
+            dispatch_key=metadata["dispatch_key"],
+            route_literal=metadata["route_literal"],
+        ),
+        workflow_entry=metadata["workflow_entry"],
     )
 
 

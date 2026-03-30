@@ -22,10 +22,13 @@ def _load_module(monkeypatch, module_name: str, file_path: Path):
     return module
 
 
-def _load_rewrite_graph_module(monkeypatch):
+def _load_skill_graph_module(monkeypatch):
     for package_name in (
         "backend",
         "backend.graphs",
+        "backend.skills",
+        "backend.skills.rewrite",
+        "backend.skills.rewrite.scripts",
         "backend.nodes",
         "backend.nodes.skills_nodes",
         "backend.nodes.common_word_nodes",
@@ -109,36 +112,61 @@ def _load_rewrite_graph_module(monkeypatch):
     )
 
     states_module = types.ModuleType("backend.states")
-    states_module.RewriteGraphState = dict
+    states_module.TaskSkillGraphState = dict
     monkeypatch.setitem(sys.modules, "backend.states", states_module)
+
+    _load_module(
+        monkeypatch,
+        "backend.skills.types",
+        ROOT / "backend/skills/types.py",
+    )
+    _load_module(
+        monkeypatch,
+        "backend.skills.rewrite.scripts.runtime",
+        ROOT / "backend/skills/rewrite/scripts/runtime.py",
+    )
+    workflow_module = _load_module(
+        monkeypatch,
+        "backend.skills.rewrite.scripts.workflow",
+        ROOT / "backend/skills/rewrite/scripts/workflow.py",
+    )
+
+    skill_registry = types.SimpleNamespace(
+        get_task_workflow=lambda skill_id: (
+            workflow_module.get_workflow()
+            if skill_id == "rewrite"
+            else (_ for _ in ()).throw(KeyError(skill_id))
+        )
+    )
+    sys.modules["backend.skills"].get_skill_registry = lambda: skill_registry
 
     return _load_module(
         monkeypatch,
-        "backend.graphs.rewrite_graph",
-        ROOT / "backend/graphs/rewrite_graph.py",
+        "backend.graphs.skill_graph",
+        ROOT / "backend/graphs/skill_graph.py",
     )
 
 
-def test_rewrite_graph_can_be_built(monkeypatch):
-    rewrite_graph_module = _load_rewrite_graph_module(monkeypatch)
-    graph = rewrite_graph_module.RewriteGraph()
+def test_skill_graph_can_be_built_for_rewrite(monkeypatch):
+    skill_graph_module = _load_skill_graph_module(monkeypatch)
+    graph = skill_graph_module.SkillGraph.for_skill("rewrite")()
 
     compiled_graph = graph.compile()
 
     assert compiled_graph is not None
 
 
-def test_rewrite_graph_has_get_rewrite_comments_node(monkeypatch):
-    rewrite_graph_module = _load_rewrite_graph_module(monkeypatch)
-    graph = rewrite_graph_module.RewriteGraph()
+def test_skill_graph_rewrite_workflow_has_get_rewrite_comments_node(monkeypatch):
+    skill_graph_module = _load_skill_graph_module(monkeypatch)
+    graph = skill_graph_module.SkillGraph.for_skill("rewrite")()
     builder = graph.build_graph()
 
     assert "get_rewrite_comments" in builder.nodes
 
 
-def test_rewrite_graph_orders_comment_extraction_before_delete_section(monkeypatch):
-    rewrite_graph_module = _load_rewrite_graph_module(monkeypatch)
-    builder = rewrite_graph_module.RewriteGraph().build_graph()
+def test_skill_graph_orders_comment_extraction_before_delete_section(monkeypatch):
+    skill_graph_module = _load_skill_graph_module(monkeypatch)
+    builder = skill_graph_module.SkillGraph.for_skill("rewrite")().build_graph()
 
     assert ("get_rewrite_comments", "delete_section") in builder.edges
     assert ("resolve_rewrite_target", "delete_section") not in builder.edges
@@ -158,9 +186,9 @@ def test_rewrite_graph_orders_comment_extraction_before_delete_section(monkeypat
     assert conditional_edge["condition"]({}) == "get_rewrite_comments"
 
 
-def test_rewrite_graph_keeps_parallel_join_and_updates_total_nodes(monkeypatch):
-    rewrite_graph_module = _load_rewrite_graph_module(monkeypatch)
-    graph = rewrite_graph_module.RewriteGraph()
+def test_skill_graph_keeps_parallel_join_and_updates_total_nodes(monkeypatch):
+    skill_graph_module = _load_skill_graph_module(monkeypatch)
+    graph = skill_graph_module.SkillGraph.for_skill("rewrite")()
     builder = graph.build_graph()
 
     assert graph.estimate_total_nodes({}) == 5

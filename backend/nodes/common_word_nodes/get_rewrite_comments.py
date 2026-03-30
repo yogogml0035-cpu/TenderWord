@@ -22,14 +22,14 @@ from backend.nodes.common_word_nodes.get_comments import (
     extract_document_analysis_result,
     result_to_polished_comments,
 )
-from backend.states import RewriteGraphState
+from backend.states import TaskSkillGraphState
 from backend.util.log_util.progress_log import progress_log
 
 
 logger = logging.getLogger(__name__)
 
 
-def get_rewrite_comments(state: RewriteGraphState, config) -> RewriteGraphState:
+def get_rewrite_comments(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
     """
     在 rewrite 删除原内容之前，提取锚点区间内的旧批注并写入 polished_comments。
 
@@ -70,4 +70,4 @@ def get_rewrite_comments(state: RewriteGraphState, config) -> RewriteGraphState:
         len(polished_comments),
         elapsed,
     )
-    return RewriteGraphState(polished_comments=polished_comments)
+    return TaskSkillGraphState(polished_comments=polished_comments)

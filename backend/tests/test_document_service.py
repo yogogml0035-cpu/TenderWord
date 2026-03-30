@@ -293,7 +293,7 @@ def test_document_service_create_rewrite_task_forwards_rewrite_log_path(monkeypa
         return GenerateResponse(success=True, task_id="task-9", task_kind="rewrite")
 
     service._conversation_service = ConversationStub()
-    monkeypatch.setattr(document_service_module, "REWRITE_GRAPH_CLASS", _DummyGraph)
+    monkeypatch.setattr(document_service_module, "REWRITE_SKILL_GRAPH_CLASS", _DummyGraph)
     monkeypatch.setattr(service, "_submit_graph_task", _fake_submit_graph_task)
 
     response = asyncio.run(
@@ -310,6 +310,7 @@ def test_document_service_create_rewrite_task_forwards_rewrite_log_path(monkeypa
     assert captured["task_kind"] == "rewrite"
     assert captured["conversation_id"] == "conv-9"
     assert captured["rewrite_user_prompt"] == "请把第三章写正式"
+    assert captured["initial_state"]["skill_id"] == "rewrite"
     assert captured["initial_state"]["source_origin_tender_path"] == "D:/origin.docx"
 
 
