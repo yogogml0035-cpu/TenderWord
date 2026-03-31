@@ -7,13 +7,15 @@ from __future__ import annotations
 import os
 import pathlib
 import re
+import shutil
 import sys
 import time
 
-# 添加项目根目录到 sys.path
-ROOT = pathlib.Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+# 添加仓库根目录到 sys.path，便于直接运行当前脚本进行本地调试
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[3]
+BACKEND_ROOT = PROJECT_ROOT / "backend"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from typing import Dict, Optional
 
@@ -22,6 +24,7 @@ from backend.config.tender_config import (
     CONTENT_UPDATE_MODE_DIRECT_REPLACE,
     get_anchor_target_sizes,
     get_content_update_mode,
+    get_default_anchor_texts,
 )
 from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
@@ -894,25 +897,35 @@ if __name__ == "__main__":
     print("开始测试 delete_tender_param 节点 (common)")
     print("=" * 80)
 
-    # 构造测试文档路径
-    test_doc_path = ROOT / "test_word" / "251534-招标文件-清洁稿 copy.doc"
+    tender_type = "gjgk"
+    source_doc_path = (
+        BACKEND_ROOT / "test_doc" / "254DSITC2512-招标文件-发售稿-财政模板.doc"
+    )
+    before_text, after_text = get_default_anchor_texts(tender_type)
+    test_doc_path = source_doc_path.with_name(
+        f"{source_doc_path.stem}-delete-test{source_doc_path.suffix}"
+    )
 
     # 检查测试文件是否存在
-    if not test_doc_path.exists():
-        print(f"错误: 测试文件不存在: {test_doc_path}")
+    if not source_doc_path.exists():
+        print(f"错误: 测试文件不存在: {source_doc_path}")
         sys.exit(1)
 
-    print(f"测试文件: {test_doc_path}")
-    print(f"文件存在: {test_doc_path.exists()}")
-    print(f"文件大小: {test_doc_path.stat().st_size / 1024:.2f} KB")
+    shutil.copy2(source_doc_path, test_doc_path)
+
+    print(f"测试类型: {tender_type} (国际公开)")
+    print(f"源文件: {source_doc_path}")
+    print(f"测试副本: {test_doc_path}")
+    print(f"源文件存在: {source_doc_path.exists()}")
+    print(f"文件大小: {source_doc_path.stat().st_size / 1024:.2f} KB")
     print()
 
     # 构造测试状态
     test_state: TenderGraphStateBase = {
-        "tender_type": "gngk",
+        "tender_type": tender_type,
         "prepared_doc_path": str(test_doc_path),
-        "insertion_before_text": "第三章 招标内容及要求",
-        "insertion_after_text": "第四章 投标文件有关格式",
+        "insertion_before_text": before_text,
+        "insertion_after_text": after_text,
     }
 
     print("测试状态:")
@@ -928,6 +941,7 @@ if __name__ == "__main__":
         print("-" * 80)
         print()
         print("✅ 删除操作执行完成")
+        print(f"删除结果文件: {test_doc_path}")
         print()
         print("返回状态:")
         for key, value in result_state.items():
