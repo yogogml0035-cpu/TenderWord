@@ -63,8 +63,16 @@ export interface TemplateCandidate {
   blocked_reason?: string | null;
 }
 
+export interface TemplateCandidateRanking {
+  applied: boolean;
+  mode: 'ai' | 'priority_only';
+  reason: string;
+  message: string;
+}
+
 export interface TemplateCandidateListResponse {
   candidates: TemplateCandidate[];
+  ranking?: TemplateCandidateRanking;
 }
 
 export interface TemplateCandidateSelectPayload {

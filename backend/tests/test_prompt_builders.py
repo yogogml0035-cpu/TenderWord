@@ -11,6 +11,10 @@ from backend.prompts.routing_prompt import (
     render_route_or_reply_prompt,
 )
 from backend.prompts.skill_prompt import render_task_skill_prompt
+from backend.prompts.template_candidate_ranking_prompt import (
+    parse_template_candidate_ranking_output,
+    render_template_candidate_ranking_prompt,
+)
 from backend.prompts.types import (
     CommentPromptInput,
     GeneratePromptInput,
@@ -18,6 +22,8 @@ from backend.prompts.types import (
     RewriteStateSnapshot,
     TaskSkillPromptInput,
     TaskSkillPromptSection,
+    TemplateCandidateRankingItem,
+    TemplateCandidateRankingPromptInput,
     RewriteTargetSelectionPromptInput,
     RouteHistoryMessage,
     RouteOrReplyPromptInput,
@@ -190,3 +196,37 @@ def test_parse_rewrite_target_selection_validates_output_shape():
 
 def test_comment_prompt_registry_uses_shared_templates_for_current_tender_types():
     assert COMMENT_PROMPT_REGISTRY["xjcg"] == COMMENT_PROMPT_REGISTRY["gngk"]
+
+
+def test_render_template_candidate_ranking_prompt_uses_minimum_fields():
+    rendered = render_template_candidate_ranking_prompt(
+        TemplateCandidateRankingPromptInput(
+            project_name="细胞电转仪",
+            candidates=(
+                TemplateCandidateRankingItem(row_index=0, tendername="胸骨锯套装"),
+                TemplateCandidateRankingItem(row_index=1, tendername="细胞电转仪"),
+            ),
+        )
+    )
+
+    assert "当前项目名称" in rendered.user_prompt
+    assert "细胞电转仪" in rendered.user_prompt
+    assert "row_index=0" in rendered.user_prompt
+    assert "row_index=1" in rendered.user_prompt
+    assert "采购人" not in rendered.user_prompt
+
+
+def test_parse_template_candidate_ranking_output_validates_contract():
+    assert parse_template_candidate_ranking_output("[1, 0]", [0, 1]) == (1, 0)
+
+    with pytest.raises(ValueError):
+        parse_template_candidate_ranking_output('{"order":[1,0]}', [0, 1])
+
+    with pytest.raises(ValueError):
+        parse_template_candidate_ranking_output("[1, 1]", [0, 1])
+
+    with pytest.raises(ValueError):
+        parse_template_candidate_ranking_output("[2, 0]", [0, 1])
+
+    with pytest.raises(ValueError):
+        parse_template_candidate_ranking_output("[0]", [0, 1])

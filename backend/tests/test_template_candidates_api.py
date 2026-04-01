@@ -100,6 +100,25 @@ def test_fetch_template_candidates_normalizes_external_json_array(monkeypatch):
 
 
 def test_get_template_candidates_route_returns_wrapped_candidates(monkeypatch):
+    captured_project_names: list[str | None] = []
+
+    class DummyRankingService:
+        async def rank_candidates(self, *, candidates, project_name):
+            captured_project_names.append(project_name)
+            return type(
+                "DummyRankingResult",
+                (),
+                {
+                    "candidates": candidates,
+                    "ranking": {
+                        "applied": True,
+                        "mode": "ai",
+                        "reason": "ai_ranked",
+                        "message": "已按优先级排序；同优先级模板已按项目名称相关性重排。",
+                    },
+                },
+            )()
+
     monkeypatch.setattr(
         template_candidates_api,
         "fetch_template_candidates",
@@ -123,10 +142,16 @@ def test_get_template_candidates_route_returns_wrapped_candidates(monkeypatch):
             }
         ],
     )
+    monkeypatch.setattr(
+        template_candidates_api,
+        "get_template_candidate_ranking_service",
+        lambda: DummyRankingService(),
+    )
 
     result = run_async_endpoint(
         template_candidates_api.get_template_candidates(
             tenderno="0811-TEST",
+            project_name="细胞电转仪",
         )
     )
 
@@ -139,6 +164,9 @@ def test_get_template_candidates_route_returns_wrapped_candidates(monkeypatch):
     assert result.data.candidates[0].tendertype == "国内公开"
     assert result.data.candidates[0].hwlx == "货物"
     assert result.data.candidates[0].yxj == "2"
+    assert result.data.ranking.applied is True
+    assert result.data.ranking.reason == "ai_ranked"
+    assert captured_project_names == ["细胞电转仪"]
 
 
 def test_download_template_candidate_rejects_disallowed_host(monkeypatch):

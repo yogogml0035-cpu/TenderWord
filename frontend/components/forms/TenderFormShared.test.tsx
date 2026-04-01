@@ -5,7 +5,7 @@ import { TenderFormShared, type BaseTenderFormData } from './TenderFormShared';
 import type { UploadedFile } from './FileUploader';
 import type { ConversationFormDraft } from '@/stores/chatStore';
 import { ApiError } from '@/lib/api';
-import type { TenderData, TemplateCandidate } from '@/types/api';
+import type { TenderData, TemplateCandidate, TemplateCandidateRanking } from '@/types/api';
 
 const mockSyncTenderDataDraft = jest.fn();
 const mockUseUrlParams = jest.fn();
@@ -233,6 +233,28 @@ function buildTemplateCandidate(overrides: Partial<TemplateCandidate> = {}): Tem
   };
 }
 
+function buildTemplateCandidateRanking(
+  overrides: Partial<TemplateCandidateRanking> = {}
+): TemplateCandidateRanking {
+  return {
+    applied: true,
+    mode: 'ai',
+    reason: 'ai_ranked',
+    message: '已按优先级排序；同优先级模板已按项目名称相关性重排。',
+    ...overrides,
+  };
+}
+
+function buildTemplateCandidateResponse(overrides?: {
+  candidates?: TemplateCandidate[];
+  ranking?: Partial<TemplateCandidateRanking>;
+}) {
+  return {
+    candidates: overrides?.candidates || [buildTemplateCandidate()],
+    ranking: buildTemplateCandidateRanking(overrides?.ranking),
+  };
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -272,9 +294,7 @@ describe('TenderFormShared', () => {
     mockUploadFactoryByType.origin_tender = () => [buildUploadedFile('origin_tender')];
     mockUploadFactoryByType.params = () => [buildUploadedFile('params')];
     setUrlParams();
-    mockFetchTemplateCandidates.mockResolvedValue({
-      candidates: [buildTemplateCandidate()],
-    });
+    mockFetchTemplateCandidates.mockResolvedValue(buildTemplateCandidateResponse());
     mockGetTemplateCandidateDownloadUrl.mockImplementation(
       (fileUrl: string, downloadName?: string) =>
         `/api/template-candidates/download?file_url=${encodeURIComponent(fileUrl)}&download_name=${encodeURIComponent(downloadName || '')}`
@@ -522,6 +542,7 @@ describe('TenderFormShared', () => {
     setUrlParams({ hasParams: false });
     const templateCandidateLookup = createDeferred<{
       candidates: TemplateCandidate[];
+      ranking?: TemplateCandidateRanking;
     }>();
     mockFetchTemplateCandidates.mockReturnValueOnce(templateCandidateLookup.promise);
     renderSharedForm({
@@ -535,14 +556,14 @@ describe('TenderFormShared', () => {
     expect(within(dialog).getByText('正在加载模板列表...')).toBeInTheDocument();
     expect(mockFetchTemplateCandidates).toHaveBeenCalledWith({
       tenderno: 'TEST-001',
+      project_name: undefined,
     });
 
-    templateCandidateLookup.resolve({
-      candidates: [buildTemplateCandidate()],
-    });
+    templateCandidateLookup.resolve(buildTemplateCandidateResponse());
 
     await waitFor(() => expect(mockFetchTemplateCandidates).toHaveBeenCalledTimes(1));
     expect(await within(dialog).findByText('测试模板-送审稿')).toBeInTheDocument();
+    expect(within(dialog).getByText('已按优先级排序；同优先级模板已按项目名称相关性重排。')).toBeInTheDocument();
   });
 
   it('uses current input tender number when URL params are missing', async () => {
@@ -556,6 +577,7 @@ describe('TenderFormShared', () => {
     expect(await screen.findByTestId('template-candidate-dialog')).toBeInTheDocument();
     expect(mockFetchTemplateCandidates).toHaveBeenCalledWith({
       tenderno: 'TEST-001',
+      project_name: undefined,
     });
   });
 
@@ -569,6 +591,7 @@ describe('TenderFormShared', () => {
     expect(await screen.findByTestId('template-candidate-dialog')).toBeInTheDocument();
     expect(mockFetchTemplateCandidates).toHaveBeenCalledWith({
       tenderno: 'TEST-001',
+      project_name: undefined,
     });
   });
 
@@ -623,6 +646,7 @@ describe('TenderFormShared', () => {
     expect(within(dialog).getByTestId('template-priority-badge-0')).toHaveTextContent('1');
     expect(within(dialog).getByTestId('template-priority-badge-0')).toHaveClass('bg-red-50', 'text-red-700');
     expect(within(dialog).getByRole('button', { name: '选择' })).toBeInTheDocument();
+    expect(within(dialog).getByText('已按优先级排序；同优先级模板已按项目名称相关性重排。')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '关闭模板弹窗' }));
     await user.click(screen.getByRole('button', { name: '智能抽取模板' }));
@@ -636,28 +660,30 @@ describe('TenderFormShared', () => {
   it('renders candidates with duplicate tender name and year without duplicate key warnings', async () => {
     const user = userEvent.setup();
     const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    mockFetchTemplateCandidates.mockResolvedValue({
-      candidates: [
-        buildTemplateCandidate({
-          tenderno: '0811-DSITC260574',
-          tendername: '电子上消化道内窥镜等设备',
-          year: 2026,
-          zbr: '张三',
-          xbr: '李四',
-          fsg: 'http://10.11.1.224/fsg-1',
-          shener: 'http://10.11.1.224/shener-1',
-        }),
-        buildTemplateCandidate({
-          tenderno: '0811-DSITC260575',
-          tendername: '电子上消化道内窥镜等设备',
-          year: 2026,
-          zbr: '王五',
-          xbr: '赵六',
-          fsg: 'http://10.11.1.224/fsg-2',
-          shener: 'http://10.11.1.224/shener-2',
-        }),
-      ],
-    });
+    mockFetchTemplateCandidates.mockResolvedValue(
+      buildTemplateCandidateResponse({
+        candidates: [
+          buildTemplateCandidate({
+            tenderno: '0811-DSITC260574',
+            tendername: '电子上消化道内窥镜等设备',
+            year: 2026,
+            zbr: '张三',
+            xbr: '李四',
+            fsg: 'http://10.11.1.224/fsg-1',
+            shener: 'http://10.11.1.224/shener-1',
+          }),
+          buildTemplateCandidate({
+            tenderno: '0811-DSITC260575',
+            tendername: '电子上消化道内窥镜等设备',
+            year: 2026,
+            zbr: '王五',
+            xbr: '赵六',
+            fsg: 'http://10.11.1.224/fsg-2',
+            shener: 'http://10.11.1.224/shener-2',
+          }),
+        ],
+      })
+    );
 
     try {
       renderSharedForm();
@@ -681,16 +707,24 @@ describe('TenderFormShared', () => {
 
   it('warns instead of selecting old template candidates', async () => {
     const user = userEvent.setup();
-    mockFetchTemplateCandidates.mockResolvedValue({
-      candidates: [
-        buildTemplateCandidate({
-          tendername: '旧模板',
-          year: 2024,
-          selectable: false,
-          blocked_reason: '该模板过旧不能选择，仅供下载参考',
-        }),
-      ],
-    });
+    mockFetchTemplateCandidates.mockResolvedValue(
+      buildTemplateCandidateResponse({
+        candidates: [
+          buildTemplateCandidate({
+            tendername: '旧模板',
+            year: 2024,
+            selectable: false,
+            blocked_reason: '该模板过旧不能选择，仅供下载参考',
+          }),
+        ],
+        ranking: {
+          applied: false,
+          mode: 'priority_only',
+          reason: 'project_name_missing',
+          message: '已按优先级排序；当前项目名称缺失，未启用同优先级 AI 重排。',
+        },
+      })
+    );
 
     renderSharedForm();
 
@@ -778,5 +812,28 @@ describe('TenderFormShared', () => {
     );
     expect(screen.getByText('测试模板-送审稿.docx')).toBeInTheDocument();
     expect(screen.queryByTestId('template-feedback')).not.toBeInTheDocument();
+  });
+
+  it('reloads template candidates when project name becomes available', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ hasParams: false });
+    renderSharedForm({
+      initialTenderNo: 'TEST-001',
+    });
+
+    await user.click(screen.getByRole('button', { name: '智能抽取模板' }));
+    expect(mockFetchTemplateCandidates).toHaveBeenNthCalledWith(1, {
+      tenderno: 'TEST-001',
+      project_name: undefined,
+    });
+
+    await user.click(screen.getByRole('button', { name: '关闭模板弹窗' }));
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+    await user.click(screen.getByRole('button', { name: '智能抽取模板' }));
+
+    expect(mockFetchTemplateCandidates).toHaveBeenNthCalledWith(2, {
+      tenderno: 'TEST-001',
+      project_name: '测试项目',
+    });
   });
 });

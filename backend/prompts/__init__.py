@@ -24,6 +24,11 @@ from backend.prompts.routing_prompt import (
     render_route_or_reply_prompt,
 )
 from backend.prompts.skill_prompt import render_task_skill_prompt
+from backend.prompts.template_candidate_ranking_prompt import (
+    TEMPLATE_CANDIDATE_RANKING_SYSTEM_PROMPT,
+    parse_template_candidate_ranking_output,
+    render_template_candidate_ranking_prompt,
+)
 from backend.prompts.types import (
     CommentPromptInput,
     GeneratePromptInput,
@@ -33,6 +38,8 @@ from backend.prompts.types import (
     RewriteStateSnapshot,
     TaskSkillPromptInput,
     TaskSkillPromptSection,
+    TemplateCandidateRankingItem,
+    TemplateCandidateRankingPromptInput,
     RewriteTargetSelectionBundle,
     RewriteTargetSelectionPromptInput,
     RouteHistoryMessage,
@@ -59,6 +66,9 @@ __all__ = [
     "RewriteStateSnapshot",
     "TaskSkillPromptInput",
     "TaskSkillPromptSection",
+    "TEMPLATE_CANDIDATE_RANKING_SYSTEM_PROMPT",
+    "TemplateCandidateRankingItem",
+    "TemplateCandidateRankingPromptInput",
     "RewriteTargetSelectionBundle",
     "RewriteTargetSelectionPromptInput",
     "RouteHistoryMessage",
@@ -69,5 +79,7 @@ __all__ = [
     "render_comment_prompt",
     "render_generate_prompt",
     "render_task_skill_prompt",
+    "render_template_candidate_ranking_prompt",
     "render_route_or_reply_prompt",
+    "parse_template_candidate_ranking_output",
 ]

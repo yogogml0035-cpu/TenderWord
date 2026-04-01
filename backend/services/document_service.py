@@ -158,21 +158,24 @@ class _LLMSnapshotRelay:
 
 # Graph 注册表：表单类型 -> Graph 类
 GRAPH_REGISTRY: Dict[str, type] = {}
-REWRITE_GRAPH_CLASS: Optional[type] = None
+TASK_SKILL_GRAPH_CLASSES: Dict[str, type] = {}
+REWRITE_SKILL_ID = "rewrite"
+REWRITE_SKILL_GRAPH_CLASS: Optional[type] = None
 
 
 def _init_graph_registry():
     """初始化 Graph 注册表（延迟加载）."""
-    global GRAPH_REGISTRY, REWRITE_GRAPH_CLASS
-    if GRAPH_REGISTRY and REWRITE_GRAPH_CLASS is not None:
+    global GRAPH_REGISTRY, TASK_SKILL_GRAPH_CLASSES, REWRITE_SKILL_GRAPH_CLASS
+    if GRAPH_REGISTRY and REWRITE_SKILL_GRAPH_CLASS is not None:
         return
 
     try:
-        from backend.graphs import GngkTenderGraph, RewriteGraph, XjcgTenderGraph
+        from backend.graphs import GngkTenderGraph, SkillGraph, XjcgTenderGraph
 
         GRAPH_REGISTRY["xjcg_tender"] = XjcgTenderGraph
         GRAPH_REGISTRY["gngk_tender"] = GngkTenderGraph
-        REWRITE_GRAPH_CLASS = RewriteGraph
+        TASK_SKILL_GRAPH_CLASSES[REWRITE_SKILL_ID] = SkillGraph.for_skill(REWRITE_SKILL_ID)
+        REWRITE_SKILL_GRAPH_CLASS = TASK_SKILL_GRAPH_CLASSES[REWRITE_SKILL_ID]
         logger.info("Graph 注册表初始化完成")
     except ImportError as e:
         logger.error(f"初始化 Graph 注册表失败: {e}")
@@ -419,16 +422,17 @@ class DocumentService:
                 error="REWRITE_NO_DOCUMENT",
             )
 
-        if not REWRITE_GRAPH_CLASS:
+        if not REWRITE_SKILL_GRAPH_CLASS:
             return GenerateResponse(
                 success=False,
                 task_id=task_id,
-                message="Rewrite Graph 未初始化",
+                message="Rewrite Skill Graph 未初始化",
                 error="REWRITE_TARGET_NOT_RESOLVED",
             )
 
-        rewrite_initial_state = self._build_rewrite_graph_initial_state(
+        rewrite_initial_state = self._build_skill_graph_initial_state(
             task_id=task_id,
+            skill_id=REWRITE_SKILL_ID,
             conversation_id=normalized_conversation_id,
             user_prompt=normalized_prompt,
             latest_rewrite_state=latest_rewrite_state,
@@ -436,7 +440,7 @@ class DocumentService:
 
         return self._submit_graph_task(
             task_id=task_id,
-            graph_class=REWRITE_GRAPH_CLASS,
+            graph_class=REWRITE_SKILL_GRAPH_CLASS,
             initial_state=rewrite_initial_state,
             callback=callback,
             model_provider=model_provider,
@@ -511,74 +515,18 @@ class DocumentService:
             waiting_count=waiting_count,
         )
 
-    def _resolve_rewrite_target_state(
-        self, *, conversation_id: str, user_prompt: str
-    ) -> Optional[Dict[str, Any]]:
-        candidates = self._conversation_service.list_rewrite_states(conversation_id)
-        if not candidates:
-            return None
-
-        prompt = user_prompt.strip()
-        if len(candidates) >= 2 and any(token in prompt for token in ("上一版", "前一版", "上个版本")):
-            return dict(candidates[-2])
-        if any(token in prompt for token in ("第一版", "最初版本", "初稿")):
-            return dict(candidates[0])
-        return dict(candidates[-1])
-
-    def _build_rewrite_initial_state(
+    def _build_skill_graph_initial_state(
         self,
         *,
         task_id: str,
-        conversation_id: str,
-        user_prompt: str,
-        target_state: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        tender_type = str(target_state.get("tender_type") or "").strip() or "xjcg"
-        prepared_doc_path = str(target_state.get("prepared_doc_path") or "").strip()
-        if not prepared_doc_path:
-            raise ValueError("rewrite 目标文档路径不存在")
-
-        default_before, default_after = REWRITE_DEFAULT_ANCHORS.get(
-            tender_type, REWRITE_DEFAULT_ANCHORS["xjcg"]
-        )
-
-        state: Dict[str, Any] = {
-            "task_id": task_id,
-            "conversation_id": conversation_id,
-            "user_session_id": conversation_id,
-            "tender_type": tender_type,
-            "origin_tender_path": prepared_doc_path,
-            "clean_draft_path": prepared_doc_path,
-            "insertion_before_text": str(
-                target_state.get("insertion_before_text") or default_before
-            ),
-            "insertion_after_text": str(
-                target_state.get("insertion_after_text") or default_after
-            ),
-            "rewrite_mode": True,
-            "rewrite_user_prompt": user_prompt,
-            "rewrite_base_text": str(target_state.get("polished_text") or ""),
-        }
-
-        for key in REWRITE_STATE_KEYS:
-            if key in {"prepared_doc_path", "tender_type", "insertion_before_text", "insertion_after_text"}:
-                continue
-            value = target_state.get(key)
-            if isinstance(value, str):
-                state[key] = value
-
-        return state
-
-    def _build_rewrite_graph_initial_state(
-        self,
-        *,
-        task_id: str,
+        skill_id: str,
         conversation_id: str,
         user_prompt: str,
         latest_rewrite_state: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         initial_state = {
             "task_id": task_id,
+            "skill_id": skill_id,
             "conversation_id": conversation_id,
             "user_session_id": conversation_id,
             "rewrite_user_prompt": user_prompt,

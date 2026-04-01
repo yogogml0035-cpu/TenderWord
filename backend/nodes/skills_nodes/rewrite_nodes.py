@@ -18,7 +18,7 @@ from backend.prompts.types import (
     RewriteTargetSelectionPromptInput,
 )
 from backend.services.conversation_service import RewriteMessage, get_conversation_service
-from backend.states import RewriteGraphState
+from backend.states import TaskSkillGraphState
 from backend.util.common_util import StreamCallbacks, stream_llm_completion
 from backend.util.log_util.progress_log import progress_log
 from backend.util.log_util.rewrite_audit_log import (
@@ -124,7 +124,7 @@ def _build_rewrite_output_path(source_path: pathlib.Path) -> pathlib.Path:
     return candidate
 
 
-def resolve_rewrite_target(state: RewriteGraphState, config) -> RewriteGraphState:
+def resolve_rewrite_target(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
     conversation_id = str(state.get("conversation_id") or "").strip()
     rewrite_user_prompt = str(state.get("rewrite_user_prompt") or "").strip()
     if not conversation_id:
@@ -175,10 +175,10 @@ def resolve_rewrite_target(state: RewriteGraphState, config) -> RewriteGraphStat
         if isinstance(value, str):
             updates[key] = value
 
-    return RewriteGraphState(**updates)
+    return TaskSkillGraphState(**updates)
 
 
-def rewrite_text(state: RewriteGraphState, config) -> RewriteGraphState:
+def rewrite_text(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
     next_state = dict(state)
     next_state["rewrite_mode"] = True
-    return generate_polished_text(RewriteGraphState(**next_state), config)
+    return generate_polished_text(TaskSkillGraphState(**next_state), config)

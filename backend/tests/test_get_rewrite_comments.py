@@ -70,7 +70,7 @@ def _load_rewrite_comment_modules(monkeypatch):
 
     states_module = types.ModuleType("backend.states")
     states_module.TenderGraphStateBase = dict
-    states_module.RewriteGraphState = dict
+    states_module.TaskSkillGraphState = dict
     monkeypatch.setitem(sys.modules, "backend.states", states_module)
 
     word_util_module = types.ModuleType("backend.util.word_util")
