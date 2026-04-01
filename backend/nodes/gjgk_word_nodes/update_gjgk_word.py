@@ -65,10 +65,9 @@ DEFAULT_TEST_UPDATE_SOURCE_DOC = (
 DEFAULT_TEST_SUFFIX = "-gjgk-update-test"
 DEFAULT_DELETE_TEST_SUFFIX = "-gjgk-delete-test"
 DEFAULT_DIAG_SUFFIX = "-gjgk-lock-diagnose"
-MANUAL_TEST_INSERT_TEXT = """第1包：细胞电转仪
+MANUAL_TEST_INSERT_TEXT = """
 一、项目概述
 1、设备名称及数量：
-
 2、交付日期：合同签订后30天内
 3、交付地点：采购人指定地点
 4、付款方式：货到验收合格（出具合同验收单或验收报告）且采购人收到其发票后三个月内，支付全部货款（100%）。
@@ -433,6 +432,8 @@ def _find_first_insert_position_on_anchor_page(
     scan_end = min(latest_end, doc_end)
     pos = min(max(int(start_pos), int(bound_start)), scan_end)
 
+    is_within_table = globals().get("_is_within_table")
+
     for _ in range(max_lookahead + 1):
         if _get_position_page(doc, pos, anchor_page) != int(anchor_page):
             break
@@ -444,7 +445,11 @@ def _find_first_insert_position_on_anchor_page(
             pos += 1
             continue
 
-        if _is_within_table(probe):
+        try:
+            in_table = bool(is_within_table(probe)) if callable(is_within_table) else bool(probe.Information(wdWithInTable))
+        except Exception:
+            in_table = False
+        if in_table:
             raise ValueError("删除正文后插入起点仍位于旧表格宿主内")
 
         return pos
@@ -452,11 +457,12 @@ def _find_first_insert_position_on_anchor_page(
     raise ValueError("前置锚点同页内未找到可编辑插入位置")
 
 
-def _find_next_editable_pos_on_page(
+def _find_next_editable_pos_on_page_bounded(
     doc,
     *,
     start_pos: int,
     anchor_page: int,
+    get_bound_end: Callable[[], int],
     max_lookahead: int = 50000,
 ) -> Optional[int]:
     try:
@@ -464,9 +470,10 @@ def _find_next_editable_pos_on_page(
     except Exception:
         return None
 
-    pos = min(max(0, int(start_pos)), max(0, doc_end))
+    scan_end = min(max(0, int(get_bound_end())), max(0, doc_end))
+    pos = min(max(0, int(start_pos)), scan_end)
     for _ in range(max_lookahead + 1):
-        if pos > doc_end:
+        if pos > scan_end:
             break
         if _get_position_page(doc, pos, anchor_page) != int(anchor_page):
             break
@@ -508,19 +515,11 @@ def _reposition_insert_range_if_locked(
         raise_on_missing=False,
     )
     if next_pos is None or next_pos <= cur_pos:
-        next_pos = _find_next_editable_pos_on_page(
+        next_pos = _find_next_editable_pos_on_page_bounded(
             doc,
             start_pos=cur_pos + 1,
             anchor_page=anchor_page,
-        )
-
-    if next_pos is None or next_pos <= cur_pos:
-        next_pos = _find_next_editable_pos_bounded(
-            doc,
-            start_pos=insert_start,
-            bound_start=insert_start,
             get_bound_end=get_bound_end,
-            raise_on_missing=False,
         )
 
     if next_pos is None:
@@ -1200,8 +1199,14 @@ def update_gjgk_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
                 return anchor_bound_end
             return max(anchor_bound_end, int(cursor_bound_end))
 
+        _delete_original_content(
+            doc,
+            range_start=range_start,
+            get_bound_end=get_insertion_bound_end,
+            log_parts=log_parts,
+        )
         log_parts.append(
-            f"跳过删除阶段: start={range_start}, bound_end={int(get_insertion_bound_end())}, "
+            f"删除阶段完成: start={range_start}, bound_end={int(get_insertion_bound_end())}, "
             f"anchor_after={int(after_hit['start'])}"
         )
 
@@ -1252,6 +1257,11 @@ def update_gjgk_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
                             get_bound_end=get_insertion_bound_end,
                             log_parts=log_parts,
                         )
+                        insert_cursor_bound_end[0] = max(
+                            int(insert_cursor_bound_end[0] or insert_start),
+                            int(insert_range.Start),
+                            int(insert_range.End),
+                        )
                         _reposition_insert_range_if_locked(
                             doc,
                             insert_range,
@@ -1284,6 +1294,11 @@ def update_gjgk_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
                         bound_start=insert_start,
                         get_bound_end=get_insertion_bound_end,
                         log_parts=log_parts,
+                    )
+                    insert_cursor_bound_end[0] = max(
+                        int(insert_cursor_bound_end[0] or insert_start),
+                        int(insert_range.Start),
+                        int(insert_range.End),
                     )
                     _reposition_insert_range_if_locked(
                         doc,
@@ -1330,10 +1345,11 @@ def update_gjgk_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
 
                         # L2: full same-page scan when bounded recovery fails
                         if next_pos is None or next_pos <= cur_pos:
-                            next_pos = _find_next_editable_pos_on_page(
+                            next_pos = _find_next_editable_pos_on_page_bounded(
                                 doc,
                                 start_pos=cur_pos + 1,
                                 anchor_page=start_page,
+                                get_bound_end=get_insertion_bound_end,
                             )
 
                         # L3: reset to insert_start and retry from earliest editable point

@@ -50,6 +50,7 @@ def _load_functions(*names: str, extra_globals=None):
         "List": list,
         "Optional": object,
         "DEFAULT_TEST_SUFFIX": _get_constant("DEFAULT_TEST_SUFFIX"),
+        "DEFAULT_DELETE_TEST_SUFFIX": _get_constant("DEFAULT_DELETE_TEST_SUFFIX"),
         "MANUAL_TEST_INSERT_TEXT": _get_constant("MANUAL_TEST_INSERT_TEXT"),
         "GjgkTenderGraphState": dict,
     }
@@ -398,6 +399,7 @@ def test_move_insert_range_after_current_table_inserts_paragraph_after_outermost
 
     namespace = _load_functions(
         "_pick_outermost_table",
+        "_is_within_table",
         "_move_insert_range_after_current_table",
         extra_globals={
             "_set_collapsed_range": _set_collapsed_range,
@@ -812,3 +814,69 @@ def test_insert_text_line_sequence_advances_cursor_when_bound_updates_after_each
 
     assert cursor_history == [12, 16, 20]
     assert doc.write_calls == [(8, "第1行\r"), (12, "第2行\r"), (16, "第3行\r")]
+
+
+def test_reposition_insert_range_if_locked_does_not_rewind_to_insert_start():
+    class _ProbeRange:
+        def __init__(self, start: int):
+            self.Start = start
+            self.End = start
+
+    class _Doc:
+        def Range(self, start, end):
+            return _ProbeRange(start)
+
+    class _InsertRange:
+        def __init__(self, pos: int):
+            self.Start = pos
+            self.End = pos
+
+        def SetRange(self, start, end):
+            self.Start = start
+            self.End = end
+
+    collapsed_positions = []
+
+    def fake_set_collapsed_range(target_range, position):
+        collapsed_positions.append(position)
+        target_range.SetRange(position, position)
+
+    def fake_find_next_editable_pos_bounded(
+        doc,
+        *,
+        start_pos,
+        bound_start,
+        get_bound_end,
+        raise_on_missing=False,
+    ):
+        if start_pos == 8:
+            return 8
+        return None
+
+    namespace = _load_functions(
+        "_reposition_insert_range_if_locked",
+        extra_globals={
+            "_is_range_locked": lambda doc, rng: True,
+            "_find_next_editable_pos_bounded": fake_find_next_editable_pos_bounded,
+            "_find_next_editable_pos_on_page_bounded": (
+                lambda doc, start_pos, anchor_page, get_bound_end: None
+            ),
+            "_set_collapsed_range": fake_set_collapsed_range,
+        },
+    )
+
+    insert_range = _InsertRange(20)
+
+    result = namespace["_reposition_insert_range_if_locked"](
+        _Doc(),
+        insert_range,
+        insert_start=8,
+        anchor_page=3,
+        get_bound_end=lambda: 20,
+        log_parts=[],
+    )
+
+    assert result is False
+    assert insert_range.Start == 20
+    assert insert_range.End == 20
+    assert collapsed_positions == []
