@@ -43,7 +43,7 @@ nul
 AGENTS.md
 asset/
 guide/
-
+.omx/
 # Next.js 构建产物
 .next/
 out/

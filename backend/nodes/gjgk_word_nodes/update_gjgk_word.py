@@ -11,9 +11,11 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import shutil
+import stat
 import sys
 import time
 from typing import Any, Callable, Dict, List, Optional
@@ -27,6 +29,9 @@ from backend.config.tender_config import (  # noqa: E402
     get_anchor_target_sizes,
     get_default_anchor_texts,
 )
+from backend.nodes.common_word_nodes.delete_tender_param import (  # noqa: E402
+    delete_tender_param,
+)
 from backend.states import GjgkTenderGraphState  # noqa: E402
 from backend.util.log_util.progress_log import progress_log  # noqa: E402
 from backend.util.word_util import (  # noqa: E402
@@ -35,6 +40,7 @@ from backend.util.word_util import (  # noqa: E402
     open_document_with_retry,
     save_document_with_retry,
     unprotect_document,
+    wdActiveEndPageNumber,
     wdCollapseEnd,
     wdCollapseStart,
     wdLineSpace1pt5,
@@ -53,13 +59,16 @@ CONTROL_CHARS = {"\r", "\n", "\v", "\f", "\a"}
 DEFAULT_TEST_SOURCE_DOC = (
     BACKEND_ROOT / "test_doc" / "254DSITC2512-招标文件-发售稿-财政模板.doc"
 )
+DEFAULT_TEST_UPDATE_SOURCE_DOC = (
+    BACKEND_ROOT / "test_doc" / "1.doc"
+)
 DEFAULT_TEST_SUFFIX = "-gjgk-update-test"
+DEFAULT_DELETE_TEST_SUFFIX = "-gjgk-delete-test"
+DEFAULT_DIAG_SUFFIX = "-gjgk-lock-diagnose"
 MANUAL_TEST_INSERT_TEXT = """第1包：细胞电转仪
 一、项目概述
 1、设备名称及数量：
-| 序号 | 设备名称 | 数量 | 是否按照医疗器械管理 |
-| --- | --- | --- | --- |
-| 1 | 细胞电转仪 | 壹套 | 是 |
+
 2、交付日期：合同签订后30天内
 3、交付地点：采购人指定地点
 4、付款方式：货到验收合格（出具合同验收单或验收报告）且采购人收到其发票后三个月内，支付全部货款（100%）。
@@ -70,13 +79,6 @@ MANUAL_TEST_INSERT_TEXT = """第1包：细胞电转仪
 2、★售后服务：提供报价设备均需提供原厂（制造商）售后，并出具相关证明文件。
 3、医疗设备必须符合 IHE 医疗信息系统集成规范，并免费提供信息系统接口，医学影像设备须提供 DICOM软硬件接口，数字化医疗设备须提供HL7软硬件接口，并由供应商承担相应信息系统联机费用。
 四、每套配置要求
-| 序号 | 内容 | 数量 |
-| --- | --- | --- |
-| 1 | 主机 | 1台 |
-| 2 | 腔室数 | ≥6个 |
-| 3 | 温度控制 | 1个 |
-| 4 | 软件 | 1套 |
-| 5 | 校正 | 1套 |
 注：供应商按上述配置要求自行提供响应设备的配置清单。
 """
 
@@ -100,7 +102,7 @@ def _parse_table_row(line: str) -> List[str]:
 
 def _looks_like_table_row(line: str) -> bool:
     stripped = (line or "").strip()
-    if not stripped.startswith("|"):
+    if "|" not in stripped:
         return False
     return len(_parse_table_row(stripped)) >= 2
 
@@ -173,6 +175,10 @@ def _apply_standard_insert_format(
         ("SpaceAfterAuto", False),
         ("SpaceBefore", 0),
         ("SpaceAfter", 0),
+        ("PageBreakBefore", False),
+        ("KeepWithNext", False),
+        ("KeepTogether", False),
+        ("WidowControl", False),
     ):
         try:
             setattr(paragraph_format, attr, value)
@@ -196,7 +202,412 @@ def _set_collapsed_range(insert_range, position: int) -> None:
     insert_range.Collapse(wdCollapseStart)
 
 
+def _range_overlaps(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+    return not (int(a_end) <= int(b_start) or int(b_end) <= int(a_start))
+
+
+def _is_locked_exception(exc: Exception) -> bool:
+    error_text = str(exc).lower()
+    return "锁定" in error_text or "locked" in error_text or "-2146823683" in error_text
+
+
+def _is_range_locked(doc, rng) -> bool:
+    try:
+        if hasattr(rng, "Locked") and rng.Locked:
+            return True
+    except Exception:
+        pass
+
+    try:
+        editors = getattr(rng, "Editors", None)
+        editors_count = int(getattr(editors, "Count", 0))
+        if editors_count > 0:
+            return False
+    except Exception:
+        pass
+
+    try:
+        fields = rng.Fields
+        count = int(getattr(fields, "Count", 0))
+        for idx in range(1, count + 1):
+            try:
+                field = fields(idx)
+                if hasattr(field, "Locked") and field.Locked:
+                    return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    try:
+        protection_type = int(getattr(doc, "ProtectionType", -1))
+    except Exception:
+        protection_type = -1
+
+    # -1 means wdNoProtection. In protected documents, prefer non-writing checks above
+    # and only use write-probe as the final fallback.
+    try:
+        marker = "\u200b"
+        test_pos = int(getattr(rng, "End", getattr(rng, "Start", 0)))
+        probe_rng = doc.Range(test_pos, test_pos)
+        probe_rng.InsertAfter(marker)
+        inserted = doc.Range(test_pos, min(test_pos + 1, int(doc.Content.End)))
+        if str(getattr(inserted, "Text", "") or "") == marker:
+            inserted.Delete()
+            return False
+        return protection_type != -1
+    except Exception as exc:
+        return _is_locked_exception(exc) or (protection_type != -1)
+
+
+def _get_position_page(doc, position: int, fallback_page: int) -> int:
+    try:
+        doc_end = int(doc.Content.End)
+        if doc_end <= 0:
+            return int(fallback_page)
+        probe_start = min(max(0, int(position)), max(0, doc_end - 1))
+        probe_end = min(doc_end, probe_start + 1)
+        probe_rng = doc.Range(probe_start, probe_end)
+        return int(probe_rng.Information(wdActiveEndPageNumber))
+    except Exception:
+        return int(fallback_page)
+
+
+def _find_next_editable_pos_bounded(
+    doc,
+    *,
+    start_pos: int,
+    bound_start: int,
+    get_bound_end: Callable[[], int],
+    max_lookahead: int = 20000,
+    raise_on_missing: bool = True,
+) -> Optional[int]:
+    latest_end = int(get_bound_end())
+    doc_end = int(doc.Content.End)
+    scan_end = min(latest_end, doc_end)
+    pos = min(max(int(start_pos), int(bound_start)), scan_end)
+
+    for _ in range(max_lookahead + 1):
+        try:
+            if not _is_range_locked(doc, doc.Range(pos, pos)):
+                return pos
+        except Exception:
+            pass
+        if pos >= scan_end:
+            break
+        pos += 1
+
+    if raise_on_missing:
+        raise ValueError("锚点范围内未找到可编辑插入位置")
+    return None
+
+
+def _pick_outermost_table(tables):
+    try:
+        count = int(getattr(tables, "Count", 0))
+    except Exception:
+        return None
+
+    picked_table = None
+    picked_span = -1
+    for idx in range(1, count + 1):
+        try:
+            table = tables(idx)
+            table_range = getattr(table, "Range", None)
+            if table_range is None:
+                continue
+            table_start = int(table_range.Start)
+            table_end = int(table_range.End)
+            span = table_end - table_start
+            if span >= picked_span:
+                picked_table = table
+                picked_span = span
+        except Exception:
+            continue
+    return picked_table
+
+
+def _is_within_table(rng) -> bool:
+    try:
+        return bool(rng.Information(wdWithInTable))
+    except Exception:
+        pass
+
+    try:
+        tables = getattr(rng, "Tables", None)
+        return int(getattr(tables, "Count", 0)) > 0
+    except Exception:
+        return False
+
+
+def _find_next_non_table_editable_pos_bounded(
+    doc,
+    *,
+    start_pos: int,
+    bound_start: int,
+    get_bound_end: Callable[[], int],
+    max_lookahead: int = 20000,
+) -> int:
+    latest_end = int(get_bound_end())
+    doc_end = int(doc.Content.End)
+    scan_end = min(latest_end, doc_end)
+    pos = min(max(int(start_pos), int(bound_start)), scan_end)
+
+    for _ in range(max_lookahead + 1):
+        probe = doc.Range(pos, pos)
+        try:
+            if not _is_within_table(probe) and not _is_range_locked(doc, probe):
+                return pos
+        except Exception:
+            pass
+        if pos >= scan_end:
+            break
+        pos += 1
+
+    raise ValueError("表格后未找到表外可编辑插入位置")
+
+
+def _move_insert_range_after_current_table(
+    doc,
+    insert_range,
+    *,
+    bound_start: int,
+    get_bound_end: Callable[[], int],
+) -> bool:
+    max_hops = 8
+    for _ in range(max_hops):
+        try:
+            if not _is_within_table(insert_range):
+                return True
+        except Exception:
+            return False
+
+        try:
+            parent_tables = insert_range.Tables
+        except Exception:
+            return False
+
+        host_table = _pick_outermost_table(parent_tables)
+        if host_table is None:
+            return False
+
+        try:
+            host_table.Range.InsertParagraphAfter()
+        except Exception:
+            pass
+
+        latest_end = int(get_bound_end())
+        next_pos = min(max(int(host_table.Range.End), int(bound_start)), latest_end)
+        try:
+            next_pos = _find_next_non_table_editable_pos_bounded(
+                doc,
+                start_pos=next_pos,
+                bound_start=bound_start,
+                get_bound_end=get_bound_end,
+            )
+        except ValueError:
+            pass
+
+        _set_collapsed_range(insert_range, next_pos)
+
+        try:
+            if not _is_within_table(insert_range):
+                return True
+        except Exception:
+            return False
+
+    return False
+
+
+def _find_first_insert_position_on_anchor_page(
+    doc,
+    *,
+    start_pos: int,
+    bound_start: int,
+    get_bound_end: Callable[[], int],
+    anchor_page: int,
+    max_lookahead: int = 20000,
+) -> int:
+    latest_end = int(get_bound_end())
+    doc_end = int(doc.Content.End)
+    scan_end = min(latest_end, doc_end)
+    pos = min(max(int(start_pos), int(bound_start)), scan_end)
+
+    for _ in range(max_lookahead + 1):
+        if _get_position_page(doc, pos, anchor_page) != int(anchor_page):
+            break
+
+        probe = doc.Range(pos, pos)
+        if _is_range_locked(doc, probe):
+            if pos >= scan_end:
+                break
+            pos += 1
+            continue
+
+        if _is_within_table(probe):
+            raise ValueError("删除正文后插入起点仍位于旧表格宿主内")
+
+        return pos
+
+    raise ValueError("前置锚点同页内未找到可编辑插入位置")
+
+
+def _find_next_editable_pos_on_page(
+    doc,
+    *,
+    start_pos: int,
+    anchor_page: int,
+    max_lookahead: int = 50000,
+) -> Optional[int]:
+    try:
+        doc_end = int(doc.Content.End)
+    except Exception:
+        return None
+
+    pos = min(max(0, int(start_pos)), max(0, doc_end))
+    for _ in range(max_lookahead + 1):
+        if pos > doc_end:
+            break
+        if _get_position_page(doc, pos, anchor_page) != int(anchor_page):
+            break
+        probe = doc.Range(pos, pos)
+        try:
+            if (not _is_within_table(probe)) and (not _is_range_locked(doc, probe)):
+                return pos
+        except Exception:
+            pass
+        pos += 1
+    return None
+
+
+def _reposition_insert_range_if_locked(
+    doc,
+    insert_range,
+    *,
+    insert_start: int,
+    anchor_page: int,
+    get_bound_end: Callable[[], int],
+    log_parts: Optional[List[str]] = None,
+) -> bool:
+    try:
+        cur_pos = int(insert_range.Start)
+    except Exception:
+        cur_pos = int(insert_start)
+
+    try:
+        if not _is_range_locked(doc, doc.Range(cur_pos, cur_pos)):
+            return False
+    except Exception:
+        return False
+
+    next_pos = _find_next_editable_pos_bounded(
+        doc,
+        start_pos=cur_pos + 1,
+        bound_start=insert_start,
+        get_bound_end=get_bound_end,
+        raise_on_missing=False,
+    )
+    if next_pos is None or next_pos <= cur_pos:
+        next_pos = _find_next_editable_pos_on_page(
+            doc,
+            start_pos=cur_pos + 1,
+            anchor_page=anchor_page,
+        )
+
+    if next_pos is None or next_pos <= cur_pos:
+        next_pos = _find_next_editable_pos_bounded(
+            doc,
+            start_pos=insert_start,
+            bound_start=insert_start,
+            get_bound_end=get_bound_end,
+            raise_on_missing=False,
+        )
+
+    if next_pos is None:
+        return False
+
+    _set_collapsed_range(insert_range, next_pos)
+    if log_parts is not None:
+        log_parts.append(f"游标后校验命中锁定，已重定位到 {next_pos}")
+    return True
+
+
+def _delete_original_content(
+    doc,
+    *,
+    range_start: int,
+    get_bound_end: Callable[[], int],
+    log_parts: List[str],
+) -> None:
+    initial_end = int(get_bound_end())
+    if initial_end <= int(range_start):
+        log_parts.append("锚点区间为空，直接执行同页插入")
+        return
+
+    deleted_tables = 0
+    skipped_tables = 0
+    try:
+        tables = doc.Range(int(range_start), initial_end).Tables
+        for idx in range(tables.Count, 0, -1):
+            try:
+                table = tables(idx)
+                table_start = int(table.Range.Start)
+                table_end = int(table.Range.End)
+                if not _range_overlaps(table_start, table_end, range_start, initial_end):
+                    continue
+                if _is_range_locked(doc, table.Range):
+                    skipped_tables += 1
+                    continue
+                table.Range.Delete()
+                deleted_tables += 1
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    deleted_paragraphs = 0
+    skipped_paragraphs = 0
+    try:
+        paragraphs = list(doc.Range(int(range_start), int(get_bound_end())).Paragraphs)
+    except Exception:
+        paragraphs = []
+
+    for para in reversed(paragraphs):
+        try:
+            para_start = int(para.Range.Start)
+            para_end = int(para.Range.End)
+            if not _range_overlaps(para_start, para_end, range_start, int(get_bound_end())):
+                continue
+            if _is_range_locked(doc, para.Range):
+                skipped_paragraphs += 1
+                continue
+            para.Range.Delete()
+            deleted_paragraphs += 1
+        except Exception:
+            continue
+
+    if deleted_tables or deleted_paragraphs or skipped_tables or skipped_paragraphs:
+        log_parts.append(
+            f"删除原内容: 表格 {deleted_tables} 个，段落 {deleted_paragraphs} 个"
+            f"，跳过锁定表格 {skipped_tables} 个，锁定段落 {skipped_paragraphs} 个"
+        )
+
+    used_fallback_delete = False
+    latest_end = int(get_bound_end())
+    if latest_end > int(range_start):
+        try:
+            if not _is_range_locked(doc, doc.Range(int(range_start), latest_end)):
+                doc.Range(int(range_start), latest_end).Delete()
+                used_fallback_delete = True
+        except Exception:
+            pass
+
+    if used_fallback_delete:
+        log_parts.append("执行整段可编辑删除")
+
+
 def _ensure_insert_range(
+    doc,
     insert_range,
     *,
     bound_start: int,
@@ -220,17 +631,16 @@ def _ensure_insert_range(
     _set_collapsed_range(insert_range, pos)
 
     try:
-        if insert_range.Information(wdWithInTable):
-            parent_tables = insert_range.Tables
-            if parent_tables.Count > 0:
-                host_table = parent_tables(1)
-                next_pos = int(host_table.Range.End)
-                latest_end = int(get_bound_end())
-                if next_pos > latest_end:
-                    next_pos = latest_end
-                if next_pos < bound_start:
-                    next_pos = bound_start
-                _set_collapsed_range(insert_range, next_pos)
+        if _is_range_locked(doc, doc.Range(pos, pos)):
+            pos2 = _find_next_editable_pos_bounded(
+                doc,
+                start_pos=pos + 1,
+                bound_start=bound_start,
+                get_bound_end=get_bound_end,
+                raise_on_missing=False,
+            )
+            if pos2 is not None and pos2 > pos:
+                _set_collapsed_range(insert_range, pos2)
     except Exception:
         pass
 
@@ -270,22 +680,78 @@ def _insert_text_line(
     *,
     bound_start: int,
     get_bound_end: Callable[[], int],
+    log_parts: Optional[List[str]] = None,
 ):
+    try:
+        if _is_within_table(insert_range):
+            _move_insert_range_after_current_table(
+                doc,
+                insert_range,
+                bound_start=bound_start,
+                get_bound_end=get_bound_end,
+            )
+    except Exception:
+        pass
+
     _ensure_insert_range(
+        doc,
         insert_range,
         bound_start=bound_start,
         get_bound_end=get_bound_end,
     )
-    start_pos = int(insert_range.End)
-    insert_range.InsertAfter(line + "\r")
-    end_pos = int(insert_range.End)
+    if log_parts is not None:
+        log_parts.append(_describe_range_state(doc, insert_range, label="文本插入前"))
+    start_pos = int(insert_range.Start)
+    inserted_text = line + "\r"
+    write_range = doc.Range(start_pos, start_pos)
+
+    try:
+        write_range.InsertAfter(inserted_text)
+    except Exception as exc:
+        if not _is_locked_exception(exc):
+            raise
+
+        fallback_inserted = False
+        for fallback_char in ("\r", "\v"):
+            try:
+                if _is_within_table(doc.Range(start_pos, start_pos)):
+                    moved = _move_insert_range_after_current_table(
+                        doc,
+                        insert_range,
+                        bound_start=bound_start,
+                        get_bound_end=get_bound_end,
+                    )
+                    if moved:
+                        start_pos = int(insert_range.Start)
+                probe = doc.Range(start_pos, start_pos)
+                probe.InsertAfter(fallback_char)
+                write_range = doc.Range(start_pos + 1, start_pos + 1)
+                write_range.InsertAfter(inserted_text)
+                fallback_inserted = True
+                if log_parts is not None:
+                    log_parts.append(
+                        f"文本插入触发锁定，已降级补控制符后重试成功（位置 {start_pos}）"
+                    )
+                break
+            except Exception:
+                continue
+
+        if not fallback_inserted:
+            raise
+
+    try:
+        write_end = int(getattr(write_range, "End", start_pos))
+    except Exception:
+        write_end = start_pos
+    end_pos = max(write_end, start_pos + len(inserted_text))
     inserted_rng = doc.Range(start_pos, max(start_pos, end_pos - 1))
     _apply_standard_insert_format(inserted_rng)
-    insert_range.Collapse(wdCollapseEnd)
+    _set_collapsed_range(insert_range, end_pos)
     _ensure_insert_range(
+        doc,
         insert_range,
         bound_start=bound_start,
-        get_bound_end=get_bound_end,
+        get_bound_end=lambda: max(int(get_bound_end()), int(end_pos)),
     )
     return inserted_rng
 
@@ -297,15 +763,39 @@ def _insert_table(
     *,
     bound_start: int,
     get_bound_end: Callable[[], int],
+    log_parts: Optional[List[str]] = None,
 ):
     if not rows:
         return None
 
     _ensure_insert_range(
+        doc,
         insert_range,
         bound_start=bound_start,
         get_bound_end=get_bound_end,
     )
+    if log_parts is not None:
+        log_parts.append(_describe_range_state(doc, insert_range, label="表格插入前"))
+    try:
+        if _is_within_table(insert_range):
+            moved_after_table = _move_insert_range_after_current_table(
+                doc,
+                insert_range,
+                bound_start=bound_start,
+                get_bound_end=get_bound_end,
+            )
+            if not moved_after_table:
+                parent_tables = insert_range.Tables
+                if int(getattr(parent_tables, "Count", 0)) > 0:
+                    host_table = parent_tables(1)
+                    end_pos = int(host_table.Range.End)
+                    bound_end = int(get_bound_end())
+                    if end_pos > bound_end:
+                        end_pos = bound_end
+                    _set_collapsed_range(insert_range, end_pos)
+    except Exception:
+        pass
+
     cols = max(len(row) for row in rows)
     start_pos = int(insert_range.End)
     table_range = doc.Range(start_pos, start_pos)
@@ -336,18 +826,37 @@ def _insert_table(
             except Exception:
                 continue
 
-    latest_end = int(get_bound_end())
-    next_pos = int(table.Range.End)
-    if next_pos > latest_end:
-        next_pos = latest_end
-    if next_pos < bound_start:
-        next_pos = bound_start
-    _set_collapsed_range(insert_range, next_pos)
-    _ensure_insert_range(
-        insert_range,
-        bound_start=bound_start,
-        get_bound_end=get_bound_end,
-    )
+    try:
+        insert_range.SetRange(table.Range.End, table.Range.End)
+    except Exception:
+        insert_range.Collapse(wdCollapseEnd)
+        insert_range.Start = table.Range.End
+        insert_range.End = table.Range.End
+
+    # Word COM 在表尾位置经常仍判定为表内，下一项若继续写入会把新文本/新表格灌进宿主表。
+    moved_after_table = False
+    try:
+        insert_range.Collapse(wdCollapseEnd)
+        moved_after_table = _move_insert_range_after_current_table(
+            doc,
+            insert_range,
+            bound_start=bound_start,
+            get_bound_end=get_bound_end,
+        )
+    except Exception:
+        moved_after_table = False
+
+    if not moved_after_table:
+        _ensure_insert_range(
+            doc,
+            insert_range,
+            bound_start=bound_start,
+            get_bound_end=lambda: max(
+                int(get_bound_end()),
+                int(getattr(insert_range, "Start", start_pos)),
+                int(getattr(insert_range, "End", start_pos)),
+            ),
+        )
     return table
 
 
@@ -369,7 +878,7 @@ def _cleanup_blank_paragraphs(
     deleted = 0
     for para in reversed(paragraphs):
         try:
-            if para.Range.Information(wdWithInTable):
+            if _is_within_table(para.Range):
                 continue
             para_text = (
                 str(getattr(para.Range, "Text", "") or "")
@@ -395,6 +904,46 @@ def _build_manual_test_output_path(source_doc_path: pathlib.Path) -> pathlib.Pat
     )
 
 
+def _build_manual_delete_output_path(source_doc_path: pathlib.Path) -> pathlib.Path:
+    return source_doc_path.with_name(
+        f"{source_doc_path.stem}{DEFAULT_DELETE_TEST_SUFFIX}{source_doc_path.suffix}"
+    )
+
+
+def _build_manual_diag_output_path(source_doc_path: pathlib.Path) -> pathlib.Path:
+    return source_doc_path.with_name(
+        f"{source_doc_path.stem}{DEFAULT_DIAG_SUFFIX}{source_doc_path.suffix}"
+    )
+
+
+def _build_manual_delete_state(prepared_doc_path: str) -> GjgkTenderGraphState:
+    before_text, after_text = get_default_anchor_texts("gjgk")
+    return GjgkTenderGraphState(
+        tender_type="gjgk",
+        prepared_doc_path=str(prepared_doc_path),
+        insertion_before_text=before_text,
+        insertion_after_text=after_text,
+    )
+
+
+def _ensure_file_writable(file_path: pathlib.Path) -> None:
+    """确保测试副本文档可写，避免继承源文件只读属性导致 Word 锁定。"""
+    if not file_path.exists():
+        raise FileNotFoundError(f"测试副本不存在，无法设置可写: {file_path}")
+
+    try:
+        current_mode = file_path.stat().st_mode
+        file_path.chmod(current_mode | stat.S_IWRITE)
+    except Exception as exc:
+        raise RuntimeError(f"设置测试副本为可写失败: {file_path}") from exc
+
+
+def _prepare_manual_test_copy(source_doc_path: pathlib.Path, output_path: pathlib.Path) -> None:
+    """复制测试文档并在复制后显式清除只读标记。"""
+    shutil.copy2(source_doc_path, output_path)
+    _ensure_file_writable(output_path)
+
+
 def _build_manual_test_state(prepared_doc_path: str) -> GjgkTenderGraphState:
     before_text, after_text = get_default_anchor_texts("gjgk")
     return GjgkTenderGraphState(
@@ -404,6 +953,163 @@ def _build_manual_test_state(prepared_doc_path: str) -> GjgkTenderGraphState:
         insertion_before_text=before_text,
         insertion_after_text=after_text,
     )
+
+
+def _safe_int(value: Any, default: int = -1) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _describe_range_state(doc, rng, *, label: str = "") -> str:
+    """返回当前位置的可读诊断信息，用于精确定位锁定触发点。"""
+    try:
+        start = int(getattr(rng, "Start", -1))
+        end = int(getattr(rng, "End", -1))
+    except Exception:
+        start, end = -1, -1
+
+    page = _get_position_page(doc, start if start >= 0 else 0, 1)
+    within_table = False
+    locked = False
+    try:
+        within_table = _is_within_table(rng)
+    except Exception:
+        pass
+    try:
+        locked = _is_range_locked(doc, rng)
+    except Exception:
+        pass
+
+    prefix = f"{label}: " if label else ""
+    return (
+        f"{prefix}range[{start},{end}] page={page} "
+        f"in_table={within_table} locked={locked}"
+    )
+
+
+def diagnose_gjgk_lock(
+    *,
+    source_doc_path: pathlib.Path,
+    before_text: str,
+    after_text: str,
+) -> Dict[str, Any]:
+    """诊断 gjgk 模板锁定来源，输出可直接用于排查的结构化信息。"""
+    if not source_doc_path.exists():
+        raise FileNotFoundError(f"诊断源文件不存在: {source_doc_path}")
+
+    diag_doc_path = _build_manual_diag_output_path(source_doc_path)
+    _prepare_manual_test_copy(source_doc_path, diag_doc_path)
+
+    report: Dict[str, Any] = {
+        "diag_doc_path": str(diag_doc_path),
+        "file_writable": os.access(diag_doc_path, os.W_OK),
+    }
+
+    word = None
+    doc = None
+    com_initialized = False
+
+    try:
+        word, com_initialized = create_word_application(
+            initial_delay=0.0,
+            post_init_delay=1.0,
+            use_existing=False,
+            verify=False,
+            node_name=NODE_NAME,
+        )
+        doc = open_document_with_retry(
+            word_app=word,
+            file_path=str(diag_doc_path),
+            read_only=False,
+            node_name=NODE_NAME,
+        )
+
+        report["doc_read_only"] = bool(getattr(doc, "ReadOnly", False))
+        report["doc_protection_type"] = _safe_int(getattr(doc, "ProtectionType", -1), -1)
+        report["doc_protect_content"] = bool(getattr(doc, "ProtectContent", False))
+
+        can_unprotect = unprotect_document(doc, node_name=NODE_NAME)
+        report["unprotect_result"] = bool(can_unprotect)
+        report["doc_protection_type_after_unprotect"] = _safe_int(
+            getattr(doc, "ProtectionType", -1), -1
+        )
+
+        before_size, after_size = get_anchor_target_sizes("gjgk")
+        before_hit, after_hit = find_anchor_range(
+            doc,
+            before_text,
+            after_text,
+            before_size=before_size,
+            after_size=after_size,
+            prefer_before="last",
+            prefer_after="first",
+        )
+        if not before_hit or not after_hit:
+            report["anchor_found"] = False
+            report["before_hit"] = before_hit
+            report["after_hit"] = after_hit
+            return report
+
+        report["anchor_found"] = True
+        report["before_hit"] = before_hit
+        report["after_hit"] = after_hit
+
+        content_range = _resolve_gjgk_content_range(
+            doc=doc,
+            word_app=word,
+            before_hit=before_hit,
+            after_hit=after_hit,
+        )
+        range_start = int(content_range["range_start"])
+        range_end = int(content_range["range_end"])
+        report["content_range"] = content_range
+
+        probe_positions: List[int] = [range_start]
+        if range_end > range_start:
+            probe_positions.append(min(range_start + 1, range_end))
+            probe_positions.append(max(range_start, range_end - 1))
+
+        unique_positions = []
+        for p in probe_positions:
+            if p not in unique_positions:
+                unique_positions.append(p)
+
+        probes: List[Dict[str, Any]] = []
+        for pos in unique_positions:
+            probe = doc.Range(pos, pos)
+            probe_info: Dict[str, Any] = {
+                "pos": pos,
+                "page": _get_position_page(doc, pos, content_range.get("start_page", 1)),
+                "is_within_table": _is_within_table(probe),
+                "is_range_locked": _is_range_locked(doc, probe),
+            }
+
+            try:
+                test_text = f"[LOCK-DIAG-{pos}]"
+                w_rng = doc.Range(pos, pos)
+                w_rng.InsertAfter(test_text)
+                delete_rng = doc.Range(pos, min(pos + len(test_text), int(doc.Content.End)))
+                delete_rng.Delete()
+                probe_info["write_probe"] = "ok"
+            except Exception as exc:
+                probe_info["write_probe"] = f"fail: {exc}"
+
+            probes.append(probe_info)
+
+        report["probes"] = probes
+
+    finally:
+        close_word_application(
+            word_app=word,
+            doc=doc,
+            com_initialized=com_initialized,
+            wait_time=1.0,
+            node_name=NODE_NAME,
+        )
+
+    return report
 
 
 def update_gjgk_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphState:
@@ -481,18 +1187,23 @@ def update_gjgk_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
         )
 
         after_anchor_marker = doc.Range(int(after_hit["start"]), int(after_hit["start"]))
+        insert_cursor_bound_end = [None]
 
         def get_insertion_bound_end() -> int:
             try:
-                return int(after_anchor_marker.Start)
+                anchor_bound_end = int(after_anchor_marker.Start)
             except Exception:
-                return int(range_end)
+                anchor_bound_end = int(range_end)
 
-        if range_end > range_start:
-            doc.Range(range_start, range_end).Delete()
-            log_parts.append(f"已删除原正文区间 {range_start}-{range_end}")
-        else:
-            log_parts.append("锚点区间为空，直接执行同页插入")
+            cursor_bound_end = insert_cursor_bound_end[0]
+            if cursor_bound_end is None:
+                return anchor_bound_end
+            return max(anchor_bound_end, int(cursor_bound_end))
+
+        log_parts.append(
+            f"跳过删除阶段: start={range_start}, bound_end={int(get_insertion_bound_end())}, "
+            f"anchor_after={int(after_hit['start'])}"
+        )
 
         insert_start = _trim_leading_layout_controls(
             doc,
@@ -500,36 +1211,158 @@ def update_gjgk_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
             get_bound_end=get_insertion_bound_end,
             log_parts=log_parts,
         )
+        insert_start = _find_first_insert_position_on_anchor_page(
+            doc,
+            start_pos=insert_start,
+            bound_start=range_start,
+            get_bound_end=get_insertion_bound_end,
+            anchor_page=start_page,
+        )
+        log_parts.append(f"同页插入起点定位为 {insert_start}（页 {start_page}）")
+        log_parts.append(
+            _describe_range_state(doc, doc.Range(insert_start, insert_start), label="插入起点状态")
+        )
         insert_range = doc.Range(insert_start, insert_start)
         _set_collapsed_range(insert_range, insert_start)
+        insert_cursor_bound_end[0] = int(insert_start)
 
         inserted_count = 0
-        for item in items:
-            if item["type"] == "text":
-                _insert_text_line(
-                    doc,
-                    insert_range,
-                    item["line"],
-                    bound_start=insert_start,
-                    get_bound_end=get_insertion_bound_end,
-                )
-                inserted_count += 1
-                log_parts.append(
-                    f"[{inserted_count}/{len(items)}] 已插入文本: {item['line'][:40]}"
-                )
-                continue
+        for item_idx, item in enumerate(items, start=1):
+            attempts = 0
+            while attempts < 80:
+                attempts += 1
+                try:
+                    _ensure_insert_range(
+                        doc,
+                        insert_range,
+                        bound_start=insert_start,
+                        get_bound_end=get_insertion_bound_end,
+                    )
+                    item_type = item.get("type")
+                    if item_type == "text":
+                        log_parts.append(
+                            f"准备插入[{item_idx}/{len(items)}] 文本, attempt={attempts}, "
+                            f"cursor={int(insert_range.Start)}, bound_end={int(get_insertion_bound_end())}"
+                        )
+                        _insert_text_line(
+                            doc,
+                            insert_range,
+                            item["line"],
+                            bound_start=insert_start,
+                            get_bound_end=get_insertion_bound_end,
+                            log_parts=log_parts,
+                        )
+                        _reposition_insert_range_if_locked(
+                            doc,
+                            insert_range,
+                            insert_start=insert_start,
+                            anchor_page=start_page,
+                            get_bound_end=get_insertion_bound_end,
+                            log_parts=log_parts,
+                        )
+                        insert_cursor_bound_end[0] = max(
+                            int(insert_cursor_bound_end[0] or insert_start),
+                            int(insert_range.Start),
+                            int(insert_range.End),
+                        )
+                        inserted_count += 1
+                        log_parts.append(
+                            f"[{inserted_count}/{len(items)}] 已插入文本: {item['line'][:40]} "
+                            f"(游标 {int(insert_range.Start)} / 上界 {int(get_insertion_bound_end())})"
+                        )
+                        break
 
-            _insert_table(
-                doc,
-                insert_range,
-                item["rows"],
-                bound_start=insert_start,
-                get_bound_end=get_insertion_bound_end,
-            )
-            inserted_count += 1
-            log_parts.append(
-                f"[{inserted_count}/{len(items)}] 已插入表格，行数 {len(item['rows'])}"
-            )
+                    log_parts.append(
+                        f"准备插入[{item_idx}/{len(items)}] 表格, attempt={attempts}, "
+                        f"cursor={int(insert_range.Start)}, bound_end={int(get_insertion_bound_end())}, "
+                        f"rows={len(item.get('rows', []))}"
+                    )
+                    _insert_table(
+                        doc,
+                        insert_range,
+                        item["rows"],
+                        bound_start=insert_start,
+                        get_bound_end=get_insertion_bound_end,
+                        log_parts=log_parts,
+                    )
+                    _reposition_insert_range_if_locked(
+                        doc,
+                        insert_range,
+                        insert_start=insert_start,
+                        anchor_page=start_page,
+                        get_bound_end=get_insertion_bound_end,
+                        log_parts=log_parts,
+                    )
+                    insert_cursor_bound_end[0] = max(
+                        int(insert_cursor_bound_end[0] or insert_start),
+                        int(insert_range.Start),
+                        int(insert_range.End),
+                    )
+                    inserted_count += 1
+                    log_parts.append(
+                        f"[{inserted_count}/{len(items)}] 已插入表格，行数 {len(item['rows'])} "
+                        f"(游标 {int(insert_range.Start)} / 上界 {int(get_insertion_bound_end())})"
+                    )
+                    break
+                except Exception as exc:
+                    try:
+                        current_state = _describe_range_state(doc, insert_range, label="插入失败点")
+                    except Exception:
+                        current_state = "插入失败点状态获取失败"
+                    log_parts.append(
+                        f"插入异常 item={item_idx}/{len(items)} attempt={attempts}: {exc}; {current_state}"
+                    )
+
+                    if _is_locked_exception(exc):
+                        try:
+                            cur_pos = int(insert_range.Start)
+                        except Exception:
+                            cur_pos = int(insert_start)
+
+                        # L1: keep existing bounded recovery
+                        next_pos = _find_next_editable_pos_bounded(
+                            doc,
+                            start_pos=cur_pos + 1,
+                            bound_start=insert_start,
+                            get_bound_end=get_insertion_bound_end,
+                            raise_on_missing=False,
+                        )
+
+                        # L2: full same-page scan when bounded recovery fails
+                        if next_pos is None or next_pos <= cur_pos:
+                            next_pos = _find_next_editable_pos_on_page(
+                                doc,
+                                start_pos=cur_pos + 1,
+                                anchor_page=start_page,
+                            )
+
+                        # L3: reset to insert_start and retry from earliest editable point
+                        if next_pos is None or next_pos <= cur_pos:
+                            next_pos = _find_next_editable_pos_bounded(
+                                doc,
+                                start_pos=insert_start,
+                                bound_start=insert_start,
+                                get_bound_end=get_insertion_bound_end,
+                                raise_on_missing=False,
+                            )
+
+                        if next_pos is None:
+                            log_parts.append(
+                                "锁定降级失败: bounded/同页扫描/回退insert_start均未找到可编辑点位，终止当前插入"
+                            )
+                            raise
+
+                        _set_collapsed_range(insert_range, next_pos)
+                        log_parts.append(
+                            f"锁定降级: 游标从 {cur_pos} 移动到 {next_pos} 后重试"
+                        )
+                        insert_cursor_bound_end[0] = max(
+                            int(insert_cursor_bound_end[0] or insert_start),
+                            int(insert_range.Start),
+                            int(insert_range.End),
+                        )
+                        continue
+                    raise
 
         inserted_end = int(insert_range.Start)
         _cleanup_blank_paragraphs(
@@ -543,10 +1376,16 @@ def update_gjgk_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
         log_parts.append("文档已保存")
         _visible_log("gjgk 同页回填完成")
     except Exception as exc:
+        try:
+            if doc is not None:
+                log_parts.append(_describe_range_state(doc, doc.Content, label="异常时文档内容范围"))
+        except Exception:
+            pass
         error_message = f"gjgk Word 更新失败: {exc}"
         log_parts.append(error_message)
         _visible_log(error_message)
-        raise RuntimeError(error_message) from exc
+        recent_logs = " | ".join(log_parts[-25:])
+        raise RuntimeError(f"{error_message}; 最近日志: {recent_logs}") from exc
     finally:
         close_word_application(
             word_app=word,
@@ -564,45 +1403,71 @@ def update_gjgk_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
     return GjgkTenderGraphState(**new_state)
 
 
-def main() -> None:
-    print("=" * 80)
-    print("开始测试 update_gjgk_word 节点")
-    print("=" * 80)
-
-    source_doc_path = DEFAULT_TEST_SOURCE_DOC
-    if not source_doc_path.exists():
-        print(f"错误: 测试文件不存在: {source_doc_path}")
-        sys.exit(1)
-
-    test_doc_path = _build_manual_test_output_path(source_doc_path)
-    shutil.copy2(source_doc_path, test_doc_path)
-    test_state = _build_manual_test_state(str(test_doc_path))
-
-    print(f"源文件: {source_doc_path}")
-    print(f"测试副本: {test_doc_path}")
-    print("插入模式: 先删除锚点区间原内容，再执行同页顺序回填")
+def _print_manual_state(state: GjgkTenderGraphState) -> None:
     print("测试状态:")
-    for key, value in test_state.items():
+    for key, value in state.items():
         if key == "polished_text":
             print(f"  {key}: {value[:80]}...")
         else:
             print(f"  {key}: {value}")
+
+
+
+def _run_update_only_manual_scenario(
+    source_doc_path: pathlib.Path,
+    *,
+    scenario_label: str = "[场景2] 预删模板回填产物",
+    execution_mode: str = "复制预删除模板后直接运行 update_gjgk_word",
+) -> pathlib.Path:
+    if not source_doc_path.exists():
+        raise FileNotFoundError(f"更新测试源文件不存在: {source_doc_path}")
+
+    output_path = _build_manual_test_output_path(source_doc_path)
+    _prepare_manual_test_copy(source_doc_path, output_path)
+    update_state = _build_manual_test_state(str(output_path))
+
+    print(scenario_label)
+    print(f"源文件: {source_doc_path}")
+    print(f"测试副本: {output_path}")
+    print(f"执行模式: {execution_mode}")
+    _print_manual_state(update_state)
     print("-" * 80)
 
+    result_state = update_gjgk_word(update_state, config=None)
+    print("✅ update_gjgk_word 执行完成")
+    print(f"回填产物: {output_path}")
+    print("插入日志:")
+    for part in str(result_state.get("insertion_log", "")).split("; "):
+        print(f"  - {part}")
+    return output_path
+
+
+def main() -> None:
+    print("=" * 80)
+    print("开始测试 gjgk 同页回填诊断场景")
+    print("=" * 80)
+
+    update_output_path: Optional[pathlib.Path] = None
+
     try:
-        result_state = update_gjgk_word(test_state, config=None)
-        print("✅ update_gjgk_word 执行完成")
-        print(f"结果文件: {test_doc_path}")
-        print("插入日志:")
-        for part in str(result_state.get("insertion_log", "")).split("; "):
-            print(f"  - {part}")
+        update_output_path = _run_update_only_manual_scenario(
+            DEFAULT_TEST_UPDATE_SOURCE_DOC,
+            scenario_label="[场景] 预删模板同页回填",
+            execution_mode=(
+                "仅复制删除模板测试文档并直接执行 update_gjgk_word"
+            ),
+        )
     except Exception as exc:
         print("❌ update_gjgk_word 执行失败")
         print(f"错误信息: {exc}")
-        raise
+        sys.exit(1)
 
     print("=" * 80)
-    print("测试完成")
+    print("诊断完成")
+    if update_output_path is not None:
+        print(f"回填产物文件: {update_output_path}")
+
+    print("预删模板同页回填场景执行成功")
     print("=" * 80)
 
 
