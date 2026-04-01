@@ -11,7 +11,6 @@ import re
 from typing import Optional, Dict, Any
 import time
 import pathlib
-import shutil
 import sys
 
 # 添加仓库根目录到 sys.path，便于直接运行当前脚本进行本地调试
@@ -22,10 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from backend.states import TenderGraphStateBase
 from backend.config.tender_config import (
-    CONTENT_UPDATE_MODE_DIRECT_REPLACE,
     get_anchor_target_sizes,
-    get_content_update_mode,
-    get_default_anchor_texts,
 )
 from backend.util.word_util import (
     create_word_application,
@@ -127,35 +123,6 @@ def _validate_required_protected_fields(
     missing = [keyword for keyword in required_keywords if keyword not in protected_fields]
     if missing:
         raise ValueError(f"缺少关键受保护字段: {', '.join(missing)}")
-
-
-def _inject_local_gap_before_anchor(
-    doc,
-    *,
-    cursor_pos: int,
-    bound_start: int,
-    bound_end: int,
-) -> Optional[int]:
-    """在当前位置或后置锚点前补一个局部段落空位，供零宽插入点重试使用。"""
-
-    safe_start = int(bound_start)
-    safe_end = int(bound_end)
-    if safe_end < safe_start:
-        return None
-
-    preferred = min(max(int(cursor_pos), safe_start), safe_end)
-    candidates: list[int] = []
-    for pos in (preferred, safe_end):
-        if safe_start <= pos <= safe_end and pos not in candidates:
-            candidates.append(pos)
-
-    for pos in candidates:
-        try:
-            doc.Range(pos, pos).InsertBefore("\r")
-            return pos
-        except Exception:
-            continue
-    return None
 
 
 def _resolve_block_flow(protected_fields: Dict[str, Any]) -> Dict[str, Any]:
@@ -315,69 +282,6 @@ def _parse_table_block(lines: list[str], start_idx: int) -> tuple[Optional[list[
     return None, start_idx
 
 
-def _build_direct_replace_items(polished_text: str) -> list[Dict[str, Any]]:
-    """按 gjgk 直插语义切分内容：仅抽离 Markdown 表格，其余文本块保留原始换行。"""
-
-    normalized = polished_text.replace("\r\n", "\n").replace("\r", "\n")
-    if not normalized:
-        return []
-
-    lines_with_endings = normalized.splitlines(keepends=True)
-    line_texts = [
-        line[:-1] if line.endswith("\n") else line for line in lines_with_endings
-    ]
-
-    line_offsets = [0]
-    for line in lines_with_endings:
-        line_offsets.append(line_offsets[-1] + len(line))
-
-    items: list[Dict[str, Any]] = []
-    prev_char = 0
-    idx = 0
-    while idx < len(line_texts):
-        table_rows, next_idx = _parse_table_block(line_texts, idx)
-        if table_rows:
-            table_start = line_offsets[idx]
-            if table_start > prev_char:
-                items.append(
-                    {
-                        "type": "text_block",
-                        "text": normalized[prev_char:table_start],
-                    }
-                )
-            table_end = line_offsets[next_idx]
-            items.append({"type": "table", "rows": table_rows})
-            prev_char = table_end
-            idx = next_idx
-            continue
-        idx += 1
-
-    if prev_char < len(normalized):
-        items.append({"type": "text_block", "text": normalized[prev_char:]})
-
-    return [
-        item
-        for item in items
-        if item["type"] != "text_block" or item.get("text") != ""
-    ]
-
-
-def _advance_direct_insert_bound(
-    current_bound: int,
-    *,
-    marker_start: Optional[int] = None,
-    inserted_end: Optional[int] = None,
-) -> int:
-    """在 Word 锚点回传滞后时，保证 gjgk 直插边界只向前推进。"""
-
-    updated = int(current_bound)
-    if marker_start is not None:
-        updated = max(updated, int(marker_start))
-    if inserted_end is not None:
-        updated = max(updated, int(inserted_end))
-    return updated
-
-
 def _apply_standard_insert_format(
     inserted_rng,
     *,
@@ -404,39 +308,6 @@ def _apply_standard_insert_format(
             setattr(paragraph_format, attr, value)
         except Exception:
             continue
-
-
-def _resolve_table_host_range(
-    start_pos: int,
-    *,
-    doc_end: int,
-    prefer_paragraph_host: bool,
-) -> tuple[int, int]:
-    """为表格插入生成宿主 Range。必要时改用前一个段落标记，而不是零宽边界点。"""
-
-    start = max(0, int(start_pos))
-    end = start
-    if prefer_paragraph_host:
-        if start > 0:
-            return start - 1, start
-        if int(doc_end) > start:
-            end = min(start + 1, int(doc_end))
-    return start, end
-
-
-def _resolve_post_table_cursor(
-    table_end: int,
-    *,
-    gap_pos: Optional[int] = None,
-    appended_paragraph: bool = False,
-) -> int:
-    """为表格后的续写游标选一个不再停留在表格行尾语义里的位置。"""
-
-    if gap_pos is not None:
-        return int(gap_pos)
-    if appended_paragraph:
-        return int(table_end) + 1
-    return int(table_end)
 
 
 def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
@@ -474,15 +345,9 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
         )
 
     before_size, after_size = get_anchor_target_sizes(str(tender_type or "xjcg"))
-    content_update_mode = get_content_update_mode(str(tender_type or "xjcg"))
-    if content_update_mode == CONTENT_UPDATE_MODE_DIRECT_REPLACE:
-        split_result = None
-        content_list = []
-        direct_replace_items = _build_direct_replace_items(polished_text)
-    else:
-        split_result = split_polished_text_into_blocks(polished_text)
-        content_list = split_result["content_list"]
-        direct_replace_items = []
+
+    split_result = split_polished_text_into_blocks(polished_text)
+    content_list = split_result["content_list"]
 
     insertion_log_parts = []
     word = None
@@ -565,21 +430,12 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
             after_anchor_marker = doc.Range(
                 int(after_anchor_start), int(after_anchor_start)
             )
-            effective_bound_end = int(insertion_bound_end)
 
-            def get_insertion_bound_end(inserted_end: Optional[int] = None) -> int:
-                nonlocal effective_bound_end
-                marker_start = None
+            def get_insertion_bound_end() -> int:
                 try:
-                    marker_start = int(after_anchor_marker.Start)
+                    return int(after_anchor_marker.Start)
                 except Exception:
-                    marker_start = None
-                effective_bound_end = _advance_direct_insert_bound(
-                    effective_bound_end,
-                    marker_start=marker_start,
-                    inserted_end=inserted_end,
-                )
-                return int(effective_bound_end)
+                    return int(insertion_bound_end)
 
             insertion_log_parts.append(
                 f"锚点范围(字符位置): {insertion_bound_start} - {insertion_bound_end}"
@@ -651,46 +507,33 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 page_rng = doc.Range(page_start, page_end)
 
                 # 步骤1：优先在目标页定位受保护字段，必要时回查锚点边界范围
-                use_direct_replace = (
-                    content_update_mode == CONTENT_UPDATE_MODE_DIRECT_REPLACE
-                )
-                protected_keywords = (
-                    []
-                    if use_direct_replace
-                    else list(REQUIRED_PROTECTED_FIELD_KEYWORDS)
-                )
+                protected_keywords = list(REQUIRED_PROTECTED_FIELD_KEYWORDS)
                 target_range = (int(page_start), int(page_end))
                 fallback_range = (
                     int(insertion_bound_start),
                     int(get_insertion_bound_end()),
                 )
-                if use_direct_replace:
-                    insertion_log_parts.append(
-                        "步骤1：gjgk direct_replace 模式，跳过受保护字段定位。"
-                    )
-                    protected_fields = {}
-                else:
-                    insertion_log_parts.append(
-                        "步骤1：定位关键受保护字段..."
-                        f" 目标页={target_page}({target_range[0]}-{target_range[1]})，"
-                        f" 边界范围={fallback_range[0]}-{fallback_range[1]}"
-                    )
+                insertion_log_parts.append(
+                    "步骤1：定位关键受保护字段..."
+                    f" 目标页={target_page}({target_range[0]}-{target_range[1]})，"
+                    f" 边界范围={fallback_range[0]}-{fallback_range[1]}"
+                )
 
-                    protected_fields = _collect_protected_fields(
-                        doc=doc,
-                        keywords=protected_keywords,
-                        target_range=target_range,
-                        fallback_range=fallback_range,
+                protected_fields = _collect_protected_fields(
+                    doc=doc,
+                    keywords=protected_keywords,
+                    target_range=target_range,
+                    fallback_range=fallback_range,
+                )
+                if not protected_fields:
+                    insertion_log_parts.append(
+                        "  未在目标范围内找到受保护字段，将按可编辑边界继续插入。"
                     )
-                    if not protected_fields:
+                else:
+                    for keyword, para_rng in protected_fields.items():
                         insertion_log_parts.append(
-                            "  未在目标范围内找到受保护字段，将按可编辑边界继续插入。"
+                            f"  找到受保护字段: {keyword} ({int(para_rng.Start)}-{int(para_rng.End)})"
                         )
-                    else:
-                        for keyword, para_rng in protected_fields.items():
-                            insertion_log_parts.append(
-                                f"  找到受保护字段: {keyword} ({int(para_rng.Start)}-{int(para_rng.End)})"
-                            )
 
                 def _range_overlaps(
                     a_start: int, a_end: int, b_start: int, b_end: int
@@ -714,50 +557,29 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     return False
 
                 # 步骤2：根据受保护字段将内容列表拆分为块
-                insertion_log_parts.append(
-                    "步骤2：按字段拆分内容块..."
-                    if not use_direct_replace
-                    else "步骤2：gjgk direct_replace 模式，按完整正文顺序插入。"
-                )
+                insertion_log_parts.append("步骤2：按字段拆分内容块...")
 
-                if use_direct_replace:
-                    delivery_date_line = None
-                    payment_method_line = None
-                    delivery_prefix = ""
-                    delivery_value = None
-                    payment_prefix = ""
-                    payment_value = None
-                    block1 = []
-                    block2 = []
-                    block3 = []
+                delivery_date_line = split_result["delivery_date_line"]
+                payment_method_line = split_result["payment_method_line"]
+                delivery_prefix = split_result["delivery_prefix"]
+                delivery_value = split_result["delivery_value"]
+                payment_prefix = split_result["payment_prefix"]
+                payment_value = split_result["payment_value"]
+                block1 = split_result["block1"]
+                block2 = split_result["block2"]
+                block3 = split_result["block3"]
+
+                insertion_log_parts.append(f"  块1: {len(block1)} 条（交付日期之前）")
+                insertion_log_parts.append(f"  块2: {len(block2)} 条（交付日期区段）")
+                insertion_log_parts.append(f"  块3: {len(block3)} 条（付款方式之后）")
+                if delivery_prefix.strip():
                     insertion_log_parts.append(
-                        "  same-page direct insert：仅抽离 Markdown 表格，其余文本块保留原始换行。"
+                        f"  交付日期前缀: {delivery_prefix.strip()}"
                     )
+                if payment_prefix.strip():
                     insertion_log_parts.append(
-                        f"  direct_replace 条目数: {len(direct_replace_items)}"
+                        f"  付款方式前缀: {payment_prefix.strip()}"
                     )
-                else:
-                    assert split_result is not None
-                    delivery_date_line = split_result["delivery_date_line"]
-                    payment_method_line = split_result["payment_method_line"]
-                    delivery_prefix = split_result["delivery_prefix"]
-                    delivery_value = split_result["delivery_value"]
-                    payment_prefix = split_result["payment_prefix"]
-                    payment_value = split_result["payment_value"]
-                    block1 = split_result["block1"]
-                    block2 = split_result["block2"]
-                    block3 = split_result["block3"]
-                    insertion_log_parts.append(f"  块1: {len(block1)} 条（交付日期之前）")
-                    insertion_log_parts.append(f"  块2: {len(block2)} 条（交付日期区段）")
-                    insertion_log_parts.append(f"  块3: {len(block3)} 条（付款方式之后）")
-                    if delivery_prefix.strip():
-                        insertion_log_parts.append(
-                            f"  交付日期前缀: {delivery_prefix.strip()}"
-                        )
-                    if payment_prefix.strip():
-                        insertion_log_parts.append(
-                            f"  付款方式前缀: {payment_prefix.strip()}"
-                        )
 
                 # 步骤3：删除所有可编辑内容
                 bound_start_for_delete = int(insertion_bound_start)
@@ -815,18 +637,14 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 insertion_log_parts.append("步骤4：按块插入内容...")
 
                 # 删除后重新获取页面范围
-                if use_direct_replace:
-                    page_start_after = int(insertion_bound_start)
-                    page_end_after = int(get_insertion_bound_end())
-                else:
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                    page_start_after = selection.Start
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
-                    page_end_after = (
-                        selection.Start
-                        if selection.Information(wdActiveEndPageNumber) == next_page
-                        else doc.Content.End
-                    )
+                selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
+                page_start_after = selection.Start
+                selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
+                page_end_after = (
+                    selection.Start
+                    if selection.Information(wdActiveEndPageNumber) == next_page
+                    else doc.Content.End
+                )
                 bound_end_for_search = int(get_insertion_bound_end())
                 if int(page_end_after) < bound_end_for_search:
                     page_end_after = bound_end_for_search
@@ -1081,142 +899,28 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                             idx += 1
                     return items
 
-                def _format_inserted_range(inserted_rng) -> None:
-                    _apply_standard_insert_format(
-                        inserted_rng,
-                        font_name=insert_font_name,
-                        font_size=insert_font_size,
-                    )
-
                 def insert_content_with_formatting(insert_range, line):
                     ensure_editable_insert_range(insert_range)
                     start_pos = insert_range.End
                     insert_range.InsertAfter(line + "\r")
                     end_pos = insert_range.End
                     inserted_rng = doc.Range(start_pos, end_pos - 1)
-                    _format_inserted_range(inserted_rng)
+
+                    inserted_rng.Font.Name = insert_font_name
+                    inserted_rng.Font.Size = insert_font_size
+                    inserted_rng.ParagraphFormat.LineSpacingRule = wdLineSpace1pt5
+                    inserted_rng.ParagraphFormat.LeftIndent = 0
+                    inserted_rng.ParagraphFormat.FirstLineIndent = 0
+                    inserted_rng.ParagraphFormat.OutlineLevel = wdOutlineLevelBodyText
+
+                    inserted_rng.Font.Bold = False
+
                     insert_range.Collapse(wdCollapseEnd)
                     return inserted_rng
 
-                def insert_text_block_with_formatting(insert_range, text_block: str):
-                    ensure_editable_insert_range(insert_range)
-                    normalized_block = text_block.replace("\r\n", "\n").replace("\r", "\n")
-                    if normalized_block == "":
-                        return None
-
-                    word_text = normalized_block.replace("\n", "\r")
-
-                    try:
-                        cursor_pos = int(insert_range.Start)
-                    except Exception:
-                        cursor_pos = int(insertion_bound_start)
-
-                    bound_end_before = int(get_insertion_bound_end())
-                    if cursor_pos >= bound_end_before:
-                        start_pos = bound_end_before
-                        boundary_rng = doc.Range(start_pos, start_pos)
-                        boundary_rng.InsertBefore(word_text)
-                        end_pos = int(get_insertion_bound_end(start_pos + len(word_text)))
-                        inserted_rng = doc.Range(start_pos, end_pos)
-                    else:
-                        start_pos = cursor_pos
-                        insert_range.InsertAfter(word_text)
-                        try:
-                            end_pos = int(insert_range.End)
-                        except Exception:
-                            end_pos = start_pos + len(word_text)
-                        end_pos = int(get_insertion_bound_end(end_pos))
-                        inserted_rng = doc.Range(start_pos, end_pos)
-
-                    _format_inserted_range(inserted_rng)
-                    insert_range.SetRange(end_pos, end_pos)
-                    insert_range.Collapse(wdCollapseStart)
-                    return inserted_rng
-
-                def _ensure_trailing_paragraph_after_table(table) -> bool:
-                    last_exc = None
-                    try:
-                        tail_range = table.Range.Duplicate
-                        tail_range.Collapse(wdCollapseEnd)
-                        tail_range.InsertParagraphAfter()
-                        return True
-                    except Exception as exc:
-                        last_exc = exc
-
-                    try:
-                        table.Range.InsertParagraphAfter()
-                        return True
-                    except Exception as exc:
-                        last_exc = exc
-
-                    if last_exc is not None:
-                        insertion_log_parts.append(
-                            f"    警告: gjgk 表格后补可编辑段落失败: {last_exc}"
-                        )
-                    return False
-
-                def insert_table_with_formatting(
-                    insert_range,
-                    rows,
-                    *,
-                    keep_trailing_gap: bool = False,
-                ):
+                def insert_table_with_formatting(insert_range, rows):
                     if not rows:
                         return None
-
-                    ensure_editable_insert_range(insert_range)
-
-                    try:
-                        start_pos = int(insert_range.End)
-                    except Exception:
-                        start_pos = int(insertion_bound_start)
-
-                    prefer_paragraph_host = False
-                    if use_direct_replace:
-                        needs_host_paragraph = start_pos >= int(get_insertion_bound_end())
-                        if not needs_host_paragraph:
-                            try:
-                                needs_host_paragraph = is_range_locked(
-                                    doc.Range(start_pos, start_pos)
-                                )
-                            except Exception:
-                                needs_host_paragraph = False
-
-                        if needs_host_paragraph:
-                            prefer_paragraph_host = True
-                            has_existing_paragraph_host = False
-                            if start_pos > 0:
-                                insertion_log_parts.append(
-                                    f"    gjgk 表格插入改用位置 {start_pos} 前一个段落标记建表。"
-                                )
-                                try:
-                                    prev_text = str(doc.Range(start_pos - 1, start_pos).Text or "")
-                                    has_existing_paragraph_host = (
-                                        "\r" in prev_text or "\n" in prev_text
-                                    )
-                                except Exception:
-                                    pass
-                            if not has_existing_paragraph_host:
-                                gap_pos = _inject_local_gap_before_anchor(
-                                    doc,
-                                    cursor_pos=start_pos,
-                                    bound_start=int(insertion_bound_start),
-                                    bound_end=int(get_insertion_bound_end()),
-                                )
-                                if gap_pos is not None:
-                                    try:
-                                        marker_after_gap = int(after_anchor_marker.Start)
-                                    except Exception:
-                                        marker_after_gap = int(gap_pos) + 1
-                                    start_pos = max(0, int(marker_after_gap))
-                                    insertion_log_parts.append(
-                                        f"    gjgk 表格插入前已在位置 {start_pos} 前预留宿主段落。"
-                                    )
-                                    try:
-                                        insert_range.SetRange(start_pos, start_pos)
-                                        insert_range.Collapse(wdCollapseStart)
-                                    except Exception:
-                                        pass
 
                     try:
                         if insert_range.Information(wdWithInTable):
@@ -1229,17 +933,12 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                                     end_pos = bound_end
                                 insert_range.SetRange(end_pos, end_pos)
                                 insert_range.Collapse(wdCollapseStart)
-                                start_pos = end_pos
                     except Exception:
                         pass
 
                     cols = max(len(r) for r in rows)
-                    table_start, table_end = _resolve_table_host_range(
-                        start_pos,
-                        doc_end=int(doc.Content.End),
-                        prefer_paragraph_host=prefer_paragraph_host,
-                    )
-                    table_range = doc.Range(table_start, table_end)
+                    start_pos = insert_range.End
+                    table_range = doc.Range(start_pos, start_pos)
                     table = doc.Tables.Add(table_range, len(rows), cols)
                     try:
                         table.Borders.Enable = True
@@ -1275,99 +974,13 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                                 pass
 
                     try:
-                        table_end = int(table.Range.End)
-                    except Exception:
-                        table_end = int(insert_range.End)
-
-                    post_table_cursor = None
-                    if keep_trailing_gap and use_direct_replace:
-                        bound_end_for_gap = int(get_insertion_bound_end(table_end))
-                        gap_pos = _inject_local_gap_before_anchor(
-                            doc,
-                            cursor_pos=table_end,
-                            bound_start=int(insertion_bound_start),
-                            bound_end=bound_end_for_gap,
-                        )
-                        if gap_pos is not None:
-                            post_table_cursor = _resolve_post_table_cursor(
-                                table_end,
-                                gap_pos=gap_pos,
-                            )
-                            insertion_log_parts.append(
-                                f"    gjgk 表格后续写改用位置 {post_table_cursor} 的可编辑宿主段落。"
-                            )
-                        elif _ensure_trailing_paragraph_after_table(table):
-                            post_table_cursor = _resolve_post_table_cursor(
-                                table_end,
-                                appended_paragraph=True,
-                            )
-                            insertion_log_parts.append(
-                                f"    gjgk 表格后续写游标前推到位置 {post_table_cursor}。"
-                            )
-
-                    if post_table_cursor is not None:
-                        table_end = post_table_cursor
-
-                    table_end = int(get_insertion_bound_end(table_end))
-
-                    try:
-                        insert_range.SetRange(table_end, table_end)
+                        insert_range.SetRange(table.Range.End, table.Range.End)
                     except Exception:
                         insert_range.Collapse(wdCollapseEnd)
-                        insert_range.Start = table_end
-                        insert_range.End = table_end
+                        insert_range.Start = table.Range.End
+                        insert_range.End = table.Range.End
                     insert_range.Collapse(wdCollapseEnd)
                     return table
-
-                def insert_item_with_optional_local_gap(
-                    insert_range,
-                    item,
-                    *,
-                    keep_trailing_gap: bool = False,
-                ):
-                    def _insert_once():
-                        if item["type"] == "text":
-                            return insert_content_with_formatting(
-                                insert_range, item["line"]
-                            )
-                        if item["type"] == "text_block":
-                            return insert_text_block_with_formatting(
-                                insert_range, item["text"]
-                            )
-                        if item["type"] == "table":
-                            return insert_table_with_formatting(
-                                insert_range,
-                                item["rows"],
-                                keep_trailing_gap=keep_trailing_gap,
-                            )
-                        raise ValueError(f"未知插入项类型: {item['type']}")
-
-                    try:
-                        return _insert_once()
-                    except Exception as exc:
-                        if not use_direct_replace or not is_locked_exception(exc):
-                            raise
-
-                        try:
-                            cursor_pos = int(insert_range.Start)
-                        except Exception:
-                            cursor_pos = int(insertion_bound_start)
-
-                        gap_pos = _inject_local_gap_before_anchor(
-                            doc,
-                            cursor_pos=cursor_pos,
-                            bound_start=int(insertion_bound_start),
-                            bound_end=int(get_insertion_bound_end()),
-                        )
-                        if gap_pos is None:
-                            raise
-
-                        insertion_log_parts.append(
-                            f"    gjgk 插入点受阻，已在位置 {gap_pos} 局部补一个段落空位后重试。"
-                        )
-                        insert_range.SetRange(gap_pos, gap_pos)
-                        insert_range.Collapse(wdCollapseStart)
-                        return _insert_once()
 
                 def insert_prefix_before_keyword(keyword: str, prefix: str):
                     if not prefix or not prefix.strip():
@@ -1485,32 +1098,13 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                                     inserted += 1
                     return inserted
 
-                def describe_item(item: Dict[str, Any]) -> str:
-                    if item["type"] == "table":
-                        return f"表格，行数 {len(item['rows'])}"
-                    if item["type"] == "text_block":
-                        text = item.get("text", "")
-                    else:
-                        text = item.get("line", "")
-                    text = text.replace("\r", "\\r").replace("\n", "\\n").strip()
-                    return f"{text[:50]}..." if len(text) > 50 else text
-
                 flow = _resolve_block_flow(protected_fields)
 
                 # 插入块1（始终执行，优先在交付日期前，否则回退到目标页起始可编辑位置）
                 insertion_log_parts.append("  正在插入块1...")
-                if use_direct_replace:
-                    insert_rng = doc.Range(
-                        int(insertion_bound_start), int(insertion_bound_start)
-                    )
-                    insert_rng.Collapse(wdCollapseStart)
-                    insertion_log_parts.append(
-                        f"    direct_replace 从锚点后位置开始插入，位置 {int(insertion_bound_start)}"
-                    )
-                else:
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                    insert_rng = selection.Range
-                    insert_rng.Collapse(wdCollapseStart)
+                selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
+                insert_rng = selection.Range
+                insert_rng.Collapse(wdCollapseStart)
 
                 if flow["has_delivery"]:
                     delivery_date_rng = protected_fields["交付日期"]
@@ -1523,28 +1117,18 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     insert_rng.SetRange(safe_before, safe_before)
                     insert_rng.Collapse(wdCollapseStart)
 
-                block1_items = (
-                    direct_replace_items
-                    if use_direct_replace
-                    else convert_lines_to_items(block1)
-                )
-                for item_idx, item in enumerate(block1_items):
+                block1_items = convert_lines_to_items(block1)
+                for item in block1_items:
                     try:
-                        if item["type"] in {"text", "text_block"}:
-                            insert_item_with_optional_local_gap(insert_rng, item)
+                        if item["type"] == "text":
+                            inserted_rng = insert_content_with_formatting(
+                                insert_rng, item["line"]
+                            )
                             insertion_log_parts.append(
-                                f"    已插入: {describe_item(item)}"
+                                f"    已插入: {item['line'][:50]}..."
                             )
                         elif item["type"] == "table":
-                            keep_trailing_gap = any(
-                                later_item["type"] in {"text", "text_block", "table"}
-                                for later_item in block1_items[item_idx + 1 :]
-                            )
-                            insert_item_with_optional_local_gap(
-                                insert_rng,
-                                item,
-                                keep_trailing_gap=keep_trailing_gap,
-                            )
+                            insert_table_with_formatting(insert_rng, item["rows"])
                             insertion_log_parts.append(
                                 f"    已插入表格，行数 {len(item['rows'])}。"
                             )
@@ -1635,13 +1219,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         update_protected_field("付款方式", payment_value)
 
                 # 插入块3（有付款方式则插其后，否则回退到后置锚点前）
-                if use_direct_replace:
-                    block3_items = []
-                    insertion_log_parts.append(
-                        "  gjgk direct_replace 已在块1消费完整正文，跳过 legacy 块3 路径。"
-                    )
-                else:
-                    block3_items = convert_lines_to_items(block3)
+                block3_items = convert_lines_to_items(block3)
                 insertion_log_parts.append(f"  插入块3（{len(block3_items)} 条）...")
                 if len(block3_items) == 0:
                     insertion_log_parts.append("    警告：块3为空，无需插入")
@@ -1717,8 +1295,8 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                             try:
                                 ensure_editable_insert_range(insert_rng)
                                 if item["type"] == "text":
-                                    inserted_rng = insert_item_with_optional_local_gap(
-                                        insert_rng, item
+                                    inserted_rng = insert_content_with_formatting(
+                                        insert_rng, item["line"]
                                     )
                                     inserted_count += 1
                                     insertion_log_parts.append(
@@ -1726,9 +1304,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                                     )
                                     break
                                 elif item["type"] == "table":
-                                    insert_item_with_optional_local_gap(
-                                        insert_rng, item
-                                    )
+                                    insert_table_with_formatting(insert_rng, item["rows"])
                                     inserted_count += 1
                                     insertion_log_parts.append(
                                         f"    [{inserted_count}/{len(block3_items)}] 已插入表格，行数 {len(item['rows'])}。"
@@ -1768,94 +1344,89 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 )
 
                 # 步骤5：从所有可编辑内容中移除空段落和换行符
-                if use_direct_replace:
+                insertion_log_parts.append("步骤5：清理空段落与换行...")
+
+                max_passes = 5
+                total_empty_deleted = 0
+
+                for pass_num in range(1, max_passes + 1):
                     insertion_log_parts.append(
-                        "步骤5：gjgk same-page direct insert，跳过 legacy 空段/换行清理。"
+                        f"  步骤5.1 第 {pass_num} 轮：删除空段落..."
                     )
-                else:
-                    insertion_log_parts.append("步骤5：清理空段落与换行...")
 
-                    max_passes = 5
-                    total_empty_deleted = 0
+                    selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
+                    page_start_final = selection.Start
+                    selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
+                    page_end_final = (
+                        selection.Start
+                        if selection.Information(wdActiveEndPageNumber) == next_page
+                        else doc.Content.End
+                    )
+                    page_rng_final = doc.Range(page_start_final, page_end_final)
 
-                    for pass_num in range(1, max_passes + 1):
-                        insertion_log_parts.append(
-                            f"  步骤5.1 第 {pass_num} 轮：删除空段落..."
-                        )
+                    paras_final = list(page_rng_final.Paragraphs)
+                    empty_deleted = 0
 
-                        selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                        page_start_final = selection.Start
-                        selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
-                        page_end_final = (
-                            selection.Start
-                            if selection.Information(wdActiveEndPageNumber) == next_page
-                            else doc.Content.End
-                        )
-                        page_rng_final = doc.Range(page_start_final, page_end_final)
+                    for i in range(len(paras_final) - 1, -1, -1):
+                        try:
+                            para = paras_final[i]
 
-                        paras_final = list(page_rng_final.Paragraphs)
-                        empty_deleted = 0
+                            if para.Range.Information(wdWithInTable):
+                                continue
 
-                        for i in range(len(paras_final) - 1, -1, -1):
-                            try:
-                                para = paras_final[i]
+                            is_protected = is_protected_range(para.Range)
 
-                                if para.Range.Information(wdWithInTable):
-                                    continue
+                            if not is_protected:
+                                raw_text = para.Range.Text
+                                raw_text_no_mark = raw_text.rstrip("\r\n")
 
-                                is_protected = is_protected_range(para.Range)
-
-                                if not is_protected:
-                                    raw_text = para.Range.Text
-                                    raw_text_no_mark = raw_text.rstrip("\r\n")
-
-                                    raw_cleaned = (
-                                        raw_text_no_mark.replace("\r", "")
-                                        .replace("\n", "")
-                                        .replace(" ", "")
-                                        .replace("\t", "")
-                                        .replace("\u00a0", "")
-                                        .replace("\u2000", "")
-                                        .replace("\u2001", "")
-                                        .replace("\u2002", "")
-                                        .replace("\u2003", "")
-                                        .replace("\u2004", "")
-                                        .replace("\u2005", "")
-                                        .replace("\u2006", "")
-                                        .replace("\u2007", "")
-                                        .replace("\u2008", "")
-                                        .replace("\u2009", "")
-                                        .replace("\u200a", "")
-                                        .replace("\u200b", "")
-                                        .strip()
-                                    )
-
-                                    if len(raw_cleaned) == 0:
-                                        try:
-                                            para.Range.Delete()
-                                            empty_deleted += 1
-                                            insertion_log_parts.append(
-                                                f"    删除空段落，索引 {i}"
-                                            )
-                                        except Exception as e:
-                                            insertion_log_parts.append(
-                                                f"    警告: 无法删除索引 {i} 的段落: {e}"
-                                            )
-                            except Exception as e:
-                                insertion_log_parts.append(
-                                    f"    处理第 {i} 段出错: {e}"
+                                raw_cleaned = (
+                                    raw_text_no_mark.replace("\r", "")
+                                    .replace("\n", "")
+                                    .replace(" ", "")
+                                    .replace("\t", "")
+                                    .replace("\u00a0", "")
+                                    .replace("\u2000", "")
+                                    .replace("\u2001", "")
+                                    .replace("\u2002", "")
+                                    .replace("\u2003", "")
+                                    .replace("\u2004", "")
+                                    .replace("\u2005", "")
+                                    .replace("\u2006", "")
+                                    .replace("\u2007", "")
+                                    .replace("\u2008", "")
+                                    .replace("\u2009", "")
+                                    .replace("\u200a", "")
+                                    .replace("\u200b", "")
+                                    .strip()
                                 )
 
-                        total_empty_deleted += empty_deleted
-                        insertion_log_parts.append(
-                            f"  第 {pass_num} 轮完成：删除空段 {empty_deleted} 个。"
-                        )
-
-                        if empty_deleted == 0:
+                                if len(raw_cleaned) == 0:
+                                    try:
+                                        para.Range.Delete()
+                                        empty_deleted += 1
+                                        insertion_log_parts.append(
+                                            f"    删除空段落，索引 {i}"
+                                        )
+                                    except Exception as e:
+                                        insertion_log_parts.append(
+                                            f"    警告: 无法删除索引 {i} 的段落: {e}"
+                                        )
+                        except Exception as e:
                             insertion_log_parts.append(
-                                f"  未再发现空段，第 {pass_num} 轮后停止。"
+                                f"    处理第 {i} 段出错: {e}"
                             )
-                            break
+
+                    total_empty_deleted += empty_deleted
+                    insertion_log_parts.append(
+                        f"  第 {pass_num} 轮完成：删除空段 {empty_deleted} 个。"
+                    )
+
+                    if empty_deleted == 0:
+                        insertion_log_parts.append(
+                            f"  未再发现空段，第 {pass_num} 轮后停止。"
+                        )
+                        break
 
                     insertion_log_parts.append(
                         f"  步骤5.1完成：共删除空段 {total_empty_deleted} 个，用时 {pass_num} 轮。"
@@ -2096,14 +1667,9 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 except Exception:
                     pass
 
-                if use_direct_replace:
-                    insertion_log_parts.append(
-                        "步骤5完成：gjgk 已跳过 legacy 文本清理，仅执行边界内表格修剪。"
-                    )
-                else:
-                    insertion_log_parts.append(
-                        "步骤5完成：已清理可编辑内容中的空段落与多余换行。"
-                    )
+                insertion_log_parts.append(
+                    "步骤5完成：已清理可编辑内容中的空段落与多余换行。"
+                )
                 insertion_log_parts.append("内容处理成功。")
 
                 # 步骤6：根据 polished_comments 插入批注
@@ -2269,275 +1835,3 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     duration_ms = duration * 1000
     print(f"[update_word] 执行完成，耗时: {duration:.2f} 秒 ({duration_ms:.0f} 毫秒)")
     return new_state
-
-
-def _build_manual_gjgk_test_text() -> str:
-    return """一、设备名称及数量：ERCP专用X线透视摄影系统/壹套
-二、交货日期：
-1、中华人民共和国关境外交付的货物：信用证开立后30天内
-2、中华人民共和国关境内交付的货物：合同签订后30天内
-3、若因招标人原因（包括但不限于机房不具备装机条件、免税办理时效等情况），造成在前述交货期内不具备收货条件，从而导致交货延迟的，则交货期应顺延至收货条件完备后，但不得晚于招标人出具的书面交货通知后30天内。
-三、交货地点：上海市第六人民医院临港院区
-四、主要技术规格及系统概述：
-| 1 | 设备用途 |
-| --- | --- |
-| 1.1 | 基本功能：适用于胃肠造影、DR摄影、ERCP、妇产科子宫输卵管造影、呼吸科支气管镜穿刺活检、泌尿科介入检查以及全身外周介入治疗等。 |
-| 2 | 配置要求 |
-| 2.1 | X线球管及控制系统 |
-| 2.2 | 平板成像系统 |
-| 2.3 | 床及机械臂运动系统 |
-| 2.4 | 数字化图像采集系统 |
-| 2.5 | 图像处理功能 |
-| 2.6 | ERCP专用配置功能 |
-| 2.7 | 内镜专业用显视器及吊架 |
-| 2.8 | 高频手术系统 |
-| 2.9 | 超声诊断设备 |
-| 2.10 | 双频探头 |
-| 3 | 技术参数要求 |
-| 3.1 | X线球管及控制系统 |
-| 3.1.1 | 最大管电流：≥1000mA |
-| 3.1.2 | 最大管电压：≥120kV |
-| 3.1.3 | 具备全自动控制，具有管电压自动适应功能 |
-| 3.1.4 | 具备双焦点球管:微焦点≤0.4 ，较小焦点≤1.0mm |
-| ★3.1.5 | 具备栅控球管 |
-| ★3.1.6 | 阳极热容量≥1000kHU |
-| 3.1.7 | 最短曝光时间≤1ms |
-| 3.1.8 | 具备脉冲透视，最低脉冲频率≤1fps |
-| 3.1.9 | 剂量调整过滤器≥2种金属 |
-| 3.1.10 | 高压发生器功率≥80kW |
-| ★3.1.11 | 球管类型为下球管 |
-| 3.2 | 平板成像系统 |
-| ★3.2.1 | 平板尺寸≥40×40 cm |
-| 3.2.2 | 可变视野≥4种 |
-| ★3.2.3 | 平板像素尺寸≤150 µm |
-| 3.2.4 | DQE（量子检出率）≥60% |
-| 3.2.5 | 平板为CsI（非晶硅）材质结构 |
-| 3.3 | 床及机械臂运动系统 |
-| ★3.3.1 | 要求可倾斜床面遥控检查床，床面可升降，采用低吸收剂量的高强度碳纤维床板，检查床与设备一体化。 |
-| ★3.3.2 | 床面倾倒范围≥110° |
-| 3.3.3 | 床面横向移动范围≥30cm |
-| 3.3.4 | 床面和球管相对纵向移动范围≥110cm |
-| 3.3.5 | 诊断床面可升降，距地面最低高度≤60cm |
-| 3.3.6 | 可调SID（X线焦点到影像接收器距离)，可调范围≥30cm |
-| 3.3.7 | 具有密度补偿滤过片 |
-| 3.3.8 | 具备落地式C臂结构 |
-| ★3.3.8.1 | 机械臂旋转范围：RAO（右前斜位）≥90°，LAO（左前斜位）≥45° |
-| 3.3.8.2 | 机械臂旋转范围：CRA（头位）/CAU（足位）≥45°/45° |
-| 3.4 | 数字化图像采集系统 |
-| 3.4.1 | 最大数字采集分辨率≥2560×2560，16bit |
-| 3.4.2 | 数模转换≥14bit |
-| 3.4.3 | 具备1024×1024矩阵连续摄片，采集速度≥15fps |
-| 3.4.4 | 能控制设备机械运动功能，拍片、透视等功能 |
-| 3.4.5 | 具有医用单色LCD监视器 |
-| 3.4.6 | 图像传输网络：具有DICOM接口功能 |
-| 3.4.7 | 隔室图像监视器两台，≥19英寸液晶显示器（≥1248×1024） |
-| 3.5 | 图像处理功能 |
-| 3.5.1 | 动态采集图像在回放时，可进行；空间滤过功能；窗宽窗位调整功能；自动窗口功能；正反像切换功能；漫游放大图像旋转功能；电子光圈处理功能；文字标注，比例尺显示，测量功能，箭头指示功能；散射校正，对比强化功能；同一视野可多幅显示图像 ≥36幅（6×6） |
-| 3.5.2 | 采集图像电影回放：回放速度任意可调1 fps~7.5 fps |
-| 3.5.3 | 具备血管直径，病变大小测量等功能 |
-| 3.5.4 | 具备数字滤过补偿功能：实时透视时候调整图像质量，可以使图像过黑或者过白区域的图像得以重建。 |
-| 3.5.5 | 具备降噪软件功能:实时图像处理技术和低剂量技术，提供高画质的同时降低球管发射剂量。 |
-| 3.6 | ERCP专用配置功能 |
-| 3.6.1 | 具备床侧端防护帘。 |
-| 3.6.2 | 具备带平板防护屏。 |
-| 3.6.3 | 具备ERCP专用图像优化协议系统 |
-| 3.6.4 | 具有床旁透视/摄影双功能脚闸 |
-| 3.6.5 | 具备床旁智能操作手柄 |
-| 3.7 | 内镜专业用显视器及吊架 |
-| 3.7.1 | 具备手术室内镜专用监视器大小≥55寸 |
-| 3.7.2 | 分辨率≥3840×2160 ，色深10 bit |
-| 3.7.3 | 亮度≥1200 cd/m² |
-| 3.7.4 | 对比度≥500000：1 |
-| 3.7.5 | 响应时间≤5 ms |
-| 3.7.6 | 可拓展视频输入接口≥7路HDMI |
-| 3.7.7 | 支持单画面，PIP，PBP，三画面以及四画面显示 |
-| 3.7.8 | 显示器吊架承重≥30kg |
-| 3.8 | 高频手术系统 |
-| 3.8.1 | 单极切割模式：1. 切割模式≥6种<br>2．要求有内镜专用切割模式即ENDO CUT IQ,分别适用于内镜下十二指肠乳头切开和息肉切除。 |
-| 3.8.2 | 低电压设计：单极凝血最高电压≤4300V |
-| 3.8.3 | 单极电凝功率：0~120W可调 |
-| 3.8.4 | 单极电凝模式：≥3种，1．柔和电凝；2．强力电凝；3．快速电凝 |
-| 3.8.5 | 双极切割功率：0~120W功率可调 |
-| 3.8.6 | 双极凝血控制模式：≥2种，1．脚踏开关控制；2．自动启动； |
-| 3.8.7 | 双极射频消融模式：1.脚踏开关控制；2.可兼容射频消融导管，适用于恶性胆道梗阻的消融。 |
-| 3.8.8 | 具备开机自检功能 |
-| 3.8.9 | 具备最小功率输出控制系统和功率峰值补偿系统 |
-| 3.8.10 | 具备中性电极安全监测系统 |
-| 3.8.11 | 具备输出错误监测系统 |
-| 3.8.12 | 具备时间限制检测系统 |
-| 3.8.13 | 具备错误代码储存功能 |
-| 3.8.14 | 具备程序存储和程序控制功能 |
-| 3.9 | 超声诊断设备 |
-| 3.9.1 | 成像模式：B模式 |
-| ★3.9.2 | 产品形态：一体便携式 |
-| 3.9.3 | 图像旋转：在图像冻结状态下，支持360°任意方向、角度旋转 |
-| ★3.9.4 | 图像回放：可实现≥1000帧图像回放。图像回放帧数直接影响动态影像的连续性，较高的帧数可更精准捕捉病变的实时动态特征，为提升诊断准确性、降低漏诊风险并辅助术中精准定位与评估，图像回放帧数越高越好 |
-| 3.9.5 | 图像标注：在图像冻结状态下，支持在图像上进行箭头和文字标注操作，单幅图像≥26组 |
-| 3.9.6 | 长度测量：在图像冻结状态下，支持单幅图像上两点之间长度测量≥26组，通过多维度采样显著提升病变范围量化精度，降低单次测量误差导致的误判风险，为精准分期、手术规划及疗效评估提供统计学支持 |
-| ★3.9.7 | 面积和周长测量：在图像冻结状态下，支持单幅图像上周长和面积测量数据≥26组，多维度的数据帮助医生精准诊断病情、制定个性化治疗方案、评估治疗效果、赋能教学与科研等 |
-| 3.9.8 | TGC分段增益：支持≥8段TGC明暗调节功能，每段1-20档超声图像增益可调 |
-| 3.9.9 | 对比度：支持1-8档超声图像对比度可调，通过多层级灰度区分强化组织界面辨识度 |
-| 3.9.10 | 画中画：支持超声图像和内镜图像的同屏同步同尺寸实时显示 |
-| 3.9.11 | 超声图像支持灰阶图、伪彩图，增加对灰阶超声图像的视觉分辨率，有效减少黏膜早期癌变的漏诊 |
-| 3.9.12 | 4B模式：支持4幅图像同时显示，每幅图像均可独立进行切帧显示 |
-| 3.9.13 | 局部放大：支持图像局部放大，呈现更清晰的组织细节 |
-| 3.9.14 | 内置存储硬盘≥1TB，支持存储手术视频录像，方便术后复查及病例追溯 |
-| 3.9.15 | 患者检查信息管理：支持对患者检查信息库进行检索、查看、编辑、保存、 预览、报告打印 |
-| 3.9.16 | 数据接口：传输协议支持USB2.0、USB 3.0、TCP/IP、DIC0M协议；存储格式支持BMP、PNG、JPG、TIFF、Run（AVI、WMV）、DICOMDIR等格式，视频输出支持HDMI、SDI、DP、S-Video、CVBS等多种模式 |
-| 3.9.17 | 记录回放原始数据：支持记录和回放采集到的超声原始数据，可在离线模式下使用范围调节、对比度调节、TGC调节、标注、测量功能 |
-| 3.9.18 | 快速标记：可以设置并使用自定义按键，在图像上可快速进行标识，并支持标识编辑 |
-| ★3.9.19 | 支持一键切换两种探头频率，不用更换探头，完成“从表及里”的全面评估满足对消化道肿瘤精准的分期诊断 |
-| ★3.9.20 | 内置可充电锂离子电池，充满最长待机90分钟 |
-| ★3.9.21 | 兼容性：兼容消化、变频消化、小肠、胆胰、变频胆胰探头，满足多场景应用需求 |
-| ★3.9.22 | 主机使用年限应≥10年 |
-| 3.10 | 双频探头 |
-| 3.10.1 | 工作频率：12MHz+20MHz，支持两个频率一键切换 |
-| 3.10.2 | 图像几何畸变：≤10% |
-| 3.10.3 | 扫描角度：环形360° |
-| 3.10.4 | 工作长度：2100mm±10% |
-| 3.10.5 | 探头先端部外径：≤2.0mm |
-| 4 | 售后服务要求 |
-| 4.1 | 供应商负责设备到货搬运和安装就位，并提供详细的验收标准、验收手册（由此产生的费用由供应商承担）。 |
-| ★4.2 | 整机保修期≥60个月，保修期自设备安装调试使用验收合格后起算。软件终身免费升级。 |
-| 4.3 | 维修及服务响应时间：对采购人的售后服务要求应在2小时内响应，工程师于24小时内到达现场给出解决方案。 |
-| 4.4 | 在保质期内出现问题所产生的维修费用（包括零部件费用、运返费用等费用）均由供应商承担，保修期外维修免收人工费、差旅费。 |
-| 4.5 | 技术培训：供应商应免费对采购人操作、维修人员进行一定时期的正规的整套设备操作、维护保养、检测等内容的技术培训。 |
-| 4.6 | 质量保证：供应商按配置要求，提供原装全新设备，确保其产品品质、性能及技术参数要求达到采购人的要求；否则采购人有权向供应商提出更换。 |
-
-一、设备名称及数量：内镜主机/贰套
-二、交货日期：
-1、中华人民共和国关境外交付的货物：信用证开立后30天内
-2、中华人民共和国关境内交付的货物：合同签订后30天内
-3、若因招标人原因（包括但不限于机房不具备装机条件、免税办理时效等情况），造成在前述交货期内不具备收货条件，从而导致交货延迟的，则交货期应顺延至收货条件完备后，但不得晚于招标人出具的书面交货通知后30天内。
-三、交货地点：上海市第六人民医院临港院区
-四、主要技术规格及系统概述：
-| 1 | 设备用途 |
-| --- | --- |
-| 1.1 | 用于消化道检查与治疗 |
-| 2 | 配置要求 |
-| 2.1 | 内窥镜主机×2台 |
-| 2.2 | 液晶医用监视器×2台 |
-| 3 | 技术参数要求 |
-| 3.1 | 内窥镜主机 |
-| 3.1.1 | HDTV信号输出模式：16：9和16：10，并可兼容HDTV监视器。可支持模拟、HD-SDI和DVI信号输出 |
-| 3.1.2 | 具备自动白平衡调节 |
-| ★3.1.3 | 具备窄带成像功能，用于早期癌的诊断 |
-| ★3.1.4 | 具备双红光观察模式 |
-| ★3.1.5 | 具备荧光观察模式 |
-| 3.1.6 | 观察模式：对色调、构造和亮度进行联合强调 |
-| 3.1.7 | 色调调节：红色调节≥±8档，蓝色调节≥±8档，色度调节≥±8档 |
-| 3.1.8 | 具备增益自动控制 |
-| 3.1.9 | 具备画中画功能 |
-| 3.1.10 | 可兼容便携式存储器，并可简单连接及上传数据 |
-| 3.1.11 | 可以设定图像对比度 |
-| 3.1.12 | 测光模式：平均测光、峰值测光、全自动测光 |
-| 3.1.13 | 具备图像强调设定功能：电子强调内镜图像的细微形态或轮廓来提高图像锐度。<br>构造强调A：强调内镜图像的细微形态和轮廓<br>构造强调B：比构造强调A强调更精细的部分 |
-| 3.1.14 | 具备图像大小选择功能：可以改变内镜图像的大小 |
-| 3.1.15 | 具备快速实时冻结功能：可以从按下冻结键之前的图像中挑选色差最小的图像显示出来 |
-| 3.1.16 | 患者数据输入功能：可以在术前输入患者的数据≤50名 |
-| 3.1.17 | 具备内镜信息记忆功能：存储在内镜记忆芯片中的与内镜相关的数据可以调用并显示在屏幕上 |
-| 3.1.18 | 具备自定义按钮功能，给以下按钮分配指定功能：内镜遥控按钮≥5个，脚踏开关≥2个，键盘自定义按钮≥4个 |
-| 3.1.19 | 电子放大：即使不使用放大内镜，也能够进行电子放大观察 |
-| 3.1.20 | 设定存储：图像处理中心关闭后，设定仍可被存储 |
-| ★3.1.21 | LED光源：≥5色 |
-| 3.1.22 | LED光源和图像处理装置集成一体化设计 |
-| 3.2 | 液晶医用监视器 |
-| 3.2.1 | 液晶面板：高清晰度电视（HDTV）显示 |
-| 3.2.2 | 屏幕尺寸：≥31.5英寸 |
-| 3.2.3 | 视角：垂直≥170°，水平≥170° |
-| 3.2.4 | 分辨率：≥3840×2160高分辨率 |
-| 3.2.5 | 显示设备：TFT有效矩阵 |
-| 3.2.6 | 输出信号格式：≥2种，具备12G-SDI、DVI-D等 |
-| 4 | 售后服务要求 |
-| 4.1 | 供应商负责设备到货搬运和安装就位，并提供详细的验收标准、验收手册（由此产生的费用由供应商承担）。 |
-| ★4.2 | 整机保修期≥36个月，保修期自设备安装调试使用验收合格后起算。软件终身免费升级。 |
-| 4.3 | 维修及服务响应时间：对采购人的售后服务要求应在2小时内响应，工程师于24小时内到达现场给出解决方案。 |
-| 4.4 | 在保质期内出现问题所产生的维修费用（包括零部件费用、运返费用等费用）均由供应商承担，保修期外维修免收人工费、差旅费。 |
-| 4.5 | 技术培训：供应商应免费对采购人操作、维修人员进行一定时期的正规的整套设备操作、维护保养、检测等内容的技术培训。 |
-| 4.6 | 质量保证：供应商按配置要求，提供原装全新设备，确保其产品品质、性能及技术参数要求达到采购人的要求；否则采购人有权向供应商提出更换。 |"""
-
-
-def main() -> None:
-    """本地调试 gjgk update_word：复制样本 -> 删除正文区间 -> 用硬编码文本回填。"""
-
-    from backend.nodes.common_word_nodes.delete_tender_param import delete_tender_param
-
-    print("=" * 80)
-    print("开始测试 update_word 节点 (gjgk)")
-    print("=" * 80)
-
-    tender_type = "gjgk"
-    source_doc_path = (
-        BACKEND_ROOT / "test_doc" / "254DSITC2512-招标文件-发售稿-财政模板.doc"
-    )
-    before_text, after_text = get_default_anchor_texts(tender_type)
-    test_doc_path = source_doc_path.with_name(
-        f"{source_doc_path.stem}-update-word-test{source_doc_path.suffix}"
-    )
-    polished_text = _build_manual_gjgk_test_text()
-
-    if not source_doc_path.exists():
-        print(f"错误: 测试文件不存在: {source_doc_path}")
-        raise SystemExit(1)
-
-    shutil.copy2(source_doc_path, test_doc_path)
-
-    print(f"测试类型: {tender_type} (国际公开)")
-    print(f"源文件: {source_doc_path}")
-    print(f"测试副本: {test_doc_path}")
-    print(f"前置锚点: {before_text}")
-    print(f"后置锚点: {after_text}")
-    print(f"回填文本长度: {len(polished_text)}")
-    print()
-
-    test_state: TenderGraphStateBase = {
-        "tender_type": tender_type,
-        "prepared_doc_path": str(test_doc_path),
-        "insertion_before_text": before_text,
-        "insertion_after_text": after_text,
-    }
-
-    try:
-        print("步骤1/2: 先执行 delete_tender_param 清理锚点区间")
-        print("-" * 80)
-        cleared_state = delete_tender_param(test_state, config=None)
-        print("-" * 80)
-        print()
-
-        cleared_state = dict(cleared_state)
-        cleared_state["polished_text"] = polished_text
-        cleared_state["polished_comments"] = []
-
-        print("步骤2/2: 执行 update_word 回填硬编码文本")
-        print("-" * 80)
-        result_state = update_word(cleared_state, config=None)
-        print("-" * 80)
-        print()
-
-        print("✅ update_word 调试执行完成")
-        print(f"结果文件: {test_doc_path}")
-        insertion_log = result_state.get("insertion_log") or ""
-        if insertion_log:
-            print()
-            print("插入日志摘要:")
-            for part in str(insertion_log).split("; "):
-                print(f"  - {part}")
-    except Exception as exc:
-        print()
-        print("❌ update_word 调试失败")
-        print(f"错误信息: {exc}")
-        import traceback
-
-        print()
-        print("详细错误堆栈:")
-        traceback.print_exc()
-        raise SystemExit(1) from exc
-
-    print()
-    print("=" * 80)
-    print("测试完成")
-    print("=" * 80)
-
-
-if __name__ == "__main__":
-    main()
