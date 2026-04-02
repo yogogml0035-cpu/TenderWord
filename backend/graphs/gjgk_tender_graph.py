@@ -14,9 +14,9 @@ from backend.nodes.common_word_nodes import (
     get_comments,
     prepare_template,
     replace_content,
-    update_word,
 )
 from backend.nodes.gjgk_word_nodes import get_replacements
+from backend.nodes.gjgk_word_nodes.update_gjgk_word import update_gjgk_word
 from backend.states import GjgkTenderGraphState
 
 
@@ -34,7 +34,7 @@ class GjgkTenderGraph(StandardTenderWorkflowGraph):
     NODE_REPLACE_CONTENT: Callable = replace_content
     NODE_GENERATE_POLISHED_TEXT: Callable = generate_polished_text
     NODE_GENERATE_COMMENTS: Callable = generate_comments
-    NODE_UPDATE_WORD: Callable = update_word
+    NODE_UPDATE_WORD: Callable = update_gjgk_word
 
     def get_word_operation_steps(self) -> tuple[tuple[str, Callable], ...]:
         return (

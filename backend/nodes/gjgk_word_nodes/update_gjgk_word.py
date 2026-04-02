@@ -66,18 +66,20 @@ DEFAULT_TEST_SUFFIX = "-gjgk-update-test"
 DEFAULT_DELETE_TEST_SUFFIX = "-gjgk-delete-test"
 DEFAULT_DIAG_SUFFIX = "-gjgk-lock-diagnose"
 BOOTSTRAP_MARKER_PREFIX = "[[GJGK_BOOTSTRAP_"
-MANUAL_TEST_INSERT_TEXT = """
-1、设备名称及数量：
+MANUAL_TEST_INSERT_TEXT = """1、设备名称及数量：
 2、交付日期：合同签订后30天内
 3、交付地点：一、项目概述
 采购人指定地点
 4、付款方式：货到验收合格（出具合同验收单或验收报告）且采购人收到其发票后三个月内，支付全部货款（100%）。
+
 二、技术需求
 须提供详细技术需求。
+
 三、售后要求
 1、★质保期：验收合格后整机免费质保≥3年。
 2、★售后服务：提供报价设备均需提供原厂（制造商）售后，并出具相关证明文件。
 3、医疗设备必须符合 IHE 医疗信息系统集成规范，并免费提供信息系统接口，医学影像设备须提供 DICOM软硬件接口，数字化医疗设备须提供HL7软硬件接口，并由供应商承担相应信息系统联机费用。
+
 四、每套配置要求
 注：供应商按上述配置要求自行提供响应设备的配置清单。
 """
@@ -139,6 +141,7 @@ def _build_insert_items(polished_text: str) -> List[Dict[str, Any]]:
     idx = 0
     while idx < len(raw_lines):
         if not raw_lines[idx].strip():
+            items.append({"type": "text", "line": ""})
             idx += 1
             continue
 
@@ -150,6 +153,9 @@ def _build_insert_items(polished_text: str) -> List[Dict[str, Any]]:
 
         items.append({"type": "text", "line": raw_lines[idx].strip()})
         idx += 1
+
+    while items and items[-1].get("type") == "text" and items[-1].get("line") == "":
+        items.pop()
 
     return items
 
@@ -1228,6 +1234,10 @@ def update_gjgk_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
     if not items:
         raise ValueError("gjgk 插入内容为空，无法执行更新")
 
+    has_explicit_blank_lines = any(
+        item.get("type") == "text" and item.get("line") == "" for item in items
+    )
+
     log_parts = [f"共解析插入项 {len(items)} 条"]
     word = None
     doc = None
@@ -1513,12 +1523,15 @@ def update_gjgk_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
                     log_parts.append("bootstrap 标记未在插入边界内命中，已回退到全文清理")
 
         inserted_end = int(insert_range.Start)
-        _cleanup_blank_paragraphs(
-            doc,
-            range_start=insert_start,
-            range_end=inserted_end,
-            log_parts=log_parts,
-        )
+        if has_explicit_blank_lines:
+            log_parts.append("检测到输入包含显式空行，跳过空白段落清理")
+        else:
+            _cleanup_blank_paragraphs(
+                doc,
+                range_start=insert_start,
+                range_end=inserted_end,
+                log_parts=log_parts,
+            )
 
         save_document_with_retry(doc, node_name=NODE_NAME)
         log_parts.append("文档已保存")
