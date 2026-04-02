@@ -456,6 +456,51 @@ def test_find_next_editable_pos_bounded_can_return_none_when_disabled():
     assert result is None
 
 
+def test_prime_empty_insert_slot_consumes_first_insert_and_resets_cursor():
+    class _InsertRange:
+        def __init__(self):
+            self.Start = 8
+            self.End = 8
+
+        def SetRange(self, start, end):
+            self.Start = start
+            self.End = end
+
+    inserted_lines = []
+
+    def fake_insert_text_line(doc, insert_range, line, **kwargs):
+        inserted_lines.append(line)
+        insert_range.SetRange(99, 99)
+
+    def fake_set_collapsed_range(insert_range, position):
+        insert_range.SetRange(position, position)
+
+    namespace = _load_functions(
+        "_prime_empty_insert_slot",
+        extra_globals={
+            "_build_bootstrap_marker": lambda: "BOOTSTRAP-MARKER",
+            "_insert_text_line": fake_insert_text_line,
+            "_set_collapsed_range": fake_set_collapsed_range,
+        },
+    )
+
+    insert_range = _InsertRange()
+    log_parts = []
+    marker = namespace["_prime_empty_insert_slot"](
+        object(),
+        insert_range,
+        bound_start=8,
+        get_bound_end=lambda: 8,
+        log_parts=log_parts,
+    )
+
+    assert marker == "BOOTSTRAP-MARKER"
+    assert inserted_lines == ["BOOTSTRAP-MARKER"]
+    assert insert_range.Start == 8
+    assert insert_range.End == 8
+    assert any("bootstrap 标记" in part for part in log_parts)
+
+
 def test_ensure_insert_range_only_normalizes_bounds_and_locks():
     class _InsertRange:
         def __init__(self):
@@ -504,6 +549,57 @@ def test_ensure_insert_range_only_normalizes_bounds_and_locks():
 
     assert insert_range.Start == 5
     assert insert_range.End == 5
+
+
+def test_remove_marker_paragraphs_deletes_only_matching_bootstrap_marker():
+    class _Range:
+        def __init__(self, text: str):
+            self.Text = text
+            self.deleted = False
+
+        def Delete(self):
+            self.deleted = True
+
+    class _Paragraph:
+        def __init__(self, text: str):
+            self.Range = _Range(text)
+
+    class _DocRange:
+        def __init__(self, paragraphs):
+            self.Paragraphs = paragraphs
+
+    class _Doc:
+        def __init__(self, paragraphs):
+            self._paragraphs = paragraphs
+
+        def Range(self, start, end):
+            return _DocRange(self._paragraphs)
+
+    namespace = _load_functions(
+        "_normalize_visible_paragraph_text",
+        "_remove_marker_paragraphs",
+    )
+
+    paragraphs = [
+        _Paragraph("普通正文\r"),
+        _Paragraph("BOOTSTRAP-MARKER\r"),
+        _Paragraph("其他正文\r"),
+    ]
+    log_parts = []
+
+    removed = namespace["_remove_marker_paragraphs"](
+        _Doc(paragraphs),
+        marker_text="BOOTSTRAP-MARKER",
+        search_start=0,
+        search_end=100,
+        log_parts=log_parts,
+    )
+
+    assert removed == 1
+    assert paragraphs[0].Range.deleted is False
+    assert paragraphs[1].Range.deleted is True
+    assert paragraphs[2].Range.deleted is False
+    assert any("bootstrap 标记段落" in part for part in log_parts)
 
 
 def test_insert_table_allows_post_table_cursor_to_remain_at_table_end():
@@ -645,29 +741,18 @@ def test_insert_text_line_can_continue_from_table_end_cursor():
             self.Font = _Font()
             self.ParagraphFormat = _ParagraphFormat()
 
-    class _WriteRange:
-        def __init__(self, start: int, end: int, doc):
-            self.Start = start
-            self.End = end
-            self._doc = doc
-
-        def InsertAfter(self, text):
-            self._doc.write_calls.append((self.Start, text))
-            # 模拟真实 Word COM：执行插入后，当前 live range 仍可能停留在原位置。
-
     class _Doc:
         def __init__(self):
             self.write_calls = []
 
         def Range(self, start, end):
-            if start == end:
-                return _WriteRange(start, end, self)
             return _InsertedRange(start, end)
 
     class _InsertRange:
-        def __init__(self):
+        def __init__(self, doc):
             self.Start = 8
             self.End = 8
+            self._doc = doc
 
         def SetRange(self, start, end):
             self.Start = start
@@ -675,6 +760,10 @@ def test_insert_text_line_can_continue_from_table_end_cursor():
 
         def Collapse(self, _flag):
             return None
+
+        def InsertAfter(self, text):
+            self._doc.write_calls.append((self.Start, text))
+            # 模拟真实 Word COM：执行插入后，当前 live range 仍可能停留在原位置。
 
     ensured = {"calls": 0}
 
@@ -697,7 +786,7 @@ def test_insert_text_line_can_continue_from_table_end_cursor():
     )
 
     doc = _Doc()
-    insert_range = _InsertRange()
+    insert_range = _InsertRange(doc)
 
     inserted_rng = namespace["_insert_text_line"](
         doc,
@@ -713,6 +802,104 @@ def test_insert_text_line_can_continue_from_table_end_cursor():
     assert insert_range.Start > 8
     assert doc.write_calls == [(8, "续写正文\r")]
     assert ensured["calls"] == 2
+
+
+def test_insert_text_line_prefers_live_range_end_when_word_relocates_first_write():
+    class _ParagraphFormat:
+        def __init__(self):
+            self.LineSpacingRule = None
+            self.LeftIndent = None
+            self.FirstLineIndent = None
+            self.OutlineLevel = None
+
+    class _Font:
+        def __init__(self):
+            self.Name = None
+            self.Size = None
+            self.Bold = None
+
+    class _InsertedRange:
+        def __init__(self, start: int, end: int):
+            self.Start = start
+            self.End = end
+            self.Font = _Font()
+            self.ParagraphFormat = _ParagraphFormat()
+
+    class _Doc:
+        def __init__(self):
+            self.write_calls = []
+            self.actual_write_positions = [30, 37]
+
+        def Range(self, start, end):
+            return _InsertedRange(start, end)
+
+    class _InsertRange:
+        def __init__(self, doc):
+            self.Start = 8
+            self.End = 8
+            self._doc = doc
+
+        def SetRange(self, start, end):
+            self.Start = start
+            self.End = end
+
+        def Collapse(self, _flag):
+            return None
+
+        def InsertAfter(self, text):
+            actual_start = self._doc.actual_write_positions.pop(0)
+            self._doc.write_calls.append((actual_start, text))
+            self.Start = actual_start
+            self.End = actual_start + len(text)
+
+    def fake_set_collapsed_range(target_range, position):
+        target_range.SetRange(position, position)
+
+    def fake_ensure(doc, target_range, *, bound_start, get_bound_end, **kwargs):
+        bound_end = get_bound_end()
+        pos = target_range.Start
+        if pos < bound_start:
+            pos = bound_start
+        if pos > bound_end:
+            pos = bound_end
+        target_range.SetRange(pos, pos)
+
+    namespace = _load_functions(
+        "_insert_text_line",
+        extra_globals={
+            "_ensure_insert_range": fake_ensure,
+            "_set_collapsed_range": fake_set_collapsed_range,
+            "_apply_standard_insert_format": lambda inserted_rng: None,
+        },
+    )
+
+    doc = _Doc()
+    insert_range = _InsertRange(doc)
+    insert_cursor_bound_end = [8]
+
+    def get_bound_end():
+        return max(8, insert_cursor_bound_end[0])
+
+    namespace["_insert_text_line"](
+        doc,
+        insert_range,
+        "一、项目概述",
+        bound_start=8,
+        get_bound_end=get_bound_end,
+    )
+    insert_cursor_bound_end[0] = max(insert_cursor_bound_end[0], insert_range.Start)
+
+    namespace["_insert_text_line"](
+        doc,
+        insert_range,
+        "1、设备名称及数量：",
+        bound_start=8,
+        get_bound_end=get_bound_end,
+    )
+
+    assert doc.write_calls == [(30, "一、项目概述\r"), (37, "1、设备名称及数量：\r")]
+    assert insert_range.Start == 48
+    assert insert_range.End == 48
 
 
 def test_insert_text_line_sequence_advances_cursor_when_bound_updates_after_each_write():
@@ -736,28 +923,18 @@ def test_insert_text_line_sequence_advances_cursor_when_bound_updates_after_each
             self.Font = _Font()
             self.ParagraphFormat = _ParagraphFormat()
 
-    class _WriteRange:
-        def __init__(self, start: int, end: int, doc):
-            self.Start = start
-            self.End = end
-            self._doc = doc
-
-        def InsertAfter(self, text):
-            self._doc.write_calls.append((self.Start, text))
-
     class _Doc:
         def __init__(self):
             self.write_calls = []
 
         def Range(self, start, end):
-            if start == end:
-                return _WriteRange(start, end, self)
             return _InsertedRange(start, end)
 
     class _InsertRange:
-        def __init__(self, pos: int):
+        def __init__(self, pos: int, doc):
             self.Start = pos
             self.End = pos
+            self._doc = doc
 
         def SetRange(self, start, end):
             self.Start = start
@@ -765,6 +942,9 @@ def test_insert_text_line_sequence_advances_cursor_when_bound_updates_after_each
 
         def Collapse(self, _flag):
             return None
+
+        def InsertAfter(self, text):
+            self._doc.write_calls.append((self.Start, text))
 
     def fake_set_collapsed_range(target_range, position):
         target_range.SetRange(position, position)
@@ -789,7 +969,7 @@ def test_insert_text_line_sequence_advances_cursor_when_bound_updates_after_each
 
     doc = _Doc()
     insert_start = 8
-    insert_range = _InsertRange(insert_start)
+    insert_range = _InsertRange(insert_start, doc)
     insert_cursor_bound_end = [insert_start]
     anchor_bound_end = 8
 

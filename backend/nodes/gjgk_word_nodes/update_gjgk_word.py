@@ -65,11 +65,12 @@ DEFAULT_TEST_UPDATE_SOURCE_DOC = (
 DEFAULT_TEST_SUFFIX = "-gjgk-update-test"
 DEFAULT_DELETE_TEST_SUFFIX = "-gjgk-delete-test"
 DEFAULT_DIAG_SUFFIX = "-gjgk-lock-diagnose"
+BOOTSTRAP_MARKER_PREFIX = "[[GJGK_BOOTSTRAP_"
 MANUAL_TEST_INSERT_TEXT = """
-一、项目概述
 1、设备名称及数量：
 2、交付日期：合同签订后30天内
-3、交付地点：采购人指定地点
+3、交付地点：一、项目概述
+采购人指定地点
 4、付款方式：货到验收合格（出具合同验收单或验收报告）且采购人收到其发票后三个月内，支付全部货款（100%）。
 二、技术需求
 须提供详细技术需求。
@@ -199,6 +200,10 @@ def _resolve_gjgk_content_range(doc, word_app, before_hit, after_hit) -> Dict[st
 def _set_collapsed_range(insert_range, position: int) -> None:
     insert_range.SetRange(int(position), int(position))
     insert_range.Collapse(wdCollapseStart)
+
+
+def _build_bootstrap_marker() -> str:
+    return f"{BOOTSTRAP_MARKER_PREFIX}{time.time_ns()}]]"
 
 
 def _range_overlaps(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
@@ -672,6 +677,44 @@ def _trim_leading_layout_controls(
     return cursor
 
 
+def _normalize_visible_paragraph_text(text: str) -> str:
+    normalized = str(text or "")
+    for control_char in ("\r", "\n", "\a", "\v", "\f"):
+        normalized = normalized.replace(control_char, "")
+    return normalized.strip()
+
+
+def _prime_empty_insert_slot(
+    doc,
+    insert_range,
+    *,
+    bound_start: int,
+    get_bound_end: Callable[[], int],
+    log_parts: Optional[List[str]] = None,
+) -> str:
+    marker_text = _build_bootstrap_marker()
+    if log_parts is not None:
+        log_parts.append(
+            "空区间首写引导：先写入一次性 bootstrap 标记，消耗 Word 的首条宿主漂移"
+        )
+
+    _insert_text_line(
+        doc,
+        insert_range,
+        marker_text,
+        bound_start=bound_start,
+        get_bound_end=get_bound_end,
+        log_parts=log_parts,
+    )
+    _set_collapsed_range(insert_range, bound_start)
+
+    if log_parts is not None:
+        log_parts.append(
+            f"空区间首写引导：bootstrap 标记已写入，游标重置回 {bound_start}"
+        )
+    return marker_text
+
+
 def _insert_text_line(
     doc,
     insert_range,
@@ -702,10 +745,21 @@ def _insert_text_line(
         log_parts.append(_describe_range_state(doc, insert_range, label="文本插入前"))
     start_pos = int(insert_range.Start)
     inserted_text = line + "\r"
-    write_range = doc.Range(start_pos, start_pos)
+    effective_start = start_pos
+    live_end = start_pos
 
     try:
-        write_range.InsertAfter(inserted_text)
+        insert_range.InsertAfter(inserted_text)
+        try:
+            live_start = int(getattr(insert_range, "Start", start_pos))
+        except Exception:
+            live_start = start_pos
+        try:
+            live_end = int(getattr(insert_range, "End", start_pos))
+        except Exception:
+            live_end = start_pos
+        if live_end > start_pos and live_start > start_pos:
+            effective_start = live_start
     except Exception as exc:
         if not _is_locked_exception(exc):
             raise
@@ -724,8 +778,19 @@ def _insert_text_line(
                         start_pos = int(insert_range.Start)
                 probe = doc.Range(start_pos, start_pos)
                 probe.InsertAfter(fallback_char)
-                write_range = doc.Range(start_pos + 1, start_pos + 1)
-                write_range.InsertAfter(inserted_text)
+                effective_start = start_pos + 1
+                _set_collapsed_range(insert_range, effective_start)
+                insert_range.InsertAfter(inserted_text)
+                try:
+                    live_start = int(getattr(insert_range, "Start", effective_start))
+                except Exception:
+                    live_start = effective_start
+                try:
+                    live_end = int(getattr(insert_range, "End", effective_start))
+                except Exception:
+                    live_end = effective_start
+                if live_end > effective_start and live_start > effective_start:
+                    effective_start = live_start
                 fallback_inserted = True
                 if log_parts is not None:
                     log_parts.append(
@@ -738,12 +803,8 @@ def _insert_text_line(
         if not fallback_inserted:
             raise
 
-    try:
-        write_end = int(getattr(write_range, "End", start_pos))
-    except Exception:
-        write_end = start_pos
-    end_pos = max(write_end, start_pos + len(inserted_text))
-    inserted_rng = doc.Range(start_pos, max(start_pos, end_pos - 1))
+    end_pos = max(int(live_end), int(effective_start) + len(inserted_text))
+    inserted_rng = doc.Range(effective_start, max(effective_start, end_pos - 1))
     _apply_standard_insert_format(inserted_rng)
     _set_collapsed_range(insert_range, end_pos)
     _ensure_insert_range(
@@ -752,6 +813,14 @@ def _insert_text_line(
         bound_start=bound_start,
         get_bound_end=lambda: max(int(get_bound_end()), int(end_pos)),
     )
+    if log_parts is not None and effective_start != start_pos:
+        log_parts.append(
+            f"文本插入 live range 实际起点已从 {start_pos} 重定位到 {effective_start}"
+        )
+    if log_parts is not None and live_end <= effective_start:
+        log_parts.append(
+            f"文本插入未返回 live range 末尾，按长度兜底推进游标到 {end_pos}"
+        )
     return inserted_rng
 
 
@@ -859,6 +928,40 @@ def _insert_table(
     return table
 
 
+def _remove_marker_paragraphs(
+    doc,
+    *,
+    marker_text: str,
+    search_start: int,
+    search_end: int,
+    log_parts: Optional[List[str]] = None,
+) -> int:
+    if not marker_text:
+        return 0
+    if int(search_end) <= int(search_start):
+        return 0
+
+    try:
+        paragraphs = list(doc.Range(int(search_start), int(search_end)).Paragraphs)
+    except Exception:
+        return 0
+
+    removed = 0
+    for para in reversed(paragraphs):
+        try:
+            para_text = _normalize_visible_paragraph_text(getattr(para.Range, "Text", ""))
+            if para_text != marker_text:
+                continue
+            para.Range.Delete()
+            removed += 1
+        except Exception:
+            continue
+
+    if removed > 0 and log_parts is not None:
+        log_parts.append(f"已清理 bootstrap 标记段落 {removed} 个")
+    return removed
+
+
 def _cleanup_blank_paragraphs(
     doc,
     *,
@@ -879,13 +982,7 @@ def _cleanup_blank_paragraphs(
         try:
             if _is_within_table(para.Range):
                 continue
-            para_text = (
-                str(getattr(para.Range, "Text", "") or "")
-                .replace("\r", "")
-                .replace("\n", "")
-                .replace("\a", "")
-                .strip()
-            )
+            para_text = _normalize_visible_paragraph_text(getattr(para.Range, "Text", ""))
             if para_text:
                 continue
             para.Range.Delete()
@@ -1230,6 +1327,16 @@ def update_gjgk_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
         insert_range = doc.Range(insert_start, insert_start)
         _set_collapsed_range(insert_range, insert_start)
         insert_cursor_bound_end[0] = int(insert_start)
+        bootstrap_marker = None
+        if range_start == range_end and items:
+            bootstrap_marker = _prime_empty_insert_slot(
+                doc,
+                insert_range,
+                bound_start=insert_start,
+                get_bound_end=get_insertion_bound_end,
+                log_parts=log_parts,
+            )
+            insert_cursor_bound_end[0] = int(insert_start)
 
         inserted_count = 0
         for item_idx, item in enumerate(items, start=1):
@@ -1379,6 +1486,31 @@ def update_gjgk_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
                         )
                         continue
                     raise
+
+        inserted_end = int(insert_range.Start)
+        if bootstrap_marker:
+            bootstrap_search_end = max(
+                int(inserted_end),
+                int(get_insertion_bound_end()),
+                int(after_hit["start"]),
+            )
+            removed_bootstrap = _remove_marker_paragraphs(
+                doc,
+                marker_text=bootstrap_marker,
+                search_start=insert_start,
+                search_end=bootstrap_search_end,
+                log_parts=log_parts,
+            )
+            if removed_bootstrap == 0:
+                removed_bootstrap = _remove_marker_paragraphs(
+                    doc,
+                    marker_text=bootstrap_marker,
+                    search_start=0,
+                    search_end=int(doc.Content.End),
+                    log_parts=log_parts,
+                )
+                if removed_bootstrap > 0:
+                    log_parts.append("bootstrap 标记未在插入边界内命中，已回退到全文清理")
 
         inserted_end = int(insert_range.Start)
         _cleanup_blank_paragraphs(
