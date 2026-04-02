@@ -17,7 +17,6 @@ from backend.util.common_util import stream_llm_completion
 
 
 logger = logging.getLogger(__name__)
-execution_logger = logging.getLogger("TenderWord")
 
 
 @dataclass(frozen=True)
@@ -85,14 +84,6 @@ class TemplateCandidateRankingService:
             eligible_group_count=len(eligible_groups),
             success_count=success_count,
             failed_count=failed_count,
-        )
-        self._log_ranking_summary(
-            project_name=project_name_text,
-            total_candidates=len(normalized_candidates),
-            eligible_group_count=len(eligible_groups),
-            success_count=success_count,
-            failed_count=failed_count,
-            ranking=ranking,
         )
         return TemplateCandidateRankingResult(
             candidates=final_candidates,
@@ -201,29 +192,6 @@ class TemplateCandidateRankingService:
             reason="ai_failed",
             message="已按优先级排序。",
         )
-
-    def _log_ranking_summary(
-        self,
-        *,
-        project_name: str,
-        total_candidates: int,
-        eligible_group_count: int,
-        success_count: int,
-        failed_count: int,
-        ranking: TemplateCandidateRanking,
-    ) -> None:
-        execution_logger.info(
-            "template_candidate_ranking mode=%s applied=%s reason=%s total_candidates=%s eligible_groups=%s success_groups=%s failed_groups=%s project_name_present=%s",
-            ranking.mode,
-            ranking.applied,
-            ranking.reason,
-            total_candidates,
-            eligible_group_count,
-            success_count,
-            failed_count,
-            bool(project_name),
-        )
-
 
 _template_candidate_ranking_service: Optional[TemplateCandidateRankingService] = None
 

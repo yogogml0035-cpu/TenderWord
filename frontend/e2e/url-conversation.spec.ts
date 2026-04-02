@@ -20,16 +20,16 @@ test.describe('URL-driven Conversation Flow', () => {
     await expect(page.getByText('国内公开')).toBeVisible();
   });
 
-  test('URL params with tenderno triggers processing', async ({ page }) => {
-    await page.goto('/tender?tenderno=TEST001&purchase_method=2&tender_lx=0&fund_lx=0');
+  test('URL params with xjcg fund_lx=1 still triggers processing', async ({ page }) => {
+    await page.goto('/tender?tenderno=TEST001&purchase_method=5&tender_lx=0&fund_lx=1');
 
     await expect(page.locator('.animate-spin')).not.toBeVisible({ timeout: 15000 });
     await expect(page).toHaveURL(/\/tender/);
     await expect(page.getByText('类型', { exact: true })).toBeVisible();
   });
 
-  test('URL params with gngk type loads page', async ({ page }) => {
-    await page.goto('/tender?tenderno=GNGK001&purchase_method=2&tender_lx=0&fund_lx=0');
+  test('URL params with gngk fund_lx=1 loads page', async ({ page }) => {
+    await page.goto('/tender?tenderno=GNGK001&purchase_method=2&tender_lx=0&fund_lx=1');
 
     await expect(page.locator('.animate-spin')).not.toBeVisible({ timeout: 15000 });
     await expect(page.getByText('国内公开')).toBeVisible();

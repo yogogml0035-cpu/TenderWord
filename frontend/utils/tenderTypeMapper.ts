@@ -2,23 +2,26 @@ import { TenderType } from '@/types';
 
 /**
  * 招标类型映射规则
- * key格式: tender_lx-fund_lx-purchase_method
+ * key格式: tender_lx-purchase_method
+ * fund_lx 仅透传，不参与前端判型
  * value: 对应的TenderType
  */
 export const TYPE_MAPPING: Record<string, TenderType> = {
-  '0-0-2': 'gngk',  // 国内公开 (tender_lx=0, fund_lx=0, purchase_method=2)
-  '0-0-5': 'xjcg',  // 询价采购 (tender_lx=0, fund_lx=0, purchase_method=5)
-  '0-0-0': 'gjgk',  // 国际公开手工/兼容 URL 别名
-  '0-1-0': 'gjgk',  // 国际公开 canonical
-  '0-2-0': 'gjgk',  // 国际公开兼容路由
+  '0-2': 'gngk',     // 国内公开 (tender_lx=0, purchase_method=2)
+  '0-5': 'xjcg',     // 询价采购 (tender_lx=0, purchase_method=5)
+  '0-0-2': 'gngk',   // 兼容包含 fund_lx 的旧参数
+  '0-0-5': 'xjcg',   // 兼容包含 fund_lx 的旧参数
+  '0-0-0': 'gjgk',   // 国际公开兼容路由
+  '0-1-0': 'gjgk',   // 国际公开 canonical
+  '0-2-0': 'gjgk',   // 国际公开兼容路由
 };
 
-const CANONICAL_TYPE_PARAMS: Record<
+const DEFAULT_URL_PARAMS_BY_TYPE: Record<
   TenderType,
   { tender_lx: number; purchase_method: number; fund_lx: number }
 > = {
-  xjcg: { tender_lx: 0, purchase_method: 5, fund_lx: 0 },
   gngk: { tender_lx: 0, purchase_method: 2, fund_lx: 0 },
+  xjcg: { tender_lx: 0, purchase_method: 5, fund_lx: 0 },
   gjgk: { tender_lx: 0, purchase_method: 0, fund_lx: 1 },
 };
 
@@ -28,7 +31,7 @@ const CANONICAL_TYPE_PARAMS: Record<
 export interface TenderUrlParams {
   tender_lx: number;
   purchase_method: number;
-  fund_lx: number;
+  fund_lx?: number;
   tenderno?: string;
 }
 
@@ -64,27 +67,21 @@ export function getTenderTypeFromParams(
 
   // 提取参数值
   let tender_lx: number | undefined;
-  let fund_lx: number | undefined;
   let purchase_method: number | undefined;
 
   if (params instanceof URLSearchParams) {
     // 从URLSearchParams中提取
     tender_lx = parseInt(params.get('tender_lx') || '', 10);
-    fund_lx = parseInt(params.get('fund_lx') || '', 10);
     purchase_method = parseInt(params.get('purchase_method') || '', 10);
   } else {
     // 从对象中提取
     tender_lx = params.tender_lx;
-    fund_lx = params.fund_lx;
     purchase_method = params.purchase_method;
   }
 
   // 验证必填参数
   if (tender_lx === undefined || isNaN(tender_lx)) {
     errors.push('Missing or invalid tender_lx parameter');
-  }
-  if (fund_lx === undefined || isNaN(fund_lx)) {
-    errors.push('Missing or invalid fund_lx parameter');
   }
   if (purchase_method === undefined || isNaN(purchase_method)) {
     errors.push('Missing or invalid purchase_method parameter');
@@ -98,15 +95,18 @@ export function getTenderTypeFromParams(
     };
   }
 
-  // 生成映射键
-  const mappingKey = `${tender_lx}-${fund_lx}-${purchase_method}`;
-  const tenderType = TYPE_MAPPING[mappingKey];
+  // 生成映射键（优先新格式，再兼容旧格式）
+  const mappingKey = `${tender_lx}-${purchase_method}`;
+  const legacyMappingKey = `${tender_lx}-${params instanceof URLSearchParams ? (parseInt(params.get('fund_lx') || '', 10) || 0) : (params.fund_lx ?? 0)}-${purchase_method}`;
+  const tenderType = TYPE_MAPPING[mappingKey] ?? TYPE_MAPPING[legacyMappingKey];
 
   if (!tenderType) {
     return {
       tenderType: undefined,
       isValid: false,
-      errors: [`Unsupported tender type combination: ${mappingKey}`],
+      errors: [
+        `Unsupported tender type combination: ${mappingKey}`,
+      ],
     };
   }
 
@@ -168,14 +168,19 @@ export function parseTenderUrlParams(
   const errors: string[] = [];
 
   // 安全解析参数
-  const parseParam = (key: string): number | undefined => {
+  const parseParam = (
+    key: string,
+    options?: { allowInvalid?: boolean }
+  ): number | undefined => {
     const value = searchParams.get(key);
     if (value === null || value === '') {
       return undefined;
     }
     const num = parseInt(value, 10);
     if (isNaN(num)) {
-      errors.push(`Invalid ${key}: "${value}" is not a valid number`);
+      if (!options?.allowInvalid) {
+        errors.push(`Invalid ${key}: "${value}" is not a valid number`);
+      }
       return undefined;
     }
     return num;
@@ -183,7 +188,7 @@ export function parseTenderUrlParams(
 
   const tender_lx = parseParam('tender_lx');
   const purchase_method = parseParam('purchase_method');
-  const fund_lx = parseParam('fund_lx');
+  const fund_lx = parseParam('fund_lx', { allowInvalid: true });
   const tenderno = searchParams.get('tenderno') || undefined;
 
   // 构建参数对象
@@ -200,7 +205,7 @@ export function parseTenderUrlParams(
     errors: [],
   };
 
-  if (tender_lx !== undefined && purchase_method !== undefined && fund_lx !== undefined) {
+  if (tender_lx !== undefined && purchase_method !== undefined) {
     tenderTypeResult = getTenderTypeFromParams({
       tender_lx,
       purchase_method,
@@ -210,7 +215,6 @@ export function parseTenderUrlParams(
     const missingParams = [];
     if (tender_lx === undefined) missingParams.push('tender_lx');
     if (purchase_method === undefined) missingParams.push('purchase_method');
-    if (fund_lx === undefined) missingParams.push('fund_lx');
     if (missingParams.length > 0) {
       errors.push(`Missing required parameters: ${missingParams.join(', ')}`);
     }
@@ -249,5 +253,5 @@ export function isValidTenderType(value: unknown): value is TenderType {
 export function getUrlParamsForTenderType(
   tenderType: TenderType
 ): { tender_lx: number; purchase_method: number; fund_lx: number } | null {
-  return CANONICAL_TYPE_PARAMS[tenderType] || null;
+  return DEFAULT_URL_PARAMS_BY_TYPE[tenderType] ?? null;
 }
