@@ -51,6 +51,21 @@ def test_render_generate_prompt_includes_required_sections():
     assert "参考内容模具" in rendered.user_prompt
 
 
+@pytest.mark.parametrize("tender_type", ["gngk_zc", "gngk_cz"])
+def test_render_generate_prompt_accepts_split_gngk_runtime_types(tender_type: str):
+    rendered = render_generate_prompt(
+        GeneratePromptInput(
+            tender_type=tender_type,
+            project_info="项目基础信息",
+            tender_params="技术参数原材料",
+            origin_tender_params="参考内容模具",
+        )
+    )
+
+    assert "项目基础信息" in rendered.user_prompt
+    assert "技术参数原材料" in rendered.user_prompt
+
+
 def test_render_comment_prompt_serializes_structured_inputs():
     rendered = render_comment_prompt(
         CommentPromptInput(
@@ -67,6 +82,22 @@ def test_render_comment_prompt_serializes_structured_inputs():
     assert "建议补充" in rendered.user_prompt
     assert "删除线" in rendered.user_prompt
     assert "蓝色字体" in rendered.user_prompt
+
+
+@pytest.mark.parametrize("tender_type", ["gngk_zc", "gngk_cz"])
+def test_render_comment_prompt_accepts_split_gngk_runtime_types(tender_type: str):
+    rendered = render_comment_prompt(
+        CommentPromptInput(
+            tender_type=tender_type,
+            polished_text="修改后正文",
+            comment_plan_detail=[{"content": "建议补充", "scope_text": "第二章"}],
+            strikethrough_plan=[],
+            non_black_font_plan=[],
+        )
+    )
+
+    assert "修改后正文" in rendered.user_prompt
+    assert "建议补充" in rendered.user_prompt
 
 
 def test_render_task_skill_prompt_wraps_instruction_and_context_sections():

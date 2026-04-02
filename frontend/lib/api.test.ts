@@ -222,7 +222,7 @@ describe('API Client', () => {
         type: {
           tender_lx: 0,
           purchase_method: 0,
-          fund_lx: 2,
+          fund_lx: 1,
         },
         message: 'OK',
         timestamp: new Date().toISOString(),
@@ -233,8 +233,26 @@ describe('API Client', () => {
       expect(result.type).toEqual({
         tender_lx: 0,
         purchase_method: 0,
-        fund_lx: 2,
+        fund_lx: 1,
       });
+    });
+
+    it('drops invalid tender type info when fund_lx is outside 0|1', async () => {
+      globalThis.fetch = mockFetchJson({
+        success: true,
+        data: { project_name: 'Test Project' },
+        type: {
+          tender_lx: 0,
+          purchase_method: 0,
+          fund_lx: 2,
+        },
+        message: 'OK',
+        timestamp: new Date().toISOString(),
+      });
+
+      const result = await fetchTenderDataWithType('ZBGG-2024-001');
+      expect(result.data.project_name).toBe('Test Project');
+      expect(result.type).toBeNull();
     });
 
     it('should return tender data on success', async () => {

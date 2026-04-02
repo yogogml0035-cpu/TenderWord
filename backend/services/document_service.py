@@ -73,6 +73,8 @@ REWRITE_STATE_KEYS = [
 REWRITE_DEFAULT_ANCHORS = {
     "xjcg": ("第三章  采购需求", "第四章  响应文件有关格式"),
     "gngk": ("第三章 招标内容及要求", "第四章 投标文件有关格式"),
+    "gngk_zc": ("第三章 招标内容及要求", "第四章 投标文件有关格式"),
+    "gngk_cz": ("第四章  招标需求", "第五章  评标方法与程序"),
     "gjgk": ("技术规格及要求", "附件1：投标文件封面（格式）"),
 }
 
@@ -175,10 +177,17 @@ def _init_graph_registry():
         return
 
     try:
-        from backend.graphs import GjgkTenderGraph, GngkTenderGraph, SkillGraph, XjcgTenderGraph
+        from backend.graphs import (
+            GjgkTenderGraph,
+            GngkCzTenderGraph,
+            GngkZcTenderGraph,
+            SkillGraph,
+            XjcgTenderGraph,
+        )
 
         GRAPH_REGISTRY["xjcg_tender"] = XjcgTenderGraph
-        GRAPH_REGISTRY["gngk_tender"] = GngkTenderGraph
+        GRAPH_REGISTRY["gngk_zc_tender"] = GngkZcTenderGraph
+        GRAPH_REGISTRY["gngk_cz_tender"] = GngkCzTenderGraph
         GRAPH_REGISTRY["gjgk_tender"] = GjgkTenderGraph
         TASK_SKILL_GRAPH_CLASSES[REWRITE_SKILL_ID] = SkillGraph.for_skill(REWRITE_SKILL_ID)
         REWRITE_SKILL_GRAPH_CLASS = TASK_SKILL_GRAPH_CLASSES[REWRITE_SKILL_ID]

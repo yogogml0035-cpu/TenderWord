@@ -1,24 +1,20 @@
-import { TenderType } from '@/types';
+import { FundLx, TenderType } from '@/types';
 
 /**
  * 招标类型映射规则
  * key格式: tender_lx-purchase_method
- * fund_lx 仅透传，不参与前端判型
+ * fund_lx 仅允许 0|1，并且不参与前端判型
  * value: 对应的TenderType
  */
 export const TYPE_MAPPING: Record<string, TenderType> = {
   '0-2': 'gngk',     // 国内公开 (tender_lx=0, purchase_method=2)
   '0-5': 'xjcg',     // 询价采购 (tender_lx=0, purchase_method=5)
-  '0-0-2': 'gngk',   // 兼容包含 fund_lx 的旧参数
-  '0-0-5': 'xjcg',   // 兼容包含 fund_lx 的旧参数
-  '0-0-0': 'gjgk',   // 国际公开兼容路由
-  '0-1-0': 'gjgk',   // 国际公开 canonical
-  '0-2-0': 'gjgk',   // 国际公开兼容路由
+  '0-0': 'gjgk',     // 国际公开
 };
 
 const DEFAULT_URL_PARAMS_BY_TYPE: Record<
   TenderType,
-  { tender_lx: number; purchase_method: number; fund_lx: number }
+  { tender_lx: number; purchase_method: number; fund_lx: FundLx }
 > = {
   gngk: { tender_lx: 0, purchase_method: 2, fund_lx: 0 },
   xjcg: { tender_lx: 0, purchase_method: 5, fund_lx: 0 },
@@ -31,7 +27,7 @@ const DEFAULT_URL_PARAMS_BY_TYPE: Record<
 export interface TenderUrlParams {
   tender_lx: number;
   purchase_method: number;
-  fund_lx?: number;
+  fund_lx?: 0 | 1;
   tenderno?: string;
 }
 
@@ -95,10 +91,9 @@ export function getTenderTypeFromParams(
     };
   }
 
-  // 生成映射键（优先新格式，再兼容旧格式）
+  // 判型仅依赖 tender_lx + purchase_method
   const mappingKey = `${tender_lx}-${purchase_method}`;
-  const legacyMappingKey = `${tender_lx}-${params instanceof URLSearchParams ? (parseInt(params.get('fund_lx') || '', 10) || 0) : (params.fund_lx ?? 0)}-${purchase_method}`;
-  const tenderType = TYPE_MAPPING[mappingKey] ?? TYPE_MAPPING[legacyMappingKey];
+  const tenderType = TYPE_MAPPING[mappingKey];
 
   if (!tenderType) {
     return {
@@ -188,7 +183,8 @@ export function parseTenderUrlParams(
 
   const tender_lx = parseParam('tender_lx');
   const purchase_method = parseParam('purchase_method');
-  const fund_lx = parseParam('fund_lx', { allowInvalid: true });
+  const rawFundLx = parseParam('fund_lx', { allowInvalid: true });
+  const fund_lx = rawFundLx === 0 || rawFundLx === 1 ? rawFundLx : undefined;
   const tenderno = searchParams.get('tenderno') || undefined;
 
   // 构建参数对象
@@ -252,6 +248,6 @@ export function isValidTenderType(value: unknown): value is TenderType {
  */
 export function getUrlParamsForTenderType(
   tenderType: TenderType
-): { tender_lx: number; purchase_method: number; fund_lx: number } | null {
+): { tender_lx: number; purchase_method: number; fund_lx: FundLx } | null {
   return DEFAULT_URL_PARAMS_BY_TYPE[tenderType] ?? null;
 }

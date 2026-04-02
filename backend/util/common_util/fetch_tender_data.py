@@ -22,6 +22,27 @@ def _normalize_fund_source_lx(value) -> int | None:
     return normalized if normalized in (0, 1) else None
 
 
+def _normalize_tender_type_payload(payload) -> Dict | None:
+    if not isinstance(payload, dict):
+        return None
+
+    fund_lx = _normalize_fund_source_lx(payload.get("fund_lx"))
+    if fund_lx is None:
+        return None
+
+    try:
+        tender_lx = int(payload.get("tender_lx", 0))
+        purchase_method = int(payload.get("purchase_method", 5))
+    except (TypeError, ValueError):
+        return None
+
+    return {
+        "tender_lx": tender_lx,
+        "purchase_method": purchase_method,
+        "fund_lx": fund_lx,
+    }
+
+
 def fetch_tender_data(tender_no: str) -> Dict:
     """
     从接口获取招标数据
@@ -31,7 +52,7 @@ def fetch_tender_data(tender_no: str) -> Dict:
     其中：
     - type 用于表单路由（例如 tender_lx=0, purchase_method=2, fund_lx=0 表示国内公开；
       tender_lx=0, purchase_method=5, fund_lx=0 表示询价采购；
-      tender_lx=0, purchase_method=0, fund_lx in {1, 2} 表示国际公开）
+      tender_lx=0, purchase_method=0, fund_lx=0|1 表示国际公开）
     - data.fund_lx 会透传为业务字段 fund_source_lx
 
     Args:
@@ -40,8 +61,8 @@ def fetch_tender_data(tender_no: str) -> Dict:
     Returns:
         包含 "data" 与 "type" 的字典：
         - data: 招标业务数据（project_name、project_number 等）
-        - type: 招标类型，用于匹配表单，格式 {"tender_lx": int, "purchase_method": int, "fund_lx": int}，
-          若接口未返回则为 None
+        - type: 招标类型，用于匹配表单，格式 {"tender_lx": int, "purchase_method": int, "fund_lx": 0|1}，
+          若接口未返回或资金类型非法则为 None
 
     Raises:
         requests.RequestException: 当接口请求失败时
@@ -86,7 +107,7 @@ def fetch_tender_data(tender_no: str) -> Dict:
         }
 
         # 接口返回的 type 用于表单路由（不通过 URL 传 tender_lx/purchase_method/fund_lx）
-        tender_type = result.get("type")
+        tender_type = _normalize_tender_type_payload(result.get("type"))
 
         return {"data": tender_data, "type": tender_type}
 

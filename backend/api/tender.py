@@ -108,11 +108,13 @@ async def get_tender_data(
         # 构建 TenderType 模型（可能为 None）
         tender_type = None
         if tender_type_dict:
-            tender_type = TenderType(
-                tender_lx=tender_type_dict.get("tender_lx", 0),
-                purchase_method=tender_type_dict.get("purchase_method", 5),
-                fund_lx=tender_type_dict.get("fund_lx", 0),
-            )
+            normalized_fund_lx = tender_type_dict.get("fund_lx")
+            if normalized_fund_lx in (0, 1):
+                tender_type = TenderType(
+                    tender_lx=tender_type_dict.get("tender_lx", 0),
+                    purchase_method=tender_type_dict.get("purchase_method", 5),
+                    fund_lx=normalized_fund_lx,
+                )
 
         logger.info(f"招标数据获取成功: tender_no={tender_no}")
 

@@ -9,6 +9,7 @@ import type { TenderInsertionConfig } from './tenderFormConfig';
 
 export interface XjcgTenderFormData {
   tender_no: string;
+  fund_lx: BaseTenderFormData['fund_lx'];
   tender_data: BaseTenderFormData['tender_data'];
   model: BaseTenderFormData['model'];
   files: BaseTenderFormData['files'];

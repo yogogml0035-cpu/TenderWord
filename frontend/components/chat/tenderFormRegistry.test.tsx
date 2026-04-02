@@ -13,6 +13,7 @@ describe('tenderFormRegistry', () => {
   it('converts gjgk form data to gjgk_tender request', () => {
     const request = tenderFormConverterMap.gjgk({
       tender_no: 'GJ-001',
+      fund_lx: 1,
       tender_data: {
         project_name: '国际项目',
         project_number: 'GJ-001',

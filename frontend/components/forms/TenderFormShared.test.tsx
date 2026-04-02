@@ -195,6 +195,33 @@ function renderSharedForm(options?: {
   );
 }
 
+function mergeDraftState(
+  previous: ConversationFormDraft,
+  updates: Partial<ConversationFormDraft>
+): ConversationFormDraft {
+  const nextDraft: ConversationFormDraft = {
+    ...previous,
+    ...updates,
+  };
+
+  if (updates.insertion_config) {
+    nextDraft.insertion_config = {
+      ...(previous.insertion_config || {}),
+      ...updates.insertion_config,
+    };
+  }
+
+  if (updates.files) {
+    nextDraft.files = {
+      ...(previous.files || { tender_params: [] }),
+      ...updates.files,
+      tender_params: updates.files.tender_params || previous.files?.tender_params || [],
+    };
+  }
+
+  return nextDraft;
+}
+
 function setUrlParams(options?: {
   tenderType?: 'xjcg' | 'gngk' | 'gjgk';
   hasParams?: boolean;
@@ -364,30 +391,18 @@ describe('TenderFormShared', () => {
     }
   );
 
-  it.each([
-    [null, 'missing type info'],
-    [2, 'unsupported fund_lx'],
-  ] as const)(
-    'hides both 资金性质 and 发布平台 for gjgk when %s',
-    (fundLx) => {
-      renderSharedForm({
-        tenderType: 'gjgk',
-        initialDraft:
-          fundLx === null
-            ? {
-                tender_data: mockTenderData,
-              }
-            : {
-                tender_data: mockTenderData,
-                tender_type_info: buildTenderTypeInfo({ fund_lx: fundLx }),
-              },
-      });
+  it('hides both 资金性质 and 发布平台 for gjgk when type info is missing', () => {
+    renderSharedForm({
+      tenderType: 'gjgk',
+      initialDraft: {
+        tender_data: mockTenderData,
+      },
+    });
 
-      expect(screen.queryByText('资金性质')).not.toBeInTheDocument();
-      expect(screen.queryByText('发布平台')).not.toBeInTheDocument();
-      expect(screen.queryByText('测试平台')).not.toBeInTheDocument();
-    }
-  );
+    expect(screen.queryByText('资金性质')).not.toBeInTheDocument();
+    expect(screen.queryByText('发布平台')).not.toBeInTheDocument();
+    expect(screen.queryByText('测试平台')).not.toBeInTheDocument();
+  });
 
   it.each(['xjcg', 'gngk'] as const)(
     'keeps 发布平台 visible for non-gjgk tender type %s',
@@ -560,6 +575,39 @@ describe('TenderFormShared', () => {
         }),
       })
     );
+  });
+
+  it('uses URL fund_lx only for initial default and allows manual switching afterwards', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk' });
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <TenderFormShared
+          tenderType="gngk"
+          onSubmit={jest.fn()}
+          initialDraft={draft}
+          onDraftChange={(updates) => {
+            setDraft((previous) => mergeDraftState(previous, updates));
+          }}
+        />
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    const selfFundButton = screen.getByRole('button', { name: '自筹' });
+    const fiscalFundButton = screen.getByRole('button', { name: '财政' });
+
+    await waitFor(() => expect(selfFundButton).toHaveClass('bg-blue-600'));
+    expect(fiscalFundButton).not.toHaveClass('bg-blue-600');
+
+    await user.click(fiscalFundButton);
+
+    await waitFor(() => expect(fiscalFundButton).toHaveClass('bg-blue-600'));
+    expect(selfFundButton).not.toHaveClass('bg-blue-600');
   });
 
   it('switches primary action to cancel when canCancel is true', async () => {

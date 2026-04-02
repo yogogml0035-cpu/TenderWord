@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { TenderType } from '@/types';
+import type { TenderType, FundLx } from '@/types';
 import { useUrlParams } from '@/hooks/useUrlParams';
 import type { ConversationDraftFile, ConversationFormDraft } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -49,6 +49,7 @@ import {
 
 export interface BaseTenderFormData {
   tender_no: string;
+  fund_lx: FundLx;
   tender_data: TenderData;
   model: ModelType;
   files: {
@@ -189,7 +190,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   onCancel,
 }: TenderFormSharedProps<TFormData>) {
   const variantConfig = tenderFormVariantConfigMap[tenderType];
-  const { tenderno: urlTenderNo } = useUrlParams();
+  const { tenderno: urlTenderNo, fund_lx: urlFundLx } = useUrlParams();
   const updateConversation = useChatStore((state) => state.updateConversation);
   const currentConversation = useChatStore((state) =>
     state.conversations.find((conversation) => conversation.id === state.currentConversationId) || null
@@ -213,13 +214,28 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const [paramFiles, setParamFiles] = useState<UploadedFile[]>(
     (initialDraft?.files?.tender_params as UploadedFile[] | undefined) || []
   );
-  const [insertionConfig, setInsertionConfig] = useState<TenderInsertionConfig>({
-    before_text:
-      initialDraft?.insertion_config?.before_text ||
-      variantConfig.insertionConfigDefaults.before_text,
-    after_text:
-      initialDraft?.insertion_config?.after_text ||
-      variantConfig.insertionConfigDefaults.after_text,
+  const draftFundLx: FundLx | undefined =
+    initialDraft?.fund_lx === 0 || initialDraft?.fund_lx === 1
+      ? initialDraft.fund_lx
+      : undefined;
+  const initialFundLx: FundLx =
+    urlFundLx === 0 || urlFundLx === 1
+      ? urlFundLx
+      : draftFundLx === 0 || draftFundLx === 1
+        ? draftFundLx
+        : 0;
+  const [localFundLx, setLocalFundLx] = useState<FundLx>(initialFundLx);
+  const [insertionConfig, setInsertionConfig] = useState<TenderInsertionConfig>(() => {
+    const gngkScopedInsertion =
+      initialDraft?.gngk_insertion_configs?.[initialFundLx] || initialDraft?.insertion_config;
+    return {
+      before_text:
+        gngkScopedInsertion?.before_text ||
+        variantConfig.insertionConfigDefaults.before_text,
+      after_text:
+        gngkScopedInsertion?.after_text ||
+        variantConfig.insertionConfigDefaults.after_text,
+    };
   });
   const [error, setError] = useState<string | null>(null);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
@@ -239,8 +255,13 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const [templateCandidatesLoading, setTemplateCandidatesLoading] = useState(false);
   const [templateCandidatesRefreshing, setTemplateCandidatesRefreshing] = useState(false);
   const [selectingTemplateRowKey, setSelectingTemplateRowKey] = useState<string | null>(null);
+  const didSyncInitialFundRef = useRef(false);
   const selectedModel: ModelType = initialDraft?.model || 'deepseek';
   const tenderNo = onDraftChange ? initialDraft?.tender_no || initialTenderNo : localTenderNo;
+  const fundLx: FundLx =
+    onDraftChange && (initialDraft?.fund_lx === 0 || initialDraft?.fund_lx === 1)
+      ? initialDraft.fund_lx
+      : localFundLx;
   const tenderData = onDraftChange
     ? initialDraft?.tender_data || initialTenderData || null
     : localTenderData;
@@ -258,6 +279,52 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     () => normalizeTemplateProjectName(tenderData?.project_name),
     [tenderData]
   );
+
+  useEffect(() => {
+    if (!onDraftChange || didSyncInitialFundRef.current) {
+      return;
+    }
+    didSyncInitialFundRef.current = true;
+
+    const shouldUpdateFund = initialDraft?.fund_lx !== initialFundLx;
+    const updates: Partial<ConversationFormDraft> = {};
+
+    if (shouldUpdateFund) {
+      updates.fund_lx = initialFundLx;
+    }
+
+    if (tenderType === 'gngk' && shouldUpdateFund) {
+      const scopedConfig = initialDraft?.gngk_insertion_configs?.[initialFundLx];
+      const nextInsertion: TenderInsertionConfig = {
+        before_text:
+          scopedConfig?.before_text ||
+          (initialFundLx === 1
+            ? '第四章  招标需求'
+            : variantConfig.insertionConfigDefaults.before_text),
+        after_text:
+          scopedConfig?.after_text ||
+          (initialFundLx === 1
+            ? '第五章  评标方法与程序'
+            : variantConfig.insertionConfigDefaults.after_text),
+      };
+      updates.insertion_config = nextInsertion;
+      setInsertionConfig(nextInsertion);
+    }
+
+    setLocalFundLx(initialFundLx);
+
+    if (Object.keys(updates).length > 0) {
+      onDraftChange(updates);
+    }
+  }, [
+    initialDraft?.fund_lx,
+    initialDraft?.gngk_insertion_configs,
+    initialFundLx,
+    onDraftChange,
+    tenderType,
+    variantConfig.insertionConfigDefaults.after_text,
+    variantConfig.insertionConfigDefaults.before_text,
+  ]);
 
   const applyTenderDraftUpdates = useCallback(
     (updates: TenderDraftUpdates) => {
@@ -340,26 +407,98 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     return data;
   }, [applyTenderDraftUpdates, currentConversation, tenderNo, updateConversation]);
 
+  const handleFundLxChange = useCallback(
+    (nextFundLx: FundLx) => {
+      if (fundLx === nextFundLx) {
+        return;
+      }
+
+      setLocalFundLx(nextFundLx);
+
+      const nextUpdates: Partial<ConversationFormDraft> = {
+        fund_lx: nextFundLx,
+      };
+
+      if (tenderType === 'gngk') {
+        const currentScopedConfigs = initialDraft?.gngk_insertion_configs || {};
+        const nextScopedConfigs = {
+          ...currentScopedConfigs,
+          [fundLx]: insertionConfig,
+        };
+        const targetScoped = nextScopedConfigs[nextFundLx];
+        const nextInsertion: TenderInsertionConfig = targetScoped || {
+          before_text:
+            nextFundLx === 1
+              ? '第四章  招标需求'
+              : variantConfig.insertionConfigDefaults.before_text,
+          after_text:
+            nextFundLx === 1
+              ? '第五章  评标方法与程序'
+              : variantConfig.insertionConfigDefaults.after_text,
+        };
+
+        nextUpdates.gngk_insertion_configs = nextScopedConfigs;
+        nextUpdates.insertion_config = nextInsertion;
+        setInsertionConfig(nextInsertion);
+      }
+
+      onDraftChange?.(nextUpdates);
+
+      const url = new URL(window.location.href);
+      url.searchParams.set('fund_lx', String(nextFundLx));
+      window.history.replaceState(window.history.state, '', url.toString());
+    },
+    [
+      fundLx,
+      initialDraft?.gngk_insertion_configs,
+      insertionConfig,
+      onDraftChange,
+      tenderType,
+      variantConfig.insertionConfigDefaults.after_text,
+      variantConfig.insertionConfigDefaults.before_text,
+    ]
+  );
+
   const handleBeforeTextChange = useCallback(
     (value: string) => {
       setInsertionConfig((prev) => {
         const next = { ...prev, before_text: value };
-        onDraftChange?.({ insertion_config: next });
+        if (tenderType === 'gngk') {
+          onDraftChange?.({
+            insertion_config: next,
+            gngk_insertion_configs: {
+              ...(initialDraft?.gngk_insertion_configs || {}),
+              [fundLx]: next,
+            },
+          });
+        } else {
+          onDraftChange?.({ insertion_config: next });
+        }
         return next;
       });
     },
-    [onDraftChange]
+    [fundLx, initialDraft?.gngk_insertion_configs, onDraftChange, tenderType]
   );
 
   const handleAfterTextChange = useCallback(
     (value: string) => {
       setInsertionConfig((prev) => {
         const next = { ...prev, after_text: value };
-        onDraftChange?.({ insertion_config: next });
+        if (tenderType === 'gngk') {
+          onDraftChange?.({
+            insertion_config: next,
+            gngk_insertion_configs: {
+              ...(initialDraft?.gngk_insertion_configs || {}),
+              [fundLx]: next,
+            },
+          });
+        } else {
+          onDraftChange?.({ insertion_config: next });
+        }
         return next;
       });
     },
-    [onDraftChange]
+    [fundLx, initialDraft?.gngk_insertion_configs, onDraftChange, tenderType]
   );
 
   const originUploaderFiles = useMemo(() => (originFile ? [originFile] : []), [originFile]);
@@ -582,7 +721,11 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
 
       const formData: BaseTenderFormData = {
         tender_no: tenderNo,
-        tender_data: tenderData,
+        fund_lx: fundLx,
+        tender_data: {
+          ...tenderData,
+          fund_source_lx: fundLx,
+        },
         model: selectedModel,
         files: {
           origin_tender: originFile || undefined,
@@ -608,6 +751,36 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
 
   return (
     <form onSubmit={handleSubmit} className={cn('form-section space-y-5', className)}>
+      <div className="flex items-center justify-end gap-2">
+        <span className="text-sm text-gray-500">资金类型</span>
+        <button
+          type="button"
+          onClick={() => handleFundLxChange(0)}
+          disabled={isSubmitting}
+          className={cn(
+            'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+            fundLx === 0
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          )}
+        >
+          自筹
+        </button>
+        <button
+          type="button"
+          onClick={() => handleFundLxChange(1)}
+          disabled={isSubmitting}
+          className={cn(
+            'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+            fundLx === 1
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          )}
+        >
+          财政
+        </button>
+      </div>
+
       <FormSection title="招标信息" index={1}>
         <TenderNoInput
           value={tenderNo}

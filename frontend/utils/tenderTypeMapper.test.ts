@@ -2,6 +2,7 @@ import {
   getTenderTypeFromParams,
   getUrlParamsForTenderType,
   isValidTenderType,
+  parseTenderUrlParams,
 } from './tenderTypeMapper';
 
 describe('tenderTypeMapper', () => {
@@ -22,13 +23,6 @@ describe('tenderTypeMapper', () => {
       })
     ).toMatchObject({ tenderType: 'gjgk', isValid: true });
 
-    expect(
-      getTenderTypeFromParams({
-        tender_lx: 0,
-        purchase_method: 0,
-        fund_lx: 2,
-      })
-    ).toMatchObject({ tenderType: 'gjgk', isValid: true });
   });
 
   it('returns canonical gjgk url params', () => {
@@ -41,5 +35,14 @@ describe('tenderTypeMapper', () => {
 
   it('accepts gjgk as a valid tender type', () => {
     expect(isValidTenderType('gjgk')).toBe(true);
+  });
+
+  it('treats invalid fund_lx as undefined while keeping tender type resolution', () => {
+    const result = parseTenderUrlParams(
+      new URLSearchParams('tender_lx=0&purchase_method=0&fund_lx=2&tenderno=GJGK001')
+    );
+
+    expect(result.tenderType).toBe('gjgk');
+    expect(result.params.fund_lx).toBeUndefined();
   });
 });

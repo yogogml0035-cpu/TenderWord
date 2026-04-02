@@ -11,6 +11,8 @@ import { parseTenderUrlParams, getTenderNo } from '@/utils/tenderTypeMapper';
 export interface UseUrlParamsReturn {
   /** 招标编号 */
   tenderno: string | undefined;
+  /** 资金类型（仅 0|1） */
+  fund_lx: 0 | 1 | undefined;
   /** 招标类型 */
   tenderType: TenderType | undefined;
   /** 参数是否有效 */
@@ -66,6 +68,7 @@ export function useUrlParams(): UseUrlParamsReturn {
     if (!searchParams) {
       return {
         tenderno: undefined,
+        fund_lx: undefined,
         tenderType: undefined,
         isValid: false,
         errors: ['Search params not available'],
@@ -82,11 +85,15 @@ export function useUrlParams(): UseUrlParamsReturn {
 
     // 解析招标类型参数
     const result = parseTenderUrlParams(searchParams);
+    const fund_lx = result.params.fund_lx === 0 || result.params.fund_lx === 1
+      ? result.params.fund_lx
+      : undefined;
 
     // 如果没有参数，返回空状态但不标记为错误
     if (!hasParams) {
       return {
         tenderno: undefined,
+        fund_lx: undefined,
         tenderType: undefined,
         isValid: true,
         errors: [],
@@ -97,6 +104,7 @@ export function useUrlParams(): UseUrlParamsReturn {
 
     return {
       tenderno,
+      fund_lx,
       tenderType: result.tenderType,
       isValid: result.isValid,
       errors: result.errors,

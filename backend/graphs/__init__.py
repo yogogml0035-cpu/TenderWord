@@ -26,7 +26,8 @@ from .base_graph import (
 )
 from .skill_graph import SkillGraph
 from .xjcg_tender_graph import XjcgTenderGraph
-from .gngk_tender_graph import GngkTenderGraph
+from .gngk_zc_tender_graph import GngkZcTenderGraph
+from .gngk_cz_tender_graph import GngkCzTenderGraph
 from .gjgk_tender_graph import GjgkTenderGraph
 from .user_graph import UserGraph
 
@@ -39,7 +40,8 @@ __all__ = [
     "invoke_with_timing_async",
     "SkillGraph",
     "XjcgTenderGraph",
-    "GngkTenderGraph",
+    "GngkZcTenderGraph",
+    "GngkCzTenderGraph",
     "GjgkTenderGraph",
     "UserGraph",
 ]

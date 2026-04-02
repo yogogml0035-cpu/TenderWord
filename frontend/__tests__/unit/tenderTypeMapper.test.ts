@@ -6,8 +6,8 @@ import {
 
 describe('tenderTypeMapper', () => {
   it.each([
-    { fund_lx: 0, tenderType: 'xjcg' },
-    { fund_lx: 1, tenderType: 'xjcg' },
+    { fund_lx: 0 as const, tenderType: 'xjcg' as const },
+    { fund_lx: 1 as const, tenderType: 'xjcg' as const },
   ])('maps 询价采购 without depending on fund_lx=$fund_lx', ({ fund_lx, tenderType }) => {
     expect(
       getTenderTypeFromParams({
@@ -23,8 +23,8 @@ describe('tenderTypeMapper', () => {
   });
 
   it.each([
-    { fund_lx: 0, tenderType: 'gngk' },
-    { fund_lx: 1, tenderType: 'gngk' },
+    { fund_lx: 0 as const, tenderType: 'gngk' as const },
+    { fund_lx: 1 as const, tenderType: 'gngk' as const },
   ])('maps 国内公开 without depending on fund_lx=$fund_lx', ({ fund_lx, tenderType }) => {
     expect(
       getTenderTypeFromParams({

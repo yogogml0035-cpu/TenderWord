@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.states import TenderGraphStateBase
+from backend.config.tender_config import get_tender_type_family
 from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
     create_word_application,
@@ -202,7 +203,8 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
     # 获取替换列表
     replacements = state.get("replacements")
     tender_type = state.get("tender_type", "xjcg")
-    enable_erp_comments = tender_type in ("gngk", "xjcg", "gjgk")
+    tender_type_family = get_tender_type_family(tender_type)
+    enable_erp_comments = tender_type_family in ("gngk", "xjcg", "gjgk")
     derived_state_updates: dict[str, str] = {}
     
     # 如果没有需要替换的内容，直接返回
@@ -265,7 +267,7 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
             if str(search_text or "").strip()
         ]
 
-        if tender_type == "gjgk":
+        if tender_type_family == "gjgk":
             gjgk_entries, gjgk_state_updates, gjgk_logs = build_gjgk_special_replacements(state)
             replacement_entries.extend(gjgk_entries)
             derived_state_updates.update(gjgk_state_updates)

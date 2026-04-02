@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from backend.config.tender_config import get_tender_type_family
 from backend.prompts.types import GeneratePromptInput, RenderedPrompt
 
 POLISH_SYSTEM_PROMPT = """
@@ -220,7 +221,7 @@ GENERATE_PROMPT_REGISTRY = {
 
 
 def render_generate_prompt(data: GeneratePromptInput) -> RenderedPrompt:
-    tender_type = str(data.tender_type or "xjcg")
+    tender_type = get_tender_type_family(data.tender_type)
     if tender_type not in GENERATE_PROMPT_REGISTRY:
         raise ValueError(
             f"未知的招标类型: {tender_type}，支持的类型: {list(GENERATE_PROMPT_REGISTRY.keys())}"

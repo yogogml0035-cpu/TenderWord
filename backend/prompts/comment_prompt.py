@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from backend.config.tender_config import get_tender_type_family
 from backend.prompts.types import CommentPromptInput, RenderedPrompt
 
 COMMENT_SYSTEM_PROMPT = """
@@ -151,7 +152,7 @@ COMMENT_PROMPT_REGISTRY = {
 
 
 def render_comment_prompt(data: CommentPromptInput) -> RenderedPrompt:
-    tender_type = str(data.tender_type or "xjcg")
+    tender_type = get_tender_type_family(data.tender_type)
     if tender_type not in COMMENT_PROMPT_REGISTRY:
         raise ValueError(
             f"未知的招标类型: {tender_type}。支持的类型: {list(COMMENT_PROMPT_REGISTRY.keys())}"

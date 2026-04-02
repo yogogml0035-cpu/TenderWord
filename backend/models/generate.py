@@ -33,7 +33,8 @@ class FormType(str, Enum):
     """
 
     XJCG_TENDER = "xjcg_tender"  # 询价采购
-    GNGK_TENDER = "gngk_tender"  # 国内公开
+    GNGK_ZC_TENDER = "gngk_zc_tender"  # 国内公开（自筹）
+    GNGK_CZ_TENDER = "gngk_cz_tender"  # 国内公开（财政）
     GJGK_TENDER = "gjgk_tender"  # 国际公开
 
 
@@ -47,7 +48,7 @@ class GenerateRequest(BaseModel):
     文档生成请求模型
 
     Attributes:
-        form_type: 表单类型（xjcg_tender | gngk_tender | gjgk_tender）
+        form_type: 表单类型（xjcg_tender | gngk_zc_tender | gngk_cz_tender | gjgk_tender）
         tender_data: 招标数据
         file_paths: 文件路径字典
             - template: 模板文件路径
@@ -56,7 +57,7 @@ class GenerateRequest(BaseModel):
     """
 
     form_type: FormType = Field(
-        ..., description="表单类型", examples=["xjcg_tender", "gngk_tender", "gjgk_tender"]
+        ..., description="表单类型", examples=["xjcg_tender", "gngk_zc_tender", "gngk_cz_tender", "gjgk_tender"]
     )
     tender_data: TenderData = Field(..., description="招标数据")
     file_paths: Dict[str, str | List[str]] = Field(..., description="文件路径字典")

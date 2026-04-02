@@ -442,7 +442,7 @@ function parseTenderTypeInfo(payload: unknown): TenderTypeInfo | null {
   if (
     typeof tender_lx !== 'number' ||
     typeof purchase_method !== 'number' ||
-    typeof fund_lx !== 'number'
+    (fund_lx !== 0 && fund_lx !== 1)
   ) {
     return null;
   }

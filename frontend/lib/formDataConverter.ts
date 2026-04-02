@@ -113,7 +113,10 @@ export function convertXjcgFormToApiRequest(formData: XjcgTenderFormData): Gener
 
   return {
     form_type: 'xjcg_tender',
-    tender_data: formData.tender_data,
+    tender_data: {
+      ...formData.tender_data,
+      fund_source_lx: formData.fund_lx,
+    },
     file_paths: filesConfig,
     insertion_config: formData.insertion_config,
     model: formData.model,
@@ -183,12 +186,15 @@ export function convertGngkFormToApiRequest(
   );
 
   const request: GngkGenerateRequest = {
-    form_type: 'gngk_tender',
-    tender_data: formData.tender_data,
+    form_type: formData.fund_lx === 1 ? 'gngk_cz_tender' : 'gngk_zc_tender',
+    tender_data: {
+      ...formData.tender_data,
+      fund_source_lx: formData.fund_lx,
+    },
     file_paths: filesConfig,
     insertion_config: formData.insertion_config,
     model: formData.model,
-};
+  };
   // No longer processing qualification files - removed from GNGK form
 
   return request;
@@ -205,7 +211,10 @@ export function convertGjgkFormToApiRequest(
 
   return {
     form_type: 'gjgk_tender',
-    tender_data: formData.tender_data,
+    tender_data: {
+      ...formData.tender_data,
+      fund_source_lx: formData.fund_lx,
+    },
     file_paths: filesConfig,
     insertion_config: formData.insertion_config,
     model: formData.model,

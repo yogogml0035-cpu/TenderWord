@@ -25,9 +25,9 @@ class TenderType(BaseModel):
     )
     fund_lx: int = Field(
         ...,
-        description="路由资金类型（0=国内公开, 1/2=国际公开不同来源）",
+        description="路由资金类型（0=自筹, 1=财政）",
         ge=0,
-        le=2,
+        le=1,
     )
 
 

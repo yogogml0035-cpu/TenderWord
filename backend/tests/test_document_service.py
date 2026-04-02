@@ -409,6 +409,53 @@ def test_build_initial_state_for_gjgk_uses_anchor_defaults_and_derived_fields():
     assert state["tender_invitation"] == "项目名称：国际项目，招标编号：GJ-001"
 
 
+@pytest.mark.parametrize(
+    ("form_type", "expected_tender_type", "expected_before", "expected_after"),
+    [
+        (
+            FormType.GNGK_ZC_TENDER,
+            "gngk_zc",
+            "第三章 招标内容及要求",
+            "第四章 投标文件有关格式",
+        ),
+        (
+            FormType.GNGK_CZ_TENDER,
+            "gngk_cz",
+            "第四章  招标需求",
+            "第五章  评标方法与程序",
+        ),
+    ],
+)
+def test_build_initial_state_for_gngk_fund_modes_uses_split_runtime_defaults(
+    form_type,
+    expected_tender_type,
+    expected_before,
+    expected_after,
+):
+    service = DocumentService()
+
+    state = service._build_initial_state(
+        GenerateRequest(
+            form_type=form_type,
+            tender_data=TenderData(
+                project_name="国内公开项目",
+                project_number="GN-001",
+                project_content="国内公开采购内容",
+                buyer_name="国内采购人",
+                fund_source_lx=1,
+            ),
+            file_paths={"template": "D:/UploadFiles/template.docx", "params": []},
+            model=LLMModel.DEEPSEEK,
+        ),
+        task_id="task-gngk",
+    )
+
+    assert state["tender_type"] == expected_tender_type
+    assert state["insertion_before_text"] == expected_before
+    assert state["insertion_after_text"] == expected_after
+    assert state["fund_source_lx"] == "1"
+
+
 def test_build_rewrite_state_snapshot_persists_gjgk_specific_fields():
     service = DocumentService()
 

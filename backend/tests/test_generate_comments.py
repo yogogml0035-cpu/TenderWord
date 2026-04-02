@@ -97,6 +97,23 @@ class TestPromptSelectionAndValidation:
             except ValueError:
                 pytest.fail("gngk tender_type should be accepted")
 
+    @pytest.mark.parametrize("tender_type", ["gngk_zc", "gngk_cz"])
+    def test_split_gngk_runtime_types_are_accepted(self, tender_type):
+        """测试 gngk_zc / gngk_cz 运行态类型被正确接受"""
+        state = XjcgTenderGraphState(
+            polished_text="测试文本",
+            tender_type=tender_type,
+        )
+
+        with patch('backend.nodes.common_word_nodes.generate_comments.stream_llm_completion') as mock_llm:
+            mock_llm.side_effect = _empty_llm_response
+
+            try:
+                generate_comments(state, config={})
+                assert True
+            except ValueError:
+                pytest.fail(f"{tender_type} tender_type should be accepted")
+
     def test_valid_gjgk_tender_type_accepted(self):
         """测试 gjgk 招标类型被正确接受"""
         state = XjcgTenderGraphState(

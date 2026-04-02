@@ -34,7 +34,7 @@ export interface TenderData {
 export interface TenderTypeInfo {
   tender_lx: number;
   purchase_method: number;
-  fund_lx: number;
+  fund_lx: 0 | 1;
 }
 
 export interface TenderLookupResponse {
@@ -135,7 +135,7 @@ export interface InsertionConfig {
 }
 
 export interface GenerateRequest {
-  form_type: 'xjcg_tender' | 'gngk_tender' | 'gjgk_tender';
+  form_type: 'xjcg_tender' | 'gngk_zc_tender' | 'gngk_cz_tender' | 'gjgk_tender';
   tender_data: TenderData;
   file_paths: FilesConfig;
   insertion_config?: InsertionConfig;

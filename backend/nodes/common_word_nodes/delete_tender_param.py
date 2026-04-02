@@ -22,6 +22,7 @@ from typing import Dict, Optional
 from backend.states import TenderGraphStateBase
 from backend.config.tender_config import (
     CONTENT_UPDATE_MODE_DIRECT_REPLACE,
+    get_tender_type_family,
     get_anchor_target_sizes,
     get_content_update_mode,
     get_default_anchor_texts,
@@ -50,6 +51,10 @@ HEARTBEAT_INTERVAL_SECONDS = 5.0
 
 def _visible_log(message: str) -> None:
     progress_log.info(f"[{NODE_NAME}] {message}")
+
+
+def _uses_wide_scan_window(tender_type: str | None) -> bool:
+    return get_tender_type_family(tender_type) in {"gngk", "gjgk"}
 
 
 def _calculate_elapsed_seconds(
@@ -253,7 +258,7 @@ def _insert_paragraph_break_before_delivery(
             safe_insert_pos = _find_safe_insert_position(
                 doc,
                 paragraph_candidates,
-                max_forward_scan_chars=24 if tender_type in {"gngk", "gjgk"} else 8,
+                max_forward_scan_chars=24 if _uses_wide_scan_window(tender_type) else 8,
                 field_name="交付日期",
                 log=log,
             )
@@ -269,7 +274,7 @@ def _insert_paragraph_break_before_delivery(
     fallback_insert_pos = _find_safe_insert_position(
         doc,
         [fallback_pos],
-        max_forward_scan_chars=24 if tender_type in {"gngk", "gjgk"} else 8,
+        max_forward_scan_chars=24 if _uses_wide_scan_window(tender_type) else 8,
         field_name="交付日期",
         log=log,
     )
@@ -317,7 +322,7 @@ def _ensure_paragraph_break_after_payment(
     safe_insert_pos = _find_safe_insert_position(
         doc,
         range(payment_end, max_pos + 1),
-        max_forward_scan_chars=8 if tender_type in {"gngk", "gjgk"} else 0,
+        max_forward_scan_chars=8 if _uses_wide_scan_window(tender_type) else 0,
         field_name="付款方式",
         log=log,
     )
@@ -349,7 +354,7 @@ def _restore_protected_field_paragraph_boundaries(
         doc_end = 0
 
     search_start = min(max(0, int(before_end_pos or 0)), doc_end)
-    search_window = 20000 if tender_type in {"gngk", "gjgk"} else 12000
+    search_window = 20000 if _uses_wide_scan_window(tender_type) else 12000
     search_end = min(doc_end, search_start + search_window)
 
     if log:

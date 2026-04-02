@@ -4,7 +4,7 @@ TenderWord 是一个运行在 Windows 环境下的招标文档智能处理系统
 
 - 前端：Next.js 16、React 19、Tailwind 4、Zustand
 - 后端：FastAPI、LangGraph、pywin32
-- 当前已落地招标类型：`xjcg_tender`、`gngk_tender`
+- 当前已落地招标类型：`xjcg_tender`、`gngk_zc_tender`、`gngk_cz_tender`
 - 当前真实 API 前缀：`/api`
 - 当前真实关键链路：创建任务 -> 任务队列 -> SSE 推送 -> 生成完成/失败 -> 下载
 
@@ -313,7 +313,7 @@ AGENTS.md                     Agent 执行规范
 ## 基本使用流程
 
 1. 打开 <http://localhost:8502/tender>
-2. 选择招标类型：`xjcg_tender` 或 `gngk_tender`
+2. 选择招标类型：`xjcg_tender`、`gngk_zc_tender` 或 `gngk_cz_tender`
 3. 填写招标编号和项目信息
 4. 上传模板与参数文件
 5. 选择模型并发起生成

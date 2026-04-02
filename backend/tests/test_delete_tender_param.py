@@ -646,7 +646,7 @@ def test_find_paragraph_containing_any_respects_max_start():
     assert hit is None
 
 
-@pytest.mark.parametrize("tender_type", ["xjcg", "gngk"])
+@pytest.mark.parametrize("tender_type", ["xjcg", "gngk", "gngk_zc", "gngk_cz"])
 def test_delete_tender_param_runs_layout_repair_and_save(monkeypatch, tender_type):
     word = _FakeWord()
     doc = _DeleteFlowDocument(content_end=1000)
