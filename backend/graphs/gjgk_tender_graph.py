@@ -7,7 +7,6 @@ from typing import Callable
 from backend.graphs.base_graph import StandardTenderWorkflowGraph
 from backend.nodes.common_word_nodes import (
     copy_comments,
-    delete_tender_param,
     extract_tender_params,
     generate_comments,
     generate_polished_text,
@@ -15,7 +14,10 @@ from backend.nodes.common_word_nodes import (
     prepare_template,
     replace_content,
 )
-from backend.nodes.gjgk_word_nodes import get_replacements
+from backend.nodes.gjgk_word_nodes import (
+    delete_gjgk_tender_param,
+    get_replacements,
+)
 from backend.nodes.gjgk_word_nodes.update_gjgk_word import update_gjgk_word
 from backend.states import GjgkTenderGraphState
 
@@ -29,7 +31,7 @@ class GjgkTenderGraph(StandardTenderWorkflowGraph):
     NODE_GET_COMMENTS: Callable = get_comments
     NODE_COPY_COMMENTS: Callable = copy_comments
     NODE_EXTRACT_TENDER_PARAMS: Callable = extract_tender_params
-    NODE_DELETE_TENDER_PARAM: Callable = delete_tender_param
+    NODE_DELETE_TENDER_PARAM: Callable = delete_gjgk_tender_param
     NODE_GET_REPLACEMENTS: Callable = get_replacements
     NODE_REPLACE_CONTENT: Callable = replace_content
     NODE_GENERATE_POLISHED_TEXT: Callable = generate_polished_text

@@ -29,9 +29,6 @@ from backend.config.tender_config import (  # noqa: E402
     get_anchor_target_sizes,
     get_default_anchor_texts,
 )
-from backend.nodes.common_word_nodes.delete_tender_param import (  # noqa: E402
-    delete_tender_param,
-)
 from backend.states import GjgkTenderGraphState  # noqa: E402
 from backend.util.log_util.progress_log import progress_log  # noqa: E402
 from backend.util.word_util import (  # noqa: E402
