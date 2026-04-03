@@ -12,6 +12,7 @@ __pycache__/
 
 # Python 测试和工具缓存
 .pytest_cache/
+.codex
 .ruff_cache/
 .mypy_cache/
 .coverage
