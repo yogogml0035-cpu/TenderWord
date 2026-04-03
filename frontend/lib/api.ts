@@ -454,6 +454,39 @@ function parseTenderTypeInfo(payload: unknown): TenderTypeInfo | null {
   };
 }
 
+function isGjgkTenderTypeInfo(tenderTypeInfo: TenderTypeInfo | null): boolean {
+  return Boolean(
+    tenderTypeInfo &&
+      tenderTypeInfo.tender_lx === 0 &&
+      tenderTypeInfo.purchase_method === 0
+  );
+}
+
+function stripTenderNumberPrefix(value: string | null | undefined): string | null {
+  const normalized = String(value || '').replace(/\s+/g, '').trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const prefixedMatch = normalized.match(/^\d+-([A-Za-z0-9]+)$/);
+  if (prefixedMatch) {
+    return prefixedMatch[1];
+  }
+
+  return /^[A-Za-z0-9]+$/.test(normalized) ? normalized : null;
+}
+
+function normalizeGjgkProjectNumber(
+  projectNumber: string | null | undefined,
+  tenderNo: string
+): string {
+  return (
+    stripTenderNumberPrefix(tenderNo) ||
+    stripTenderNumberPrefix(projectNumber) ||
+    String(projectNumber || '')
+  );
+}
+
 export async function fetchTenderDataWithType(tenderNo: string): Promise<TenderLookupResponse> {
   const url = `${API_BASE_URL}/api/tender/${encodeURIComponent(tenderNo)}`;
 
@@ -476,11 +509,18 @@ export async function fetchTenderDataWithType(tenderNo: string): Promise<TenderL
   }
 
   const payload = isRecord(data) ? data : {};
-  const tenderData = 'data' in payload ? (payload.data as TenderData) : (data as TenderData);
   const tenderTypeInfo = parseTenderTypeInfo(payload.type);
+  const tenderData = 'data' in payload ? (payload.data as TenderData) : (data as TenderData);
+  const normalizedTenderData =
+    isGjgkTenderTypeInfo(tenderTypeInfo)
+      ? {
+          ...tenderData,
+          project_number: normalizeGjgkProjectNumber(tenderData.project_number, tenderNo),
+        }
+      : tenderData;
 
   return {
-    data: tenderData,
+    data: normalizedTenderData,
     type: tenderTypeInfo,
   };
 }

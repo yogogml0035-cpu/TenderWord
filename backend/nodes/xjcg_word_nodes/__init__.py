@@ -11,13 +11,15 @@ from backend.nodes.common_word_nodes import (
     update_word,
 )
 
-from backend.nodes.xjcg_word_nodes.xjcg_get_replacements import get_replacements
+from backend.nodes.xjcg_word_nodes.xjcg_get_replacements import (
+    xjcg_get_replacements,
+)
 
 __all__ = [
     "prepare_template",
     "extract_tender_params",
     "delete_tender_param",
-    "get_replacements",
+    "xjcg_get_replacements",
     "replace_content",
     "update_word",
     "generate_polished_text",

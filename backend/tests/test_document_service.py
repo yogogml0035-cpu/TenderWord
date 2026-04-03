@@ -409,6 +409,29 @@ def test_build_initial_state_for_gjgk_uses_anchor_defaults_and_derived_fields():
     assert state["tender_invitation"] == "项目名称：国际项目，招标编号：GJ-001"
 
 
+def test_build_initial_state_for_gjgk_normalizes_prefixed_project_number():
+    service = DocumentService()
+
+    state = service._build_initial_state(
+        GenerateRequest(
+            form_type=FormType.GJGK_TENDER,
+            tender_data=TenderData(
+                project_name="国际项目",
+                project_number="0811-264DSITC0639",
+                project_content="国际采购内容",
+                buyer_name="国际采购人",
+                fund_source_lx=1,
+            ),
+            file_paths={"template": "D:/UploadFiles/template.docx", "params": []},
+            model=LLMModel.DEEPSEEK,
+        ),
+        task_id="task-gjgk-normalized",
+    )
+
+    assert state["project_number"] == "264DSITC0639"
+    assert state["tender_invitation"] == "项目名称：国际项目，招标编号：264DSITC0639"
+
+
 @pytest.mark.parametrize(
     ("form_type", "expected_tender_type", "expected_before", "expected_after"),
     [

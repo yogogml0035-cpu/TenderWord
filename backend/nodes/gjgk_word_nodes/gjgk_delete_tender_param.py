@@ -31,7 +31,7 @@ from backend.util.word_util.anchor_utils import (
     resolve_anchor_content_range,
 )
 
-NODE_NAME = "delete_gjgk_tender_param"
+NODE_NAME = "gjgk_delete_tender_param"
 
 
 def _visible_log(message: str) -> None:
@@ -45,7 +45,7 @@ def _calculate_elapsed_seconds(
     return max(0.0, current - start_monotonic)
 
 
-def delete_gjgk_tender_param(
+def gjgk_delete_tender_param(
     state: TenderGraphStateBase, config
 ) -> TenderGraphStateBase:
     """gjgk 流程专用：按双锚点定位并直接删除正文区间。"""
@@ -81,7 +81,7 @@ def delete_gjgk_tender_param(
     )
 
     if get_content_update_mode(tender_type) != CONTENT_UPDATE_MODE_DIRECT_REPLACE:
-        raise ValueError("delete_gjgk_tender_param 仅支持 gjgk direct_replace 模式")
+        raise ValueError("gjgk_delete_tender_param 仅支持 gjgk direct_replace 模式")
 
     word = None
     doc = None

@@ -1,4 +1,4 @@
-from backend.nodes.common_word_nodes.replace_content import (
+from backend.nodes.gjgk_word_nodes.gjgk_replace_content import (
     build_gjgk_special_replacements,
     extract_delivery_location_from_polished_text,
 )

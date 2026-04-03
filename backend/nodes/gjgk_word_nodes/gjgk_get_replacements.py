@@ -14,19 +14,27 @@ from backend.nodes.common_word_nodes.get_replacements_core import (
     ReplacementFieldSpec,
     run_get_replacements,
 )
-from backend.nodes.gngk_word_nodes.gngk_get_replacements import (
-    extract_buyer_name,
-    extract_bzj_rule,
-    extract_contact_fields,
-    extract_platform,
-    extract_project_content,
+from backend.nodes.common_word_nodes.get_replacements_shared import (
+    build_common_replacement_fields,
+    extract_public_tender_buyer_name,
+    extract_public_tender_bzj_rule,
+    extract_public_tender_contact_fields,
+    extract_public_tender_project_content,
     extract_project_name,
-    extract_project_number,
+    extract_public_tender_platform,
     extract_service_fee,
     extract_shell_dates,
     extract_submit_date,
+    make_project_number_extractor,
 )
 from backend.states import GjgkTenderGraphState
+from backend.util.common_util.tender_number import normalize_gjgk_project_number
+
+
+extract_gjgk_project_number_from_bid_header = make_project_number_extractor(
+    "招标编号",
+    value_parser=normalize_gjgk_project_number,
+)
 
 
 def extract_fund_source_lx(
@@ -74,33 +82,31 @@ def extract_tender_invitation(
 def extract_delivery_location(
     doc_content: str, state: GjgkTenderGraphState, log_parts: List[str]
 ) -> Optional[str]:
+    del state
     if not doc_content:
         return None
 
-    patterns = (
-        r"(?:交货地点|交付地点|项目现场)\s*[：:]\s*([^\n\r]+)",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, doc_content)
-        if match:
-            extracted = match.group(1).strip()
-            log_parts.append(f"提取 delivery_location 占位值: {extracted}")
-            return extracted
+    pattern = r"(?:交货地点|交付地点|项目现场)\s*[：:]\s*([^\n\r]+)"
+    match = re.search(pattern, doc_content)
+    if match:
+        extracted = match.group(1).strip()
+        log_parts.append(f"提取 delivery_location 占位值: {extracted}")
+        return extracted
 
     log_parts.append("未找到 delivery_location 占位值")
     return None
 
 
-GJGK_EXTRACTORS = [
+GJGK_EXTRACTORS: List[ExtractorSpec] = [
     ExtractorSpec(
         name="project_content",
         enabled_if=lambda state: state.get("project_content") is not None,
-        extract_callable=extract_project_content,
+        extract_callable=extract_public_tender_project_content,
     ),
     ExtractorSpec(
         name="project_number",
         enabled_if=lambda state: state.get("project_number") is not None,
-        extract_callable=extract_project_number,
+        extract_callable=extract_gjgk_project_number_from_bid_header,
     ),
     ExtractorSpec(
         name="project_name",
@@ -110,12 +116,12 @@ GJGK_EXTRACTORS = [
     ExtractorSpec(
         name="buyer_name",
         enabled_if=lambda state: state.get("buyer_name") is not None,
-        extract_callable=extract_buyer_name,
+        extract_callable=extract_public_tender_buyer_name,
     ),
     ExtractorSpec(
         name="bzj_rule",
         enabled_if=lambda state: state.get("bzj_rule") is not None,
-        extract_callable=extract_bzj_rule,
+        extract_callable=extract_public_tender_bzj_rule,
     ),
     ExtractorSpec(
         name="contact_fields",
@@ -126,7 +132,7 @@ GJGK_EXTRACTORS = [
                 state.get("zbr_pinyin"),
             ]
         ),
-        extract_callable=extract_contact_fields,
+        extract_callable=extract_public_tender_contact_fields,
         output_field_names=["project_zbr_xbr", "zbr_xbr_tel", "zbr_pinyin"],
     ),
     ExtractorSpec(
@@ -144,7 +150,7 @@ GJGK_EXTRACTORS = [
     ExtractorSpec(
         name="platform",
         enabled_if=lambda state: state.get("platform") is not None,
-        extract_callable=extract_platform,
+        extract_callable=extract_public_tender_platform,
     ),
     ExtractorSpec(
         name="service_fee",
@@ -169,24 +175,12 @@ GJGK_EXTRACTORS = [
 ]
 
 
-GJGK_REPLACEMENT_FIELDS = [
-    ReplacementFieldSpec(field_name="project_content"),
-    ReplacementFieldSpec(field_name="project_number"),
-    ReplacementFieldSpec(field_name="project_name"),
-    ReplacementFieldSpec(field_name="bzj_rule"),
-    ReplacementFieldSpec(field_name="buyer_name"),
-    ReplacementFieldSpec(field_name="project_zbr_xbr"),
-    ReplacementFieldSpec(field_name="zbr_xbr_tel"),
-    ReplacementFieldSpec(field_name="zbr_pinyin"),
-    ReplacementFieldSpec(field_name="shell_start_date"),
-    ReplacementFieldSpec(field_name="shell_end_date"),
-    ReplacementFieldSpec(field_name="submit_date"),
-    ReplacementFieldSpec(field_name="platform"),
-    ReplacementFieldSpec(field_name="service_fee"),
-]
+GJGK_REPLACEMENT_FIELDS: List[ReplacementFieldSpec] = build_common_replacement_fields()
 
 
-def get_replacements(state: GjgkTenderGraphState, config) -> GjgkTenderGraphState:
+def gjgk_get_replacements(
+    state: GjgkTenderGraphState, config
+) -> GjgkTenderGraphState:
     return run_get_replacements(
         state=state,
         config=config,

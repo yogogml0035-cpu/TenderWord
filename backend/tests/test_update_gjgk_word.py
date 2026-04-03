@@ -9,7 +9,7 @@ MODULE_PATH = (
     Path(__file__).resolve().parents[1]
     / "nodes"
     / "gjgk_word_nodes"
-    / "update_gjgk_word.py"
+    / "gjgk_update_word.py"
 )
 MODULE_SOURCE = MODULE_PATH.read_text(encoding="utf-8")
 MODULE_AST = ast.parse(MODULE_SOURCE)

@@ -6,6 +6,7 @@ from typing import Dict
 import requests
 
 from backend.config.settings import settings
+from backend.util.common_util.tender_number import normalize_gjgk_project_number
 
 
 def _request_timeout_seconds() -> float:
@@ -41,6 +42,14 @@ def _normalize_tender_type_payload(payload) -> Dict | None:
         "purchase_method": purchase_method,
         "fund_lx": fund_lx,
     }
+
+
+def _is_gjgk_tender_type(tender_type: Dict | None) -> bool:
+    return bool(
+        tender_type
+        and tender_type.get("tender_lx") == 0
+        and tender_type.get("purchase_method") == 0
+    )
 
 
 def fetch_tender_data(tender_no: str) -> Dict:
@@ -84,10 +93,15 @@ def fetch_tender_data(tender_no: str) -> Dict:
             raise ValueError("接口返回数据中缺少 'data' 字段")
 
         data = result["data"]
+        tender_type = _normalize_tender_type_payload(result.get("type"))
+        project_number = data.get("project_number", "")
+        if _is_gjgk_tender_type(tender_type):
+            project_number = normalize_gjgk_project_number(project_number, tender_no)
+
         # 提取所需字段
         tender_data = {
             "project_name": data.get("project_name", ""),
-            "project_number": data.get("project_number", ""),
+            "project_number": project_number,
             "project_content": data.get("project_content", ""),
             "bzj_rule": data.get("bzj_rule", ""),
             "buyer_name": data.get("buyer_name", ""),
@@ -105,9 +119,6 @@ def fetch_tender_data(tender_no: str) -> Dict:
             "service_fee": "",  # data.get("service_fee", ""),
             "fund_source_lx": _normalize_fund_source_lx(data.get("fund_lx")),
         }
-
-        # 接口返回的 type 用于表单路由（不通过 URL 传 tender_lx/purchase_method/fund_lx）
-        tender_type = _normalize_tender_type_payload(result.get("type"))
 
         return {"data": tender_data, "type": tender_type}
 

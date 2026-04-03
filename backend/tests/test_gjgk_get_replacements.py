@@ -1,6 +1,7 @@
 from backend.nodes.gjgk_word_nodes.gjgk_get_replacements import (
     extract_delivery_location,
     extract_fund_source_lx,
+    extract_gjgk_project_number_from_bid_header,
     extract_tender_invitation,
 )
 from backend.states import GjgkTenderGraphState
@@ -45,3 +46,18 @@ def test_extract_delivery_location_supports_multiple_labels():
     )
 
     assert result == "上海市浦东新区金科路 1 号"
+
+
+def test_extract_gjgk_project_number_from_bid_header_keeps_full_code_suffix():
+    log_parts: list[str] = []
+    state = GjgkTenderGraphState(project_number="264DSITC0639")
+
+    result = extract_gjgk_project_number_from_bid_header(
+        "",
+        "招标编号：0811-254DSITC2512",
+        state,
+        log_parts,
+    )
+
+    assert result == "254DSITC2512"
+    assert any("254DSITC2512" in item for item in log_parts)

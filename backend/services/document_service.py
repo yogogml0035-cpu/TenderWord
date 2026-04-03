@@ -31,6 +31,7 @@ from backend.task.task_queue_manager import get_task_queue
 from backend.util.log_util.execution_log import log_generate_task_success
 from backend.util.log_util.progress_log import progress_log
 from backend.util.log_util.sse_log_handler import task_log_context
+from backend.util.common_util.tender_number import normalize_gjgk_project_number
 from backend.config.tender_config import get_default_anchor_texts
 
 if TYPE_CHECKING:
@@ -568,6 +569,9 @@ class DocumentService:
         # 构建状态
         tender_type = request.form_type.value.replace("_tender", "")
         conversation_id = str(getattr(request, "conversation_id", "") or "").strip()
+        project_number = tender_data.project_number or ""
+        if tender_type == "gjgk":
+            project_number = normalize_gjgk_project_number(project_number)
         state: Dict[str, Any] = {
             # 与队列任务ID保持一致，确保进度、取消、日志链路统一
             "task_id": task_id,
@@ -576,7 +580,7 @@ class DocumentService:
             "tender_type": tender_type,
             # 项目信息
             "project_name": tender_data.project_name or "",
-            "project_number": tender_data.project_number or "",
+            "project_number": project_number,
             "project_content": tender_data.project_content or "",
             "buyer_name": tender_data.buyer_name or "",
             "bzj_rule": tender_data.bzj_rule or "",

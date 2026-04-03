@@ -74,7 +74,7 @@ from backend.nodes.common_word_nodes import (
     update_word,
 )
 from backend.nodes.common_word_nodes import extract_tender_params
-from backend.nodes.xjcg_word_nodes import get_replacements
+from backend.nodes.xjcg_word_nodes import xjcg_get_replacements
 
 
 class XjcgTenderGraph(StandardTenderWorkflowGraph):
@@ -103,7 +103,7 @@ class XjcgTenderGraph(StandardTenderWorkflowGraph):
     NODE_COPY_COMMENTS: Callable = copy_comments
     NODE_EXTRACT_TENDER_PARAMS: Callable = extract_tender_params
     NODE_DELETE_TENDER_PARAM: Callable = delete_tender_param
-    NODE_GET_REPLACEMENTS: Callable = get_replacements
+    NODE_GET_REPLACEMENTS: Callable = xjcg_get_replacements
     NODE_REPLACE_CONTENT: Callable = replace_content
     NODE_GENERATE_POLISHED_TEXT: Callable = generate_polished_text
     NODE_GENERATE_COMMENTS: Callable = generate_comments

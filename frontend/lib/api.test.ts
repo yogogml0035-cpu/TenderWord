@@ -215,6 +215,26 @@ describe('API Client', () => {
   });
 
   describe('fetchTenderData', () => {
+    it('normalizes gjgk project_number from tender number when upstream returns a truncated code', async () => {
+      globalThis.fetch = mockFetchJson({
+        success: true,
+        data: {
+          project_name: 'Test Project',
+          project_number: 'TC0639',
+        },
+        type: {
+          tender_lx: 0,
+          purchase_method: 0,
+          fund_lx: 1,
+        },
+        message: 'OK',
+        timestamp: new Date().toISOString(),
+      });
+
+      const result = await fetchTenderDataWithType('0811-264DSITC0639');
+      expect(result.data.project_number).toBe('264DSITC0639');
+    });
+
     it('returns tender data and type info together when requested', async () => {
       globalThis.fetch = mockFetchJson({
         success: true,

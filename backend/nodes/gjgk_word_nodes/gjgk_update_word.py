@@ -49,7 +49,7 @@ from backend.util.word_util.anchor_utils import (  # noqa: E402
     resolve_anchor_content_range,
 )
 
-NODE_NAME = "update_gjgk_word"
+NODE_NAME = "gjgk_update_word"
 INSERT_FONT_NAME = "宋体"
 INSERT_FONT_SIZE = 12
 CONTROL_CHARS = {"\r", "\n", "\v", "\f", "\a"}
@@ -1211,7 +1211,7 @@ def diagnose_gjgk_lock(
     return report
 
 
-def update_gjgk_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphState:
+def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphState:
     start_time = time.perf_counter()
 
     prepared_doc_path = state.get("prepared_doc_path")
@@ -1575,7 +1575,7 @@ def _run_update_only_manual_scenario(
     source_doc_path: pathlib.Path,
     *,
     scenario_label: str = "[场景2] 预删模板回填产物",
-    execution_mode: str = "复制预删除模板后直接运行 update_gjgk_word",
+    execution_mode: str = "复制预删除模板后直接运行 gjgk_update_word",
 ) -> pathlib.Path:
     if not source_doc_path.exists():
         raise FileNotFoundError(f"更新测试源文件不存在: {source_doc_path}")
@@ -1591,8 +1591,8 @@ def _run_update_only_manual_scenario(
     _print_manual_state(update_state)
     print("-" * 80)
 
-    result_state = update_gjgk_word(update_state, config=None)
-    print("✅ update_gjgk_word 执行完成")
+    result_state = gjgk_update_word(update_state, config=None)
+    print("✅ gjgk_update_word 执行完成")
     print(f"回填产物: {output_path}")
     print("插入日志:")
     for part in str(result_state.get("insertion_log", "")).split("; "):
@@ -1612,11 +1612,11 @@ def main() -> None:
             DEFAULT_TEST_UPDATE_SOURCE_DOC,
             scenario_label="[场景] 预删模板同页回填",
             execution_mode=(
-                "仅复制删除模板测试文档并直接执行 update_gjgk_word"
+        "仅复制删除模板测试文档并直接执行 gjgk_update_word"
             ),
         )
     except Exception as exc:
-        print("❌ update_gjgk_word 执行失败")
+        print("❌ gjgk_update_word 执行失败")
         print(f"错误信息: {exc}")
         sys.exit(1)
 

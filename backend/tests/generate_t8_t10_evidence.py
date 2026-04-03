@@ -16,12 +16,12 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
 
 from backend.nodes.xjcg_word_nodes.xjcg_get_replacements import (
-    get_replacements as xjcg_get_replacements,
+    xjcg_get_replacements,
     XJCG_EXTRACTORS,
     XJCG_REPLACEMENT_FIELDS,
 )
 from backend.nodes.gngk_word_nodes.gngk_get_replacements import (
-    get_replacements as gngk_get_replacements,
+    gngk_get_replacements,
     GNGK_EXTRACTORS,
     GNGK_REPLACEMENT_FIELDS,
 )

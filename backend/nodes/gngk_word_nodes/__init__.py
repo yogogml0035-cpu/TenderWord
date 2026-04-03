@@ -11,13 +11,15 @@ from backend.nodes.common_word_nodes import (
     update_word,
 )
 
-from backend.nodes.gngk_word_nodes.gngk_get_replacements import get_replacements
+from backend.nodes.gngk_word_nodes.gngk_get_replacements import (
+    gngk_get_replacements,
+)
 
 __all__ = [
     "prepare_template",
     "extract_tender_params",
     "delete_tender_param",
-    "get_replacements",
+    "gngk_get_replacements",
     "replace_content",
     "update_word",
     "generate_polished_text",
