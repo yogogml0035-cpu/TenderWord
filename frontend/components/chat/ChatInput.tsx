@@ -13,7 +13,7 @@ const MAX_TEXTAREA_HEIGHT = 180;
 interface ChatInputProps {
   value: string;
   onValueChange: (value: string) => void;
-  onSend: (message: string) => void;
+  onSend: (message: string) => boolean | void | Promise<boolean | void>;
   onCancel?: () => void;
   selectedModel: ModelType;
   onModelChange: (model: ModelType) => void;
@@ -31,6 +31,15 @@ interface ChatInputProps {
 
 function isWordDocument(file: File): boolean {
   return /\.(doc|docx)$/i.test(file.name);
+}
+
+function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'then' in value &&
+    typeof (value as PromiseLike<T>).then === 'function'
+  );
 }
 
 export function ChatInput({
@@ -123,9 +132,21 @@ export function ChatInput({
     const trimmed = value.trim();
     if (!trimmed || sendLocked) return;
 
-    onSend(trimmed);
-    onValueChange('');
-    resetTextareaHeight(internalTextareaRef.current);
+    const finalizeSend = (result: boolean | void) => {
+      if (result === false) {
+        return;
+      }
+      onValueChange('');
+      resetTextareaHeight(internalTextareaRef.current);
+    };
+
+    const sendResult = onSend(trimmed);
+    if (isPromiseLike<boolean | void>(sendResult)) {
+      void sendResult.then(finalizeSend).catch(() => {});
+      return;
+    }
+
+    finalizeSend(sendResult);
   }, [onSend, onValueChange, resetTextareaHeight, sendLocked, value]);
 
   const handleCancel = useCallback(() => {

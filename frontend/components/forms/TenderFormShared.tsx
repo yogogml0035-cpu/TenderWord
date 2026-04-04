@@ -83,10 +83,15 @@ const sharedUploadCopy = {
 } as const;
 
 const oldTemplateSelectionMessage = '该模板过旧不能选择，仅供下载参考';
+const missingInsertionAnchorMessage = '请先补全当前页面的插入锚点';
 const segmentedControlClassName =
   'inline-flex items-center rounded-2xl border border-slate-200 bg-slate-100/85 p-1 shadow-sm';
 const segmentedToggleButtonClassName =
   'relative min-w-[72px] rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50';
+const gngkFiscalInsertionConfigDefaults: TenderInsertionConfig = {
+  before_text: '第四章  招标需求',
+  after_text: '第五章  评标方法与程序',
+};
 
 function toDraftFile(file: UploadedFile | null | undefined): ConversationDraftFile | undefined {
   if (!file) {
@@ -111,6 +116,35 @@ function normalizeTemplateTenderNo(value: string | null | undefined): string | n
 function normalizeTemplateProjectName(value: string | null | undefined): string | null {
   const normalizedValue = value?.trim();
   return normalizedValue ? normalizedValue : null;
+}
+
+function areInsertionConfigsEqual(
+  current: Partial<TenderInsertionConfig> | null | undefined,
+  next: TenderInsertionConfig
+): boolean {
+  return current?.before_text === next.before_text && current?.after_text === next.after_text;
+}
+
+function resolveDefaultInsertionConfig(
+  tenderType: TenderType,
+  fundLx: FundLx,
+  variantDefaults: TenderInsertionConfig
+): TenderInsertionConfig {
+  if (tenderType === 'gngk' && fundLx === 1) {
+    return gngkFiscalInsertionConfigDefaults;
+  }
+
+  return variantDefaults;
+}
+
+function resolveInsertionConfig(
+  current: Partial<TenderInsertionConfig> | null | undefined,
+  fallback: TenderInsertionConfig
+): TenderInsertionConfig {
+  return {
+    before_text: current?.before_text ?? fallback.before_text,
+    after_text: current?.after_text ?? fallback.after_text,
+  };
 }
 
 function buildTemplateCandidateCacheKey(tenderNo: string, projectName: string | null): string {
@@ -242,13 +276,15 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const [localFundLx, setLocalFundLx] = useState<FundLx>(initialFundLx);
   const [insertionConfig, setInsertionConfig] = useState<TenderInsertionConfig>(() => {
     const gngkScopedInsertion =
-      initialDraft?.gngk_insertion_configs?.[initialFundLx] || initialDraft?.insertion_config;
-    return {
-      before_text:
-        gngkScopedInsertion?.before_text || variantConfig.insertionConfigDefaults.before_text,
-      after_text:
-        gngkScopedInsertion?.after_text || variantConfig.insertionConfigDefaults.after_text,
-    };
+      initialDraft?.gngk_insertion_configs?.[initialFundLx] ?? initialDraft?.insertion_config;
+    return resolveInsertionConfig(
+      gngkScopedInsertion,
+      resolveDefaultInsertionConfig(
+        tenderType,
+        initialFundLx,
+        variantConfig.insertionConfigDefaults
+      )
+    );
   });
   const [error, setError] = useState<string | null>(null);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
@@ -321,18 +357,14 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
 
     if (tenderType === 'gngk' && shouldUpdateFund) {
       const scopedConfig = initialDraft?.gngk_insertion_configs?.[initialFundLx];
-      const nextInsertion: TenderInsertionConfig = {
-        before_text:
-          scopedConfig?.before_text ||
-          (initialFundLx === 1
-            ? '第四章  招标需求'
-            : variantConfig.insertionConfigDefaults.before_text),
-        after_text:
-          scopedConfig?.after_text ||
-          (initialFundLx === 1
-            ? '第五章  评标方法与程序'
-            : variantConfig.insertionConfigDefaults.after_text),
-      };
+      const nextInsertion = resolveInsertionConfig(
+        scopedConfig,
+        resolveDefaultInsertionConfig(
+          tenderType,
+          initialFundLx,
+          variantConfig.insertionConfigDefaults
+        )
+      );
       updates.insertion_config = nextInsertion;
       setInsertionConfig(nextInsertion);
     }
@@ -351,8 +383,42 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     initialFundLx,
     onDraftChange,
     tenderType,
+    variantConfig.insertionConfigDefaults,
     variantConfig.insertionConfigDefaults.after_text,
     variantConfig.insertionConfigDefaults.before_text,
+  ]);
+
+  useEffect(() => {
+    if (!onDraftChange) {
+      return;
+    }
+
+    const updates: Partial<ConversationFormDraft> = {};
+
+    if (!areInsertionConfigsEqual(initialDraft?.insertion_config, insertionConfig)) {
+      updates.insertion_config = insertionConfig;
+    }
+
+    if (tenderType === 'gngk') {
+      const currentScopedConfig = initialDraft?.gngk_insertion_configs?.[fundLx];
+      if (!areInsertionConfigsEqual(currentScopedConfig, insertionConfig)) {
+        updates.gngk_insertion_configs = {
+          ...(initialDraft?.gngk_insertion_configs || {}),
+          [fundLx]: insertionConfig,
+        };
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      onDraftChange(updates);
+    }
+  }, [
+    fundLx,
+    initialDraft?.gngk_insertion_configs,
+    initialDraft?.insertion_config,
+    insertionConfig,
+    onDraftChange,
+    tenderType,
   ]);
 
   const applyTenderDraftUpdates = useCallback(
@@ -455,16 +521,14 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
           [fundLx]: insertionConfig,
         };
         const targetScoped = nextScopedConfigs[nextFundLx];
-        const nextInsertion: TenderInsertionConfig = targetScoped || {
-          before_text:
-            nextFundLx === 1
-              ? '第四章  招标需求'
-              : variantConfig.insertionConfigDefaults.before_text,
-          after_text:
-            nextFundLx === 1
-              ? '第五章  评标方法与程序'
-              : variantConfig.insertionConfigDefaults.after_text,
-        };
+        const nextInsertion = resolveInsertionConfig(
+          targetScoped,
+          resolveDefaultInsertionConfig(
+            tenderType,
+            nextFundLx,
+            variantConfig.insertionConfigDefaults
+          )
+        );
 
         nextUpdates.gngk_insertion_configs = nextScopedConfigs;
         nextUpdates.insertion_config = nextInsertion;
@@ -483,8 +547,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       insertionConfig,
       onDraftChange,
       tenderType,
-      variantConfig.insertionConfigDefaults.after_text,
-      variantConfig.insertionConfigDefaults.before_text,
+      variantConfig.insertionConfigDefaults,
     ]
   );
 
@@ -508,44 +571,40 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
 
   const handleBeforeTextChange = useCallback(
     (value: string) => {
-      setInsertionConfig((prev) => {
-        const next = { ...prev, before_text: value };
-        if (tenderType === 'gngk') {
-          onDraftChange?.({
-            insertion_config: next,
-            gngk_insertion_configs: {
-              ...(initialDraft?.gngk_insertion_configs || {}),
-              [fundLx]: next,
-            },
-          });
-        } else {
-          onDraftChange?.({ insertion_config: next });
-        }
-        return next;
-      });
+      const next = { ...insertionConfig, before_text: value };
+      setInsertionConfig(next);
+      if (tenderType === 'gngk') {
+        onDraftChange?.({
+          insertion_config: next,
+          gngk_insertion_configs: {
+            ...(initialDraft?.gngk_insertion_configs || {}),
+            [fundLx]: next,
+          },
+        });
+      } else {
+        onDraftChange?.({ insertion_config: next });
+      }
     },
-    [fundLx, initialDraft?.gngk_insertion_configs, onDraftChange, tenderType]
+    [fundLx, initialDraft?.gngk_insertion_configs, insertionConfig, onDraftChange, tenderType]
   );
 
   const handleAfterTextChange = useCallback(
     (value: string) => {
-      setInsertionConfig((prev) => {
-        const next = { ...prev, after_text: value };
-        if (tenderType === 'gngk') {
-          onDraftChange?.({
-            insertion_config: next,
-            gngk_insertion_configs: {
-              ...(initialDraft?.gngk_insertion_configs || {}),
-              [fundLx]: next,
-            },
-          });
-        } else {
-          onDraftChange?.({ insertion_config: next });
-        }
-        return next;
-      });
+      const next = { ...insertionConfig, after_text: value };
+      setInsertionConfig(next);
+      if (tenderType === 'gngk') {
+        onDraftChange?.({
+          insertion_config: next,
+          gngk_insertion_configs: {
+            ...(initialDraft?.gngk_insertion_configs || {}),
+            [fundLx]: next,
+          },
+        });
+      } else {
+        onDraftChange?.({ insertion_config: next });
+      }
     },
-    [fundLx, initialDraft?.gngk_insertion_configs, onDraftChange, tenderType]
+    [fundLx, initialDraft?.gngk_insertion_configs, insertionConfig, onDraftChange, tenderType]
   );
 
   const originUploaderFiles = useMemo(() => (originFile ? [originFile] : []), [originFile]);
@@ -766,6 +825,11 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         setError(
           `请先上传技术参数文件: ${unuploadedParams.map((file) => file.original_name).join(', ')}`
         );
+        return;
+      }
+
+      if (!insertionConfig.before_text.trim() || !insertionConfig.after_text.trim()) {
+        setError(missingInsertionAnchorMessage);
         return;
       }
 

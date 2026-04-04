@@ -83,7 +83,7 @@ jest.mock('@/components/chat/ChatInput', () => ({
     noticeMessage?: string | null;
     onModelChange?: (model: string) => void;
     onCancel?: () => void;
-    onSend?: (message: string) => void;
+    onSend?: (message: string) => boolean | void | Promise<boolean | void>;
     onEditFileSelect?: (file: File) => void | Promise<void>;
     onEditFileRemove?: () => void;
   }) => (
@@ -357,11 +357,16 @@ describe('ChatPanel', () => {
 
     render(<ChatPanel />);
 
-    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-send-disabled', 'true');
-    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-notice', '请先补全当前页面的插入锚点');
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-send-disabled', 'false');
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-notice', '');
 
     fireEvent.click(screen.getByTestId('send-current-input-button'));
+
     expect(mockCreateEditTask).not.toHaveBeenCalled();
+    expect(screen.getByTestId('chat-input')).toHaveAttribute(
+      'data-notice',
+      '请先补全当前页面的插入锚点'
+    );
   });
 
   it('creates an edit task directly without using the user stream route', async () => {

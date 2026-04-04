@@ -369,6 +369,25 @@ describe('TenderFormShared', () => {
     }
   );
 
+  it('syncs visible default anchors into draft on initial render', async () => {
+    const onDraftChange = jest.fn();
+
+    renderSharedForm({
+      tenderType: 'xjcg',
+      initialDraft: {},
+      onDraftChange,
+    });
+
+    await waitFor(() =>
+      expect(onDraftChange).toHaveBeenCalledWith({
+        insertion_config: {
+          before_text: '第三章  采购需求',
+          after_text: '第四章  响应文件有关格式',
+        },
+      })
+    );
+  });
+
   it.each([
     ['xjcg', '询价采购'],
     ['gngk', '国内公开'],
@@ -580,6 +599,27 @@ describe('TenderFormShared', () => {
     });
   });
 
+  it('shows missing anchor validation only on submit', async () => {
+    const user = userEvent.setup();
+    const onSubmit = jest.fn();
+    renderSharedForm({ onSubmit });
+
+    await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+    await user.click(screen.getByLabelText('上传模板文件（可选）'));
+    await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
+
+    const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
+    await user.clear(beforeInput);
+
+    expect(screen.queryByText('请先补全当前页面的插入锚点')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '开始生成' }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText('请先补全当前页面的插入锚点')).toBeInTheDocument();
+  });
+
   it('supports draft initialization and draft sync callbacks', async () => {
     const user = userEvent.setup();
     const onDraftChange = jest.fn();
@@ -675,6 +715,76 @@ describe('TenderFormShared', () => {
 
     await waitFor(() => expect(fiscalFundButton).toHaveClass('bg-blue-600'));
     expect(selfFundButton).not.toHaveClass('bg-blue-600');
+  });
+
+  it('syncs gngk visible anchors into draft when fund mode switches', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk' });
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <>
+          <TenderFormShared
+            tenderType="gngk"
+            onSubmit={jest.fn()}
+            initialDraft={draft}
+            onDraftChange={(updates) => {
+              setDraft((previous) => mergeDraftState(previous, updates));
+            }}
+          />
+          <pre data-testid="draft-state">{JSON.stringify(draft)}</pre>
+        </>
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('draft-state')).toHaveTextContent('第三章 招标内容及要求')
+    );
+
+    await user.click(screen.getByRole('button', { name: '财政' }));
+
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText('插入位置前的章节标题')).toHaveValue('第四章  招标需求')
+    );
+    expect(screen.getByTestId('draft-state')).toHaveTextContent('第四章 招标需求');
+    expect(screen.getByTestId('draft-state')).toHaveTextContent('第五章 评标方法与程序');
+  });
+
+  it('preserves manually cleared gngk anchors across fund switches', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk' });
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <TenderFormShared
+          tenderType="gngk"
+          onSubmit={jest.fn()}
+          initialDraft={draft}
+          onDraftChange={(updates) => {
+            setDraft((previous) => mergeDraftState(previous, updates));
+          }}
+        />
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
+
+    await user.clear(beforeInput);
+    await waitFor(() => expect(beforeInput).toHaveValue(''));
+
+    await user.click(screen.getByRole('button', { name: '财政' }));
+    await waitFor(() => expect(beforeInput).toHaveValue('第四章  招标需求'));
+
+    await user.click(screen.getByRole('button', { name: '自筹' }));
+    await waitFor(() => expect(beforeInput).toHaveValue(''));
   });
 
   it('uses URL tender_lx only for initial default and allows manual switching afterwards', async () => {

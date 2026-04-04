@@ -25,6 +25,8 @@ interface ChatPanelProps {
   className?: string;
 }
 
+const missingInsertionAnchorMessage = '请先补全当前页面的插入锚点';
+
 function collectNormalChatContext(messages: Message[]): UserStreamMessage[] {
   const candidates = messages.filter((message) => {
     if (message.metadata?.messageKind) {
@@ -122,7 +124,7 @@ function getEditContextMessage(
     !insertionConfig.before_text?.trim() ||
     !insertionConfig.after_text?.trim()
   ) {
-    return '请先补全当前页面的插入锚点';
+    return missingInsertionAnchorMessage;
   }
 
   if (!resolveEditFormType(tenderType, draft)) {
@@ -209,8 +211,6 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   const editFile = conversationDraft?.edit_file || null;
   const currentEditFileSize = conversationDraft?.edit_file?.size || 0;
   const isEditMode = inputMode === 'edit' || !!editFile;
-  const editContextMessage =
-    isEditMode && conversation ? getEditContextMessage(conversation.tenderType, conversationDraft) : null;
   const messages = conversation?.messages || [];
   const mergedMessages: Message[] = messages.map((message) => {
     if (!message.taskId) {
@@ -618,9 +618,9 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   );
 
   const handleSendMessage = useCallback(
-    async (content: string) => {
+    async (content: string): Promise<boolean> => {
       if (!conversation || isBusy) {
-        return;
+        return false;
       }
 
       if (isEditMode) {
@@ -633,7 +633,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         );
         if (!request) {
           setComposerNotice(error || '当前页面缺少可识别的 edit 上下文');
-          return;
+          return false;
         }
 
         addMessage(conversation.id, {
@@ -672,6 +672,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             pending_edit_prompt: content,
             pending_edit_task_id: result.task_id,
           });
+          return true;
         } catch (error) {
           deleteMessage(conversation.id, placeholderMessageId);
           const message = error instanceof ApiError ? error.message : '创建文件修改任务失败，请稍后重试';
@@ -681,14 +682,15 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             content: message,
             status: 'completed',
           });
+          return true;
         }
-        return;
       }
 
       await sendUserMessage(content, {
         appendUserMessage: true,
       });
       updateConversationDraft(conversation.id, { chat_input: '' });
+      return true;
     },
     [
       addMessage,
@@ -815,6 +817,21 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     },
     []
   );
+
+  useEffect(() => {
+    if (composerNotice !== missingInsertionAnchorMessage || !conversation) {
+      return;
+    }
+
+    if (!isEditMode) {
+      setComposerNotice(null);
+      return;
+    }
+
+    if (!getEditContextMessage(conversation.tenderType, conversationDraft)) {
+      setComposerNotice(null);
+    }
+  }, [composerNotice, conversation, conversationDraft, isEditMode]);
 
   useEffect(() => {
     if (!conversation) {
@@ -1060,8 +1077,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         editFile={editFile}
         onEditFileSelect={handleEditFileSelect}
         onEditFileRemove={handleEditFileRemove}
-        sendDisabled={isEditMode ? !!editContextMessage : false}
-        noticeMessage={composerNotice || editContextMessage}
+        noticeMessage={composerNotice}
         placeholder={
           isBusy
             ? '回复生成中，请稍候...'

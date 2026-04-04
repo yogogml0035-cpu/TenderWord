@@ -12,7 +12,7 @@ function ControlledChatInput({
   disabled = false,
   noticeMessage = null,
 }: {
-  onSend?: (message: string) => void;
+  onSend?: (message: string) => boolean | void | Promise<boolean | void>;
   selectedModel?: 'deepseek' | 'qwen' | 'doubao';
   onModelChange?: (model: 'deepseek' | 'qwen' | 'doubao') => void;
   loading?: boolean;
@@ -130,6 +130,20 @@ describe('ChatInput', () => {
     expect(handleSend).toHaveBeenCalledWith('测试消息');
     expect(textarea).toHaveValue('');
     expect(textarea).toHaveStyle({ height: '44px', overflowY: 'hidden' });
+  });
+
+  it('keeps the textarea content when send is rejected locally', () => {
+    const handleSend = jest.fn(() => false);
+
+    render(<ControlledChatInput onSend={handleSend} />);
+
+    const textarea = screen.getByRole('textbox');
+
+    fireEvent.change(textarea, { target: { value: '请补充质保条款' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+
+    expect(handleSend).toHaveBeenCalledWith('请补充质保条款');
+    expect(textarea).toHaveValue('请补充质保条款');
   });
 
   it('auto-resizes the textarea and clamps it at the configured max height', () => {
