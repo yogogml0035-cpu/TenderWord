@@ -37,6 +37,9 @@ def _normalize_tender_type_payload(payload) -> Dict | None:
     except (TypeError, ValueError):
         return None
 
+    if tender_lx not in (0, 1):
+        return None
+
     return {
         "tender_lx": tender_lx,
         "purchase_method": purchase_method,
@@ -45,11 +48,15 @@ def _normalize_tender_type_payload(payload) -> Dict | None:
 
 
 def _is_gjgk_tender_type(tender_type: Dict | None) -> bool:
-    return bool(
-        tender_type
-        and tender_type.get("tender_lx") == 0
-        and tender_type.get("purchase_method") == 0
-    )
+    if not isinstance(tender_type, dict):
+        return False
+
+    try:
+        purchase_method = int(tender_type.get("purchase_method"))
+    except (TypeError, ValueError):
+        return False
+
+    return purchase_method == 0
 
 
 def fetch_tender_data(tender_no: str) -> Dict:
@@ -59,9 +66,10 @@ def fetch_tender_data(tender_no: str) -> Dict:
     接口返回格式为：
     {"data": {...}, "type": {"tender_lx": 0, "purchase_method": 0, "fund_lx": 1}}
     其中：
-    - type 用于表单路由（例如 tender_lx=0, purchase_method=2, fund_lx=0 表示国内公开；
-      tender_lx=0, purchase_method=5, fund_lx=0 表示询价采购；
-      tender_lx=0, purchase_method=0, fund_lx=0|1 表示国际公开）
+    - type 用于表单路由（例如 purchase_method=2 表示国内公开；
+      purchase_method=5 表示询价采购；
+      purchase_method=0 表示国际公开）
+    - type.tender_lx 表示标的类型（0=货物, 1=服务）
     - data.fund_lx 会透传为业务字段 fund_source_lx
 
     Args:
@@ -93,9 +101,10 @@ def fetch_tender_data(tender_no: str) -> Dict:
             raise ValueError("接口返回数据中缺少 'data' 字段")
 
         data = result["data"]
-        tender_type = _normalize_tender_type_payload(result.get("type"))
+        raw_tender_type = result.get("type")
+        tender_type = _normalize_tender_type_payload(raw_tender_type)
         project_number = data.get("project_number", "")
-        if _is_gjgk_tender_type(tender_type):
+        if _is_gjgk_tender_type(raw_tender_type):
             project_number = normalize_gjgk_project_number(project_number, tender_no)
 
         # 提取所需字段

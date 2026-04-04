@@ -19,6 +19,7 @@ import type {
   TaskListData,
   CancelTaskData,
   CreateTaskData,
+  EditTaskRequest,
   GenerateRequest,
   ConversationHeartbeatData,
   ApiSuccessResponse,
@@ -188,7 +189,7 @@ function parseUserStreamEvent(payload: unknown): UserStreamEvent | null {
     case 'task_accepted': {
       const taskKind = payload.data.task_kind;
       const taskId = payload.data.task_id;
-      if (taskKind !== 'generate' && taskKind !== 'rewrite') {
+      if (taskKind !== 'generate' && taskKind !== 'rewrite' && taskKind !== 'edit') {
         return null;
       }
       if (typeof taskId !== 'string' || !taskId) {
@@ -440,7 +441,7 @@ function parseTenderTypeInfo(payload: unknown): TenderTypeInfo | null {
   const fund_lx = payload.fund_lx;
 
   if (
-    typeof tender_lx !== 'number' ||
+    (tender_lx !== 0 && tender_lx !== 1) ||
     typeof purchase_method !== 'number' ||
     (fund_lx !== 0 && fund_lx !== 1)
   ) {
@@ -457,7 +458,6 @@ function parseTenderTypeInfo(payload: unknown): TenderTypeInfo | null {
 function isGjgkTenderTypeInfo(tenderTypeInfo: TenderTypeInfo | null): boolean {
   return Boolean(
     tenderTypeInfo &&
-      tenderTypeInfo.tender_lx === 0 &&
       tenderTypeInfo.purchase_method === 0
   );
 }
@@ -605,6 +605,13 @@ export async function uploadFiles(
 
 export async function createGenerateTask(params: GenerateRequest): Promise<CreateTaskData> {
   return request<CreateTaskData>('/api/generate', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function createEditTask(params: EditTaskRequest): Promise<CreateTaskData> {
+  return request<CreateTaskData>('/api/edit', {
     method: 'POST',
     body: JSON.stringify(params),
   });

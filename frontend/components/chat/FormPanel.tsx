@@ -158,6 +158,7 @@ interface FormPanelProps {
 
 export function FormPanel({ className = '', initialTenderData }: FormPanelProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [headerControlsTarget, setHeaderControlsTarget] = useState<HTMLDivElement | null>(null);
   const mounted = useHydrated();
   const {
     addMessage,
@@ -384,7 +385,8 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
             progress_percent: task.progress.progress_percent,
             progress_text: task.progress.progress_text || '',
             current_node: task.progress.current_node || '',
-            current_node_display: task.progress.current_node_display || task.progress.current_node || '',
+            current_node_display:
+              task.progress.current_node_display || task.progress.current_node || '',
           });
         } catch {
           // 摘要补拉失败不阻断提交流程
@@ -432,36 +434,52 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
     : typeof currentTaskSummary?.progress_percent === 'number'
       ? Math.max(0, Math.min(100, Math.round(currentTaskSummary.progress_percent)))
       : runningProgressFraction
-        ? Math.max(0, Math.min(100, Math.round((runningProgressFraction.completed / runningProgressFraction.total) * 100)))
+        ? Math.max(
+            0,
+            Math.min(
+              100,
+              Math.round((runningProgressFraction.completed / runningProgressFraction.total) * 100)
+            )
+          )
         : 0;
-  const runningOverlayPercent = runningProgressPercent > 0 ? Math.max(runningProgressPercent, 8) : 18;
+  const runningOverlayPercent =
+    runningProgressPercent > 0 ? Math.max(runningProgressPercent, 8) : 18;
   const runningCurrentNodeDisplay =
     typeof currentTaskSummary?.current_node_display === 'string'
       ? currentTaskSummary.current_node_display.trim()
       : '';
   const currentTaskKind = currentTaskSummary?.task_kind || 'generate';
   const isRewriteTask = currentTaskKind === 'rewrite';
+  const isEditTask = currentTaskKind === 'edit';
+  const taskActionLabel = isEditTask ? '文件修改' : isRewriteTask ? '修改' : '生成';
   const runningStepSummary = isCurrentTaskStarting
-    ? `系统正在建立${isRewriteTask ? '修改' : '生成'}任务与进度流`
+    ? `系统正在建立${taskActionLabel}任务与进度流`
     : runningTaskProgress
       ? `已完成 ${runningTaskProgress.completed_count}/${runningTaskProgress.total_nodes} 个步骤`
       : runningProgressFraction
         ? `已完成 ${runningProgressFraction.completed}/${runningProgressFraction.total} 个步骤`
-        : `系统正在启动${isRewriteTask ? '修改' : '生成'}流程`;
-  const runningStatusDetail = runningCurrentNodeDisplay
-    || (isCurrentTaskStarting
+        : `系统正在启动${taskActionLabel}流程`;
+  const runningStatusDetail =
+    runningCurrentNodeDisplay ||
+    (isCurrentTaskStarting
       ? '当前没有前置任务，系统正在获取执行权并初始化 Word 与进度流。'
-      : isRewriteTask
+      : isEditTask
+        ? '系统正在提取当前锚点区正文、生成修改结果并写回文档，请稍候，不建议关闭当前页面。'
+        : isRewriteTask
         ? '系统正在选择目标版本、重写内容并写回文档，请稍候，不建议关闭当前页面。'
         : '系统正在整理章节、参数与格式，请稍候，不建议关闭当前页面。');
   const runningStatusTitle = isCurrentTaskStarting
-    ? `正在启动${isRewriteTask ? '修改' : '生成'}流程...`
-    : isRewriteTask
+    ? `正在启动${taskActionLabel}流程...`
+    : isEditTask
+      ? '正在修改上传文档...'
+      : isRewriteTask
       ? '正在修改文档...'
       : '正在生成招标文档...';
   const runningStatusLabel = isCurrentTaskStarting
     ? '准备执行中'
-    : isRewriteTask
+    : isEditTask
+      ? '文件修改中'
+      : isRewriteTask
       ? '修改处理中'
       : '文档生成中';
   const runningProgressLabel = runningTaskProgress
@@ -482,7 +500,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         progressSummary: queueProgressSummary,
         progressLabel: queueProgressLabel,
         progressBarPercent: runningProgressPercent,
-        footer: `轮到当前任务后将自动开始${isRewriteTask ? '修改' : '生成'}，无需重复提交。`,
+        footer: `轮到当前任务后将自动开始${taskActionLabel}，无需重复提交。`,
         icon: (
           <svg
             className="h-7 w-7"
@@ -512,7 +530,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
           progressSummary: runningStepSummary,
           progressLabel: runningProgressLabel,
           progressBarPercent: runningOverlayPercent,
-          footer: `${isRewriteTask ? '修改' : '生成'}过程中可使用底部“取消生成”终止任务`,
+          footer: `${taskActionLabel}过程中可使用底部“取消任务”终止流程`,
           icon: <Loader2 className="h-7 w-7 animate-spin" />,
         }
       : null;
@@ -608,8 +626,14 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
     >
       {/* Header */}
       <div className="relative z-20 border-b border-gray-200 bg-white px-4 py-3">
-        <div>
-          <h2 className="font-medium text-gray-900">{tenderTypeDisplayName}</h2>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <h2 className="text-[28px] font-semibold tracking-[-0.04em] text-slate-900">
+            {tenderTypeDisplayName}
+          </h2>
+          <div
+            ref={setHeaderControlsTarget}
+            className="flex min-w-0 flex-wrap items-center justify-start lg:flex-1 lg:justify-end"
+          />
         </div>
       </div>
 
@@ -618,6 +642,8 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         <TenderFormComponent
           key={conversation.id}
           onSubmit={handleSubmit}
+          headerTitle={tenderTypeDisplayName}
+          headerControlsTarget={headerControlsTarget}
           isSubmitting={formIsBusy}
           canCancel={hasCancelableCurrentTask}
           onCancel={handleCancelTask}

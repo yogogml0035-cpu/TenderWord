@@ -5,7 +5,12 @@ import { TenderFormShared, type BaseTenderFormData } from './TenderFormShared';
 import type { UploadedFile } from './FileUploader';
 import type { ConversationFormDraft } from '@/stores/chatStore';
 import { ApiError } from '@/lib/api';
-import type { TenderData, TemplateCandidate, TemplateCandidateRanking, TenderTypeInfo } from '@/types/api';
+import type {
+  TenderData,
+  TemplateCandidate,
+  TemplateCandidateRanking,
+  TenderTypeInfo,
+} from '@/types/api';
 
 const mockSyncTenderDataDraft = jest.fn();
 const mockUseUrlParams = jest.fn();
@@ -38,10 +43,7 @@ const buildTenderTypeInfo = (overrides?: Partial<TenderTypeInfo>): TenderTypeInf
 
 const mockUploadFactoryByType: Record<string, () => UploadedFile[]> = {};
 
-function buildUploadedFile(
-  fileType: string,
-  overrides: Partial<UploadedFile> = {}
-): UploadedFile {
+function buildUploadedFile(fileType: string, overrides: Partial<UploadedFile> = {}): UploadedFile {
   return {
     id: `${fileType}-id`,
     file_path: `D:/UploadFiles/${fileType}.docx`,
@@ -104,9 +106,12 @@ jest.mock('./TenderNoInput', () => ({
 }));
 
 jest.mock('@/lib/tenderFetch', () => ({
-  createTenderFetchState: (status: string, error?: string) => (error ? { status, error } : { status }),
-  resolveTenderFetchState: (state: { status: string } | undefined, data: TenderData | null | undefined) =>
-    state || (data ? { status: 'success' } : { status: 'idle' }),
+  createTenderFetchState: (status: string, error?: string) =>
+    error ? { status, error } : { status },
+  resolveTenderFetchState: (
+    state: { status: string } | undefined,
+    data: TenderData | null | undefined
+  ) => state || (data ? { status: 'success' } : { status: 'idle' }),
   syncTenderDataDraft: (...args: unknown[]) => mockSyncTenderDataDraft(...args),
 }));
 
@@ -131,7 +136,8 @@ jest.mock('@/lib/api', () => {
     ApiError: MockApiError,
     fetchTemplateCandidates: (...args: unknown[]) => mockFetchTemplateCandidates(...args),
     selectTemplateCandidate: (...args: unknown[]) => mockSelectTemplateCandidate(...args),
-    getTemplateCandidateDownloadUrl: (...args: unknown[]) => mockGetTemplateCandidateDownloadUrl(...args),
+    getTemplateCandidateDownloadUrl: (...args: unknown[]) =>
+      mockGetTemplateCandidateDownloadUrl(...args),
   };
 });
 
@@ -172,6 +178,8 @@ jest.mock('./FileUploader', () => ({
 function renderSharedForm(options?: {
   tenderType?: 'xjcg' | 'gngk' | 'gjgk';
   onSubmit?: (data: BaseTenderFormData) => Promise<void> | void;
+  headerTitle?: string;
+  headerControlsTarget?: Element | null;
   initialDraft?: ConversationFormDraft | null;
   initialTenderNo?: string;
   initialTenderData?: TenderData | null;
@@ -184,6 +192,8 @@ function renderSharedForm(options?: {
     <TenderFormShared
       tenderType={options?.tenderType || 'xjcg'}
       onSubmit={options?.onSubmit || jest.fn()}
+      headerTitle={options?.headerTitle}
+      headerControlsTarget={options?.headerControlsTarget}
       initialTenderNo={options?.initialTenderNo}
       initialTenderData={options?.initialTenderData}
       initialDraft={options?.initialDraft}
@@ -224,22 +234,28 @@ function mergeDraftState(
 
 function setUrlParams(options?: {
   tenderType?: 'xjcg' | 'gngk' | 'gjgk';
+  tenderLx?: 0 | 1;
+  fundLx?: 0 | 1;
   hasParams?: boolean;
   isValid?: boolean;
 }) {
+  const tenderLx = options?.tenderLx ?? 0;
+  const fundLx = options?.fundLx ?? (options?.tenderType === 'gjgk' ? 1 : 0);
   const searchParams =
     options?.hasParams === false
-        ? new URLSearchParams('')
-        : new URLSearchParams(
+      ? new URLSearchParams('')
+      : new URLSearchParams(
           options?.tenderType === 'gngk'
-            ? 'tenderno=TEST-001&tender_lx=0&purchase_method=2&fund_lx=0'
+            ? `tenderno=TEST-001&tender_lx=${tenderLx}&purchase_method=2&fund_lx=${fundLx}`
             : options?.tenderType === 'gjgk'
-              ? 'tenderno=TEST-001&tender_lx=0&purchase_method=0&fund_lx=1'
-              : 'tenderno=TEST-001&tender_lx=0&purchase_method=5&fund_lx=0'
+              ? `tenderno=TEST-001&tender_lx=${tenderLx}&purchase_method=0&fund_lx=${fundLx}`
+              : `tenderno=TEST-001&tender_lx=${tenderLx}&purchase_method=5&fund_lx=${fundLx}`
         );
 
   mockUseUrlParams.mockReturnValue({
     tenderno: options?.hasParams === false ? undefined : 'TEST-001',
+    tender_lx: options?.hasParams === false ? undefined : tenderLx,
+    fund_lx: options?.hasParams === false ? undefined : fundLx,
     tenderType: options?.hasParams === false ? undefined : options?.tenderType || 'xjcg',
     isValid: options?.isValid ?? true,
     errors: [],
@@ -350,6 +366,52 @@ describe('TenderFormShared', () => {
       expect(screen.getByText(cleanLabel)).toBeInTheDocument();
       expect(screen.getByPlaceholderText('插入位置前的章节标题')).toHaveValue(beforeText);
       expect(screen.getByPlaceholderText('插入位置后的章节标题')).toHaveValue(afterText);
+    }
+  );
+
+  it.each([
+    ['xjcg', '询价采购'],
+    ['gngk', '国内公开'],
+    ['gjgk', '国际公开'],
+  ] as const)(
+    'renders toggle controls into the external header slot for %s',
+    async (tenderType, headerTitle) => {
+      function HeaderSlotHarness() {
+        const [headerControlsTarget, setHeaderControlsTarget] =
+          React.useState<HTMLDivElement | null>(null);
+
+        return (
+          <div>
+            <div data-testid="header-slot">
+              <h2>{headerTitle}</h2>
+              <div data-testid="header-controls-host" ref={setHeaderControlsTarget} />
+            </div>
+            <TenderFormShared
+              tenderType={tenderType}
+              onSubmit={jest.fn()}
+              headerControlsTarget={headerControlsTarget}
+            />
+          </div>
+        );
+      }
+
+      render(<HeaderSlotHarness />);
+
+      const headerSlot = screen.getByTestId('header-slot');
+      const headerControlsHost = screen.getByTestId('header-controls-host');
+      const tenderTypeGroup = within(headerControlsHost).getByRole('group', { name: '标的类型' });
+      const fundTypeGroup = within(headerControlsHost).getByRole('group', { name: '资金类型' });
+
+      await waitFor(() => expect(tenderTypeGroup).toBeInTheDocument());
+
+      expect(within(headerSlot).getByText(headerTitle)).toBeInTheDocument();
+      expect(within(tenderTypeGroup).getByRole('button', { name: '货物' })).toBeInTheDocument();
+      expect(within(tenderTypeGroup).getByRole('button', { name: '服务' })).toBeInTheDocument();
+      expect(within(fundTypeGroup).getByRole('button', { name: '自筹' })).toBeInTheDocument();
+      expect(within(fundTypeGroup).getByRole('button', { name: '财政' })).toBeInTheDocument();
+      expect(screen.queryByText('标的类型')).not.toBeInTheDocument();
+      expect(screen.queryByText('资金类型')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('tender-form-header')).not.toBeInTheDocument();
     }
   );
 
@@ -501,7 +563,12 @@ describe('TenderFormShared', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0]).toMatchObject({
       tender_no: 'TEST-001',
-      tender_data: mockTenderData,
+      tender_lx: 0,
+      tender_data: {
+        ...mockTenderData,
+        tender_lx: 0,
+        fund_source_lx: 0,
+      },
       insertion_config: {
         before_text: '新前文本',
         after_text: '新后文本',
@@ -610,6 +677,54 @@ describe('TenderFormShared', () => {
     expect(selfFundButton).not.toHaveClass('bg-blue-600');
   });
 
+  it('uses URL tender_lx only for initial default and allows manual switching afterwards', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk', tenderLx: 1 });
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <TenderFormShared
+          tenderType="gngk"
+          onSubmit={jest.fn()}
+          initialDraft={draft}
+          onDraftChange={(updates) => {
+            setDraft((previous) => mergeDraftState(previous, updates));
+          }}
+        />
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    const goodsButton = screen.getByRole('button', { name: '货物' });
+    const serviceButton = screen.getByRole('button', { name: '服务' });
+
+    await waitFor(() => expect(serviceButton).toHaveClass('bg-blue-600'));
+    expect(goodsButton).not.toHaveClass('bg-blue-600');
+
+    await user.click(goodsButton);
+
+    await waitFor(() => expect(goodsButton).toHaveClass('bg-blue-600'));
+    expect(serviceButton).not.toHaveClass('bg-blue-600');
+  });
+
+  it('does not overwrite the tender_lx button from fetched type info', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk', tenderLx: 1 });
+    renderSharedForm();
+
+    const serviceButton = screen.getByRole('button', { name: '服务' });
+
+    await waitFor(() => expect(serviceButton).toHaveClass('bg-blue-600'));
+
+    await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+
+    await waitFor(() => expect(serviceButton).toHaveClass('bg-blue-600'));
+  });
+
   it('switches primary action to cancel when canCancel is true', async () => {
     const user = userEvent.setup();
     const onCancel = jest.fn();
@@ -633,12 +748,7 @@ describe('TenderFormShared', () => {
     expect(screen.getByRole('button', { name: '智能抽取模板' })).toBeInTheDocument();
 
     setUrlParams({ tenderType: 'gngk' });
-    rerender(
-      <TenderFormShared
-        tenderType="xjcg"
-        onSubmit={jest.fn()}
-      />
-    );
+    rerender(<TenderFormShared tenderType="xjcg" onSubmit={jest.fn()} />);
 
     expect(screen.getByRole('button', { name: '智能抽取模板' })).toBeInTheDocument();
   });
@@ -683,7 +793,9 @@ describe('TenderFormShared', () => {
 
     await waitFor(() => expect(mockFetchTemplateCandidates).toHaveBeenCalledTimes(1));
     expect(await within(dialog).findByText('测试模板-送审稿')).toBeInTheDocument();
-    expect(within(dialog).getByText('已按优先级排序；同优先级模板已按项目名称相关性重排。')).toBeInTheDocument();
+    expect(
+      within(dialog).getByText('已按优先级排序；同优先级模板已按项目名称相关性重排。')
+    ).toBeInTheDocument();
   });
 
   it('uses current input tender number when URL params are missing', async () => {
@@ -753,7 +865,9 @@ describe('TenderFormShared', () => {
     expect(within(dialog).getByRole('columnheader', { name: '优先级' })).toBeInTheDocument();
     expect(within(dialog).queryByRole('columnheader', { name: '发售稿' })).not.toBeInTheDocument();
     expect(within(dialog).getByRole('columnheader', { name: '推荐模板' })).toBeInTheDocument();
-    expect(within(dialog).getByText('从ERP模板库中选择适合模板，将自动回填到发售稿和送审稿的上传区。')).toBeInTheDocument();
+    expect(
+      within(dialog).getByText('从ERP模板库中选择适合模板，将自动回填到发售稿和送审稿的上传区。')
+    ).toBeInTheDocument();
     expect(screen.getByText('测试模板-送审稿')).toBeInTheDocument();
     expect(within(dialog).getByText('0811-DSITC260194')).toBeInTheDocument();
     expect(within(dialog).getByText('张三')).toBeInTheDocument();
@@ -764,9 +878,14 @@ describe('TenderFormShared', () => {
     expect(within(dialog).getByText('国内公开')).toBeInTheDocument();
     expect(within(dialog).getByText('货物')).toBeInTheDocument();
     expect(within(dialog).getByTestId('template-priority-badge-0')).toHaveTextContent('1');
-    expect(within(dialog).getByTestId('template-priority-badge-0')).toHaveClass('bg-red-50', 'text-red-700');
+    expect(within(dialog).getByTestId('template-priority-badge-0')).toHaveClass(
+      'bg-red-50',
+      'text-red-700'
+    );
     expect(within(dialog).getByRole('button', { name: '选择' })).toBeInTheDocument();
-    expect(within(dialog).getByText('已按优先级排序；同优先级模板已按项目名称相关性重排。')).toBeInTheDocument();
+    expect(
+      within(dialog).getByText('已按优先级排序；同优先级模板已按项目名称相关性重排。')
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '关闭模板弹窗' }));
     await user.click(screen.getByRole('button', { name: '智能抽取模板' }));

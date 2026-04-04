@@ -1,28 +1,29 @@
 """
-国内公开（自筹）文档生成 Graph 模块。
+国内公开（货物 / 自筹）文档生成 Graph 模块。
 """
 
 from __future__ import annotations
+
 from typing import Callable
 
 from backend.graphs.base_graph import StandardTenderWorkflowGraph
-from backend.states import GngkTenderGraphState
 from backend.nodes.common_word_nodes import (
-    prepare_template,
-    generate_polished_text,
-    replace_content,
-    get_comments,
     copy_comments,
-    generate_comments,
     delete_tender_param,
+    generate_comments,
+    generate_polished_text,
+    get_comments,
+    prepare_template,
+    replace_content,
     update_word,
 )
 from backend.nodes.common_word_nodes import extract_tender_params
 from backend.nodes.gngk_word_nodes import gngk_get_replacements
+from backend.states import GngkTenderGraphState
 
 
-class GngkZcTenderGraph(StandardTenderWorkflowGraph):
-    """国内公开（自筹）文档生成 Graph。"""
+class GngkHwZcTenderGraph(StandardTenderWorkflowGraph):
+    """国内公开（货物 / 自筹）文档生成 Graph。"""
 
     STATE_CLS = GngkTenderGraphState
 

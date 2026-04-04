@@ -31,6 +31,7 @@ const mockTenderData: TenderData = {
 
 const mockXjcgFormData = {
   tender_no: 'XJCG-001',
+  tender_lx: 0,
   tender_data: mockTenderData,
   model: 'deepseek' as const,
   files: {
@@ -62,6 +63,7 @@ const mockXjcgFormData = {
 const mockGngkFormData = {
   ...mockXjcgFormData,
   tender_no: 'GNGK-001',
+  tender_lx: 0,
   insertion_config: {
     before_text: '第三章 招标内容及要求',
     after_text: '第四章 投标文件有关格式',
@@ -238,7 +240,7 @@ describe('FormPanel', () => {
       model: 'deepseek',
     });
     mockConvertGngkFormToApiRequest.mockReturnValue({
-      form_type: 'gngk_tender',
+      form_type: 'gngk_hw_zc_tender',
       tender_data: mockTenderData,
       file_paths: {
         clean_draft: 'D:/UploadFiles/clean.docx',

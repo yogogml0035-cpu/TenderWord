@@ -53,6 +53,23 @@ function createRewriteRunningTaskStatus() {
   };
 }
 
+function createEditRunningTaskStatus() {
+  return {
+    task_id: 'task-1',
+    task_kind: 'edit' as const,
+    status: 'running' as const,
+    created_at: new Date().toISOString(),
+    progress: {
+      completed_nodes: ['resolve_edit_target', 'extract_edit_context'],
+      running_nodes: ['edit_text'],
+      current_node: 'edit_text',
+      completed_count: 2,
+      total_nodes: 5,
+      progress_percent: 40,
+    },
+  };
+}
+
 function resetStores() {
   window.localStorage.clear();
   window.sessionStorage.clear();
@@ -836,5 +853,81 @@ describe('useChatSSE', () => {
     expect(group?.contentMessage?.content).toBe('修改后的内容');
     expect(group?.contentMessage?.metadata?.taskKind).toBe('rewrite');
     expect(group?.downloadMessage?.metadata?.taskKind).toBe('rewrite');
+  });
+
+  it('treats edit_text as the AI content trigger for edit tasks', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      taskSummaries: {
+        'task-1': {
+          task_id: 'task-1',
+          task_kind: 'edit',
+          status: 'running',
+          updated_at: Date.now(),
+        },
+      },
+    }));
+    mockGetTaskStatus.mockResolvedValue(createEditRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'progress',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'edit',
+          status: 'running',
+          progress_text: '2/5',
+          current_node: 'edit_text',
+          completed_count: 2,
+          total_nodes: 5,
+          progress_percent: 40,
+          current_node_display: 'AI生成修改正文',
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'llm',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          node: 'edit_text',
+          content: '更新后的正文',
+          content_mode: 'snapshot',
+          is_complete: true,
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'done',
+        id: '3',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'edit',
+          success: true,
+          message: '文档修改完成',
+          output_file: 'D:/UploadFiles/output-edit.docx',
+          processing_time: 2.6,
+        },
+      });
+    });
+
+    const group = getTaskGroup();
+    expect(group?.contentMessage?.status).toBe('completed');
+    expect(group?.contentMessage?.content).toBe('更新后的正文');
+    expect(group?.contentMessage?.metadata?.taskKind).toBe('edit');
+    expect(group?.downloadMessage?.metadata?.taskKind).toBe('edit');
   });
 });

@@ -6,12 +6,14 @@ import {
 
 describe('tenderTypeMapper', () => {
   it.each([
-    { fund_lx: 0 as const, tenderType: 'xjcg' as const },
-    { fund_lx: 1 as const, tenderType: 'xjcg' as const },
-  ])('maps 询价采购 without depending on fund_lx=$fund_lx', ({ fund_lx, tenderType }) => {
+    { tender_lx: 0 as const, fund_lx: 0 as const, tenderType: 'xjcg' as const },
+    { tender_lx: 1 as const, fund_lx: 1 as const, tenderType: 'xjcg' as const },
+  ])(
+    'maps 询价采购 without depending on tender_lx=$tender_lx or fund_lx=$fund_lx',
+    ({ tender_lx, fund_lx, tenderType }) => {
     expect(
       getTenderTypeFromParams({
-        tender_lx: 0,
+        tender_lx,
         purchase_method: 5,
         fund_lx,
       })
@@ -20,15 +22,18 @@ describe('tenderTypeMapper', () => {
       isValid: true,
       errors: [],
     });
-  });
+    }
+  );
 
   it.each([
-    { fund_lx: 0 as const, tenderType: 'gngk' as const },
-    { fund_lx: 1 as const, tenderType: 'gngk' as const },
-  ])('maps 国内公开 without depending on fund_lx=$fund_lx', ({ fund_lx, tenderType }) => {
+    { tender_lx: 0 as const, fund_lx: 0 as const, tenderType: 'gngk' as const },
+    { tender_lx: 1 as const, fund_lx: 1 as const, tenderType: 'gngk' as const },
+  ])(
+    'maps 国内公开 without depending on tender_lx=$tender_lx or fund_lx=$fund_lx',
+    ({ tender_lx, fund_lx, tenderType }) => {
     expect(
       getTenderTypeFromParams({
-        tender_lx: 0,
+        tender_lx,
         purchase_method: 2,
         fund_lx,
       })
@@ -37,17 +42,18 @@ describe('tenderTypeMapper', () => {
       isValid: true,
       errors: [],
     });
-  });
+    }
+  );
 
-  it('parses URL params for 询价采购 when fund_lx=1', () => {
+  it('parses URL params for 询价采购 when tender_lx=1 and fund_lx=1', () => {
     const result = parseTenderUrlParams(
-      new URLSearchParams('tenderno=0811-DSITC260712&tender_lx=0&purchase_method=5&fund_lx=1')
+      new URLSearchParams('tenderno=0811-DSITC260712&tender_lx=1&purchase_method=5&fund_lx=1')
     );
 
     expect(result).toEqual({
       params: {
         tenderno: '0811-DSITC260712',
-        tender_lx: 0,
+        tender_lx: 1,
         purchase_method: 5,
         fund_lx: 1,
       },
@@ -57,9 +63,9 @@ describe('tenderTypeMapper', () => {
     });
   });
 
-  it('keeps routing valid when fund_lx is missing or invalid', () => {
+  it('keeps routing valid when tender_lx or fund_lx is missing or invalid', () => {
     expect(
-      parseTenderUrlParams(new URLSearchParams('tenderno=TEST-001&tender_lx=0&purchase_method=5'))
+      parseTenderUrlParams(new URLSearchParams('tenderno=TEST-001&purchase_method=5'))
     ).toMatchObject({
       tenderType: 'xjcg',
       isValid: true,
@@ -68,7 +74,7 @@ describe('tenderTypeMapper', () => {
 
     expect(
       parseTenderUrlParams(
-        new URLSearchParams('tenderno=TEST-002&tender_lx=0&purchase_method=2&fund_lx=abc')
+        new URLSearchParams('tenderno=TEST-002&tender_lx=9&purchase_method=2&fund_lx=abc')
       )
     ).toMatchObject({
       tenderType: 'gngk',

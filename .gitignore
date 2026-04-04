@@ -23,6 +23,7 @@ venv/
 env/
 ENV/
 .venv/
+.venv-*
 
 # 环境变量（敏感信息）
 .env
@@ -68,6 +69,7 @@ test_doc/
 # 临时 prompt 文件（运行时生成）
 backend/prompts_log/prompt_*.txt
 docs/
+backend/tests/test_*
 
 frontend/temp-e2e-results*/
 frontend/test-results*/

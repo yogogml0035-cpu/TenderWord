@@ -31,6 +31,7 @@ class TaskKind(Enum):
 
     GENERATE = "generate"
     REWRITE = "rewrite"
+    EDIT = "edit"
 
 
 class NodeName(Enum):
@@ -45,9 +46,12 @@ class NodeName(Enum):
     GENERATE_POLISHED_TEXT = "generate_polished_text"
     GENERATE_COMMENTS = "generate_comments"
     RESOLVE_REWRITE_TARGET = "resolve_rewrite_target"
+    RESOLVE_EDIT_TARGET = "resolve_edit_target"
     GET_REWRITE_COMMENTS = "get_rewrite_comments"
+    EXTRACT_EDIT_CONTEXT = "extract_edit_context"
     DELETE_SECTION = "delete_section"
     REWRITE_TEXT = "rewrite_text"
+    EDIT_TEXT = "edit_text"
     UPDATE_WORD = "update_word"
 
 
@@ -63,9 +67,12 @@ NODE_DISPLAY_NAMES = {
     NodeName.GENERATE_POLISHED_TEXT: "AI生成采购需求",
     NodeName.GENERATE_COMMENTS: "AI生成批注建议",
     NodeName.RESOLVE_REWRITE_TARGET: "选择修改版本",
+    NodeName.RESOLVE_EDIT_TARGET: "准备编辑副本",
     NodeName.GET_REWRITE_COMMENTS: "提取原批注",
+    NodeName.EXTRACT_EDIT_CONTEXT: "提取修改上下文",
     NodeName.DELETE_SECTION: "删除原段落",
     NodeName.REWRITE_TEXT: "AI重写内容",
+    NodeName.EDIT_TEXT: "AI生成修改正文",
     NodeName.UPDATE_WORD: "生成招标文件",
 }
 

@@ -8,7 +8,7 @@
 // ============================================
 
 export type TaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-export type TaskKind = 'generate' | 'rewrite';
+export type TaskKind = 'generate' | 'rewrite' | 'edit';
 
 // ============================================
 // Tender Data Types
@@ -28,11 +28,12 @@ export interface TenderData {
   submit_date: string;
   platform: string;
   service_fee: string;
+  tender_lx?: 0 | 1;
   fund_source_lx?: number;
 }
 
 export interface TenderTypeInfo {
-  tender_lx: number;
+  tender_lx: 0 | 1;
   purchase_method: number;
   fund_lx: 0 | 1;
 }
@@ -135,12 +136,30 @@ export interface InsertionConfig {
 }
 
 export interface GenerateRequest {
-  form_type: 'xjcg_tender' | 'gngk_zc_tender' | 'gngk_cz_tender' | 'gjgk_tender';
+  form_type:
+    | 'xjcg_tender'
+    | 'gngk_hw_zc_tender'
+    | 'gngk_hw_cz_tender'
+    | 'gngk_fw_zc_tender'
+    | 'gngk_fw_cz_tender'
+    | 'gjgk_tender';
   tender_data: TenderData;
   file_paths: FilesConfig;
   insertion_config?: InsertionConfig;
   conversation_id?: string;
   model: 'deepseek' | 'qwen' | 'doubao';
+}
+
+export interface EditTaskRequest {
+  conversation_id: string;
+  form_type: GenerateRequest['form_type'];
+  model: 'deepseek' | 'qwen' | 'doubao';
+  edit_prompt: string;
+  file_path?: string;
+  insertion_config?: InsertionConfig;
+  tender_lx: 0 | 1;
+  fund_source_lx: 0 | 1;
+  tender_data_snapshot?: TenderData;
 }
 
 // ============================================
@@ -490,6 +509,7 @@ export const ErrorCodes = {
 
   // Rewrite / User Stream
   REWRITE_TARGET_NOT_RESOLVED: 'REWRITE_TARGET_NOT_RESOLVED',
+  EDIT_TARGET_NOT_RESOLVED: 'EDIT_TARGET_NOT_RESOLVED',
   CONVERSATION_INSTANCE_RESET: 'CONVERSATION_INSTANCE_RESET',
 } as const;
 
@@ -503,8 +523,11 @@ export const NodeDisplayNames: Record<string, string> = {
   prepare_template: '复制原始模板文件',
   extract_tender_params: '提取原始采购需求',
   delete_tender_param: '删除原始采购需求',
+  resolve_edit_target: '准备编辑副本',
+  extract_edit_context: '提取修改上下文',
   get_replacements: '获取原始项目信息',
   replace_content: '替换最新项目信息',
   generate_polished_text: 'AI生成采购需求',
+  edit_text: 'AI生成修改正文',
   update_word: '生成招标文件',
 };

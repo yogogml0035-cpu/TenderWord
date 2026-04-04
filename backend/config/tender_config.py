@@ -30,13 +30,27 @@ class TenderAnchorConfig:
 TARGET_SIZES: Dict[str, float] = {
     "xjcg": 18.0,
     "gngk": 22.0,
+    "gngk_hw_zc": 22.0,
+    "gngk_hw_cz": 22.0,
+    "gngk_fw_zc": 22.0,
+    "gngk_fw_cz": 22.0,
     "gngk_zc": 22.0,
     "gngk_cz": 22.0,
 }
 
 
 DEFAULT_TENDER_TYPE = "xjcg"
-GNGK_TENDER_TYPES = frozenset({"gngk", "gngk_zc", "gngk_cz"})
+GNGK_TENDER_TYPES = frozenset(
+    {
+        "gngk",
+        "gngk_hw_zc",
+        "gngk_hw_cz",
+        "gngk_fw_zc",
+        "gngk_fw_cz",
+        "gngk_zc",
+        "gngk_cz",
+    }
+)
 
 ANCHOR_CONFIGS: Dict[str, TenderAnchorConfig] = {
     "xjcg": TenderAnchorConfig(
@@ -48,6 +62,30 @@ ANCHOR_CONFIGS: Dict[str, TenderAnchorConfig] = {
     "gngk": TenderAnchorConfig(
         before_text="第三章 招标内容及要求",
         after_text="第四章 投标文件有关格式",
+        before_size=22.0,
+        after_size=22.0,
+    ),
+    "gngk_hw_zc": TenderAnchorConfig(
+        before_text="第三章 招标内容及要求",
+        after_text="第四章 投标文件有关格式",
+        before_size=22.0,
+        after_size=22.0,
+    ),
+    "gngk_fw_zc": TenderAnchorConfig(
+        before_text="第三章 招标内容及要求",
+        after_text="第四章 投标文件有关格式",
+        before_size=22.0,
+        after_size=22.0,
+    ),
+    "gngk_hw_cz": TenderAnchorConfig(
+        before_text="第四章  招标需求",
+        after_text="第五章  评标方法与程序",
+        before_size=22.0,
+        after_size=22.0,
+    ),
+    "gngk_fw_cz": TenderAnchorConfig(
+        before_text="第四章  招标需求",
+        after_text="第五章  评标方法与程序",
         before_size=22.0,
         after_size=22.0,
     ),

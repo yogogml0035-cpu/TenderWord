@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { TenderType, FundLx } from '@/types';
+import type { TenderType, FundLx, TenderLx } from '@/types';
 import { useUrlParams } from '@/hooks/useUrlParams';
 import type { ConversationDraftFile, ConversationFormDraft } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -26,10 +27,7 @@ import type {
   TemplateSelectedFile,
   TenderTypeInfo,
 } from '@/types/api';
-import {
-  generateConversationTitle,
-  shouldAutoUpdateConversationTitle,
-} from '@/lib/chat-utils';
+import { generateConversationTitle, shouldAutoUpdateConversationTitle } from '@/lib/chat-utils';
 import { TenderNoInput, type TenderData } from './TenderNoInput';
 import { FileUploader, type UploadedFile } from './FileUploader';
 import { TemplateCandidateDialog } from './TemplateCandidateDialog';
@@ -42,13 +40,11 @@ import {
   secondaryActionButtonClassName,
   type TenderInfoItem,
 } from './shared';
-import {
-  tenderFormVariantConfigMap,
-  type TenderInsertionConfig,
-} from './tenderFormConfig';
+import { tenderFormVariantConfigMap, type TenderInsertionConfig } from './tenderFormConfig';
 
 export interface BaseTenderFormData {
   tender_no: string;
+  tender_lx: TenderLx;
   fund_lx: FundLx;
   tender_data: TenderData;
   model: ModelType;
@@ -64,6 +60,8 @@ export interface TenderFormSharedProps<TFormData extends BaseTenderFormData = Ba
   tenderType: TenderType;
   onSubmit: (data: TFormData) => Promise<void> | void;
   className?: string;
+  headerTitle?: string;
+  headerControlsTarget?: Element | null;
   initialTenderNo?: string;
   initialTenderData?: TenderData | null;
   initialDraft?: ConversationFormDraft | null;
@@ -85,6 +83,10 @@ const sharedUploadCopy = {
 } as const;
 
 const oldTemplateSelectionMessage = '该模板过旧不能选择，仅供下载参考';
+const segmentedControlClassName =
+  'inline-flex items-center rounded-2xl border border-slate-200 bg-slate-100/85 p-1 shadow-sm';
+const segmentedToggleButtonClassName =
+  'relative min-w-[72px] rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50';
 
 function toDraftFile(file: UploadedFile | null | undefined): ConversationDraftFile | undefined {
   if (!file) {
@@ -111,10 +113,7 @@ function normalizeTemplateProjectName(value: string | null | undefined): string 
   return normalizedValue ? normalizedValue : null;
 }
 
-function buildTemplateCandidateCacheKey(
-  tenderNo: string,
-  projectName: string | null
-): string {
+function buildTemplateCandidateCacheKey(tenderNo: string, projectName: string | null): string {
   return `${tenderNo}::${projectName || '__no_project_name__'}`;
 }
 
@@ -181,6 +180,8 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   tenderType,
   onSubmit,
   className,
+  headerTitle,
+  headerControlsTarget,
   initialTenderNo = '',
   initialTenderData,
   initialDraft,
@@ -190,10 +191,12 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   onCancel,
 }: TenderFormSharedProps<TFormData>) {
   const variantConfig = tenderFormVariantConfigMap[tenderType];
-  const { tenderno: urlTenderNo, fund_lx: urlFundLx } = useUrlParams();
+  const { tenderno: urlTenderNo, tender_lx: urlTenderLx, fund_lx: urlFundLx } = useUrlParams();
   const updateConversation = useChatStore((state) => state.updateConversation);
-  const currentConversation = useChatStore((state) =>
-    state.conversations.find((conversation) => conversation.id === state.currentConversationId) || null
+  const currentConversation = useChatStore(
+    (state) =>
+      state.conversations.find((conversation) => conversation.id === state.currentConversationId) ||
+      null
   );
   const [localTenderNo, setLocalTenderNo] = useState(initialDraft?.tender_no || initialTenderNo);
   const [localTenderData, setLocalTenderData] = useState<TenderData | null>(
@@ -203,7 +206,10 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     initialDraft?.tender_type_info || null
   );
   const [localTenderFetchState, setLocalTenderFetchState] = useState<TenderFetchState>(
-    resolveTenderFetchState(initialDraft?.tender_fetch, initialDraft?.tender_data || initialTenderData)
+    resolveTenderFetchState(
+      initialDraft?.tender_fetch,
+      initialDraft?.tender_data || initialTenderData
+    )
   );
   const [originFile, setOriginFile] = useState<UploadedFile | null>(
     (initialDraft?.files?.origin_tender as UploadedFile | undefined) || null
@@ -214,10 +220,19 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const [paramFiles, setParamFiles] = useState<UploadedFile[]>(
     (initialDraft?.files?.tender_params as UploadedFile[] | undefined) || []
   );
-  const draftFundLx: FundLx | undefined =
-    initialDraft?.fund_lx === 0 || initialDraft?.fund_lx === 1
-      ? initialDraft.fund_lx
+  const draftTenderLx: TenderLx | undefined =
+    initialDraft?.tender_lx === 0 || initialDraft?.tender_lx === 1
+      ? initialDraft.tender_lx
       : undefined;
+  const initialTenderLx: TenderLx =
+    urlTenderLx === 0 || urlTenderLx === 1
+      ? urlTenderLx
+      : draftTenderLx === 0 || draftTenderLx === 1
+        ? draftTenderLx
+        : 0;
+  const [localTenderLx, setLocalTenderLx] = useState<TenderLx>(initialTenderLx);
+  const draftFundLx: FundLx | undefined =
+    initialDraft?.fund_lx === 0 || initialDraft?.fund_lx === 1 ? initialDraft.fund_lx : undefined;
   const initialFundLx: FundLx =
     urlFundLx === 0 || urlFundLx === 1
       ? urlFundLx
@@ -230,11 +245,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       initialDraft?.gngk_insertion_configs?.[initialFundLx] || initialDraft?.insertion_config;
     return {
       before_text:
-        gngkScopedInsertion?.before_text ||
-        variantConfig.insertionConfigDefaults.before_text,
+        gngkScopedInsertion?.before_text || variantConfig.insertionConfigDefaults.before_text,
       after_text:
-        gngkScopedInsertion?.after_text ||
-        variantConfig.insertionConfigDefaults.after_text,
+        gngkScopedInsertion?.after_text || variantConfig.insertionConfigDefaults.after_text,
     };
   });
   const [error, setError] = useState<string | null>(null);
@@ -249,15 +262,21 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       }
     >
   >({});
-  const [templateCandidateRanking, setTemplateCandidateRanking] = useState<TemplateCandidateRanking | null>(null);
+  const [templateCandidateRanking, setTemplateCandidateRanking] =
+    useState<TemplateCandidateRanking | null>(null);
   const [templateDialogError, setTemplateDialogError] = useState<string | null>(null);
   const [templateDialogNotice, setTemplateDialogNotice] = useState<string | null>(null);
   const [templateCandidatesLoading, setTemplateCandidatesLoading] = useState(false);
   const [templateCandidatesRefreshing, setTemplateCandidatesRefreshing] = useState(false);
   const [selectingTemplateRowKey, setSelectingTemplateRowKey] = useState<string | null>(null);
-  const didSyncInitialFundRef = useRef(false);
+  const didSyncInitialRouteStateRef = useRef(false);
+  const renderControlsInHeader = headerControlsTarget !== undefined;
   const selectedModel: ModelType = initialDraft?.model || 'deepseek';
   const tenderNo = onDraftChange ? initialDraft?.tender_no || initialTenderNo : localTenderNo;
+  const tenderLx: TenderLx =
+    onDraftChange && (initialDraft?.tender_lx === 0 || initialDraft?.tender_lx === 1)
+      ? initialDraft.tender_lx
+      : localTenderLx;
   const fundLx: FundLx =
     onDraftChange && (initialDraft?.fund_lx === 0 || initialDraft?.fund_lx === 1)
       ? initialDraft.fund_lx
@@ -269,7 +288,10 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     ? initialDraft?.tender_type_info || null
     : localTenderTypeInfo;
   const tenderFetchState = onDraftChange
-    ? resolveTenderFetchState(initialDraft?.tender_fetch, initialDraft?.tender_data || initialTenderData)
+    ? resolveTenderFetchState(
+        initialDraft?.tender_fetch,
+        initialDraft?.tender_data || initialTenderData
+      )
     : localTenderFetchState;
   const effectiveTemplateTenderNo = useMemo(
     () => normalizeTemplateTenderNo(tenderNo) || normalizeTemplateTenderNo(urlTenderNo),
@@ -281,14 +303,18 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   );
 
   useEffect(() => {
-    if (!onDraftChange || didSyncInitialFundRef.current) {
+    if (!onDraftChange || didSyncInitialRouteStateRef.current) {
       return;
     }
-    didSyncInitialFundRef.current = true;
+    didSyncInitialRouteStateRef.current = true;
 
+    const shouldUpdateTenderLx = initialDraft?.tender_lx !== initialTenderLx;
     const shouldUpdateFund = initialDraft?.fund_lx !== initialFundLx;
     const updates: Partial<ConversationFormDraft> = {};
 
+    if (shouldUpdateTenderLx) {
+      updates.tender_lx = initialTenderLx;
+    }
     if (shouldUpdateFund) {
       updates.fund_lx = initialFundLx;
     }
@@ -311,14 +337,17 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       setInsertionConfig(nextInsertion);
     }
 
+    setLocalTenderLx(initialTenderLx);
     setLocalFundLx(initialFundLx);
 
     if (Object.keys(updates).length > 0) {
       onDraftChange(updates);
     }
   }, [
+    initialDraft?.tender_lx,
     initialDraft?.fund_lx,
     initialDraft?.gngk_insertion_configs,
+    initialTenderLx,
     initialFundLx,
     onDraftChange,
     tenderType,
@@ -459,6 +488,24 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     ]
   );
 
+  const handleTenderLxChange = useCallback(
+    (nextTenderLx: TenderLx) => {
+      if (tenderLx === nextTenderLx) {
+        return;
+      }
+
+      setLocalTenderLx(nextTenderLx);
+      onDraftChange?.({
+        tender_lx: nextTenderLx,
+      });
+
+      const url = new URL(window.location.href);
+      url.searchParams.set('tender_lx', String(nextTenderLx));
+      window.history.replaceState(window.history.state, '', url.toString());
+    },
+    [onDraftChange, tenderLx]
+  );
+
   const handleBeforeTextChange = useCallback(
     (value: string) => {
       setInsertionConfig((prev) => {
@@ -518,7 +565,8 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       tenderNoOverride?: string | null,
       projectNameOverride?: string | null
     ) => {
-      const activeTemplateTenderNo = normalizeTemplateTenderNo(tenderNoOverride) || effectiveTemplateTenderNo;
+      const activeTemplateTenderNo =
+        normalizeTemplateTenderNo(tenderNoOverride) || effectiveTemplateTenderNo;
       const activeTemplateProjectName =
         normalizeTemplateProjectName(projectNameOverride) ?? effectiveTemplateProjectName;
       if (!activeTemplateTenderNo) {
@@ -715,15 +763,19 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
 
       const unuploadedParams = paramFiles.filter((file) => !file.file_path);
       if (unuploadedParams.length > 0) {
-        setError(`请先上传技术参数文件: ${unuploadedParams.map((file) => file.original_name).join(', ')}`);
+        setError(
+          `请先上传技术参数文件: ${unuploadedParams.map((file) => file.original_name).join(', ')}`
+        );
         return;
       }
 
       const formData: BaseTenderFormData = {
         tender_no: tenderNo,
+        tender_lx: tenderLx,
         fund_lx: fundLx,
         tender_data: {
           ...tenderData,
+          tender_lx: tenderLx,
           fund_source_lx: fundLx,
         },
         model: selectedModel,
@@ -739,6 +791,8 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     },
     [
       tenderNo,
+      tenderLx,
+      fundLx,
       tenderData,
       selectedModel,
       originFile,
@@ -749,234 +803,292 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     ]
   );
 
-  return (
-    <form onSubmit={handleSubmit} className={cn('form-section space-y-5', className)}>
-      <div className="flex items-center justify-end gap-2">
-        <span className="text-sm text-gray-500">资金类型</span>
+  const variantControls = (
+    <div
+      data-testid="tender-form-variant-controls"
+      className="flex flex-wrap items-center justify-start gap-2 md:justify-end"
+    >
+      <div role="group" aria-label="标的类型" className={segmentedControlClassName}>
+        <button
+          type="button"
+          onClick={() => handleTenderLxChange(0)}
+          disabled={isSubmitting}
+          className={cn(
+            segmentedToggleButtonClassName,
+            tenderLx === 0
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'bg-transparent text-slate-700 hover:bg-white/80'
+          )}
+        >
+          货物
+        </button>
+        <span aria-hidden className="h-6 w-px bg-slate-200" />
+        <button
+          type="button"
+          onClick={() => handleTenderLxChange(1)}
+          disabled={isSubmitting}
+          className={cn(
+            segmentedToggleButtonClassName,
+            tenderLx === 1
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'bg-transparent text-slate-700 hover:bg-white/80'
+          )}
+        >
+          服务
+        </button>
+      </div>
+      <div role="group" aria-label="资金类型" className={segmentedControlClassName}>
         <button
           type="button"
           onClick={() => handleFundLxChange(0)}
           disabled={isSubmitting}
           className={cn(
-            'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+            segmentedToggleButtonClassName,
             fundLx === 0
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'bg-transparent text-slate-700 hover:bg-white/80'
           )}
         >
           自筹
         </button>
+        <span aria-hidden className="h-6 w-px bg-slate-200" />
         <button
           type="button"
           onClick={() => handleFundLxChange(1)}
           disabled={isSubmitting}
           className={cn(
-            'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+            segmentedToggleButtonClassName,
             fundLx === 1
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'bg-transparent text-slate-700 hover:bg-white/80'
           )}
         >
           财政
         </button>
       </div>
+    </div>
+  );
 
-      <FormSection title="招标信息" index={1}>
-        <TenderNoInput
-          value={tenderNo}
-          onChange={handleTenderNoChange}
-          onFetch={handleFetchTenderData}
-          disabled={isSubmitting}
-          required
-          isLoading={tenderFetchState.status === 'loading'}
-          isSuccess={tenderFetchState.status === 'success'}
-          error={tenderFetchState.status === 'error' ? tenderFetchState.error || null : null}
+  return (
+    <>
+      {renderControlsInHeader && headerControlsTarget
+        ? createPortal(variantControls, headerControlsTarget)
+        : null}
+      <form onSubmit={handleSubmit} className={cn('form-section space-y-5', className)}>
+        {!renderControlsInHeader ? (
+          <div
+            data-testid="tender-form-header"
+            className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+          >
+            {headerTitle ? (
+              <h2 className="text-2xl font-medium text-gray-900">{headerTitle}</h2>
+            ) : null}
+            {variantControls}
+          </div>
+        ) : null}
+
+        <FormSection title="招标信息" index={1}>
+          <TenderNoInput
+            value={tenderNo}
+            onChange={handleTenderNoChange}
+            onFetch={handleFetchTenderData}
+            disabled={isSubmitting}
+            required
+            isLoading={tenderFetchState.status === 'loading'}
+            isSuccess={tenderFetchState.status === 'success'}
+            error={tenderFetchState.status === 'error' ? tenderFetchState.error || null : null}
+          />
+          {tenderData && <InfoCard items={tenderInfoItems} columns={2} />}
+        </FormSection>
+
+        <FormSection title="文件上传" index={2} headerAction={uploadSectionAction}>
+          <div className="space-y-5">
+            <FileUploader
+              label={sharedUploadCopy.cleanDraftUpload.label}
+              description={sharedUploadCopy.cleanDraftUpload.description}
+              accept=".doc,.docx"
+              multiple={false}
+              autoUpload={true}
+              disabled={isSubmitting}
+              fileType="clean_draft"
+              initialFiles={cleanDraftUploaderFiles}
+              onFilesChange={(files) => {
+                const nextCleanDraftFile = files[0] || null;
+                setCleanDraftFile(nextCleanDraftFile);
+                syncDraftFiles(originFile, nextCleanDraftFile, paramFiles);
+              }}
+            />
+
+            <FileUploader
+              label={sharedUploadCopy.originUpload.label}
+              description={sharedUploadCopy.originUpload.description}
+              accept=".doc,.docx"
+              multiple={false}
+              autoUpload={true}
+              disabled={isSubmitting}
+              fileType="origin_tender"
+              initialFiles={originUploaderFiles}
+              onFilesChange={(files) => {
+                const nextOriginFile = files[0] || null;
+                setOriginFile(nextOriginFile);
+                syncDraftFiles(nextOriginFile, cleanDraftFile, paramFiles);
+              }}
+            />
+
+            <FileUploader
+              label="技术参数文件（必填）"
+              description="上传技术参数 Word 文件，支持多个文件"
+              accept=".doc,.docx"
+              multiple={true}
+              maxFiles={10}
+              autoUpload={true}
+              disabled={isSubmitting}
+              fileType="params"
+              initialFiles={paramFiles}
+              onFilesChange={(files) => {
+                setParamFiles(files);
+                syncDraftFiles(originFile, cleanDraftFile, files);
+              }}
+            />
+          </div>
+        </FormSection>
+
+        <FormSection title="高级设置（可选）" index={3}>
+          <div className="space-y-4">
+            <FormField
+              label="插入位置前文本"
+              name="before_text"
+              variant="text"
+              value={insertionConfig.before_text}
+              onChange={handleBeforeTextChange}
+              disabled={isSubmitting}
+              placeholder="插入位置前的章节标题"
+              helperText="系统将在该文本位置之后插入生成的内容"
+            />
+
+            <FormField
+              label="插入位置后文本"
+              name="after_text"
+              variant="text"
+              value={insertionConfig.after_text}
+              onChange={handleAfterTextChange}
+              disabled={isSubmitting}
+              placeholder="插入位置后的章节标题"
+              helperText="系统将在该文本位置之前插入生成的内容"
+            />
+          </div>
+        </FormSection>
+
+        {error && <ErrorDisplay message={error} onDismiss={() => setError(null)} />}
+
+        <TemplateCandidateDialog
+          open={templateDialogOpen}
+          candidates={templateCandidates}
+          loading={templateCandidatesLoading}
+          refreshing={templateCandidatesRefreshing}
+          selectingRowKey={selectingTemplateRowKey}
+          error={templateDialogError}
+          notice={templateDialogNotice}
+          rankingMessage={templateCandidateRanking?.message || null}
+          onClose={handleCloseTemplateDialog}
+          onRefresh={handleRefreshTemplateDialog}
+          onSelect={handleTemplateSelect}
+          getDownloadUrl={(fileUrl, downloadName) =>
+            getTemplateCandidateDownloadUrl(fileUrl, downloadName)
+          }
         />
-        {tenderData && <InfoCard items={tenderInfoItems} columns={2} />}
-      </FormSection>
 
-      <FormSection title="文件上传" index={2} headerAction={uploadSectionAction}>
-        <div className="space-y-5">
-          <FileUploader
-            label={sharedUploadCopy.cleanDraftUpload.label}
-            description={sharedUploadCopy.cleanDraftUpload.description}
-            accept=".doc,.docx"
-            multiple={false}
-            autoUpload={true}
-            disabled={isSubmitting}
-            fileType="clean_draft"
-            initialFiles={cleanDraftUploaderFiles}
-            onFilesChange={(files) => {
-              const nextCleanDraftFile = files[0] || null;
-              setCleanDraftFile(nextCleanDraftFile);
-              syncDraftFiles(originFile, nextCleanDraftFile, paramFiles);
-            }}
-          />
-
-          <FileUploader
-            label={sharedUploadCopy.originUpload.label}
-            description={sharedUploadCopy.originUpload.description}
-            accept=".doc,.docx"
-            multiple={false}
-            autoUpload={true}
-            disabled={isSubmitting}
-            fileType="origin_tender"
-            initialFiles={originUploaderFiles}
-            onFilesChange={(files) => {
-              const nextOriginFile = files[0] || null;
-              setOriginFile(nextOriginFile);
-              syncDraftFiles(nextOriginFile, cleanDraftFile, paramFiles);
-            }}
-          />
-
-          <FileUploader
-            label="技术参数文件（必填）"
-            description="上传技术参数 Word 文件，支持多个文件"
-            accept=".doc,.docx"
-            multiple={true}
-            maxFiles={10}
-            autoUpload={true}
-            disabled={isSubmitting}
-            fileType="params"
-            initialFiles={paramFiles}
-            onFilesChange={(files) => {
-              setParamFiles(files);
-              syncDraftFiles(originFile, cleanDraftFile, files);
-            }}
-          />
-        </div>
-      </FormSection>
-
-      <FormSection title="高级设置（可选）" index={3}>
-        <div className="space-y-4">
-          <FormField
-            label="插入位置前文本"
-            name="before_text"
-            variant="text"
-            value={insertionConfig.before_text}
-            onChange={handleBeforeTextChange}
-            disabled={isSubmitting}
-            placeholder="插入位置前的章节标题"
-            helperText="系统将在该文本位置之后插入生成的内容"
-          />
-
-          <FormField
-            label="插入位置后文本"
-            name="after_text"
-            variant="text"
-            value={insertionConfig.after_text}
-            onChange={handleAfterTextChange}
-            disabled={isSubmitting}
-            placeholder="插入位置后的章节标题"
-            helperText="系统将在该文本位置之前插入生成的内容"
-          />
-        </div>
-      </FormSection>
-
-      {error && <ErrorDisplay message={error} onDismiss={() => setError(null)} />}
-
-      <TemplateCandidateDialog
-        open={templateDialogOpen}
-        candidates={templateCandidates}
-        loading={templateCandidatesLoading}
-        refreshing={templateCandidatesRefreshing}
-        selectingRowKey={selectingTemplateRowKey}
-        error={templateDialogError}
-        notice={templateDialogNotice}
-        rankingMessage={templateCandidateRanking?.message || null}
-        onClose={handleCloseTemplateDialog}
-        onRefresh={handleRefreshTemplateDialog}
-        onSelect={handleTemplateSelect}
-        getDownloadUrl={(fileUrl, downloadName) =>
-          getTemplateCandidateDownloadUrl(fileUrl, downloadName)
-        }
-      />
-
-      <button
-        type={showCancelAction ? 'button' : 'submit'}
-        onClick={showCancelAction ? () => void onCancel?.() : undefined}
-        disabled={isSubmitting && !showCancelAction}
-        className={cn(
-          'group relative w-full transform overflow-hidden rounded-xl px-5 py-2.5 text-[15px] font-semibold text-white transition-all duration-200 ease-out',
-          showCancelAction && 'z-40',
-          showCancelAction
-            ? 'bg-gradient-to-r from-red-500 via-red-500 to-orange-500 shadow-md shadow-red-500/25 hover:-translate-y-0.5 hover:from-red-600 hover:via-red-600 hover:to-orange-600 hover:shadow-lg hover:shadow-red-500/30'
-            : 'bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 shadow-md shadow-blue-500/25 hover:-translate-y-0.5 hover:from-blue-700 hover:via-blue-600 hover:to-cyan-600 hover:shadow-lg hover:shadow-blue-500/30 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:transform-none disabled:hover:shadow-md'
-        )}
-      >
-        {!showCancelAction && (
-          <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-1000 ease-out group-hover:translate-x-full" />
-        )}
-
-        <span className="relative flex items-center justify-center gap-2">
-          {showCancelAction ? (
-            <>
-              <svg
-                className="h-4.5 w-4.5 transition-transform duration-200 group-hover:rotate-90"
-                width={20}
-                height={20}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M18 6L6 18" />
-              </svg>
-              <span>取消生成</span>
-            </>
-          ) : isSubmitting ? (
-            <>
-              <svg className="h-4.5 w-4.5 animate-spin" width={20} height={20} viewBox="0 0 24 24">
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                  fill="none"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                />
-              </svg>
-              <span>提交中...</span>
-            </>
-          ) : (
-            <>
-              <svg
-                className="h-4.5 w-4.5 transition-transform group-hover:scale-110"
-                width={20}
-                height={20}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"
-                />
-              </svg>
-              <span>开始生成</span>
-              <svg
-                className="h-4.5 w-4.5 transition-transform group-hover:translate-x-1"
-                width={20}
-                height={20}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-              </svg>
-            </>
+        <button
+          type={showCancelAction ? 'button' : 'submit'}
+          onClick={showCancelAction ? () => void onCancel?.() : undefined}
+          disabled={isSubmitting && !showCancelAction}
+          className={cn(
+            'group relative w-full transform overflow-hidden rounded-xl px-5 py-2.5 text-[15px] font-semibold text-white transition-all duration-200 ease-out',
+            showCancelAction && 'z-40',
+            showCancelAction
+              ? 'bg-gradient-to-r from-red-500 via-red-500 to-orange-500 shadow-md shadow-red-500/25 hover:-translate-y-0.5 hover:from-red-600 hover:via-red-600 hover:to-orange-600 hover:shadow-lg hover:shadow-red-500/30'
+              : 'bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 shadow-md shadow-blue-500/25 hover:-translate-y-0.5 hover:from-blue-700 hover:via-blue-600 hover:to-cyan-600 hover:shadow-lg hover:shadow-blue-500/30 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:transform-none disabled:hover:shadow-md'
           )}
-        </span>
-      </button>
-    </form>
+        >
+          {!showCancelAction && (
+            <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-1000 ease-out group-hover:translate-x-full" />
+          )}
+
+          <span className="relative flex items-center justify-center gap-2">
+            {showCancelAction ? (
+              <>
+                <svg
+                  className="h-4.5 w-4.5 transition-transform duration-200 group-hover:rotate-90"
+                  width={20}
+                  height={20}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M18 6L6 18" />
+                </svg>
+                <span>取消生成</span>
+              </>
+            ) : isSubmitting ? (
+              <>
+                <svg
+                  className="h-4.5 w-4.5 animate-spin"
+                  width={20}
+                  height={20}
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    fill="none"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
+                </svg>
+                <span>提交中...</span>
+              </>
+            ) : (
+              <>
+                <svg
+                  className="h-4.5 w-4.5 transition-transform group-hover:scale-110"
+                  width={20}
+                  height={20}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"
+                  />
+                </svg>
+                <span>开始生成</span>
+                <svg
+                  className="h-4.5 w-4.5 transition-transform group-hover:translate-x-1"
+                  width={20}
+                  height={20}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+              </>
+            )}
+          </span>
+        </button>
+      </form>
+    </>
   );
 }

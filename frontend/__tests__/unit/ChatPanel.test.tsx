@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ChatPanel } from '@/components/chat/ChatPanel';
-import { cancelTask, streamUserMessage } from '@/lib/api';
+import { cancelTask, createEditTask, streamUserMessage, uploadFile } from '@/lib/api';
 import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import type { UserStreamEvent } from '@/types/api';
@@ -11,8 +11,10 @@ jest.mock('@/lib/api', () => {
   return {
     ...actual,
     cancelTask: jest.fn(),
+    createEditTask: jest.fn(),
     downloadFile: jest.fn(),
     streamUserMessage: jest.fn(),
+    uploadFile: jest.fn(),
   };
 });
 
@@ -60,18 +62,30 @@ jest.mock('@/components/chat/ChatInput', () => ({
     loading,
     placeholder,
     selectedModel,
+    inputMode,
+    editFile,
+    sendDisabled,
+    noticeMessage,
     onModelChange,
     onCancel,
     onSend,
+    onEditFileSelect,
+    onEditFileRemove,
   }: {
     value?: string;
     disabled?: boolean;
     loading?: boolean;
     placeholder?: string;
     selectedModel?: string;
+    inputMode?: 'normal' | 'edit';
+    editFile?: { original_name?: string } | null;
+    sendDisabled?: boolean;
+    noticeMessage?: string | null;
     onModelChange?: (model: string) => void;
     onCancel?: () => void;
     onSend?: (message: string) => void;
+    onEditFileSelect?: (file: File) => void | Promise<void>;
+    onEditFileRemove?: () => void;
   }) => (
     <div
       data-testid="chat-input"
@@ -79,6 +93,10 @@ jest.mock('@/components/chat/ChatInput', () => ({
       data-loading={loading ? 'true' : 'false'}
       data-placeholder={placeholder || ''}
       data-model={selectedModel || ''}
+      data-input-mode={inputMode || 'normal'}
+      data-send-disabled={sendDisabled ? 'true' : 'false'}
+      data-notice={noticeMessage || ''}
+      data-edit-file={editFile?.original_name || ''}
     >
       <button type="button" data-testid="change-model-button" onClick={() => onModelChange?.('qwen')}>
         change model
@@ -93,12 +111,30 @@ jest.mock('@/components/chat/ChatInput', () => ({
       <button type="button" data-testid="cancel-chat-button" onClick={() => onCancel?.()}>
         cancel chat
       </button>
+      <button
+        type="button"
+        data-testid="select-edit-file-button"
+        onClick={() =>
+          onEditFileSelect?.(
+            new File(['content'], 'edit.docx', {
+              type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            })
+          )
+        }
+      >
+        select edit file
+      </button>
+      <button type="button" data-testid="remove-edit-file-button" onClick={() => onEditFileRemove?.()}>
+        remove edit file
+      </button>
     </div>
   ),
 }));
 
 const mockStreamUserMessage = streamUserMessage as jest.MockedFunction<typeof streamUserMessage>;
 const mockCancelTask = cancelTask as jest.MockedFunction<typeof cancelTask>;
+const mockCreateEditTask = createEditTask as jest.MockedFunction<typeof createEditTask>;
+const mockUploadFile = uploadFile as jest.MockedFunction<typeof uploadFile>;
 
 function mockUserStream(events: UserStreamEvent[], terminalError?: unknown) {
   mockStreamUserMessage.mockImplementationOnce(async (_payload, options = {}) => {
@@ -117,11 +153,20 @@ describe('ChatPanel', () => {
     window.sessionStorage.clear();
     mockStreamUserMessage.mockReset();
     mockCancelTask.mockReset();
+    mockCreateEditTask.mockReset();
+    mockUploadFile.mockReset();
     mockCancelTask.mockResolvedValue({
       success: true,
       task_id: 'task-1',
       message: '任务已取消',
       was_running: true,
+    });
+    mockUploadFile.mockResolvedValue({
+      file_path: 'D:/UploadFiles/edit.docx',
+      file_name: 'edit.docx',
+      original_name: 'edit.docx',
+      size: 128,
+      upload_time: new Date().toISOString(),
     });
 
     useChatStore.setState((state) => ({
@@ -254,6 +299,238 @@ describe('ChatPanel', () => {
 
     expect(screen.queryByTestId('toggle-rewrite-button')).not.toBeInTheDocument();
     expect(screen.getByTestId('chat-input')).toHaveAttribute('data-placeholder', '回复生成中，请稍候...');
+  });
+
+  it('uploads a file and switches the draft into edit mode', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+    }));
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('select-edit-file-button'));
+
+    await waitFor(() => {
+      expect(mockUploadFile).toHaveBeenCalledTimes(1);
+      const draft = useChatStore.getState().getConversationDraft('conv-1');
+      expect(draft?.input_mode).toBe('edit');
+      expect(draft?.edit_file?.original_name).toBe('edit.docx');
+    });
+  });
+
+  it('blocks edit send when required context is incomplete', () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请补充质保条款',
+          input_mode: 'edit',
+          edit_file: {
+            id: 'file-1',
+            file_path: 'D:/UploadFiles/edit.docx',
+            file_name: 'edit.docx',
+            original_name: 'edit.docx',
+            size: 128,
+            upload_time: new Date().toISOString(),
+          },
+          tender_lx: 0,
+          fund_lx: 1,
+        },
+      },
+    }));
+
+    render(<ChatPanel />);
+
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-send-disabled', 'true');
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-notice', '请先补全当前页面的插入锚点');
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+    expect(mockCreateEditTask).not.toHaveBeenCalled();
+  });
+
+  it('creates an edit task directly without using the user stream route', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请把交付日期改成合同签订后 30 天内',
+          input_mode: 'edit',
+          edit_file: {
+            id: 'file-1',
+            file_path: 'D:/UploadFiles/edit.docx',
+            file_name: 'edit.docx',
+            original_name: 'edit.docx',
+            size: 128,
+            upload_time: new Date().toISOString(),
+          },
+          tender_lx: 0,
+          fund_lx: 1,
+          insertion_config: {
+            before_text: '第三章 采购需求',
+            after_text: '第四章 响应文件有关格式',
+          },
+          tender_data: {
+            project_name: '示例项目',
+            project_number: 'ZBGG-2026-001',
+            project_content: '原始内容',
+            bzj_rule: '',
+            buyer_name: '示例单位',
+            project_zbr_xbr: '',
+            zbr_xbr_tel: '',
+            zbr_pinyin: '',
+            shell_start_date: '',
+            shell_end_date: '',
+            submit_date: '',
+            platform: '',
+            service_fee: '',
+            tender_lx: 0,
+            fund_source_lx: 1,
+          },
+        },
+      },
+    }));
+    mockCreateEditTask.mockResolvedValue({
+      task_id: 'task-edit',
+      task_kind: 'edit',
+      status: 'queued',
+      queue_position: 0,
+      waiting_count: 0,
+    });
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      expect(mockCreateEditTask).toHaveBeenCalledTimes(1);
+      expect(mockStreamUserMessage).not.toHaveBeenCalled();
+      const conversation = useChatStore.getState().conversations[0];
+      const draft = useChatStore.getState().getConversationDraft('conv-1');
+      expect(conversation.currentTaskId).toBe('task-edit');
+      expect(draft?.pending_edit_task_id).toBe('task-edit');
+      expect(conversation.messages[0]).toMatchObject({
+        type: 'user',
+        metadata: {
+          chatKind: 'edit',
+        },
+      });
+      expect(conversation.messages[1]).toMatchObject({
+        type: 'ai',
+        content: '正在创建文件修改任务',
+        metadata: {
+          chatKind: 'edit',
+        },
+      });
+    });
+
+    expect(mockCreateEditTask).toHaveBeenCalledWith({
+      conversation_id: 'conv-1',
+      form_type: 'xjcg_tender',
+      model: 'deepseek',
+      edit_prompt: '请把交付日期改成合同签订后 30 天内',
+      file_path: 'D:/UploadFiles/edit.docx',
+      insertion_config: {
+        before_text: '第三章 采购需求',
+        after_text: '第四章 响应文件有关格式',
+      },
+      tender_lx: 0,
+      fund_source_lx: 1,
+      tender_data_snapshot: expect.objectContaining({
+        project_name: '示例项目',
+      }),
+    });
+  });
+
+  it('keeps the latest edit output as the default file for the next edit', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+          messages: [
+            {
+              id: 'msg-download',
+              conversationId: 'conv-1',
+              type: 'ai',
+              content: 'latest-edit.docx',
+              timestamp: Date.now(),
+              status: 'completed',
+              taskId: 'task-edit-finished',
+              metadata: {
+                messageKind: 'task-download',
+                taskKind: 'edit',
+                outputFile: 'D:/UploadFiles/latest-edit.docx',
+                fileName: 'latest-edit.docx',
+              },
+            },
+          ],
+        },
+      ],
+      activeTaskIds: [],
+      taskMessageMap: {
+        'task-edit-finished': {
+          downloadMessageId: 'msg-download',
+        },
+      },
+      taskSummaries: {
+        'task-edit-finished': {
+          task_id: 'task-edit-finished',
+          task_kind: 'edit',
+          status: 'completed',
+          updated_at: Date.now(),
+        },
+      },
+      conversationDrafts: {
+        'conv-1': {
+          input_mode: 'edit',
+          pending_edit_prompt: '请继续修改',
+          pending_edit_task_id: 'task-edit-finished',
+          edit_file: {
+            id: 'old-file',
+            file_path: 'D:/UploadFiles/old-edit.docx',
+            file_name: 'old-edit.docx',
+            original_name: 'old-edit.docx',
+            size: 256,
+            upload_time: new Date().toISOString(),
+          },
+        },
+      },
+    }));
+
+    render(<ChatPanel />);
+
+    await waitFor(() => {
+      const draft = useChatStore.getState().getConversationDraft('conv-1');
+      expect(draft?.pending_edit_task_id).toBeUndefined();
+      expect(draft?.input_mode).toBe('edit');
+      expect(draft?.edit_file?.file_path).toBe('D:/UploadFiles/latest-edit.docx');
+      expect(draft?.edit_file?.original_name).toBe('latest-edit.docx');
+    });
   });
 
   it('retries failed ai message in place instead of appending a new bubble', async () => {

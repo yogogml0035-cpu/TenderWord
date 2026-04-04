@@ -1,0 +1,113 @@
+import {
+  convertGjgkFormToApiRequest,
+  convertGngkFormToApiRequest,
+  convertXjcgFormToApiRequest,
+} from './formDataConverter';
+
+const baseTenderData = {
+  project_name: '测试项目',
+  project_number: 'TEST-001',
+  project_content: '测试内容',
+  bzj_rule: '规则',
+  buyer_name: '采购人',
+  project_zbr_xbr: '张三',
+  zbr_xbr_tel: '13800138000',
+  zbr_pinyin: 'zhangsan',
+  shell_start_date: '2026-03-01',
+  shell_end_date: '2026-03-08',
+  submit_date: '2026-03-09',
+  platform: '平台A',
+  service_fee: '1000',
+};
+
+const baseFiles = {
+  origin_tender: {
+    id: 'origin',
+    file_path: '/uploads/origin.docx',
+    file_name: 'origin.docx',
+    original_name: 'origin.docx',
+    size: 100,
+    upload_time: '2026-03-01T00:00:00.000Z',
+  },
+  clean_draft: {
+    id: 'clean',
+    file_path: '/uploads/clean.docx',
+    file_name: 'clean.docx',
+    original_name: 'clean.docx',
+    size: 100,
+    upload_time: '2026-03-01T00:00:00.000Z',
+  },
+  tender_params: [
+    {
+      id: 'params',
+      file_path: '/uploads/params.docx',
+      file_name: 'params.docx',
+      original_name: 'params.docx',
+      size: 100,
+      upload_time: '2026-03-01T00:00:00.000Z',
+    },
+  ],
+};
+
+describe('formDataConverter', () => {
+  it.each([
+    { tender_lx: 0 as const, fund_lx: 0 as const, expected: 'gngk_hw_zc_tender' },
+    { tender_lx: 0 as const, fund_lx: 1 as const, expected: 'gngk_hw_cz_tender' },
+    { tender_lx: 1 as const, fund_lx: 0 as const, expected: 'gngk_fw_zc_tender' },
+    { tender_lx: 1 as const, fund_lx: 1 as const, expected: 'gngk_fw_cz_tender' },
+  ])('maps gngk tender_lx=$tender_lx fund_lx=$fund_lx to $expected', ({ tender_lx, fund_lx, expected }) => {
+    const request = convertGngkFormToApiRequest({
+      tender_no: 'GNGK-001',
+      tender_lx,
+      fund_lx,
+      tender_data: baseTenderData,
+      model: 'deepseek',
+      files: baseFiles,
+      insertion_config: {
+        before_text: '第三章 招标内容及要求',
+        after_text: '第四章 投标文件有关格式',
+      },
+    });
+
+    expect(request.form_type).toBe(expected);
+    expect(request.tender_data.tender_lx).toBe(tender_lx);
+    expect(request.tender_data.fund_source_lx).toBe(fund_lx);
+  });
+
+  it('keeps xjcg graph selection stable while forwarding tender_lx', () => {
+    const request = convertXjcgFormToApiRequest({
+      tender_no: 'XJCG-001',
+      tender_lx: 1,
+      fund_lx: 0,
+      tender_data: baseTenderData,
+      model: 'deepseek',
+      files: baseFiles,
+      insertion_config: {
+        before_text: '第三章  采购需求',
+        after_text: '第四章  响应文件有关格式',
+      },
+    });
+
+    expect(request.form_type).toBe('xjcg_tender');
+    expect(request.tender_data.tender_lx).toBe(1);
+  });
+
+  it('keeps gjgk graph selection stable while forwarding tender_lx', () => {
+    const request = convertGjgkFormToApiRequest({
+      tender_no: 'GJGK-001',
+      tender_lx: 1,
+      fund_lx: 1,
+      tender_data: baseTenderData,
+      model: 'deepseek',
+      files: baseFiles,
+      insertion_config: {
+        before_text: '技术规格及要求',
+        after_text: '附件1：投标文件封面（格式）',
+      },
+    });
+
+    expect(request.form_type).toBe('gjgk_tender');
+    expect(request.tender_data.tender_lx).toBe(1);
+    expect(request.tender_data.fund_source_lx).toBe(1);
+  });
+});

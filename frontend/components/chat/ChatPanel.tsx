@@ -10,12 +10,15 @@ import { ChatInput } from './ChatInput';
 import {
   ApiError,
   cancelTask,
+  createEditTask,
   downloadFile,
   streamUserMessage,
+  uploadFile,
 } from '@/lib/api';
-import type { UserStreamEvent, UserStreamMessage } from '@/types/api';
+import type { EditTaskRequest, UserStreamEvent, UserStreamMessage } from '@/types/api';
 import type { Message } from '@/types/chat';
 import type { ModelType } from '@/components/forms/ModelSelector';
+import type { ConversationDraftFile, ConversationFormDraft } from '@/stores/chatStore';
 import { tenderTypeDisplayNameMap } from './tenderFormRegistry';
 
 interface ChatPanelProps {
@@ -55,6 +58,117 @@ function getConversationMessagesById(conversationId: string): Message[] {
   return state.conversations.find((item) => item.id === conversationId)?.messages || [];
 }
 
+function toConversationDraftFile(uploadedFile: {
+  file_path: string;
+  file_name: string;
+  original_name: string;
+  size: number;
+  upload_time?: string;
+}): ConversationDraftFile {
+  return {
+    id: `edit-${Date.now()}`,
+    file_path: uploadedFile.file_path,
+    file_name: uploadedFile.file_name,
+    original_name: uploadedFile.original_name,
+    size: uploadedFile.size,
+    upload_time: uploadedFile.upload_time || new Date().toISOString(),
+  };
+}
+
+function resolveEditFormType(
+  tenderType: 'xjcg' | 'gngk' | 'gjgk',
+  draft: ConversationFormDraft | null
+): EditTaskRequest['form_type'] | null {
+  const tenderLx = draft?.tender_lx;
+  const fundSourceLx = draft?.fund_lx;
+
+  if (tenderType === 'xjcg') {
+    return 'xjcg_tender';
+  }
+
+  if (tenderType === 'gjgk') {
+    return 'gjgk_tender';
+  }
+
+  if ((tenderLx !== 0 && tenderLx !== 1) || (fundSourceLx !== 0 && fundSourceLx !== 1)) {
+    return null;
+  }
+
+  if (tenderLx === 1) {
+    return fundSourceLx === 1 ? 'gngk_fw_cz_tender' : 'gngk_fw_zc_tender';
+  }
+  return fundSourceLx === 1 ? 'gngk_hw_cz_tender' : 'gngk_hw_zc_tender';
+}
+
+function getEditContextMessage(
+  tenderType: 'xjcg' | 'gngk' | 'gjgk',
+  draft: ConversationFormDraft | null
+): string | null {
+  if (!draft?.edit_file) {
+    return '请先上传一个 Word 文档';
+  }
+
+  if (draft.tender_lx !== 0 && draft.tender_lx !== 1) {
+    return '请先补全当前页面的货物/服务类型';
+  }
+
+  if (draft.fund_lx !== 0 && draft.fund_lx !== 1) {
+    return '请先补全当前页面的资金性质';
+  }
+
+  const insertionConfig = draft.insertion_config;
+  if (
+    !insertionConfig ||
+    !insertionConfig.before_text?.trim() ||
+    !insertionConfig.after_text?.trim()
+  ) {
+    return '请先补全当前页面的插入锚点';
+  }
+
+  if (!resolveEditFormType(tenderType, draft)) {
+    return '当前页面缺少可识别的 edit 上下文';
+  }
+
+  return null;
+}
+
+function buildEditTaskRequest(
+  conversationId: string,
+  tenderType: 'xjcg' | 'gngk' | 'gjgk',
+  draft: ConversationFormDraft | null,
+  model: ModelType,
+  prompt: string
+): { request?: EditTaskRequest; error?: string } {
+  const normalizedPrompt = prompt.trim();
+  if (!normalizedPrompt) {
+    return { error: '请输入修改要求' };
+  }
+
+  const contextMessage = getEditContextMessage(tenderType, draft);
+  if (contextMessage) {
+    return { error: contextMessage };
+  }
+
+  const formType = resolveEditFormType(tenderType, draft);
+  if (!formType || !draft?.edit_file || draft.tender_lx === undefined || draft.fund_lx === undefined) {
+    return { error: '当前页面缺少可识别的 edit 上下文' };
+  }
+
+  return {
+    request: {
+      conversation_id: conversationId,
+      form_type: formType,
+      model,
+      edit_prompt: normalizedPrompt,
+      file_path: draft.edit_file.file_path,
+      insertion_config: draft.insertion_config,
+      tender_lx: draft.tender_lx,
+      fund_source_lx: draft.fund_lx,
+      tender_data_snapshot: draft.tender_data || undefined,
+    },
+  };
+}
+
 export function ChatPanel({ className = '' }: ChatPanelProps) {
   const mounted = useHydrated();
   const {
@@ -64,12 +178,15 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     addMessage,
     updateMessage,
     deleteMessage,
+    findTaskMessageGroup,
     startTask,
     taskSummaries,
   } =
     useChatStore();
   const streams = useChatStreamStore((state) => state.streams);
   const normalChatAbortRef = useRef<Record<string, AbortController>>({});
+  const [composerNotice, setComposerNotice] = useState<string | null>(null);
+  const [isUploadingEditFile, setIsUploadingEditFile] = useState(false);
   const [activeNormalConversations, setActiveNormalConversations] = useState<Record<string, boolean>>(
     {}
   );
@@ -88,6 +205,12 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     isCurrentTaskQueued && (!waitingCount || Number.isNaN(Number(waitingCount)) || waitingCount <= 0);
   const selectedModel: ModelType = conversationDraft?.model || 'deepseek';
   const inputValue = conversationDraft?.chat_input || '';
+  const inputMode = conversationDraft?.input_mode || 'normal';
+  const editFile = conversationDraft?.edit_file || null;
+  const currentEditFileSize = conversationDraft?.edit_file?.size || 0;
+  const isEditMode = inputMode === 'edit' || !!editFile;
+  const editContextMessage =
+    isEditMode && conversation ? getEditContextMessage(conversation.tenderType, conversationDraft) : null;
   const messages = conversation?.messages || [];
   const mergedMessages: Message[] = messages.map((message) => {
     if (!message.taskId) {
@@ -138,21 +261,32 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   const isNormalStreamActive = !!(conversation && activeNormalConversations[conversation.id]);
   const isTaskBusy = isCurrentTaskQueued || isCurrentTaskRunning;
   const isBusy = isTaskBusy || isNormalStreamActive;
+  const isComposerBusy = isBusy || isUploadingEditFile;
   const isRewriteQueueStage =
     !!conversation &&
     currentTaskStatus === 'queued' &&
     typeof waitingCount === 'number' &&
     waitingCount > 0 &&
     conversationDraft?.pending_rewrite_task_id === currentTaskId;
+  const isEditQueueStage =
+    !!conversation &&
+    currentTaskStatus === 'queued' &&
+    typeof waitingCount === 'number' &&
+    waitingCount > 0 &&
+    conversationDraft?.pending_edit_task_id === currentTaskId;
+  const isTaskQueueStage = isRewriteQueueStage || isEditQueueStage;
 
   const updateInputValue = useCallback(
     (nextValue: string) => {
       if (!conversation) {
         return;
       }
+      if (composerNotice) {
+        setComposerNotice(null);
+      }
       updateConversationDraft(conversation.id, { chat_input: nextValue });
     },
-    [conversation, updateConversationDraft]
+    [composerNotice, conversation, updateConversationDraft]
   );
 
   const setNormalChatActive = useCallback((conversationId: string, active: boolean) => {
@@ -163,6 +297,46 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       return Object.fromEntries(Object.entries(state).filter(([id]) => id !== conversationId));
     });
   }, []);
+
+  const handleEditFileSelect = useCallback(
+    async (file: File) => {
+      if (!conversation || isBusy) {
+        return;
+      }
+
+      setComposerNotice(null);
+      setIsUploadingEditFile(true);
+      try {
+        const uploadedFile = await uploadFile(file, 'origin_tender');
+        updateConversationDraft(conversation.id, {
+          input_mode: 'edit',
+          edit_file: toConversationDraftFile({
+            file_path: uploadedFile.file_path,
+            file_name: uploadedFile.file_name,
+            original_name: uploadedFile.original_name,
+            size: file.size,
+            upload_time: uploadedFile.upload_time,
+          }),
+        });
+      } catch (error) {
+        setComposerNotice(error instanceof ApiError ? error.message : '文件上传失败，请重试');
+      } finally {
+        setIsUploadingEditFile(false);
+      }
+    },
+    [conversation, isBusy, updateConversationDraft]
+  );
+
+  const handleEditFileRemove = useCallback(() => {
+    if (!conversation || isBusy) {
+      return;
+    }
+    setComposerNotice(null);
+    updateConversationDraft(conversation.id, {
+      input_mode: 'normal',
+      edit_file: undefined,
+    });
+  }, [conversation, isBusy, updateConversationDraft]);
 
   const sendUserMessage = useCallback(
     async (
@@ -449,15 +623,83 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         return;
       }
 
+      if (isEditMode) {
+        const { request, error } = buildEditTaskRequest(
+          conversation.id,
+          conversation.tenderType,
+          conversationDraft,
+          selectedModel,
+          content
+        );
+        if (!request) {
+          setComposerNotice(error || '当前页面缺少可识别的 edit 上下文');
+          return;
+        }
+
+        addMessage(conversation.id, {
+          type: 'user',
+          content,
+          status: 'sent',
+          metadata: {
+            chatKind: 'edit',
+          },
+        });
+        const placeholderMessageId = addMessage(conversation.id, {
+          type: 'ai',
+          content: '正在创建文件修改任务',
+          status: 'completed',
+          metadata: {
+            chatKind: 'edit',
+          },
+        });
+
+        try {
+          setComposerNotice(null);
+          const result = await createEditTask(request);
+          startTask(
+            conversation.id,
+            result.task_id,
+            {
+              task_kind: result.task_kind,
+              status: result.status || 'queued',
+              queue_position: result.queue_position,
+              waiting_count: result.waiting_count,
+            },
+            { logMessageId: placeholderMessageId }
+          );
+          updateConversationDraft(conversation.id, {
+            chat_input: '',
+            pending_edit_prompt: content,
+            pending_edit_task_id: result.task_id,
+          });
+        } catch (error) {
+          deleteMessage(conversation.id, placeholderMessageId);
+          const message = error instanceof ApiError ? error.message : '创建文件修改任务失败，请稍后重试';
+          setComposerNotice(message);
+          addMessage(conversation.id, {
+            type: 'system',
+            content: message,
+            status: 'completed',
+          });
+        }
+        return;
+      }
+
       await sendUserMessage(content, {
         appendUserMessage: true,
       });
       updateConversationDraft(conversation.id, { chat_input: '' });
     },
     [
+      addMessage,
       conversation,
+      conversationDraft,
+      deleteMessage,
+      isEditMode,
       isBusy,
+      selectedModel,
       sendUserMessage,
+      startTask,
       updateConversationDraft,
     ]
   );
@@ -467,6 +709,9 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       return;
     }
 
+    if (composerNotice) {
+      setComposerNotice(null);
+    }
     updateConversationDraft(conversation.id, { model });
   };
 
@@ -538,14 +783,23 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           pending_rewrite_prompt: undefined,
           pending_rewrite_task_id: undefined,
         });
+      } else if (isEditQueueStage) {
+        const refillPrompt = conversationDraft?.pending_edit_prompt || '';
+        updateConversationDraft(conversation.id, {
+          chat_input: refillPrompt,
+          pending_edit_prompt: undefined,
+          pending_edit_task_id: undefined,
+        });
       }
     } catch {
       // noop
     }
   }, [
     conversation,
+    conversationDraft?.pending_edit_prompt,
     conversationDraft?.pending_rewrite_prompt,
     currentTaskId,
+    isEditQueueStage,
     isNormalStreamActive,
     isRewriteQueueStage,
     updateConversationDraft,
@@ -588,6 +842,75 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   }, [
     conversation,
     conversationDraft?.pending_rewrite_task_id,
+    taskSummaries,
+    updateConversationDraft,
+  ]);
+
+  useEffect(() => {
+    if (!conversation) {
+      return;
+    }
+    const pendingTaskId = conversationDraft?.pending_edit_task_id;
+    if (!pendingTaskId) {
+      return;
+    }
+
+    const pendingSummary = taskSummaries[pendingTaskId];
+    const pendingStatus = pendingSummary?.status;
+    const stillActive =
+      conversation.currentTaskId === pendingTaskId ||
+      pendingStatus === 'queued' ||
+      pendingStatus === 'running';
+    if (stillActive) {
+      return;
+    }
+
+    const taskGroup = findTaskMessageGroup(pendingTaskId);
+    const latestOutputFile =
+      typeof taskGroup?.downloadMessage?.metadata?.outputFile === 'string'
+        ? taskGroup.downloadMessage.metadata.outputFile
+        : '';
+    const latestOutputFileName =
+      typeof taskGroup?.downloadMessage?.metadata?.fileName === 'string'
+        ? taskGroup.downloadMessage.metadata.fileName
+        : latestOutputFile.split(/[\\/]/).pop() || '';
+    const terminalStatus =
+      taskGroup?.downloadMessage?.status ||
+      taskGroup?.contentMessage?.status ||
+      taskGroup?.logMessage?.status;
+
+    if (terminalStatus === 'completed' && latestOutputFile) {
+      updateConversationDraft(conversation.id, {
+        pending_edit_task_id: undefined,
+        pending_edit_prompt: undefined,
+        input_mode: 'edit',
+        edit_file: {
+          id: `edit-result-${pendingTaskId}`,
+          file_path: latestOutputFile,
+          file_name: latestOutputFileName,
+          original_name: latestOutputFileName,
+          size: currentEditFileSize,
+          upload_time: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+
+    updateConversationDraft(conversation.id, {
+      chat_input:
+        conversationDraft?.chat_input ||
+        conversationDraft?.pending_edit_prompt ||
+        '',
+      pending_edit_task_id: undefined,
+      pending_edit_prompt: undefined,
+    });
+  }, [
+    conversation,
+    conversationDraft?.chat_input,
+    conversationDraft?.pending_edit_prompt,
+    conversationDraft?.pending_edit_task_id,
+    currentEditFileSize,
+    findTaskMessageGroup,
     taskSummaries,
     updateConversationDraft,
   ]);
@@ -689,18 +1012,20 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           messages={mergedMessages}
           onDownload={handleDownload}
           onRetry={handleRetry}
-          interactionDisabled={isRewriteQueueStage}
+          interactionDisabled={isTaskQueueStage}
           emptyState={isCurrentTaskQueued || isCurrentTaskStarting ? <div className="h-full" /> : undefined}
         />
 
-        {isRewriteQueueStage && (
+        {isTaskQueueStage && (
           <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">
             <div className="absolute inset-0 bg-slate-900/6 shadow-inner backdrop-blur-[1px]" />
             <div className="relative w-full max-w-md rounded-3xl border border-amber-300/90 bg-white/95 p-6 shadow-xl shadow-amber-100/70">
               <div className="mb-3 inline-flex rounded-full border border-amber-200/80 bg-amber-50 px-3 py-1 text-xs font-semibold tracking-[0.18em] text-amber-700">
                 排队等待
               </div>
-              <h3 className="text-xl font-semibold tracking-tight text-slate-900">修改任务排队中</h3>
+              <h3 className="text-xl font-semibold tracking-tight text-slate-900">
+                {isEditQueueStage ? '文件修改任务排队中' : '修改任务排队中'}
+              </h3>
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 前方等待 {waitingCount} 个任务（含当前执行任务），轮到后将自动进入日志流。
               </p>
@@ -730,8 +1055,20 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         selectedModel={selectedModel}
         onModelChange={handleModelChange}
         actionMode={isBusy ? 'cancel' : 'send'}
-        loading={isBusy}
-        placeholder={isBusy ? '回复生成中，请稍候...' : '输入文字并发送即可对话...'}
+        loading={isComposerBusy}
+        inputMode={isEditMode ? 'edit' : 'normal'}
+        editFile={editFile}
+        onEditFileSelect={handleEditFileSelect}
+        onEditFileRemove={handleEditFileRemove}
+        sendDisabled={isEditMode ? !!editContextMessage : false}
+        noticeMessage={composerNotice || editContextMessage}
+        placeholder={
+          isBusy
+            ? '回复生成中，请稍候...'
+            : isEditMode
+              ? '输入修改要求，系统将只修改当前锚点区正文...'
+              : '输入文字并发送即可对话...'
+        }
       />
     </div>
   );

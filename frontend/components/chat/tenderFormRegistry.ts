@@ -16,6 +16,8 @@ export type TenderFormData = XjcgTenderFormData | GngkTenderFormData | GjgkTende
 export interface TenderFormComponentProps {
   onSubmit: (data: TenderFormData) => Promise<void> | void;
   className?: string;
+  headerTitle?: string;
+  headerControlsTarget?: Element | null;
   initialTenderNo?: string;
   initialTenderData?: TenderData | null;
   initialDraft?: ConversationFormDraft | null;

@@ -26,6 +26,7 @@ from .task import (
 
 # 生成请求/响应模型
 from .generate import (
+    EditTaskRequest,
     FileRequirement,
     FormRequirementsResponse,
     FormType,
@@ -109,6 +110,7 @@ __all__ = [
     # 生成相关
     "LLMModel",
     "FormType",
+    "EditTaskRequest",
     "GenerateRequest",
     "GenerateResponse",
     "GenerateResult",

@@ -13,6 +13,7 @@ describe('tenderFormRegistry', () => {
   it('converts gjgk form data to gjgk_tender request', () => {
     const request = tenderFormConverterMap.gjgk({
       tender_no: 'GJ-001',
+      tender_lx: 1,
       fund_lx: 1,
       tender_data: {
         project_name: '国际项目',
@@ -28,6 +29,7 @@ describe('tenderFormRegistry', () => {
         submit_date: '2026-03-09',
         platform: '平台A',
         service_fee: '1000',
+        tender_lx: 1,
         fund_source_lx: 1,
       },
       model: 'deepseek',
@@ -41,6 +43,7 @@ describe('tenderFormRegistry', () => {
     });
 
     expect(request.form_type).toBe('gjgk_tender');
+    expect(request.tender_data.tender_lx).toBe(1);
     expect(request.tender_data.fund_source_lx).toBe(1);
   });
 });

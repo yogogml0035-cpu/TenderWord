@@ -47,6 +47,7 @@ from backend.api.tender import router as tender_router
 from backend.api.tasks import router as tasks_router
 from backend.api.stream import router as stream_router
 from backend.api.generate import router as generate_router
+from backend.api.edit import router as edit_router
 from backend.api.download import router as download_router
 from backend.api.user import router as user_router
 from backend.api.conversations import router as conversations_router
@@ -177,6 +178,7 @@ def create_application() -> FastAPI:
     app.include_router(tasks_router, prefix="/api")
     app.include_router(stream_router, prefix="/api")
     app.include_router(generate_router, prefix="/api")
+    app.include_router(edit_router, prefix="/api")
     app.include_router(download_router, prefix="/api")
     app.include_router(user_router, prefix="/api")
     app.include_router(conversations_router, prefix="/api")

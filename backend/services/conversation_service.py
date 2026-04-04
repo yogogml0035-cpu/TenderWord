@@ -140,6 +140,41 @@ class ConversationService:
         model: Optional[str] = None,
     ) -> None:
         """Append Human + Assistant atomically after rewrite success."""
+        self._append_revision_success(
+            conversation_id,
+            user_prompt=user_prompt,
+            assistant_content="rewrite_success",
+            rewrite_state=rewrite_state,
+            model=model,
+        )
+
+    def append_edit_success(
+        self,
+        conversation_id: str,
+        *,
+        user_prompt: str,
+        rewrite_state: Dict[str, Any],
+        model: Optional[str] = None,
+    ) -> None:
+        """Append Human + Assistant atomically after edit success."""
+        self._append_revision_success(
+            conversation_id,
+            user_prompt=user_prompt,
+            assistant_content="edit_success",
+            rewrite_state=rewrite_state,
+            model=model,
+        )
+
+    def _append_revision_success(
+        self,
+        conversation_id: str,
+        *,
+        user_prompt: str,
+        assistant_content: str,
+        rewrite_state: Dict[str, Any],
+        model: Optional[str] = None,
+    ) -> None:
+        """Append one revision turn and keep rewrite-state continuity."""
         now = time.time()
         user_message = RewriteMessage(
             role="user",
@@ -150,7 +185,7 @@ class ConversationService:
         )
         ai_message = RewriteMessage(
             role="assistant",
-            content="rewrite_success",
+            content=assistant_content,
             rewrite_state=dict(rewrite_state),
             model=model,
             created_at=now,

@@ -1,20 +1,20 @@
-import { FundLx, TenderType } from '@/types';
+import { FundLx, TenderLx, TenderType } from '@/types';
 
 /**
  * 招标类型映射规则
- * key格式: tender_lx-purchase_method
- * fund_lx 仅允许 0|1，并且不参与前端判型
+ * key格式: purchase_method
+ * tender_lx / fund_lx 仅作为按钮态输入，不参与前端判型
  * value: 对应的TenderType
  */
 export const TYPE_MAPPING: Record<string, TenderType> = {
-  '0-2': 'gngk',     // 国内公开 (tender_lx=0, purchase_method=2)
-  '0-5': 'xjcg',     // 询价采购 (tender_lx=0, purchase_method=5)
-  '0-0': 'gjgk',     // 国际公开
+  '2': 'gngk',     // 国内公开
+  '5': 'xjcg',     // 询价采购
+  '0': 'gjgk',     // 国际公开
 };
 
 const DEFAULT_URL_PARAMS_BY_TYPE: Record<
   TenderType,
-  { tender_lx: number; purchase_method: number; fund_lx: FundLx }
+  { tender_lx: TenderLx; purchase_method: number; fund_lx: FundLx }
 > = {
   gngk: { tender_lx: 0, purchase_method: 2, fund_lx: 0 },
   xjcg: { tender_lx: 0, purchase_method: 5, fund_lx: 0 },
@@ -25,7 +25,7 @@ const DEFAULT_URL_PARAMS_BY_TYPE: Record<
  * URL参数接口
  */
 export interface TenderUrlParams {
-  tender_lx: number;
+  tender_lx?: TenderLx;
   purchase_method: number;
   fund_lx?: 0 | 1;
   tenderno?: string;
@@ -49,7 +49,7 @@ export interface TenderTypeMappingResult {
  * @example
  * ```typescript
  * const result = getTenderTypeFromParams({
- *   tender_lx: 0,
+ *   tender_lx: 1,
  *   fund_lx: 0,
  *   purchase_method: 2
  * });
@@ -62,23 +62,14 @@ export function getTenderTypeFromParams(
   const errors: string[] = [];
 
   // 提取参数值
-  let tender_lx: number | undefined;
   let purchase_method: number | undefined;
 
   if (params instanceof URLSearchParams) {
-    // 从URLSearchParams中提取
-    tender_lx = parseInt(params.get('tender_lx') || '', 10);
     purchase_method = parseInt(params.get('purchase_method') || '', 10);
   } else {
-    // 从对象中提取
-    tender_lx = params.tender_lx;
     purchase_method = params.purchase_method;
   }
 
-  // 验证必填参数
-  if (tender_lx === undefined || isNaN(tender_lx)) {
-    errors.push('Missing or invalid tender_lx parameter');
-  }
   if (purchase_method === undefined || isNaN(purchase_method)) {
     errors.push('Missing or invalid purchase_method parameter');
   }
@@ -91,8 +82,8 @@ export function getTenderTypeFromParams(
     };
   }
 
-  // 判型仅依赖 tender_lx + purchase_method
-  const mappingKey = `${tender_lx}-${purchase_method}`;
+  // 判型仅依赖 purchase_method
+  const mappingKey = `${purchase_method}`;
   const tenderType = TYPE_MAPPING[mappingKey];
 
   if (!tenderType) {
@@ -142,10 +133,10 @@ export function getTenderNo(
  * 
  * @example
  * ```typescript
- * const url = new URL('http://localhost:8502?tender_lx=0&purchase_method=2&fund_lx=0&tenderno=TEST001');
+ * const url = new URL('http://localhost:8502?tender_lx=1&purchase_method=2&fund_lx=0&tenderno=TEST001');
  * const result = parseTenderUrlParams(url.searchParams);
  * // result: {
- * //   params: { tender_lx: 0, purchase_method: 2, fund_lx: 0, tenderno: 'TEST001' },
+ * //   params: { tender_lx: 1, purchase_method: 2, fund_lx: 0, tenderno: 'TEST001' },
  * //   tenderType: 'gngk',
  * //   isValid: true,
  * //   errors: []
@@ -181,7 +172,8 @@ export function parseTenderUrlParams(
     return num;
   };
 
-  const tender_lx = parseParam('tender_lx');
+  const rawTenderLx = parseParam('tender_lx', { allowInvalid: true });
+  const tender_lx = rawTenderLx === 0 || rawTenderLx === 1 ? rawTenderLx : undefined;
   const purchase_method = parseParam('purchase_method');
   const rawFundLx = parseParam('fund_lx', { allowInvalid: true });
   const fund_lx = rawFundLx === 0 || rawFundLx === 1 ? rawFundLx : undefined;
@@ -201,7 +193,7 @@ export function parseTenderUrlParams(
     errors: [],
   };
 
-  if (tender_lx !== undefined && purchase_method !== undefined) {
+  if (purchase_method !== undefined) {
     tenderTypeResult = getTenderTypeFromParams({
       tender_lx,
       purchase_method,
@@ -209,7 +201,6 @@ export function parseTenderUrlParams(
     });
   } else {
     const missingParams = [];
-    if (tender_lx === undefined) missingParams.push('tender_lx');
     if (purchase_method === undefined) missingParams.push('purchase_method');
     if (missingParams.length > 0) {
       errors.push(`Missing required parameters: ${missingParams.join(', ')}`);
@@ -248,6 +239,6 @@ export function isValidTenderType(value: unknown): value is TenderType {
  */
 export function getUrlParamsForTenderType(
   tenderType: TenderType
-): { tender_lx: number; purchase_method: number; fund_lx: FundLx } | null {
+): { tender_lx: TenderLx; purchase_method: number; fund_lx: FundLx } | null {
   return DEFAULT_URL_PARAMS_BY_TYPE[tenderType] ?? null;
 }

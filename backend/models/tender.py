@@ -18,10 +18,10 @@ class TenderType(BaseModel):
     """
 
     tender_lx: int = Field(
-        ..., description="招标类型（0=询价, 1=国内公开, 2=邀请招标）", ge=0, le=2
+        ..., description="标的类型（0=货物, 1=服务）", ge=0, le=1
     )
     purchase_method: int = Field(
-        ..., description="采购方式（0=公开招标, 5=询价采购）", ge=0, le=5
+        ..., description="页面类型路由（0=国际公开, 2=国内公开, 5=询价采购）", ge=0, le=5
     )
     fund_lx: int = Field(
         ...,
@@ -99,6 +99,12 @@ class TenderData(BaseModel):
         default="", description="招标平台名称", examples=["中国政府采购网"]
     )
     service_fee: str = Field(default="", description="服务费金额", examples=["5000元"])
+    tender_lx: int | None = Field(
+        default=None,
+        description="标的类型编码（0=货物, 1=服务）",
+        ge=0,
+        le=1,
+    )
     fund_source_lx: int | None = Field(
         default=None,
         description="业务资金来源编码（0=自筹资金, 1=财政资金）",
@@ -122,6 +128,7 @@ class TenderData(BaseModel):
                 "submit_date": "2024-03-20",
                 "platform": "中国政府采购网",
                 "service_fee": "5000元",
+                "tender_lx": 0,
                 "fund_source_lx": 1,
             }
         }

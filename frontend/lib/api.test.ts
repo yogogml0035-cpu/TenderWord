@@ -1,6 +1,7 @@
 import {
   ApiError,
   cancelTask,
+  createEditTask,
   createGenerateTask,
   downloadFile,
   fetchTemplateCandidates,
@@ -14,7 +15,7 @@ import {
   streamUserMessage,
   uploadFile,
 } from '@/lib/api';
-import type { GenerateRequest, TemplateCandidateSelectRequest, UserStreamEvent } from '@/types/api';
+import type { EditTaskRequest, GenerateRequest, TemplateCandidateSelectRequest, UserStreamEvent } from '@/types/api';
 
 type FetchMock = jest.MockedFunction<typeof fetch>;
 
@@ -85,6 +86,7 @@ const validGenerateRequest: GenerateRequest = {
     submit_date: '2024-02-01',
     platform: 'Test Platform',
     service_fee: '1000',
+    tender_lx: 0,
     fund_source_lx: 1,
   },
   file_paths: {
@@ -100,6 +102,21 @@ const validTemplateSelectRequest: TemplateCandidateSelectRequest = {
     fsg: 'http://10.11.1.224/fsg',
     shener: 'http://10.11.1.224/shener',
   },
+};
+
+const validEditTaskRequest: EditTaskRequest = {
+  conversation_id: 'conv-1',
+  form_type: 'xjcg_tender',
+  model: 'deepseek',
+  edit_prompt: '请把交付日期改成合同签订后 30 天内',
+  file_path: 'D:/UploadFiles/edit.docx',
+  insertion_config: {
+    before_text: '第三章 采购需求',
+    after_text: '第四章 响应文件有关格式',
+  },
+  tender_lx: 0,
+  fund_source_lx: 1,
+  tender_data_snapshot: validGenerateRequest.tender_data,
 };
 
 describe('API Client', () => {
@@ -172,6 +189,44 @@ describe('API Client', () => {
     });
   });
 
+  describe('createEditTask', () => {
+    it('should return task info on success', async () => {
+      globalThis.fetch = mockFetchJson({
+        success: true,
+        task_id: 'edit-task-123',
+        task_kind: 'edit',
+        status: 'queued',
+        queue_position: 0,
+        waiting_count: 0,
+      });
+
+      const result = await createEditTask(validEditTaskRequest);
+      expect(result.task_id).toBe('edit-task-123');
+      expect(result.task_kind).toBe('edit');
+      expect(result.status).toBe('queued');
+    });
+
+    it('should send correct request body', async () => {
+      const fetchSpy = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 202,
+        json: async () => ({
+          success: true,
+          task_id: 'edit-task-123',
+          task_kind: 'edit',
+          status: 'queued',
+        }),
+      } as unknown as Response) as unknown as FetchMock;
+      globalThis.fetch = fetchSpy;
+
+      await createEditTask(validEditTaskRequest);
+
+      const [, init] = fetchSpy.mock.calls[0];
+      const body = (init as RequestInit).body as string;
+      expect(JSON.parse(body)).toEqual(validEditTaskRequest);
+    });
+  });
+
   describe('downloadFile', () => {
     it('should return Blob on success', async () => {
       const blob = new Blob(['test'], { type: 'application/octet-stream' });
@@ -223,7 +278,7 @@ describe('API Client', () => {
           project_number: 'TC0639',
         },
         type: {
-          tender_lx: 0,
+          tender_lx: 1,
           purchase_method: 0,
           fund_lx: 1,
         },
@@ -240,7 +295,7 @@ describe('API Client', () => {
         success: true,
         data: { project_name: 'Test Project' },
         type: {
-          tender_lx: 0,
+          tender_lx: 1,
           purchase_method: 0,
           fund_lx: 1,
         },
@@ -251,7 +306,7 @@ describe('API Client', () => {
       const result = await fetchTenderDataWithType('ZBGG-2024-001');
       expect(result.data.project_name).toBe('Test Project');
       expect(result.type).toEqual({
-        tender_lx: 0,
+        tender_lx: 1,
         purchase_method: 0,
         fund_lx: 1,
       });
@@ -262,7 +317,7 @@ describe('API Client', () => {
         success: true,
         data: { project_name: 'Test Project' },
         type: {
-          tender_lx: 0,
+          tender_lx: 9,
           purchase_method: 0,
           fund_lx: 2,
         },

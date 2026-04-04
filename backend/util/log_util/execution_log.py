@@ -117,9 +117,7 @@ def _build_generate_success_message(state: Mapping[str, Any]) -> str | None:
     if not (project_zbr_xbr and project_number and project_name):
         return None
 
-    return (
-        f"{project_zbr_xbr}-{project_number}-{project_name}"
-    )
+    return f"{project_zbr_xbr}-{project_number}-{project_name}结束生成，当前进入update_word"
 
 
 def log_generate_task_success(state: Mapping[str, Any]) -> None:

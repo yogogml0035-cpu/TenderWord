@@ -6,6 +6,10 @@ Graphs 模块
 目录结构：
 - base_graph.py: 基础 Graph 类，提供通用功能
 - xjcg_tender_graph.py: 询价采购文档生成 Graph
+- gngk_hw_zc_tender_graph.py: 国内公开（货物 / 自筹）文档生成 Graph
+- gngk_hw_cz_tender_graph.py: 国内公开（货物 / 财政）文档生成 Graph
+- gngk_fw_zc_tender_graph.py: 国内公开（服务 / 自筹）文档生成 Graph
+- gngk_fw_cz_tender_graph.py: 国内公开（服务 / 财政）文档生成 Graph
 - [future_graph].py: 未来的新 Graph
 
 使用示例：
@@ -26,8 +30,10 @@ from .base_graph import (
 )
 from .skill_graph import SkillGraph
 from .xjcg_tender_graph import XjcgTenderGraph
-from .gngk_zc_tender_graph import GngkZcTenderGraph
-from .gngk_cz_tender_graph import GngkCzTenderGraph
+from .gngk_hw_zc_tender_graph import GngkHwZcTenderGraph
+from .gngk_hw_cz_tender_graph import GngkHwCzTenderGraph
+from .gngk_fw_zc_tender_graph import GngkFwZcTenderGraph
+from .gngk_fw_cz_tender_graph import GngkFwCzTenderGraph
 from .gjgk_tender_graph import GjgkTenderGraph
 from .user_graph import UserGraph
 
@@ -40,8 +46,10 @@ __all__ = [
     "invoke_with_timing_async",
     "SkillGraph",
     "XjcgTenderGraph",
-    "GngkZcTenderGraph",
-    "GngkCzTenderGraph",
+    "GngkHwZcTenderGraph",
+    "GngkHwCzTenderGraph",
+    "GngkFwZcTenderGraph",
+    "GngkFwCzTenderGraph",
     "GjgkTenderGraph",
     "UserGraph",
 ]

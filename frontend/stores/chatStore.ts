@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createJSONStorage, devtools, persist } from 'zustand/middleware';
-import type { TenderType, FundLx } from '@/types';
+import type { TenderType, FundLx, TenderLx } from '@/types';
 import type { TaskKind, TaskStatus, TenderData, TenderTypeInfo } from '@/types/api';
 import type { TenderFetchState } from '@/lib/tenderFetch';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
@@ -68,8 +68,11 @@ export interface ConversationFormDraft {
   tender_data?: TenderData | null;
   tender_type_info?: TenderTypeInfo | null;
   tender_fetch?: TenderFetchState;
+  tender_lx?: TenderLx;
   fund_lx?: FundLx;
   model?: 'deepseek' | 'qwen' | 'doubao';
+  input_mode?: 'normal' | 'edit';
+  edit_file?: ConversationDraftFile | null;
   insertion_config?: {
     before_text: string;
     after_text: string;
@@ -87,6 +90,8 @@ export interface ConversationFormDraft {
   chat_input?: string;
   pending_rewrite_prompt?: string;
   pending_rewrite_task_id?: string;
+  pending_edit_prompt?: string;
+  pending_edit_task_id?: string;
   files?: {
     origin_tender?: ConversationDraftFile;
     clean_draft?: ConversationDraftFile;
@@ -156,6 +161,10 @@ function mergeConversationDraft(
     ...base,
     ...updates,
   };
+
+  if (Object.prototype.hasOwnProperty.call(updates, 'edit_file')) {
+    nextDraft.edit_file = normalizeDraftFile(updates.edit_file || undefined) || undefined;
+  }
 
   if (updates.insertion_config) {
     nextDraft.insertion_config = {
@@ -1413,9 +1422,11 @@ export const useChatStore = create<ChatStore>()(
                   chat_input:
                     typeof draft.chat_input === 'string' && draft.chat_input.length > 0
                       ? draft.chat_input
-                      : draft.pending_rewrite_prompt,
+                      : draft.pending_rewrite_prompt || draft.pending_edit_prompt,
                   pending_rewrite_prompt: undefined,
                   pending_rewrite_task_id: undefined,
+                  pending_edit_prompt: undefined,
+                  pending_edit_task_id: undefined,
                 }),
               ])
             ),

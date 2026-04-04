@@ -79,6 +79,7 @@ class TenderGraphStateBase(BaseState, total=False):
     submit_date: str
     platform: str
     service_fee: str
+    tender_lx: int
     fund_source_lx: str
     tender_invitation: str
     delivery_location: str

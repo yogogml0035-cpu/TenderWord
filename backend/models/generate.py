@@ -33,8 +33,10 @@ class FormType(str, Enum):
     """
 
     XJCG_TENDER = "xjcg_tender"  # 询价采购
-    GNGK_ZC_TENDER = "gngk_zc_tender"  # 国内公开（自筹）
-    GNGK_CZ_TENDER = "gngk_cz_tender"  # 国内公开（财政）
+    GNGK_HW_ZC_TENDER = "gngk_hw_zc_tender"  # 国内公开（货物 / 自筹）
+    GNGK_HW_CZ_TENDER = "gngk_hw_cz_tender"  # 国内公开（货物 / 财政）
+    GNGK_FW_ZC_TENDER = "gngk_fw_zc_tender"  # 国内公开（服务 / 自筹）
+    GNGK_FW_CZ_TENDER = "gngk_fw_cz_tender"  # 国内公开（服务 / 财政）
     GJGK_TENDER = "gjgk_tender"  # 国际公开
 
 
@@ -48,7 +50,7 @@ class GenerateRequest(BaseModel):
     文档生成请求模型
 
     Attributes:
-        form_type: 表单类型（xjcg_tender | gngk_zc_tender | gngk_cz_tender | gjgk_tender）
+        form_type: 表单类型
         tender_data: 招标数据
         file_paths: 文件路径字典
             - template: 模板文件路径
@@ -57,7 +59,16 @@ class GenerateRequest(BaseModel):
     """
 
     form_type: FormType = Field(
-        ..., description="表单类型", examples=["xjcg_tender", "gngk_zc_tender", "gngk_cz_tender", "gjgk_tender"]
+        ...,
+        description="表单类型",
+        examples=[
+            "xjcg_tender",
+            "gngk_hw_zc_tender",
+            "gngk_hw_cz_tender",
+            "gngk_fw_zc_tender",
+            "gngk_fw_cz_tender",
+            "gjgk_tender",
+        ],
     )
     tender_data: TenderData = Field(..., description="招标数据")
     file_paths: Dict[str, str | List[str]] = Field(..., description="文件路径字典")
@@ -87,6 +98,7 @@ class GenerateRequest(BaseModel):
                     "submit_date": "2024-03-20",
                     "platform": "中国政府采购网",
                     "service_fee": "5000元",
+                    "tender_lx": 0,
                     "fund_source_lx": 1,
                 },
                 "file_paths": {
@@ -104,6 +116,40 @@ class GenerateRequest(BaseModel):
             }
         }
     }
+
+
+class EditTaskRequest(BaseModel):
+    """显式 edit 文档修改请求模型。"""
+
+    conversation_id: str = Field(..., min_length=1, description="会话ID")
+    form_type: FormType = Field(..., description="表单类型")
+    model: LLMModel = Field(default=LLMModel.DEEPSEEK, description="使用的 LLM 模型")
+    edit_prompt: str = Field(..., min_length=1, description="用户修改指令")
+    file_path: Optional[str] = Field(default=None, description="待修改 Word 文档路径")
+    insertion_config: Optional[InsertionConfig] = Field(
+        default=None, description="插入锚点配置（可选）"
+    )
+    tender_lx: int = Field(..., description="标的类型编码（0=货物, 1=服务）")
+    fund_source_lx: int = Field(..., description="资金性质编码（0=自筹, 1=财政）")
+    tender_data_snapshot: Optional[TenderData] = Field(
+        default=None,
+        description="当前页面招标数据快照（可选透传，用于保留会话上下文）",
+    )
+
+    @field_validator("conversation_id", "edit_prompt")
+    @classmethod
+    def _validate_non_empty_text(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("字段不能为空")
+        return normalized
+
+    @field_validator("tender_lx", "fund_source_lx")
+    @classmethod
+    def _validate_binary_flag(cls, value: int) -> int:
+        if value not in (0, 1):
+            raise ValueError("字段必须是 0 或 1")
+        return int(value)
 
 
 class GenerateResponse(BaseModel):

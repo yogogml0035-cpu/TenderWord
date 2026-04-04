@@ -67,6 +67,13 @@ function buildFilesConfig(
   };
 }
 
+function resolveGngkFormType(formData: GngkTenderFormData): GngkGenerateRequest['form_type'] {
+  if (formData.tender_lx === 1) {
+    return formData.fund_lx === 1 ? 'gngk_fw_cz_tender' : 'gngk_fw_zc_tender';
+  }
+  return formData.fund_lx === 1 ? 'gngk_hw_cz_tender' : 'gngk_hw_zc_tender';
+}
+
 // ============================================
 // XJCG Converter
 // ============================================
@@ -115,6 +122,7 @@ export function convertXjcgFormToApiRequest(formData: XjcgTenderFormData): Gener
     form_type: 'xjcg_tender',
     tender_data: {
       ...formData.tender_data,
+      tender_lx: formData.tender_lx,
       fund_source_lx: formData.fund_lx,
     },
     file_paths: filesConfig,
@@ -186,9 +194,10 @@ export function convertGngkFormToApiRequest(
   );
 
   const request: GngkGenerateRequest = {
-    form_type: formData.fund_lx === 1 ? 'gngk_cz_tender' : 'gngk_zc_tender',
+    form_type: resolveGngkFormType(formData),
     tender_data: {
       ...formData.tender_data,
+      tender_lx: formData.tender_lx,
       fund_source_lx: formData.fund_lx,
     },
     file_paths: filesConfig,
@@ -213,6 +222,7 @@ export function convertGjgkFormToApiRequest(
     form_type: 'gjgk_tender',
     tender_data: {
       ...formData.tender_data,
+      tender_lx: formData.tender_lx,
       fund_source_lx: formData.fund_lx,
     },
     file_paths: filesConfig,

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 from backend.models import (
     DoneEventData,
+    EditTaskRequest,
     ErrorEventData,
     GenerateRequest,
     GenerateResponse,
@@ -66,6 +67,7 @@ REWRITE_STATE_KEYS = [
     "submit_date",
     "platform",
     "service_fee",
+    "tender_lx",
     "fund_source_lx",
     "tender_invitation",
     "delivery_location",
@@ -74,6 +76,10 @@ REWRITE_STATE_KEYS = [
 REWRITE_DEFAULT_ANCHORS = {
     "xjcg": ("第三章  采购需求", "第四章  响应文件有关格式"),
     "gngk": ("第三章 招标内容及要求", "第四章 投标文件有关格式"),
+    "gngk_hw_zc": ("第三章 招标内容及要求", "第四章 投标文件有关格式"),
+    "gngk_fw_zc": ("第三章 招标内容及要求", "第四章 投标文件有关格式"),
+    "gngk_hw_cz": ("第四章  招标需求", "第五章  评标方法与程序"),
+    "gngk_fw_cz": ("第四章  招标需求", "第五章  评标方法与程序"),
     "gngk_zc": ("第三章 招标内容及要求", "第四章 投标文件有关格式"),
     "gngk_cz": ("第四章  招标需求", "第五章  评标方法与程序"),
     "gjgk": ("技术规格及要求", "附件1：投标文件封面（格式）"),
@@ -82,6 +88,7 @@ REWRITE_DEFAULT_ANCHORS = {
 TASK_KIND_TO_LLM_NODE = {
     "generate": "generate_polished_text",
     "rewrite": "rewrite_text",
+    "edit": "edit_text",
 }
 
 class _DiscardingWriter:
@@ -168,30 +175,38 @@ class _LLMSnapshotRelay:
 GRAPH_REGISTRY: Dict[str, type] = {}
 TASK_SKILL_GRAPH_CLASSES: Dict[str, type] = {}
 REWRITE_SKILL_ID = "rewrite"
+EDIT_SKILL_ID = "edit"
 REWRITE_SKILL_GRAPH_CLASS: Optional[type] = None
+EDIT_SKILL_GRAPH_CLASS: Optional[type] = None
 
 
 def _init_graph_registry():
     """初始化 Graph 注册表（延迟加载）."""
-    global GRAPH_REGISTRY, TASK_SKILL_GRAPH_CLASSES, REWRITE_SKILL_GRAPH_CLASS
-    if GRAPH_REGISTRY and REWRITE_SKILL_GRAPH_CLASS is not None:
+    global GRAPH_REGISTRY, TASK_SKILL_GRAPH_CLASSES, REWRITE_SKILL_GRAPH_CLASS, EDIT_SKILL_GRAPH_CLASS
+    if GRAPH_REGISTRY and REWRITE_SKILL_GRAPH_CLASS is not None and EDIT_SKILL_GRAPH_CLASS is not None:
         return
 
     try:
         from backend.graphs import (
             GjgkTenderGraph,
-            GngkCzTenderGraph,
-            GngkZcTenderGraph,
+            GngkFwCzTenderGraph,
+            GngkFwZcTenderGraph,
+            GngkHwCzTenderGraph,
+            GngkHwZcTenderGraph,
             SkillGraph,
             XjcgTenderGraph,
         )
 
         GRAPH_REGISTRY["xjcg_tender"] = XjcgTenderGraph
-        GRAPH_REGISTRY["gngk_zc_tender"] = GngkZcTenderGraph
-        GRAPH_REGISTRY["gngk_cz_tender"] = GngkCzTenderGraph
+        GRAPH_REGISTRY["gngk_hw_zc_tender"] = GngkHwZcTenderGraph
+        GRAPH_REGISTRY["gngk_hw_cz_tender"] = GngkHwCzTenderGraph
+        GRAPH_REGISTRY["gngk_fw_zc_tender"] = GngkFwZcTenderGraph
+        GRAPH_REGISTRY["gngk_fw_cz_tender"] = GngkFwCzTenderGraph
         GRAPH_REGISTRY["gjgk_tender"] = GjgkTenderGraph
         TASK_SKILL_GRAPH_CLASSES[REWRITE_SKILL_ID] = SkillGraph.for_skill(REWRITE_SKILL_ID)
+        TASK_SKILL_GRAPH_CLASSES[EDIT_SKILL_ID] = SkillGraph.for_skill(EDIT_SKILL_ID)
         REWRITE_SKILL_GRAPH_CLASS = TASK_SKILL_GRAPH_CLASSES[REWRITE_SKILL_ID]
+        EDIT_SKILL_GRAPH_CLASS = TASK_SKILL_GRAPH_CLASSES[EDIT_SKILL_ID]
         logger.info("Graph 注册表初始化完成")
     except ImportError as e:
         logger.error(f"初始化 Graph 注册表失败: {e}")
@@ -467,6 +482,72 @@ class DocumentService:
             llm_node_name=TASK_KIND_TO_LLM_NODE["rewrite"],
         )
 
+    async def create_edit_task(self, request: EditTaskRequest) -> GenerateResponse:
+        """创建显式 edit 任务（复用文档任务队列 + SSE 三卡片链路）。"""
+        task_id, callback = self._allocate_task_callback_pair()
+
+        normalized_conversation_id = str(request.conversation_id or "").strip()
+        normalized_prompt = str(request.edit_prompt or "").strip()
+        normalized_file_path = str(request.file_path or "").strip()
+        latest_rewrite_state = None
+
+        if not normalized_conversation_id:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="conversation_id 不能为空",
+                error="REQ_MISSING_FIELD",
+            )
+
+        if not normalized_prompt:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="修改要求不能为空",
+                error="REQ_MISSING_FIELD",
+            )
+
+        if not normalized_file_path:
+            latest_rewrite_state = self._conversation_service.get_latest_rewrite_state(
+                normalized_conversation_id
+            )
+            normalized_file_path = str(
+                (latest_rewrite_state or {}).get("prepared_doc_path") or ""
+            ).strip()
+
+        if not normalized_file_path:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="当前会话没有可用文档，请先上传文件或先完成一次生成/修改",
+                error="REWRITE_NO_DOCUMENT",
+            )
+
+        if not EDIT_SKILL_GRAPH_CLASS:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="Edit Skill Graph 未初始化",
+                error="EDIT_TARGET_NOT_RESOLVED",
+            )
+
+        edit_initial_state = self._build_edit_graph_initial_state(
+            request=request.model_copy(update={"file_path": normalized_file_path}),
+            task_id=task_id,
+        )
+
+        return self._submit_graph_task(
+            task_id=task_id,
+            graph_class=EDIT_SKILL_GRAPH_CLASS,
+            initial_state=edit_initial_state,
+            callback=callback,
+            model_provider=request.model.value,
+            task_kind="edit",
+            conversation_id=normalized_conversation_id,
+            rewrite_user_prompt=normalized_prompt,
+            llm_node_name=TASK_KIND_TO_LLM_NODE["edit"],
+        )
+
     def _allocate_task_callback_pair(self) -> tuple[str, SSECallback]:
         task_id = f"task-{uuid.uuid4().hex[:8]}-{uuid.uuid4().hex[:4]}"
         callback = SSECallback(task_id)
@@ -554,6 +635,64 @@ class DocumentService:
             ).strip()
         return initial_state
 
+    def _build_edit_graph_initial_state(
+        self,
+        *,
+        request: EditTaskRequest,
+        task_id: str,
+    ) -> Dict[str, Any]:
+        tender_type = request.form_type.value.replace("_tender", "")
+        tender_data = request.tender_data_snapshot
+        conversation_id = str(request.conversation_id).strip()
+        project_number = str(getattr(tender_data, "project_number", "") or "").strip()
+        if tender_type == "gjgk":
+            project_number = normalize_gjgk_project_number(project_number)
+
+        insertion_before_text = None
+        insertion_after_text = None
+        insertion_config = getattr(request, "insertion_config", None)
+        if insertion_config:
+            insertion_before_text = getattr(insertion_config, "before_text", None)
+            insertion_after_text = getattr(insertion_config, "after_text", None)
+
+        default_before_text, default_after_text = get_default_anchor_texts(tender_type)
+        if not insertion_before_text or not str(insertion_before_text).strip():
+            insertion_before_text = default_before_text
+        if not insertion_after_text or not str(insertion_after_text).strip():
+            insertion_after_text = default_after_text
+
+        state: Dict[str, Any] = {
+            "task_id": task_id,
+            "skill_id": EDIT_SKILL_ID,
+            "conversation_id": conversation_id,
+            "user_session_id": conversation_id,
+            "tender_type": tender_type,
+            "project_name": str(getattr(tender_data, "project_name", "") or "").strip(),
+            "project_number": project_number,
+            "project_content": str(getattr(tender_data, "project_content", "") or "").strip(),
+            "buyer_name": str(getattr(tender_data, "buyer_name", "") or "").strip(),
+            "bzj_rule": str(getattr(tender_data, "bzj_rule", "") or "").strip(),
+            "project_zbr_xbr": str(getattr(tender_data, "project_zbr_xbr", "") or "").strip(),
+            "zbr_xbr_tel": str(getattr(tender_data, "zbr_xbr_tel", "") or "").strip(),
+            "zbr_pinyin": str(getattr(tender_data, "zbr_pinyin", "") or "").strip(),
+            "shell_start_date": str(getattr(tender_data, "shell_start_date", "") or "").strip(),
+            "shell_end_date": str(getattr(tender_data, "shell_end_date", "") or "").strip(),
+            "submit_date": str(getattr(tender_data, "submit_date", "") or "").strip(),
+            "platform": str(getattr(tender_data, "platform", "") or "").strip(),
+            "service_fee": str(getattr(tender_data, "service_fee", "") or "").strip(),
+            "tender_lx": int(request.tender_lx),
+            "fund_source_lx": str(request.fund_source_lx),
+            "edit_user_prompt": str(request.edit_prompt).strip(),
+            "source_origin_tender_path": str(request.file_path).strip(),
+            "insertion_before_text": str(insertion_before_text),
+            "insertion_after_text": str(insertion_after_text),
+        }
+        if tender_type == "gjgk":
+            state["tender_invitation"] = (
+                f"项目名称：{state['project_name']}，招标编号：{state['project_number']}"
+            )
+        return state
+
     def _build_initial_state(self, request: GenerateRequest, task_id: str) -> Dict[str, Any]:
         """构建 Graph 初始状态.
 
@@ -596,6 +735,9 @@ class DocumentService:
         fund_source_lx = getattr(tender_data, "fund_source_lx", None)
         if fund_source_lx not in (None, ""):
             state["fund_source_lx"] = str(fund_source_lx)
+        tender_lx = getattr(tender_data, "tender_lx", None)
+        if tender_lx in (0, 1):
+            state["tender_lx"] = int(tender_lx)
 
         insertion_before_text = None
         insertion_after_text = None
@@ -675,8 +817,16 @@ class DocumentService:
         """
         import asyncio
 
-        task_label = "修改任务" if task_kind == "rewrite" else "文档生成任务"
-        success_message = "修改任务完成" if task_kind == "rewrite" else "文档生成完成"
+        task_label = {
+            "generate": "文档生成任务",
+            "rewrite": "修改任务",
+            "edit": "文档修改任务",
+        }.get(task_kind, "文档任务")
+        success_message = {
+            "generate": "文档生成完成",
+            "rewrite": "修改任务完成",
+            "edit": "文档修改完成",
+        }.get(task_kind, "任务完成")
         callback.push_log(f"开始执行{task_label}: {task_id}")
         progress_log.info(f"[Task] 开始执行任务: {task_id}")
         stdout_writer = _DiscardingWriter()
@@ -730,6 +880,13 @@ class DocumentService:
                         )
                         if task_kind == "rewrite":
                             self._conversation_service.append_rewrite_success(
+                                conversation_id=conversation_id,
+                                user_prompt=str(rewrite_user_prompt or ""),
+                                rewrite_state=rewrite_state,
+                                model=model_provider,
+                            )
+                        elif task_kind == "edit":
+                            self._conversation_service.append_edit_success(
                                 conversation_id=conversation_id,
                                 user_prompt=str(rewrite_user_prompt or ""),
                                 rewrite_state=rewrite_state,
@@ -842,8 +999,8 @@ class DocumentService:
             except Exception:
                 pass
 
-            if task_kind == "rewrite":
-                self._cleanup_rewrite_output(rewrite_cleanup_holder.get("path"))
+            if task_kind in {"rewrite", "edit"}:
+                self._cleanup_temporary_output(rewrite_cleanup_holder.get("path"))
 
             # 更新任务队列状态
             self._task_queue.complete_task(task_id, result=None, error=error_msg)
@@ -856,7 +1013,7 @@ class DocumentService:
             value = result_state.get(key)
             if value in (None, ""):
                 value = initial_state.get(key)
-            if isinstance(value, str):
+            if isinstance(value, (str, int)):
                 snapshot[key] = value
 
         tender_type = str(snapshot.get("tender_type") or initial_state.get("tender_type") or "").strip()
@@ -879,7 +1036,7 @@ class DocumentService:
         snapshot.setdefault("polished_text", str(result_state.get("polished_text") or ""))
         return snapshot
 
-    def _cleanup_rewrite_output(self, file_path: Optional[str]) -> None:
+    def _cleanup_temporary_output(self, file_path: Optional[str]) -> None:
         target = str(file_path or "").strip()
         if not target:
             return
@@ -888,9 +1045,9 @@ class DocumentService:
             path = pathlib.Path(target)
             if path.is_file():
                 path.unlink()
-                logger.info("已清理 rewrite 失败副本: %s", target)
+                logger.info("已清理失败任务副本: %s", target)
         except Exception:
-            logger.exception("清理 rewrite 副本失败: %s", target)
+            logger.exception("清理任务副本失败: %s", target)
 
     async def _invoke_graph_async(
         self,

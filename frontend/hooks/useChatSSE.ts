@@ -41,11 +41,17 @@ function isTaskTrackedForStreaming(taskId: string): boolean {
 }
 
 function getAIContentTriggerNode(taskKind: TaskKind): string {
-  return taskKind === 'rewrite' ? 'rewrite_text' : 'generate_polished_text';
+  if (taskKind === 'rewrite') {
+    return 'rewrite_text';
+  }
+  if (taskKind === 'edit') {
+    return 'edit_text';
+  }
+  return 'generate_polished_text';
 }
 
 function resolveTaskKind(taskId: string, eventTaskKind?: unknown): TaskKind {
-  if (eventTaskKind === 'rewrite' || eventTaskKind === 'generate') {
+  if (eventTaskKind === 'rewrite' || eventTaskKind === 'generate' || eventTaskKind === 'edit') {
     return eventTaskKind;
   }
   return useChatStore.getState().getTaskSummary(taskId)?.task_kind || 'generate';

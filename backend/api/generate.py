@@ -36,8 +36,10 @@ description="""
 
 **表单类型**：
 - `xjcg_tender`: 询价采购
-- `gngk_zc_tender`: 国内公开（自筹）
-- `gngk_cz_tender`: 国内公开（财政）
+- `gngk_hw_zc_tender`: 国内公开（货物 / 自筹）
+- `gngk_hw_cz_tender`: 国内公开（货物 / 财政）
+- `gngk_fw_zc_tender`: 国内公开（服务 / 自筹）
+- `gngk_fw_cz_tender`: 国内公开（服务 / 财政）
 - `gjgk_tender`: 国际公开
 
 **模型选择**：

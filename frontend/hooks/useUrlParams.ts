@@ -2,7 +2,7 @@
 
 import { useSearchParams } from 'next/navigation';
 import { useMemo } from 'react';
-import { TenderType } from '@/types';
+import { TenderLx, TenderType } from '@/types';
 import { parseTenderUrlParams, getTenderNo } from '@/utils/tenderTypeMapper';
 
 /**
@@ -11,6 +11,8 @@ import { parseTenderUrlParams, getTenderNo } from '@/utils/tenderTypeMapper';
 export interface UseUrlParamsReturn {
   /** 招标编号 */
   tenderno: string | undefined;
+  /** 标的类型（0=货物, 1=服务） */
+  tender_lx: TenderLx | undefined;
   /** 资金类型（仅 0|1） */
   fund_lx: 0 | 1 | undefined;
   /** 招标类型 */
@@ -37,13 +39,13 @@ export interface UseUrlParamsReturn {
  * ```typescript
  * // 完整URL: /tender?tender_lx=0&purchase_method=2&fund_lx=0&tenderno=TEST001
  * function MyComponent() {
- *   const { tenderno, tenderType, isValid, errors } = useUrlParams();
+ *   const { tenderno, tenderType, tender_lx, isValid, errors } = useUrlParams();
  *   
  *   if (!isValid) {
  *     return <div>错误: {errors.join(', ')}</div>;
  *   }
  *   
- *   return <div>招标编号: {tenderno}, 类型: {tenderType}</div>;
+ *   return <div>招标编号: {tenderno}, 类型: {tenderType}, 标的: {tender_lx}</div>;
  * }
  * ```
  * 
@@ -52,9 +54,10 @@ export interface UseUrlParamsReturn {
  * // 缺少tenderno
  * // URL: /tender?tender_lx=0&purchase_method=2&fund_lx=0
  * function MyComponent() {
- *   const { tenderno, tenderType, isValid, errors } = useUrlParams();
+ *   const { tenderno, tenderType, tender_lx, isValid, errors } = useUrlParams();
  *   // tenderno: undefined
  *   // tenderType: 'gngk'
+ *   // tender_lx: 0
  *   // isValid: true
  *   // errors: []
  * }
@@ -68,6 +71,7 @@ export function useUrlParams(): UseUrlParamsReturn {
     if (!searchParams) {
       return {
         tenderno: undefined,
+        tender_lx: undefined,
         fund_lx: undefined,
         tenderType: undefined,
         isValid: false,
@@ -85,6 +89,9 @@ export function useUrlParams(): UseUrlParamsReturn {
 
     // 解析招标类型参数
     const result = parseTenderUrlParams(searchParams);
+    const tender_lx = result.params.tender_lx === 0 || result.params.tender_lx === 1
+      ? result.params.tender_lx
+      : undefined;
     const fund_lx = result.params.fund_lx === 0 || result.params.fund_lx === 1
       ? result.params.fund_lx
       : undefined;
@@ -93,6 +100,7 @@ export function useUrlParams(): UseUrlParamsReturn {
     if (!hasParams) {
       return {
         tenderno: undefined,
+        tender_lx: undefined,
         fund_lx: undefined,
         tenderType: undefined,
         isValid: true,
@@ -104,6 +112,7 @@ export function useUrlParams(): UseUrlParamsReturn {
 
     return {
       tenderno,
+      tender_lx,
       fund_lx,
       tenderType: result.tenderType,
       isValid: result.isValid,

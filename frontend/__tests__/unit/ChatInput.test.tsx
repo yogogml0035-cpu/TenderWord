@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { useState } from 'react';
+import type { ConversationDraftFile } from '@/stores/chatStore';
 
 function ControlledChatInput({
   onSend = jest.fn(),
@@ -9,6 +10,7 @@ function ControlledChatInput({
   loading = false,
   actionMode = 'send',
   disabled = false,
+  noticeMessage = null,
 }: {
   onSend?: (message: string) => void;
   selectedModel?: 'deepseek' | 'qwen' | 'doubao';
@@ -16,6 +18,7 @@ function ControlledChatInput({
   loading?: boolean;
   actionMode?: 'send' | 'cancel';
   disabled?: boolean;
+  noticeMessage?: string | null;
 }) {
   const [value, setValue] = useState('');
 
@@ -29,6 +32,42 @@ function ControlledChatInput({
       loading={loading}
       actionMode={actionMode}
       disabled={disabled}
+      noticeMessage={noticeMessage}
+    />
+  );
+}
+
+function ControlledEditChatInput({
+  onEditFileSelect = jest.fn(),
+  initialEditFile = null,
+}: {
+  onEditFileSelect?: (file: File) => void | Promise<void>;
+  initialEditFile?: ConversationDraftFile | null;
+}) {
+  const [value, setValue] = useState('');
+  const [editFile, setEditFile] = useState<ConversationDraftFile | null>(initialEditFile);
+
+  return (
+    <ChatInput
+      value={value}
+      onValueChange={setValue}
+      onSend={jest.fn()}
+      selectedModel="deepseek"
+      onModelChange={jest.fn()}
+      inputMode={editFile ? 'edit' : 'normal'}
+      editFile={editFile}
+      onEditFileSelect={async (file) => {
+        await onEditFileSelect(file);
+        setEditFile({
+          id: 'edit-file-1',
+          file_path: '/tmp/test.docx',
+          file_name: 'test.docx',
+          original_name: file.name,
+          size: file.size,
+          upload_time: new Date().toISOString(),
+        });
+      }}
+      onEditFileRemove={() => setEditFile(null)}
     />
   );
 }
@@ -83,7 +122,7 @@ describe('ChatInput', () => {
 
     render(<ControlledChatInput onSend={handleSend} />);
 
-    const textarea = screen.getByPlaceholderText('输入文字即可进行对话');
+    const textarea = screen.getByRole('textbox');
 
     fireEvent.change(textarea, { target: { value: '  测试消息  ' } });
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
@@ -96,7 +135,7 @@ describe('ChatInput', () => {
   it('auto-resizes the textarea and clamps it at the configured max height', () => {
     render(<ControlledChatInput />);
 
-    const textarea = screen.getByPlaceholderText('输入文字即可进行对话') as HTMLTextAreaElement;
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 
     Object.defineProperty(textarea, 'scrollHeight', {
       configurable: true,
@@ -122,7 +161,7 @@ describe('ChatInput', () => {
   it('resizes the textarea when the draft is updated programmatically', () => {
     render(<ProgrammaticValueChatInput />);
 
-    const textarea = screen.getByPlaceholderText('输入文字即可进行对话') as HTMLTextAreaElement;
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
     Object.defineProperty(textarea, 'scrollHeight', {
       configurable: true,
       value: 96,
@@ -139,7 +178,7 @@ describe('ChatInput', () => {
 
     render(<ControlledChatInput onSend={handleSend} loading actionMode="cancel" />);
 
-    const textarea = screen.getByPlaceholderText('输入文字即可进行对话');
+    const textarea = screen.getByRole('textbox');
     expect(textarea).not.toBeDisabled();
 
     fireEvent.change(textarea, { target: { value: '这条消息先写好，等生成结束再发' } });
@@ -148,5 +187,57 @@ describe('ChatInput', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
     expect(handleSend).not.toHaveBeenCalled();
     expect(textarea).toHaveValue('这条消息先写好，等生成结束再发');
+  });
+
+  it('opens and closes the explicit plus menu', () => {
+    render(<ControlledChatInput />);
+
+    fireEvent.click(screen.getByTestId('chat-plus-trigger'));
+    expect(screen.getByTestId('chat-plus-menu')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('chat-plus-menu')).not.toBeInTheDocument();
+  });
+
+  it('rejects non-word files in edit mode entry', () => {
+    render(<ControlledChatInput />);
+
+    fireEvent.change(screen.getByTestId('chat-edit-file-input'), {
+      target: {
+        files: [new File(['x'], 'invalid.pdf', { type: 'application/pdf' })],
+      },
+    });
+
+    expect(screen.getByTestId('chat-input-notice')).toHaveTextContent('仅支持上传 .doc 或 .docx 文件');
+  });
+
+  it('shows, removes, and replaces the selected edit file card', async () => {
+    const handleEditFileSelect = jest.fn();
+    render(<ControlledEditChatInput onEditFileSelect={handleEditFileSelect} />);
+
+    fireEvent.change(screen.getByTestId('chat-edit-file-input'), {
+      target: {
+        files: [
+          new File(['hello'], 'first.docx', {
+            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          }),
+        ],
+      },
+    });
+
+    expect(handleEditFileSelect).toHaveBeenCalledTimes(1);
+    expect(await screen.findByTestId('chat-edit-file-card')).toHaveTextContent('first.docx');
+
+    fireEvent.click(screen.getByTestId('chat-edit-file-remove'));
+    expect(screen.queryByTestId('chat-edit-file-card')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('chat-edit-file-input'), {
+      target: {
+        files: [new File(['world'], 'second.doc', { type: 'application/msword' })],
+      },
+    });
+
+    expect(handleEditFileSelect).toHaveBeenCalledTimes(2);
+    expect(await screen.findByTestId('chat-edit-file-card')).toHaveTextContent('second.doc');
   });
 });

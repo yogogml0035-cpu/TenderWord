@@ -19,6 +19,7 @@ class TaskSkillGraphState(TenderGraphStateBase, total=False):
     conversation_id: str
     rewrite_mode: bool
     rewrite_user_prompt: str
+    edit_user_prompt: str
     rewrite_base_text: str
     rewrite_target_index: int
     rewrite_history_messages: List[RewriteHistoryMessage]
