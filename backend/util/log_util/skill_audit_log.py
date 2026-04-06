@@ -34,8 +34,10 @@ TASK_AUDIT_STAGES = frozenset(
 REWRITE_AUDIT_STAGES = TASK_AUDIT_STAGES
 
 
-def _get_task_audit_dir() -> Path:
-    target = Path(__file__).resolve().parents[2] / "prompts_log" / "rewrite_log"
+def _get_task_audit_dir(prefix: str = "rewrite") -> Path:
+    safe_prefix = _sanitize_filename_part(prefix)
+    subdir = "edit_log" if safe_prefix == "edit" else "rewrite_log"
+    target = Path(__file__).resolve().parents[2] / "prompts_log" / subdir
     target.mkdir(parents=True, exist_ok=True)
     return target
 
@@ -100,7 +102,7 @@ def create_task_audit_log(
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now or time.time()))
     safe_audit_id = _sanitize_filename_part(audit_id)
     safe_prefix = _sanitize_filename_part(prefix) or "task"
-    audit_dir = _get_task_audit_dir()
+    audit_dir = _get_task_audit_dir(safe_prefix)
 
     candidate = audit_dir / f"{safe_prefix}_{timestamp}_{safe_audit_id}.json"
     if candidate.exists():

@@ -222,6 +222,7 @@ class TaskService:
         kind_map = {
             InternalTaskKind.GENERATE: TaskKind.GENERATE,
             InternalTaskKind.REWRITE: TaskKind.REWRITE,
+            InternalTaskKind.EDIT: TaskKind.EDIT,
         }
         return kind_map.get(task_kind, TaskKind.GENERATE)
 

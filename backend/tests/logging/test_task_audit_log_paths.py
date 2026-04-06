@@ -7,7 +7,10 @@ from types import SimpleNamespace
 from backend.models.generate import EditTaskRequest, FormType, GenerateResponse, LLMModel
 from backend.models.tender import TenderData
 from backend.services.document_service import DocumentService, SSECallback
-from backend.util.log_util.skill_audit_log import create_edit_audit_log
+from backend.util.log_util.skill_audit_log import (
+    create_edit_audit_log,
+    create_rewrite_audit_log,
+)
 
 
 def _build_edit_request() -> EditTaskRequest:
@@ -29,16 +32,35 @@ def _build_edit_request() -> EditTaskRequest:
 
 
 def test_create_edit_audit_log_creates_prefixed_file(tmp_path, monkeypatch):
+    def _fake_get_task_audit_dir(prefix: str = "rewrite") -> Path:
+        return tmp_path / f"{prefix}_dir"
+
     monkeypatch.setattr(
         "backend.util.log_util.skill_audit_log._get_task_audit_dir",
-        lambda: tmp_path,
+        _fake_get_task_audit_dir,
     )
 
     log_path = create_edit_audit_log("conv-edit-1", now=0.0)
 
     assert Path(log_path).is_file()
-    assert Path(log_path).parent == tmp_path
+    assert Path(log_path).parent == tmp_path / "edit_dir"
     assert Path(log_path).name.startswith("edit_")
+
+
+def test_create_rewrite_audit_log_stays_under_rewrite_dir(tmp_path, monkeypatch):
+    def _fake_get_task_audit_dir(prefix: str = "rewrite") -> Path:
+        return tmp_path / f"{prefix}_dir"
+
+    monkeypatch.setattr(
+        "backend.util.log_util.skill_audit_log._get_task_audit_dir",
+        _fake_get_task_audit_dir,
+    )
+
+    log_path = create_rewrite_audit_log("conv-rewrite-1", now=0.0)
+
+    assert Path(log_path).is_file()
+    assert Path(log_path).parent == tmp_path / "rewrite_dir"
+    assert Path(log_path).name.startswith("rewrite_")
 
 
 def test_create_edit_task_passes_task_audit_log_path_to_submit(monkeypatch):
