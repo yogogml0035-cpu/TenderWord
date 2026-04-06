@@ -5,6 +5,7 @@ export interface TaskStreamState {
   logs: LogEntry[];
   aiText: string;
   aiComplete: boolean;
+  lastCompleteAiText?: string;
   lastEventId?: string;
   progressPercent?: number;
   progressText?: string;
@@ -79,14 +80,18 @@ export const useChatStreamStore = create<ChatStreamStore>()((set) => ({
   setAIContent: (taskId, text, isComplete) =>
     set((state) => {
       const current = state.streams[taskId] ?? createStreamState();
+      const nextStream: TaskStreamState = {
+        ...current,
+        aiText: text,
+        aiComplete: isComplete,
+      };
+      if (isComplete) {
+        nextStream.lastCompleteAiText = text;
+      }
       return {
         streams: {
           ...state.streams,
-          [taskId]: {
-            ...current,
-            aiText: text,
-            aiComplete: isComplete,
-          },
+          [taskId]: nextStream,
         },
       };
     }),

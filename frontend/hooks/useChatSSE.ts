@@ -57,6 +57,26 @@ function resolveTaskKind(taskId: string, eventTaskKind?: unknown): TaskKind {
   return useChatStore.getState().getTaskSummary(taskId)?.task_kind || 'generate';
 }
 
+function normalizeAIContent(text: string): string {
+  return text.replace(/\r\n?/g, '\n');
+}
+
+function getCanonicalAIText(stream?: {
+  aiText: string;
+  lastCompleteAiText?: string;
+}): string {
+  if (!stream) {
+    return '';
+  }
+
+  const preferredText =
+    typeof stream.lastCompleteAiText === 'string' && stream.lastCompleteAiText.length > 0
+      ? stream.lastCompleteAiText
+      : stream.aiText;
+
+  return normalizeAIContent(preferredText);
+}
+
 function isAIContentCompletedLog(message: string, node: unknown, taskKind: TaskKind): boolean {
   if (typeof message !== 'string' || !message) {
     return false;
@@ -130,7 +150,7 @@ export function useChatSSE({
 
       return {
         logs: stream.logs,
-        aiText: stream.aiText,
+        aiText: getCanonicalAIText(stream),
         aiComplete: forceComplete || stream.aiComplete,
       };
     },
@@ -269,7 +289,11 @@ export function useChatSSE({
 
             const taskKind = resolveTaskKind(taskId);
             if (isAIContentCompletedLog(logMessage, logData.node, taskKind)) {
-              const aiText = useChatStreamStore.getState().streams[taskId]?.aiText || '';
+              const stream = useChatStreamStore.getState().streams[taskId];
+              if (taskKind === 'edit' && !stream?.aiComplete) {
+                break;
+              }
+              const aiText = getCanonicalAIText(stream);
               markTaskContentReady(taskId, aiText);
             }
           }
@@ -285,21 +309,24 @@ export function useChatSSE({
             const taskKind = resolveTaskKind(taskId);
             const triggerNode = getAIContentTriggerNode(taskKind);
 
-            if (llmNode === triggerNode) {
-              ensureTaskContentMessage(taskId);
+            if (llmNode !== triggerNode) {
+              break;
             }
+
+            ensureTaskContentMessage(taskId);
 
             if (contentMode === 'chunk') {
               const currentText = useChatStreamStore.getState().streams[taskId]?.aiText || '';
-              const mergedText = currentText + nextText;
+              const mergedText = normalizeAIContent(currentText + nextText);
               useChatStreamStore.getState().setAIContent(taskId, mergedText, isComplete);
-              if (llmNode === triggerNode && isComplete) {
+              if (isComplete) {
                 markTaskContentReady(taskId, mergedText);
               }
             } else {
-              useChatStreamStore.getState().setAIContent(taskId, nextText, isComplete);
-              if (llmNode === triggerNode && isComplete) {
-                markTaskContentReady(taskId, nextText);
+              const normalizedText = normalizeAIContent(nextText);
+              useChatStreamStore.getState().setAIContent(taskId, normalizedText, isComplete);
+              if (isComplete) {
+                markTaskContentReady(taskId, normalizedText);
               }
             }
           }

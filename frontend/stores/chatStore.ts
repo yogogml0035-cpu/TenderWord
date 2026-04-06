@@ -934,7 +934,12 @@ export const useChatStore = create<ChatStore>()(
             return;
           }
 
-          if (contentMessage.status !== 'generating') {
+          const shouldRefreshCompletedContent =
+            contentMessage.status === 'completed' &&
+            typeof nextText === 'string' &&
+            nextText !== contentMessage.content;
+
+          if (contentMessage.status !== 'generating' && !shouldRefreshCompletedContent) {
             return;
           }
 
