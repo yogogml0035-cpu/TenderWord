@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { GngkTenderForm } from './GngkTenderForm';
+import { GngkTenderForm } from '@/components/forms/GngkTenderForm';
 
 describe('GngkTenderForm Wrapper', () => {
   it('uses gngk-specific copy and insertion defaults', () => {

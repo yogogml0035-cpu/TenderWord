@@ -2,7 +2,7 @@ import {
   convertGjgkFormToApiRequest,
   convertGngkFormToApiRequest,
   convertXjcgFormToApiRequest,
-} from './formDataConverter';
+} from '@/lib/formDataConverter';
 
 const baseTenderData = {
   project_name: '测试项目',

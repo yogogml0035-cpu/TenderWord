@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { XjcgTenderForm } from './XjcgTenderForm';
+import { XjcgTenderForm } from '@/components/forms/XjcgTenderForm';
 
 describe('XjcgTenderForm Wrapper', () => {
   it('uses xjcg insertion defaults', () => {

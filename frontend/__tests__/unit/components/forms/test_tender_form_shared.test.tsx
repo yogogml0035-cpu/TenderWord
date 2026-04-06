@@ -1,8 +1,8 @@
 import React from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { TenderFormShared, type BaseTenderFormData } from './TenderFormShared';
-import type { UploadedFile } from './FileUploader';
+import { TenderFormShared, type BaseTenderFormData } from '@/components/forms/TenderFormShared';
+import type { UploadedFile } from '@/components/forms/FileUploader';
 import type { ConversationFormDraft } from '@/stores/chatStore';
 import { ApiError } from '@/lib/api';
 import type {
@@ -56,7 +56,7 @@ function buildUploadedFile(fileType: string, overrides: Partial<UploadedFile> = 
   };
 }
 
-jest.mock('./TenderNoInput', () => ({
+jest.mock('@/components/forms/TenderNoInput', () => ({
   TenderNoInput: ({
     value,
     onChange,
@@ -141,7 +141,7 @@ jest.mock('@/lib/api', () => {
   };
 });
 
-jest.mock('./FileUploader', () => ({
+jest.mock('@/components/forms/FileUploader', () => ({
   FileUploader: ({
     label,
     onFilesChange,

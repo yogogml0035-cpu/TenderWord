@@ -20,7 +20,7 @@ import {
   inferTenderNoFromConversationTitle,
   shouldAutoUpdateConversationTitle,
 } from '@/lib/chat-utils';
-import { ConversationFactory, MessageFactory } from '../mocks/data-factories';
+import { ConversationFactory, MessageFactory } from '../../mocks/data-factories';
 
 describe('chat-utils', () => {
   describe('ID Generation', () => {

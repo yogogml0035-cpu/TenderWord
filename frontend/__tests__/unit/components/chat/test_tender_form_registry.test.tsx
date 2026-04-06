@@ -2,7 +2,7 @@ import {
   tenderFormComponentMap,
   tenderFormConverterMap,
   tenderTypeDisplayNameMap,
-} from './tenderFormRegistry';
+} from '@/components/chat/tenderFormRegistry';
 
 describe('tenderFormRegistry', () => {
   it('registers gjgk display name and component', () => {
