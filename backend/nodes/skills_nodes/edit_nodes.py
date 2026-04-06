@@ -23,6 +23,12 @@ from backend.skills import get_skill_registry
 from backend.states import TaskSkillGraphState
 from backend.util.common_util import StreamCallbacks, stream_llm_completion
 from backend.util.log_util.progress_log import progress_log
+from backend.util.log_util.skill_audit_log import (
+    EDIT_STAGE_TEXT_REQUEST,
+    resolve_task_audit_log_path,
+    TASK_AUDIT_STAGE_SKILL_PROMPT_RENDER,
+    write_task_audit_stage,
+)
 from backend.util.word_util import (
     WordDocumentInspector,
     close_word_application,
@@ -220,6 +226,17 @@ def edit_text(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
     stream_callback = configurable.get("llm_stream_callback")
     complete_callback = configurable.get("llm_stream_complete_callback")
     suppress_llm_stdout = bool(configurable.get("suppress_llm_stdout", False))
+    task_audit_log_path = resolve_task_audit_log_path(config)
+
+    if task_audit_log_path:
+        write_task_audit_stage(
+            task_audit_log_path,
+            TASK_AUDIT_STAGE_SKILL_PROMPT_RENDER,
+            [
+                {"role": "system", "content": rendered_prompt.system_prompt},
+                {"role": "user", "content": rendered_prompt.user_prompt},
+            ],
+        )
 
     def _push_stream_update(text: str) -> None:
         if callable(stream_callback) and text is not None:
@@ -229,9 +246,19 @@ def edit_text(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
         if not suppress_llm_stdout:
             progress_log.debug(text)
 
+    def _capture_request_messages(messages: list[dict[str, Any]]) -> None:
+        if not task_audit_log_path:
+            return
+        write_task_audit_stage(
+            task_audit_log_path,
+            EDIT_STAGE_TEXT_REQUEST,
+            messages,
+        )
+
     callbacks = StreamCallbacks(
         on_chunk=_log_chunk,
         on_update=_push_stream_update,
+        on_request_messages=_capture_request_messages,
     )
 
     try:

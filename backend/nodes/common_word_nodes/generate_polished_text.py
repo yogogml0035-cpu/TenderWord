@@ -21,10 +21,11 @@ from backend.util.common_util import (
 )
 from backend.util.log_util.prompt_log import get_generate_prompt_log_dir
 from backend.util.log_util.progress_log import progress_log
-from backend.util.log_util.rewrite_audit_log import (
+from backend.util.log_util.skill_audit_log import (
     REWRITE_STAGE_SKILL_PROMPT_RENDER,
     REWRITE_STAGE_TEXT,
-    write_rewrite_audit_stage,
+    resolve_task_audit_log_path,
+    write_task_audit_stage,
 )
 
 PROMPT_REGISTRY = GENERATE_PROMPT_REGISTRY
@@ -49,7 +50,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
     # 获取配置的 model_provider，默认为 deepseek
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     model_provider = configurable.get("model_provider", "deepseek")
-    rewrite_log_path = str(configurable.get("rewrite_log_path") or "").strip()
+    rewrite_log_path = resolve_task_audit_log_path(config)
     progress_log.debug(f"[generate_polished_text] 使用模型: {model_provider}")
 
     # 根据 tender_type 从 PROMPT_REGISTRY 中选择对应的 prompt
@@ -99,7 +100,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
     system_prompt = rendered_prompt.system_prompt
     user_prompt = rendered_prompt.user_prompt
     if rewrite_mode and rewrite_log_path:
-        write_rewrite_audit_stage(
+        write_task_audit_stage(
             rewrite_log_path,
             REWRITE_STAGE_SKILL_PROMPT_RENDER,
             [
@@ -153,7 +154,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
     def _capture_request_messages(messages: list[dict[str, object]]) -> None:
         if not rewrite_mode or not rewrite_log_path:
             return
-        write_rewrite_audit_stage(
+        write_task_audit_stage(
             rewrite_log_path,
             REWRITE_STAGE_TEXT,
             messages,

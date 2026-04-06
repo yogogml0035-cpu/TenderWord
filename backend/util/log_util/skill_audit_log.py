@@ -10,23 +10,31 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 
+TASK_AUDIT_LOG_PATH_KEY = "task_audit_log_path"
+LEGACY_REWRITE_AUDIT_LOG_PATH_KEY = "rewrite_log_path"
+
 REWRITE_STAGE_SKILL_DIRECTORY_ROUTE = "skill_directory_route"
 REWRITE_STAGE_ROUTE_OR_REPLY = REWRITE_STAGE_SKILL_DIRECTORY_ROUTE
 REWRITE_STAGE_SKILL_PROMPT_RENDER = "skill_prompt_render"
+TASK_AUDIT_STAGE_SKILL_PROMPT_RENDER = REWRITE_STAGE_SKILL_PROMPT_RENDER
 REWRITE_STAGE_TARGET_SELECTION = "rewrite_target_selection"
 REWRITE_STAGE_TEXT = "rewrite_text"
+EDIT_STAGE_PROMPT_RENDER = TASK_AUDIT_STAGE_SKILL_PROMPT_RENDER
+EDIT_STAGE_TEXT_REQUEST = "edit_text_request"
 
-REWRITE_AUDIT_STAGES = frozenset(
+TASK_AUDIT_STAGES = frozenset(
     {
         REWRITE_STAGE_SKILL_DIRECTORY_ROUTE,
         REWRITE_STAGE_SKILL_PROMPT_RENDER,
         REWRITE_STAGE_TARGET_SELECTION,
         REWRITE_STAGE_TEXT,
+        EDIT_STAGE_TEXT_REQUEST,
     }
 )
+REWRITE_AUDIT_STAGES = TASK_AUDIT_STAGES
 
 
-def _get_rewrite_audit_dir() -> Path:
+def _get_task_audit_dir() -> Path:
     target = Path(__file__).resolve().parents[2] / "prompts_log" / "rewrite_log"
     target.mkdir(parents=True, exist_ok=True)
     return target
@@ -83,22 +91,51 @@ def _normalize_messages(messages: Sequence[Mapping[str, Any]]) -> list[dict[str,
     return normalized
 
 
-def create_rewrite_audit_log(conversation_id: str, *, now: float | None = None) -> str:
+def create_task_audit_log(
+    audit_id: str,
+    *,
+    prefix: str,
+    now: float | None = None,
+) -> str:
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now or time.time()))
-    safe_conversation_id = _sanitize_filename_part(conversation_id)
-    audit_dir = _get_rewrite_audit_dir()
+    safe_audit_id = _sanitize_filename_part(audit_id)
+    safe_prefix = _sanitize_filename_part(prefix) or "task"
+    audit_dir = _get_task_audit_dir()
 
-    candidate = audit_dir / f"rewrite_{timestamp}_{safe_conversation_id}.json"
+    candidate = audit_dir / f"{safe_prefix}_{timestamp}_{safe_audit_id}.json"
     if candidate.exists():
         candidate = audit_dir / (
-            f"rewrite_{timestamp}_{safe_conversation_id}_{uuid.uuid4().hex[:6]}.json"
+            f"{safe_prefix}_{timestamp}_{safe_audit_id}_{uuid.uuid4().hex[:6]}.json"
         )
 
     _atomic_write_json(candidate, {})
     return str(candidate)
 
 
-def write_rewrite_audit_stage(
+def create_rewrite_audit_log(conversation_id: str, *, now: float | None = None) -> str:
+    return create_task_audit_log(conversation_id, prefix="rewrite", now=now)
+
+
+def create_edit_audit_log(audit_id: str, *, now: float | None = None) -> str:
+    return create_task_audit_log(audit_id, prefix="edit", now=now)
+
+
+def resolve_task_audit_log_path(config: Mapping[str, Any] | None) -> str:
+    if not isinstance(config, Mapping):
+        return ""
+
+    configurable = config.get("configurable", config)
+    if not isinstance(configurable, Mapping):
+        return ""
+
+    task_audit_log_path = str(configurable.get(TASK_AUDIT_LOG_PATH_KEY) or "").strip()
+    legacy_rewrite_log_path = str(
+        configurable.get(LEGACY_REWRITE_AUDIT_LOG_PATH_KEY) or ""
+    ).strip()
+    return task_audit_log_path or legacy_rewrite_log_path
+
+
+def write_task_audit_stage(
     log_path: str,
     stage: str,
     messages: Sequence[Mapping[str, Any]],
@@ -106,8 +143,8 @@ def write_rewrite_audit_stage(
     normalized_path = str(log_path or "").strip()
     if not normalized_path:
         return
-    if stage not in REWRITE_AUDIT_STAGES:
-        raise ValueError(f"unsupported rewrite audit stage: {stage}")
+    if stage not in TASK_AUDIT_STAGES:
+        raise ValueError(f"unsupported task audit stage: {stage}")
 
     target = Path(normalized_path)
     payload = _load_existing_payload(target)
@@ -115,13 +152,31 @@ def write_rewrite_audit_stage(
     _atomic_write_json(target, payload)
 
 
+def write_rewrite_audit_stage(
+    log_path: str,
+    stage: str,
+    messages: Sequence[Mapping[str, Any]],
+) -> None:
+    write_task_audit_stage(log_path, stage, messages)
+
+
 __all__ = [
+    "EDIT_STAGE_PROMPT_RENDER",
+    "EDIT_STAGE_TEXT_REQUEST",
+    "LEGACY_REWRITE_AUDIT_LOG_PATH_KEY",
+    "REWRITE_AUDIT_STAGES",
+    "REWRITE_STAGE_ROUTE_OR_REPLY",
     "REWRITE_STAGE_SKILL_DIRECTORY_ROUTE",
     "REWRITE_STAGE_SKILL_PROMPT_RENDER",
-    "REWRITE_STAGE_ROUTE_OR_REPLY",
     "REWRITE_STAGE_TARGET_SELECTION",
     "REWRITE_STAGE_TEXT",
-    "REWRITE_AUDIT_STAGES",
+    "TASK_AUDIT_LOG_PATH_KEY",
+    "TASK_AUDIT_STAGE_SKILL_PROMPT_RENDER",
+    "TASK_AUDIT_STAGES",
+    "create_edit_audit_log",
     "create_rewrite_audit_log",
+    "create_task_audit_log",
+    "resolve_task_audit_log_path",
     "write_rewrite_audit_stage",
+    "write_task_audit_stage",
 ]

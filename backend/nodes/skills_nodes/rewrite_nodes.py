@@ -21,9 +21,10 @@ from backend.services.conversation_service import RewriteMessage, get_conversati
 from backend.states import TaskSkillGraphState
 from backend.util.common_util import StreamCallbacks, stream_llm_completion
 from backend.util.log_util.progress_log import progress_log
-from backend.util.log_util.rewrite_audit_log import (
+from backend.util.log_util.skill_audit_log import (
     REWRITE_STAGE_TARGET_SELECTION,
-    write_rewrite_audit_stage,
+    resolve_task_audit_log_path,
+    write_task_audit_stage,
 )
 
 
@@ -58,8 +59,7 @@ def _list_assistant_messages(rewrite_messages: List[RewriteMessage]) -> List[Rew
 
 
 def _get_rewrite_log_path(config: Dict[str, Any] | None) -> str:
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    return str(configurable.get("rewrite_log_path") or "").strip()
+    return resolve_task_audit_log_path(config)
 
 
 def _select_rewrite_target_index(user_prompt: str, rewrite_messages: List[RewriteMessage], config) -> int:
@@ -78,7 +78,7 @@ def _select_rewrite_target_index(user_prompt: str, rewrite_messages: List[Rewrit
     def _capture_request_messages(messages: list[dict[str, Any]]) -> None:
         if not rewrite_log_path:
             return
-        write_rewrite_audit_stage(
+        write_task_audit_stage(
             rewrite_log_path,
             REWRITE_STAGE_TARGET_SELECTION,
             messages,

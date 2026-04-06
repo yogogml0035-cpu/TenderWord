@@ -31,6 +31,7 @@ from backend.services.conversation_service import get_conversation_service
 from backend.task.task_queue_manager import get_task_queue
 from backend.util.log_util.execution_log import log_generate_task_success
 from backend.util.log_util.progress_log import progress_log
+from backend.util.log_util.skill_audit_log import create_edit_audit_log
 from backend.util.log_util.sse_log_handler import task_log_context
 from backend.util.common_util.tender_number import normalize_gjgk_project_number
 from backend.config.tender_config import get_default_anchor_texts
@@ -477,7 +478,8 @@ class DocumentService:
             model_provider=model_provider,
             task_kind="rewrite",
             conversation_id=normalized_conversation_id,
-            rewrite_user_prompt=normalized_prompt,
+            task_user_prompt=normalized_prompt,
+            task_audit_log_path=str(rewrite_log_path or "").strip() or None,
             rewrite_log_path=str(rewrite_log_path or "").strip() or None,
             llm_node_name=TASK_KIND_TO_LLM_NODE["rewrite"],
         )
@@ -531,6 +533,15 @@ class DocumentService:
                 error="EDIT_TARGET_NOT_RESOLVED",
             )
 
+        task_audit_log_path: Optional[str] = None
+        try:
+            task_audit_log_path = create_edit_audit_log(task_id)
+        except Exception:
+            logger.exception(
+                "创建 edit audit 日志文件失败: task_id=%s",
+                task_id,
+            )
+
         edit_initial_state = self._build_edit_graph_initial_state(
             request=request.model_copy(update={"file_path": normalized_file_path}),
             task_id=task_id,
@@ -544,7 +555,8 @@ class DocumentService:
             model_provider=request.model.value,
             task_kind="edit",
             conversation_id=normalized_conversation_id,
-            rewrite_user_prompt=normalized_prompt,
+            task_user_prompt=normalized_prompt,
+            task_audit_log_path=task_audit_log_path,
             llm_node_name=TASK_KIND_TO_LLM_NODE["edit"],
         )
 
@@ -565,7 +577,8 @@ class DocumentService:
         model_provider: str,
         task_kind: str,
         conversation_id: Optional[str] = None,
-        rewrite_user_prompt: Optional[str] = None,
+        task_user_prompt: Optional[str] = None,
+        task_audit_log_path: Optional[str] = None,
         rewrite_log_path: Optional[str] = None,
         llm_node_name: Optional[str] = None,
     ) -> GenerateResponse:
@@ -584,7 +597,8 @@ class DocumentService:
             model_provider,
             task_kind,
             conversation_id,
-            rewrite_user_prompt,
+            task_user_prompt,
+            task_audit_log_path,
             rewrite_log_path,
             llm_node_name,
         )
@@ -799,7 +813,8 @@ class DocumentService:
         model_provider: str,
         task_kind: str = "generate",
         conversation_id: Optional[str] = None,
-        rewrite_user_prompt: Optional[str] = None,
+        task_user_prompt: Optional[str] = None,
+        task_audit_log_path: Optional[str] = None,
         rewrite_log_path: Optional[str] = None,
         llm_node_name: Optional[str] = None,
     ) -> None:
@@ -813,7 +828,7 @@ class DocumentService:
             model_provider: 模型提供商
             task_kind: 任务类别（generate | rewrite）
             conversation_id: 会话ID
-            rewrite_user_prompt: rewrite 用户指令
+            task_user_prompt: task 用户指令
         """
         import asyncio
 
@@ -859,6 +874,7 @@ class DocumentService:
                             callback,
                             model_provider,
                             llm_node_name=llm_node_name or TASK_KIND_TO_LLM_NODE.get(task_kind, "generate_polished_text"),
+                            task_audit_log_path=task_audit_log_path,
                             rewrite_log_path=rewrite_log_path,
                             rewrite_cleanup_holder=rewrite_cleanup_holder,
                             stdout_writer=stdout_writer,
@@ -881,14 +897,14 @@ class DocumentService:
                         if task_kind == "rewrite":
                             self._conversation_service.append_rewrite_success(
                                 conversation_id=conversation_id,
-                                user_prompt=str(rewrite_user_prompt or ""),
+                                user_prompt=str(task_user_prompt or ""),
                                 rewrite_state=rewrite_state,
                                 model=model_provider,
                             )
                         elif task_kind == "edit":
                             self._conversation_service.append_edit_success(
                                 conversation_id=conversation_id,
-                                user_prompt=str(rewrite_user_prompt or ""),
+                                user_prompt=str(task_user_prompt or ""),
                                 rewrite_state=rewrite_state,
                                 model=model_provider,
                             )
@@ -1057,6 +1073,7 @@ class DocumentService:
         callback: SSECallback,
         model_provider: str,
         llm_node_name: str = "generate_polished_text",
+        task_audit_log_path: Optional[str] = None,
         rewrite_log_path: Optional[str] = None,
         rewrite_cleanup_holder: Optional[Dict[str, str]] = None,
         stdout_writer: Optional[Any] = None,
@@ -1088,6 +1105,10 @@ class DocumentService:
             node=llm_node_name,
         )
 
+        resolved_task_audit_log_path = str(
+            task_audit_log_path or rewrite_log_path or ""
+        ).strip()
+
         # 配置
         config = {
             "configurable": {
@@ -1096,7 +1117,10 @@ class DocumentService:
                 "llm_stream_complete_callback": llm_relay.flush,
                 "suppress_llm_stdout": True,
                 "model_provider": model_provider,
-                "rewrite_log_path": str(rewrite_log_path or "").strip(),
+                "task_audit_log_path": resolved_task_audit_log_path,
+                "rewrite_log_path": str(
+                    rewrite_log_path or resolved_task_audit_log_path
+                ).strip(),
                 "rewrite_cleanup_holder": rewrite_cleanup_holder
                 if rewrite_cleanup_holder is not None
                 else {},

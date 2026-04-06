@@ -19,7 +19,7 @@ from backend.prompts.types import (
 )
 from backend.services.conversation_service import ConversationService, get_conversation_service
 from backend.util.common_util import StreamCallbacks, stream_llm_completion
-from backend.util.log_util.rewrite_audit_log import (
+from backend.util.log_util.skill_audit_log import (
     REWRITE_STAGE_SKILL_DIRECTORY_ROUTE,
     create_rewrite_audit_log,
     write_rewrite_audit_stage,
