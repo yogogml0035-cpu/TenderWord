@@ -32,8 +32,8 @@ select_powershell_host() {
 }
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$script_dir"
-script_path="$repo_root/start-dev.ps1"
+repo_root="$(cd "$script_dir/.." && pwd)"
+script_path="$repo_root/scripts/start-dev.ps1"
 
 is_wsl || fail "该脚本只能在 WSL 中使用。"
 require_command wslpath

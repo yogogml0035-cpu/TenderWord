@@ -8,7 +8,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $script:ScriptName = "stop-build"
-$script:RepoRoot = [System.IO.Path]::GetFullPath($PSScriptRoot)
+$script:RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$script:ScriptRelativePath = "scripts\stop-build.ps1"
 $script:RuntimeDir = Join-Path $script:RepoRoot ".runtime\build"
 $script:BackendPidFile = Join-Path $script:RuntimeDir "backend.pid"
 $script:FrontendPidFile = Join-Path $script:RuntimeDir "frontend.pid"
@@ -119,7 +120,7 @@ function Stop-OrphanPortOccupant {
 
     if (-not $ForcePortCleanup -and -not $isExpectedProcess) {
         $displayName = if ($occupant.ProcessName) { $occupant.ProcessName } else { "unknown" }
-        Write-Info "检测到 $Label 端口 $Port 被 $displayName（PID: $($occupant.Pid)）占用，但它不在默认可回收进程名单中。若确认可清理，请执行 .\stop-build.ps1 -ForcePortCleanup。"
+        Write-Info "检测到 $Label 端口 $Port 被 $displayName（PID: $($occupant.Pid)）占用，但它不在默认可回收进程名单中。若确认可清理，请执行 .\$script:ScriptRelativePath -ForcePortCleanup。"
         return $false
     }
 

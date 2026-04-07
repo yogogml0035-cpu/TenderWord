@@ -78,18 +78,18 @@ NEXT_PUBLIC_API_URL=http://localhost:8000,http://10.11.11.44:8000
 
 | 场景 | 命令 | 说明 |
 |------|------|------|
-| 日常开发联调 | `.\start-dev.ps1` | 启动后端热重载和前端 `next dev`，会弹出两个 PowerShell 窗口 |
-| 停止服务 | `.\stop-build.ps1` | 停止 `.runtime\build` 记录的前后端进程并清理状态文件 |
+| 日常开发联调 | `.\scripts\start-dev.ps1` | 启动后端热重载和前端 `next dev`，会弹出两个 PowerShell 窗口 |
+| 停止服务 | `.\scripts\stop-build.ps1` | 停止 `.runtime\build` 记录的前后端进程并清理状态文件 |
 
-如果你在 WSL 中工作，但仍要复用 Windows 侧的 Python / Node / Word COM 环境，可使用仓库根目录下的桥接脚本：
+如果你在 WSL 中工作，但仍要复用 Windows 侧的 Python / Node / Word COM 环境，可使用 `scripts/` 下的桥接脚本：
 
 | 场景 | 命令 | 说明 |
 |------|------|------|
-| 日常开发联调（WSL 入口） | `./start-dev-wsl.sh` | 从 WSL 调起 Windows PowerShell 版 `start-dev.ps1` |
+| 日常开发联调（WSL 入口） | `./scripts/start-dev-wsl.sh` | 从 WSL 调起 Windows PowerShell 版 `start-dev.ps1` |
 
 脚本启动前会检查：
 
-- 脚本会以自身所在目录作为仓库根目录；从仓库根目录执行最直观
+- 脚本会自动将 `scripts/` 的上一级识别为仓库根目录；从仓库根目录执行最直观
 - `backend/.venv/Scripts/python.exe` 存在
 - `backend/.env`、`frontend/.env.local` 存在
 - `frontend/node_modules` 存在
@@ -97,7 +97,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000,http://10.11.11.44:8000
 
 ### 4. WSL 使用说明
 
-- `start-dev-wsl.sh` 只是桥接包装器，本质上仍在 Windows 侧执行 `ps1` 脚本。
+- `scripts/start-dev-wsl.sh` 只是桥接包装器，本质上仍在 Windows 侧执行 `ps1` 脚本。
 - 这类脚本仅用于开发便利，不代表 TenderWord 支持 Linux / WSL 原生运行。
 - 完整文档生成、修改与 COM 相关能力仍然依赖 Windows + Word COM。
 - 推荐从仓库根目录调用。
@@ -117,7 +117,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000,http://10.11.11.44:8000
 推荐使用步骤：
 
 1. 在 WSL 中进入仓库根目录。
-2. 开发模式下执行 `./start-dev-wsl.sh`。
+2. 开发模式下执行 `./scripts/start-dev-wsl.sh`。
 
 常用命令：
 
@@ -125,7 +125,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000,http://10.11.11.44:8000
 cd /home/wsq12/linux/code/TenderWord-linux-feat-wsq
 
 # 开发联调：Windows 侧拉起后端窗口，当前 WSL 终端运行前端
-./start-dev-wsl.sh
+./scripts/start-dev-wsl.sh
 ```
 
 如果你之前在 WSL 中执行过 `python3 -m venv backend/.venv`，需要先在 Windows PowerShell 里重建后端虚拟环境：
@@ -138,7 +138,7 @@ py -3.12 -m venv .venv
 
 运行结果说明：
 
-- `./start-dev-wsl.sh` 成功后，会由 Windows 侧弹出后端 PowerShell 窗口，并在当前 WSL 终端直接运行前端 `npm run dev`。
+- `./scripts/start-dev-wsl.sh` 成功后，会由 Windows 侧弹出后端 PowerShell 窗口，并在当前 WSL 终端直接运行前端 `npm run dev`。
 - 这样开发模式下的前端文件监听由 WSL/Linux 负责，避免 Windows 在 `\\wsl.localhost\...` 或映射盘路径上运行 `next dev` 时出现 Watchpack/UNC 监听异常。
 
 如果脚本启动失败，优先检查：
@@ -233,9 +233,10 @@ backend/                      FastAPI + LangGraph 后端
 
 asset/                        长期知识包与规则沉淀
 guide/                        本地 Git / worktree 操作说明，不是产品真源
-start-dev.ps1                 本地开发启动脚本
-stop-build.ps1                停止后台服务脚本
-start-dev-wsl.sh              WSL 开发联调入口脚本
+scripts/
+  start-dev.ps1               本地开发启动脚本
+  stop-build.ps1              停止后台服务脚本
+  start-dev-wsl.sh            WSL 开发联调入口脚本
 AGENTS.md                     仓库级执行规范
 ```
 
@@ -269,14 +270,14 @@ python scripts/diagnose_word.py
 ### PowerShell 阻止脚本执行
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\start-dev.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\stop-build.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-dev.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-build.ps1
 ```
 
 如果是从 WSL 调用，优先使用：
 
 ```bash
-./start-dev-wsl.sh
+./scripts/start-dev-wsl.sh
 ```
 
 ### 端口占用

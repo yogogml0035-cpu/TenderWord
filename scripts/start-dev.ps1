@@ -6,6 +6,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $script:LauncherName = "start-dev"
 $script:LauncherFileName = "start-dev.ps1"
+$script:LauncherRelativePath = "scripts\start-dev.ps1"
 
 function Write-Info {
     param([string]$Message)
@@ -145,7 +146,7 @@ function Assert-PortFree {
         "（PID: $($occupant.Pid)）"
     }
 
-    Fail "端口 $Port 已被占用$suffix。请先释放端口后再运行 .\$script:LauncherFileName。"
+    Fail "端口 $Port 已被占用$suffix。请先释放端口后再运行 .\$script:LauncherRelativePath。"
 }
 
 function Escape-SingleQuotedText {
@@ -215,12 +216,12 @@ function Start-CmdServiceWindow {
     return Start-Process @startProcessArgs
 }
 
-$repoRoot = [System.IO.Path]::GetFullPath($PSScriptRoot)
+$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $currentDir = [System.IO.Path]::GetFullPath((Get-Location).Path)
 $launchFrontend = -not $BackendOnly
 
 if ($currentDir -ne $repoRoot) {
-    Write-Info "检测到当前目录不是仓库根目录，已自动切换到脚本目录：$repoRoot"
+    Write-Info "检测到当前目录不是仓库根目录，已自动切换到仓库根目录：$repoRoot"
     Set-Location -LiteralPath $repoRoot
 }
 
