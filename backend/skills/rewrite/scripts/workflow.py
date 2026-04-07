@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from backend.nodes.common_word_nodes import (
-    delete_tender_param,
     get_rewrite_comments,
-    update_word,
 )
 from backend.nodes.skills_nodes.rewrite_nodes import resolve_rewrite_target, rewrite_text
+from backend.nodes.skills_nodes.tender_aware_word_dispatch import (
+    dispatch_tender_aware_delete_section,
+    dispatch_tender_aware_update_word,
+)
 from backend.skills.types import (
     TaskSkillConditionalEdge,
     TaskSkillWorkflow,
@@ -24,9 +26,9 @@ def get_workflow() -> TaskSkillWorkflow:
         nodes=(
             TaskSkillWorkflowNode("resolve_rewrite_target", resolve_rewrite_target),
             TaskSkillWorkflowNode("get_rewrite_comments", get_rewrite_comments),
-            TaskSkillWorkflowNode("delete_section", delete_tender_param),
+            TaskSkillWorkflowNode("delete_section", dispatch_tender_aware_delete_section),
             TaskSkillWorkflowNode("rewrite_text", rewrite_text),
-            TaskSkillWorkflowNode("update_word", update_word),
+            TaskSkillWorkflowNode("update_word", dispatch_tender_aware_update_word),
         ),
         edges=(
             ("get_rewrite_comments", "delete_section"),

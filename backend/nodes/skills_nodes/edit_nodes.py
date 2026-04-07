@@ -8,15 +8,9 @@ import uuid
 from typing import Any, Dict
 
 from backend.config.tender_config import get_anchor_target_sizes
-from backend.nodes.common_word_nodes.delete_tender_param import delete_tender_param
 from backend.nodes.common_word_nodes.get_comments import (
     result_to_polished_comments,
 )
-from backend.nodes.common_word_nodes.update_word import update_word
-from backend.nodes.gjgk_word_nodes.gjgk_delete_tender_param import (
-    gjgk_delete_tender_param,
-)
-from backend.nodes.gjgk_word_nodes.gjgk_update_word import gjgk_update_word
 from backend.prompts.skill_prompt import render_task_skill_prompt
 from backend.prompts.types import TaskSkillPromptInput, TaskSkillPromptSection
 from backend.skills import get_skill_registry
@@ -57,15 +51,6 @@ def _build_edit_output_path(source_path: pathlib.Path) -> pathlib.Path:
             f"{source_path.stem}_edit_{timestamp}_{uuid.uuid4().hex[:4]}{suffix}"
         )
     return candidate
-
-
-def _should_use_gjgk_goods_route(state: TaskSkillGraphState) -> bool:
-    tender_lx = state.get("tender_lx")
-    return (
-        str(state.get("tender_type") or "").strip() == "gjgk"
-        and tender_lx is not None
-        and int(tender_lx) == 0
-    )
 
 
 def resolve_edit_target(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
@@ -284,24 +269,4 @@ def edit_text(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
     return TaskSkillGraphState(
         polished_text=str(content),
         generate_polished_done=True,
-    )
-
-
-def dispatch_edit_delete_section(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
-    if _should_use_gjgk_goods_route(state):
-        return TaskSkillGraphState(
-            **gjgk_delete_tender_param(TaskSkillGraphState(**dict(state)), config)
-        )
-    return TaskSkillGraphState(
-        **delete_tender_param(TaskSkillGraphState(**dict(state)), config)
-    )
-
-
-def dispatch_edit_update_word(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
-    if _should_use_gjgk_goods_route(state):
-        return TaskSkillGraphState(
-            **gjgk_update_word(TaskSkillGraphState(**dict(state)), config)
-        )
-    return TaskSkillGraphState(
-        **update_word(TaskSkillGraphState(**dict(state)), config)
     )

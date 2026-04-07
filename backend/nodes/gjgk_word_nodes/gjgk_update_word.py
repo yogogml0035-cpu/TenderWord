@@ -29,6 +29,9 @@ from backend.config.tender_config import (  # noqa: E402
     get_anchor_target_sizes,
     get_default_anchor_texts,
 )
+from backend.nodes.common_word_nodes.comment_writeback import (  # noqa: E402
+    write_polished_comments,
+)
 from backend.states import GjgkTenderGraphState  # noqa: E402
 from backend.util.log_util.progress_log import progress_log  # noqa: E402
 from backend.util.word_util import (  # noqa: E402
@@ -1529,6 +1532,14 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
                 range_end=inserted_end,
                 log_parts=log_parts,
             )
+
+        write_polished_comments(
+            doc=doc,
+            polished_comments=state.get("polished_comments") or [],
+            bound_start=int(range_start),
+            bound_end=int(get_insertion_bound_end()),
+            log_parts=log_parts,
+        )
 
         save_document_with_retry(doc, node_name=NODE_NAME)
         log_parts.append("文档已保存")
