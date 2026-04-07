@@ -58,6 +58,9 @@ class TenderGraphStateBase(BaseState, total=False):
     strikethrough_plan: List[Dict[str, Any]]
     non_black_font_plan: List[Dict[str, Any]]
     polished_comments: List[CommentInstruction]
+    generated_comment_count: int
+    comment_writeback_summary: str
+    comment_writeback_result: Optional[Dict[str, Any]]
 
     insertion_log: str
     replacement_log: str
@@ -65,6 +68,12 @@ class TenderGraphStateBase(BaseState, total=False):
     copy_comments_added: int
     copy_comments_unmatched: List[Dict[str, Any]]
     comments_summary: str
+
+    # Comment writeback tracking (captured by update_word / gjgk_update_word nodes)
+    comment_writeback_added: int  # Count successfully written to Word doc
+    comment_writeback_failed: int  # Count that failed writeback
+    comment_writeback_skipped: int  # Count skipped (overlapping or other reasons)
+    comment_writeback_errors: List[Dict[str, Any]]  # Detailed per-comment error info
 
     project_name: str
     project_number: str

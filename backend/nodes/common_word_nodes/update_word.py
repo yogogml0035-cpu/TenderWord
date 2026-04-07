@@ -37,6 +37,7 @@ from backend.util.word_util import (
     wdOutlineLevelBodyText,
     wdCollapseStart,
     wdCollapseEnd,
+    wdFindStop,
     wdActiveEndPageNumber,
     wdWithInTable,
 )
@@ -44,6 +45,7 @@ from backend.util.word_util.anchor_utils import (
     find_anchor_range,
     resolve_anchor_content_range,
 )
+from backend.util.log_util.progress_log import progress_log
 
 
 REQUIRED_PROTECTED_FIELD_KEYWORDS = ("交付日期", "付款方式")
@@ -353,6 +355,13 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     word = None
     doc = None
     com_initialized = False
+
+    # Default comment writeback tracking (overwritten if write_polished_comments runs)
+    comment_writeback_summary = ""
+    comment_writeback_added = 0
+    comment_writeback_failed = 0
+    comment_writeback_skipped = 0
+    comment_writeback_errors = []
 
     try:
         # 使用统一的工具函数创建 Word 应用程序
@@ -1672,13 +1681,47 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 )
                 insertion_log_parts.append("内容处理成功。")
 
-                write_polished_comments(
+                # Capture comment writeback result for tracking and failure detection
+                polished_comments = state.get("polished_comments") or []
+                generated_count = state.get("generated_comment_count", 0)
+
+                comment_writeback_result = write_polished_comments(
                     doc=doc,
-                    polished_comments=state.get("polished_comments") or [],
+                    polished_comments=polished_comments,
                     bound_start=int(insertion_bound_start),
                     bound_end=int(get_insertion_bound_end()),
                     log_parts=insertion_log_parts,
                 )
+
+                # Extract writeback stats
+                added = comment_writeback_result.get("added", 0)
+                failed = comment_writeback_result.get("failed", 0)
+                skipped = comment_writeback_result.get("skipped", 0)
+                issues = comment_writeback_result.get("issues", [])
+
+                # Build summary for logging and state
+                summary = f"AI批注写入: 生成={generated_count}, 成功={added}, 失败={failed}, 跳过={skipped}"
+                progress_log.info(summary)
+
+                # Hard fail: if AI generated comments exist but zero were written back
+                if generated_count > 0 and added == 0:
+                    error_msg = f"批注生成成功但写入失败: 生成{generated_count}条, 成功写入0条"
+                    progress_log.error(error_msg)
+                    raise ValueError(error_msg)
+
+                # Store detailed results in state for visibility
+                comment_writeback_summary = summary
+                comment_writeback_added = added
+                comment_writeback_failed = failed
+                comment_writeback_skipped = skipped
+                comment_writeback_errors = [
+                    {
+                        "reference_text": issue.get("reference_text", ""),
+                        "reason": issue.get("reason", ""),
+                        "error": issue.get("error", "")
+                    }
+                    for issue in issues
+                ]
 
             doc.Save()
             insertion_log_parts.append("文档已保存。")
@@ -1705,6 +1748,11 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     new_state_dict = dict(state)
     insertion_log = "; ".join(insertion_log_parts)
     new_state_dict["insertion_log"] = insertion_log
+    new_state_dict["comment_writeback_summary"] = comment_writeback_summary
+    new_state_dict["comment_writeback_added"] = comment_writeback_added
+    new_state_dict["comment_writeback_failed"] = comment_writeback_failed
+    new_state_dict["comment_writeback_skipped"] = comment_writeback_skipped
+    new_state_dict["comment_writeback_errors"] = comment_writeback_errors
     new_state = TenderGraphStateBase(**new_state_dict)
 
     try:

@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Iterable, Mapping, TypedDict
 
-from backend.util.word_util import wdFindStop
+from backend.util.word_util import (
+    calculate_retry_delay,
+    is_rpc_error,
+    wdFindStop,
+)
+
+MAX_COMMENT_ADD_RETRIES = 3
 
 
 class CommentWritebackIssue(TypedDict, total=False):
@@ -76,11 +83,23 @@ def _build_search_texts(reference_text: str) -> list[str]:
     search_texts: list[str] = []
     for candidate in (
         str(reference_text or ""),
-        str(reference_text or "").replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r"),
+        str(reference_text or "")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("\n", "\r"),
     ):
         normalized = str(candidate or "")
         if normalized and normalized not in search_texts:
             search_texts.append(normalized)
+
+    # Table-oriented matching: markdown-style rows like "A | B"
+    raw = str(reference_text or "")
+    if "|" in raw:
+        # Strip pipe characters and collapse whitespace
+        pipe_stripped = " ".join(raw.replace("|", " ").split())
+        if pipe_stripped and pipe_stripped not in search_texts:
+            search_texts.append(pipe_stripped)
+
     return search_texts
 
 
@@ -236,9 +255,19 @@ def write_polished_comments(
                     current_start = max(match_end, current_start + 1)
                     continue
 
-                try:
-                    doc.Comments.Add(Range=find_range.Duplicate, Text=comment_text)
-                except Exception as exc:
+                add_exc: Exception | None = None
+                for attempt in range(MAX_COMMENT_ADD_RETRIES):
+                    try:
+                        doc.Comments.Add(Range=find_range.Duplicate, Text=comment_text)
+                        add_exc = None
+                        break
+                    except Exception as exc:
+                        add_exc = exc
+                        if is_rpc_error(exc) and attempt < MAX_COMMENT_ADD_RETRIES - 1:
+                            delay = calculate_retry_delay(attempt)
+                            time.sleep(delay)
+                            continue
+                if add_exc is not None:
                     result["failed"] += 1
                     _append_issue(
                         result["issues"],
@@ -246,10 +275,10 @@ def write_polished_comments(
                         reason="comment_add_failed",
                         reference_text=reference_text,
                         comment_text=comment_text,
-                        error=str(exc),
+                        error=str(add_exc),
                     )
                     log_parts.append(
-                        f"  批注 [{idx}] 添加失败 (reference_text={reference_text[:40]}...): {exc}"
+                        f"  批注 [{idx}] 添加失败 (重试 {MAX_COMMENT_ADD_RETRIES} 次后仍失败, reference_text={reference_text[:40]}...): {add_exc}"
                     )
                     inserted_here = True
                 else:

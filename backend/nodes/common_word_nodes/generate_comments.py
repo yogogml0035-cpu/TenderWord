@@ -44,16 +44,13 @@ def _sanitize_filename(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', "_", name).strip()
 
 
-def generate_comments(
-    state: TenderGraphStateBase,
-    config
-) -> TenderGraphStateBase:
+def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     """
     基于修改文本和计划使用 LLM 生成批注指令。
-    
+
     本函数分析修改文本以及从 Word 文档中提取的批注计划、删除线计划和非黑色字体计划，
     使用 LLM 生成可插入 Word 文档的结构化批注指令。
-    
+
     Args:
         state (TenderGraphStateBase): 包含输入字段的当前图状态
             - polished_text: 来自 update_word 节点的精炼文本内容
@@ -65,34 +62,34 @@ def generate_comments(
             - model_provider: LLM 提供商（默认："deepseek"）
             - llm_stream_callback: 可选的流式回调函数
             - suppress_llm_stdout: 是否抑制控制台输出
-        
+
     Returns:
         TenderGraphStateBase: 仅包含 polished_comments 字段的状态字典
             - polished_comments: 生成的批注指令列表，每个元素包含：
                 - reference_text: 文档中附加批注的文本内容
                 - comment_text: 批注的具体内容
-    
+
     Raises:
         ValueError: 当提供未知的 tender_type 时
-    
+
     需求引用：1.4, 1.5, 8.1
     """
     # 初始化执行计时
     start_time = time.time()
-    
+
     # 添加启动日志消息
     progress_log.debug("[generate_comments] 开始执行...")
-    
+
     # 从 state 读取输入数据，使用防御性默认值
     polished_text = state.get("polished_text", "")
     comment_plan_detail = state.get("comment_plan_detail", [])
     strikethrough_plan = state.get("strikethrough_plan", [])
     non_black_font_plan = state.get("non_black_font_plan", [])
     tender_type = state.get("tender_type", "xjcg")
-    
+
     # 记录正在使用的 tender_type
     progress_log.debug(f"[generate_comments] 招标类型: {tender_type}")
-    
+
     # 实现提示词选择和验证
     rendered_prompt = render_comment_prompt(
         CommentPromptInput(
@@ -115,26 +112,28 @@ def generate_comments(
         project_number = str(state.get("project_number", "") or "").strip()
         project_name = str(state.get("project_name", "") or "").strip()
         filename_parts = [
-            _sanitize_filename(part)
-            for part in (project_number, project_name)
-            if part
+            _sanitize_filename(part) for part in (project_number, project_name) if part
         ]
         timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
         prompt_base = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
-        comments_prompt_file = prompts_log_dir / f"prompt_{prompt_base}_comments_prompt_{timestamp}.txt"
-        new_comments_file = prompts_log_dir / f"prompt_{prompt_base}_new_comments_{timestamp}.txt"
+        comments_prompt_file = (
+            prompts_log_dir / f"prompt_{prompt_base}_comments_prompt_{timestamp}.txt"
+        )
+        new_comments_file = (
+            prompts_log_dir / f"prompt_{prompt_base}_new_comments_{timestamp}.txt"
+        )
 
         with open(comments_prompt_file, "w", encoding="utf-8") as f:
             f.write(system_prompt + "\n" + formatted_user_prompt)
     except Exception as e:
         progress_log.warning(f"[generate_comments] 警告: 准备批注输出文件路径失败: {e}")
-    
+
     # 实现配置提取和回调设置
-    
+
     # 从 config 提取 model_provider，默认为 "deepseek"
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     model_provider = configurable.get("model_provider", "deepseek")
-    
+
     llm_model_override = None
     llm_extra_params_override = None
     effective_model_display = model_provider
@@ -144,22 +143,24 @@ def generate_comments(
         effective_model_display = llm_model_override
 
     progress_log.debug(f"[generate_comments] 使用模型: {effective_model_display}")
-    
+
     # 从 config 提取 llm_stream_callback（如果可用）
     stream_callback: Optional[Callable[[str], None]] = None
     suppress_llm_stdout = False
-    
+
     if config:
         try:
             if isinstance(configurable, dict):
                 stream_callback = configurable.get("llm_stream_callback")
-                suppress_llm_stdout = bool(configurable.get("suppress_llm_stdout", False))
+                suppress_llm_stdout = bool(
+                    configurable.get("suppress_llm_stdout", False)
+                )
             # 如果 configurable 中没有，尝试从 config 根级别获取
             if not stream_callback and isinstance(config, dict):
                 stream_callback = config.get("llm_stream_callback")
         except Exception:
             stream_callback = None
-    
+
     # 定义 _push_stream_update 回调函数用于流式更新
     def _push_stream_update(text: str) -> None:
         """
@@ -170,22 +171,22 @@ def generate_comments(
         """
         # 不向外传播 LLM 的完整输出内容，保护批注文本不被直接打印
         return
-    
+
     # 定义 _log_chunk 回调函数用于控制台输出
     def _log_chunk(text: str) -> None:
         """将 chunk 输出到控制台"""
         if suppress_llm_stdout:
             return
         progress_log.debug(text, end="", flush=True)
-    
+
     # 创建 StreamCallbacks 对象，包含 on_chunk 和 on_update 回调
     callbacks = StreamCallbacks(
         on_chunk=_log_chunk,
         on_update=_push_stream_update,
     )
-    
+
     # 实现带错误处理的 LLM 流式调用
-    
+
     # 设置 asyncio 事件循环（获取现有或创建新的）
     try:
         loop = asyncio.get_running_loop()
@@ -193,7 +194,7 @@ def generate_comments(
         # No running loop, create a new one
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-    
+
     # 在 try-except 块中包装 stream_llm_completion 调用
     try:
         # 使用 model_provider、system_prompt、user_prompt、callbacks、timeout_seconds 和 check_interval 调用 stream_llm_completion
@@ -212,25 +213,27 @@ def generate_comments(
     except LLMTimeoutError as e:
         # 捕获 LLMTimeoutError 并记录错误，返回空的 polished_comments 列表
         progress_log.error(f"\n[generate_comments] LLM 超时错误: {e}")
-        return TenderGraphStateBase(polished_comments=[])
+        return TenderGraphStateBase(polished_comments=[], generated_comment_count=0)
     except Exception as e:
         # 捕获一般异常，记录完整堆栈跟踪，返回空的 polished_comments 列表
         progress_log.exception(f"[generate_comments] 发生意外错误: {e}")
-        return TenderGraphStateBase(polished_comments=[])
-    
+        return TenderGraphStateBase(polished_comments=[], generated_comment_count=0)
+
     # 实现带错误处理的 JSON 解析
-    
+
     # 确保输出后有换行
     if not suppress_llm_stdout:
         progress_log.debug("")
-    
+
     try:
         # 使用 json.loads 解析 LLM 输出
         comments = json.loads(content)
-        
+
         # 验证结果是一个列表
         if not isinstance(comments, list):
-            progress_log.warning(f"[generate_comments] 警告: LLM 输出不是列表，而是 {type(comments).__name__}")
+            progress_log.warning(
+                f"[generate_comments] 警告: LLM 输出不是列表，而是 {type(comments).__name__}"
+            )
             polished_comments = []
         else:
             # 将每个字典转换为包含 reference_text 和 comment_text 字段的 CommentInstruction
@@ -239,30 +242,32 @@ def generate_comments(
             polished_comments = [
                 {
                     "reference_text": c.get("reference_text", ""),
-                    "comment_text": c.get("comment_text", "")
+                    "comment_text": c.get("comment_text", ""),
                 }
                 for c in comments
                 if isinstance(c, dict)
             ]
-            
+
             # 成功时记录生成的批注数量
-            progress_log.info(f"[generate_comments] 生成了 {len(polished_comments)} 条批注指令")
-    
+            progress_log.info(
+                f"[generate_comments] 生成了 {len(polished_comments)} 条批注指令"
+            )
+
     except json.JSONDecodeError as e:
         # 捕获 JSONDecodeError 并记录错误
         progress_log.error(f"[generate_comments] JSON 解析失败 (JSONDecodeError): {e}")
         polished_comments = []
-    
+
     except ValueError as e:
         # 捕获 ValueError 并记录错误
         progress_log.error(f"[generate_comments] JSON 解析失败 (ValueError): {e}")
         polished_comments = []
-    
+
     except KeyError as e:
         # 捕获 KeyError 并记录错误
         progress_log.error(f"[generate_comments] JSON 解析失败 (KeyError): {e}")
         polished_comments = []
-    
+
     except Exception as e:
         # 捕获其他异常并记录错误
         progress_log.exception(f"[generate_comments] JSON 解析时发生意外错误: {e}")
@@ -274,14 +279,19 @@ def generate_comments(
                 f.write(json.dumps(polished_comments, ensure_ascii=False, indent=2))
     except Exception as e:
         progress_log.warning(f"[generate_comments] 警告: 保存批注内容到文件失败: {e}")
-    
+
     # 计算执行持续时间
     duration = time.time() - start_time
     duration_ms = int(duration * 1000)
-    
+
     # 记录包含执行时间的完成消息
-    progress_log.info(f"[generate_comments] 执行完成，耗时: {duration:.2f} 秒 ({duration_ms} 毫秒)")
-    
+    progress_log.info(
+        f"[generate_comments] 执行完成，耗时: {duration:.2f} 秒 ({duration_ms} 毫秒)"
+    )
+
     # 创建仅包含 polished_comments 字段的新状态字典
     # 确保不修改输入状态对象（不可变性）
-    return TenderGraphStateBase(polished_comments=polished_comments)
+    return TenderGraphStateBase(
+        polished_comments=polished_comments,
+        generated_comment_count=len(polished_comments),
+    )

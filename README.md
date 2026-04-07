@@ -1,6 +1,6 @@
 # TenderWord
 
-TenderWord 是面向招标文件生成与修改的前后端分离系统。当前仓库以 Windows + Word COM 作为完整运行前提，围绕“创建任务 -> 队列串行执行 -> SSE 推送 -> 下载 / 继续修改”组织前后端能力。
+TenderWord 是面向招标文件生成与修改的前后端分离系统。当前仓库以 Windows + Word COM 作为完整运行前提，围绕"创建任务 -> 队列串行执行 -> SSE 推送 -> 下载 / 继续修改"组织前后端能力。
 
 ## 当前仓库现实
 
@@ -79,16 +79,13 @@ NEXT_PUBLIC_API_URL=http://localhost:8000,http://10.11.11.44:8000
 | 场景 | 命令 | 说明 |
 |------|------|------|
 | 日常开发联调 | `.\start-dev.ps1` | 启动后端热重载和前端 `next dev`，会弹出两个 PowerShell 窗口 |
-| 接近部署的本机启动 | `.\start-build.ps1` | 后台执行 `npm ci`、`npm run build`、`npm run start`，并拉起后端 |
-| 停止 build 模式服务 | `.\stop-build.ps1` | 停止 `.runtime\build` 记录的前后端进程并清理状态文件 |
+| 停止服务 | `.\stop-build.ps1` | 停止 `.runtime\build` 记录的前后端进程并清理状态文件 |
 
 如果你在 WSL 中工作，但仍要复用 Windows 侧的 Python / Node / Word COM 环境，可使用仓库根目录下的桥接脚本：
 
 | 场景 | 命令 | 说明 |
 |------|------|------|
 | 日常开发联调（WSL 入口） | `./start-dev-wsl.sh` | 从 WSL 调起 Windows PowerShell 版 `start-dev.ps1` |
-| 接近部署的本机启动（WSL 入口） | `./start-build-wsl.sh` | 从 WSL 调起 Windows PowerShell 版 `start-build.ps1` |
-| 停止 build 模式服务（WSL 入口） | `./stop-build-wsl.sh` | 从 WSL 调起 Windows PowerShell 版 `stop-build.ps1` |
 
 脚本启动前会检查：
 
@@ -100,7 +97,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000,http://10.11.11.44:8000
 
 ### 4. WSL 使用说明
 
-- `*-wsl.sh` 只是桥接包装器，本质上仍在 Windows 侧执行 `ps1` 脚本。
+- `start-dev-wsl.sh` 只是桥接包装器，本质上仍在 Windows 侧执行 `ps1` 脚本。
 - 这类脚本仅用于开发便利，不代表 TenderWord 支持 Linux / WSL 原生运行。
 - 完整文档生成、修改与 COM 相关能力仍然依赖 Windows + Word COM。
 - 推荐从仓库根目录调用。
@@ -121,7 +118,6 @@ NEXT_PUBLIC_API_URL=http://localhost:8000,http://10.11.11.44:8000
 
 1. 在 WSL 中进入仓库根目录。
 2. 开发模式下执行 `./start-dev-wsl.sh`。
-3. build 模式下执行 `./start-build-wsl.sh`；停止时使用 `./stop-build-wsl.sh`，不要手动删除 `.runtime/build` 状态文件。
 
 常用命令：
 
@@ -130,12 +126,6 @@ cd /home/wsq12/linux/code/TenderWord-linux-feat-wsq
 
 # 开发联调：Windows 侧拉起后端窗口，当前 WSL 终端运行前端
 ./start-dev-wsl.sh
-
-# 构建态启动：后台执行 npm ci / build / start，并拉起后端
-./start-build-wsl.sh
-
-# 停止 build 模式启动的后台进程
-./stop-build-wsl.sh
 ```
 
 如果你之前在 WSL 中执行过 `python3 -m venv backend/.venv`，需要先在 Windows PowerShell 里重建后端虚拟环境：
@@ -146,31 +136,10 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-参数透传说明：
-
-- `start-dev-wsl.sh` 只是桥接 `start-dev.ps1`，当前没有额外参数。
-- `start-build-wsl.sh` 会把你传入的参数原样转给 `start-build.ps1`。
-- `stop-build-wsl.sh` 会把你传入的参数原样转给 `stop-build.ps1`。
-
-示例：
-
-```bash
-# 自定义前后端端口
-./start-build-wsl.sh -BackendPort 8100 -FrontendPort 8600
-
-# 自定义健康检查超时
-./start-build-wsl.sh -BackendTimeoutSec 120 -FrontendTimeoutSec 600
-
-# 强制清理占用端口的孤儿进程
-./stop-build-wsl.sh -ForcePortCleanup
-```
-
 运行结果说明：
 
 - `./start-dev-wsl.sh` 成功后，会由 Windows 侧弹出后端 PowerShell 窗口，并在当前 WSL 终端直接运行前端 `npm run dev`。
 - 这样开发模式下的前端文件监听由 WSL/Linux 负责，避免 Windows 在 `\\wsl.localhost\...` 或映射盘路径上运行 `next dev` 时出现 Watchpack/UNC 监听异常。
-- `./start-build-wsl.sh` 成功后，会在当前终端输出 PID、访问地址和 `.runtime\build\` 日志路径。
-- `./stop-build-wsl.sh` 成功后，会停止 `.runtime\build\` 中记录的进程并清理状态文件。
 
 如果脚本启动失败，优先检查：
 
@@ -221,7 +190,7 @@ npm run start
 
 ## 类型与流程说明
 
-前端和后端对“招标类型”的粒度不同，文档和代码都要分清这两层：
+前端和后端对"招标类型"的粒度不同，文档和代码都要分清这两层：
 
 - 前端页面与表单注册使用 `TenderType`：`xjcg`、`gngk`、`gjgk`
 - 后端生成入口使用 `FormType`：`xjcg_tender`、`gngk_zc_tender`、`gngk_cz_tender`、`gjgk_tender`
@@ -265,8 +234,8 @@ backend/                      FastAPI + LangGraph 后端
 asset/                        长期知识包与规则沉淀
 guide/                        本地 Git / worktree 操作说明，不是产品真源
 start-dev.ps1                 本地开发启动脚本
-start-build.ps1               构建态启动脚本
-stop-build.ps1                构建态停止脚本
+stop-build.ps1                停止后台服务脚本
+start-dev-wsl.sh              WSL 开发联调入口脚本
 AGENTS.md                     仓库级执行规范
 ```
 
@@ -301,7 +270,6 @@ python scripts/diagnose_word.py
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\start-dev.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\start-build.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\stop-build.ps1
 ```
 
@@ -309,8 +277,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\stop-build.ps1
 
 ```bash
 ./start-dev-wsl.sh
-./start-build-wsl.sh
-./stop-build-wsl.sh
 ```
 
 ### 端口占用
