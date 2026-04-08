@@ -2,7 +2,7 @@
 
 TenderWord 是面向招标文件生成与修改的前后端分离系统。当前仓库以 Windows + Word COM 作为完整运行前提，围绕"创建任务 -> 队列串行执行 -> SSE 推送 -> 下载 / 继续修改"组织前后端能力。
 
-## 当前仓库现实
+## 当前仓库
 
 - 前端：Next.js 16、React 19、Tailwind CSS 4、Zustand
 - 后端：FastAPI、LangGraph、pywin32
