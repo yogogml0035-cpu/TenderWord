@@ -447,32 +447,50 @@ def extract_public_tender_bzj_rule(
     end_marker = "户名："
 
     start_pos = doc_content.find(start_marker)
-    if start_pos == -1:
-        log_parts.append(f"未找到起始标记 '{start_marker}'")
-        return None
+    if start_pos != -1:
+        log_parts.append(f"在位置 {start_pos} 找到起始标记 '{start_marker}'")
+        search_after = start_pos + len(start_marker)
+        end_pos = doc_content.find(end_marker, search_after)
+        if end_pos != -1:
+            log_parts.append(f"在位置 {end_pos} 找到结束标记 '{end_marker}'")
+            search_range = doc_content[search_after:end_pos]
+            log_parts.append(
+                f"在 '{start_marker}' 和 '{end_marker}' 之间搜索保证金规则，范围长度: "
+                f"{len(search_range)} 个字符"
+            )
 
-    log_parts.append(f"在位置 {start_pos} 找到起始标记 '{start_marker}'")
+            extracted_bzj = search_range.strip().rstrip("。").strip()
+            if extracted_bzj:
+                log_parts.append(f"提取保证金规则: {extracted_bzj}")
+                return extracted_bzj
+            log_parts.append("在指定范围内未提取到保证金规则")
+        else:
+            log_parts.append(f"未找到结束标记 '{end_marker}'，尝试句内兜底提取")
+    else:
+        log_parts.append(f"未找到起始标记 '{start_marker}'，尝试句内兜底提取")
 
-    search_after = start_pos + len(start_marker)
-    end_pos = doc_content.find(end_marker, search_after)
-    if end_pos == -1:
-        log_parts.append(f"未找到结束标记 '{end_marker}'")
-        return None
-
-    log_parts.append(f"在位置 {end_pos} 找到结束标记 '{end_marker}'")
-
-    search_range = doc_content[search_after:end_pos]
-    log_parts.append(
-        f"在 '{start_marker}' 和 '{end_marker}' 之间搜索保证金规则，范围长度: "
-        f"{len(search_range)} 个字符"
+    fallback_patterns = (
+        r"★\s*15\.1[\s\S]{0,300}?投标保证金金额[:：]\s*([\s\S]{1,200}?)\s*投标保证金有效期应当与投标有效期一致",
+        r"(?:必须|须)?附有\s*([^\n\r，,。；;]{1,120}?)\s*的投标保证金",
+        r"投标保证金(?:金额|数额)?\s*(?:为|按|是|应为|应按)\s*([^\n\r，,。；;]{1,120})",
     )
+    for pattern in fallback_patterns:
+        match = re.search(pattern, doc_content)
+        if match:
+            extracted_bzj = (
+                match.group(1)
+                .replace("\x07", "")
+                .replace("\r\n", "\n")
+                .replace("\r", "\n")
+                .strip()
+                .rstrip("，,。；;")
+                .strip()
+            )
+            if extracted_bzj:
+                log_parts.append(f"句内兜底提取保证金规则: {extracted_bzj}")
+                return extracted_bzj
 
-    extracted_bzj = search_range.strip().rstrip("。").strip()
-    if extracted_bzj:
-        log_parts.append(f"提取保证金规则: {extracted_bzj}")
-        return extracted_bzj
-
-    log_parts.append("在指定范围内未提取到保证金规则")
+    log_parts.append("未找到可提取的保证金规则")
     return None
 
 
@@ -590,19 +608,24 @@ def extract_public_tender_contact_fields(
                 log_parts.append("未找到负责人/经办人电话可提取内容")
 
     if state.get("zbr_pinyin"):
-        anchor_pattern = r"电子邮箱[:：]\s*([^\s@\n\r]+)\s*@dongsong-cn\.com"
+        anchor_pattern = r"(?:电子邮箱|邮箱)[:：]\s*([^\s@\n\r]+)\s*@"
         extracted = _extract_with_pattern(anchor_pattern, anchor_range, re.IGNORECASE)
         if extracted:
             zbr_pinyin = _strip_wrappers(extracted)
             log_parts.append(f"按锚点提取负责人拼音: {zbr_pinyin}")
         else:
-            email_pattern = r"电子邮箱[:：]\s*([^@\n\r]+)@"
+            email_pattern = r"(?:电子邮箱|邮箱)[:：]\s*([^@\n\r]+?)\s*@"
             extracted = _extract_with_pattern(email_pattern, search_range)
             if extracted:
                 zbr_pinyin = _strip_wrappers(extracted)
                 log_parts.append(f"提取负责人拼音: {zbr_pinyin}")
             else:
-                log_parts.append("未找到负责人拼音可提取内容")
+                extracted = _extract_with_pattern(email_pattern, doc_content)
+                if extracted:
+                    zbr_pinyin = _strip_wrappers(extracted)
+                    log_parts.append(f"全文兜底提取负责人拼音: {zbr_pinyin}")
+                else:
+                    log_parts.append("未找到负责人拼音可提取内容")
 
     return project_zbr_xbr, zbr_xbr_tel, zbr_pinyin
 

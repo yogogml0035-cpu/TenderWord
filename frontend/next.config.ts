@@ -1,6 +1,8 @@
 import type { NextConfig } from 'next';
 import { resolveApiBaseUrl } from './lib/apiBaseUrl';
 
+// const isProduction = process.env.NODE_ENV === 'production';
+
 const nextConfig: NextConfig = {
   // ========================================
   // API 代理配置 - 开发时转发到后端
@@ -19,6 +21,10 @@ const nextConfig: NextConfig = {
   },
 
   async headers() {
+    // if (!isProduction) {
+    //   return [];
+    // }
+
     return [
       {
         source: '/_next/static/:path*',

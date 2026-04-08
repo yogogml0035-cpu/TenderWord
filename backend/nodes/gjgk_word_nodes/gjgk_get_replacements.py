@@ -97,11 +97,81 @@ def extract_delivery_location(
     return None
 
 
+def extract_gjgk_project_content(
+    doc_content: str, state: GjgkTenderGraphState, log_parts: List[str]
+) -> Optional[str]:
+    """
+    提取 gjgk 专用 project_content。
+
+    优先按 `(1)设备名称及数量` 到 `(2)技术要求` 之间的整块内容提取，
+    若未命中再回退到共享提取器，降低历史模板回归风险。
+    """
+    if not doc_content or not state.get("project_content"):
+        return None
+
+    funding_source_marker = "1、本项目所需资金的来源均已落实。"
+    tender_content_marker = "2、招标内容"
+    funding_pos = doc_content.find(funding_source_marker)
+    if funding_pos == -1:
+        log_parts.append("gjgk: 未命中资金来源锚点，回退共享 project_content 提取")
+        return extract_public_tender_project_content(doc_content, state, log_parts)
+
+    section_pos = doc_content.find(
+        tender_content_marker,
+        funding_pos + len(funding_source_marker),
+    )
+    if section_pos == -1:
+        log_parts.append("gjgk: 未命中'2、招标内容'锚点，回退共享 project_content 提取")
+        return extract_public_tender_project_content(doc_content, state, log_parts)
+
+    section_start = section_pos + len(tender_content_marker)
+    section_tail = doc_content[section_start:]
+    next_section_match = re.search(r"\n\s*3[、\.]", section_tail)
+    if next_section_match:
+        section_end = section_start + next_section_match.start()
+    else:
+        section_end = len(doc_content)
+    section_text = doc_content[section_start:section_end]
+
+    start_pattern = r"[（(]\s*1\s*[）)]\s*设备名称及数量\s*[：:]"
+    end_patterns = (
+        r"[（(]\s*2\s*[）)]\s*技术要求\s*[：:]\s*见本招标文件第八章[“\"']?货物需求一览表及技术规格[”\"']?",
+        r"[（(]\s*2\s*[）)]\s*技术要求(?:\s*[：:])?",
+    )
+
+    start_match = re.search(start_pattern, section_text)
+    if not start_match:
+        log_parts.append("gjgk: 未命中 '(1)设备名称及数量'，回退共享 project_content 提取")
+        return extract_public_tender_project_content(doc_content, state, log_parts)
+
+    content_start = start_match.end()
+    tail_content = section_text[content_start:]
+    end_match = None
+    for pattern in end_patterns:
+        end_match = re.search(pattern, tail_content)
+        if end_match:
+            break
+    if end_match is None:
+        log_parts.append("gjgk: 未命中 '(2)技术要求'，回退共享 project_content 提取")
+        return extract_public_tender_project_content(doc_content, state, log_parts)
+
+    content_end = content_start + end_match.start()
+    extracted = section_text[content_start:content_end].strip()
+    if extracted:
+        log_parts.append(
+            "gjgk: 按 '(1)设备名称及数量' 到 '(2)技术要求' 成功提取 project_content"
+        )
+        return extracted
+
+    log_parts.append("gjgk: 专用 project_content 提取为空，回退共享提取器")
+    return extract_public_tender_project_content(doc_content, state, log_parts)
+
+
 GJGK_EXTRACTORS: List[ExtractorSpec] = [
     ExtractorSpec(
         name="project_content",
         enabled_if=lambda state: state.get("project_content") is not None,
-        extract_callable=extract_public_tender_project_content,
+        extract_callable=extract_gjgk_project_content,
     ),
     ExtractorSpec(
         name="project_number",
