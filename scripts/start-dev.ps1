@@ -283,8 +283,8 @@ try {
         -ShellPath $shellPath `
         -Title "TenderWord Backend (8000)" `
         -WorkingDirectory $backendDir `
-        -Banner "[backend] 正在执行 uvicorn main:app --reload (热加载模式)" `
-        -CommandText "& $backendPythonLiteral -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+        -Banner "[backend] 正在执行 uvicorn main:app --reload (热加载模式, watchfiles 轮询)" `
+        -CommandText "$env:WATCHFILES_FORCE_POLLING='true'; $env:WATCHFILES_POLL_DELAY_MS='300'; & $backendPythonLiteral -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-dir ."
 
     if ($launchFrontend) {
         Start-Sleep -Seconds 1

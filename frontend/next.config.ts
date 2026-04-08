@@ -1,7 +1,7 @@
 import type { NextConfig } from 'next';
 import { resolveApiBaseUrl } from './lib/apiBaseUrl';
 
-// const isProduction = process.env.NODE_ENV === 'production';
+const isProduction = process.env.NODE_ENV === 'production';
 
 const nextConfig: NextConfig = {
   // ========================================
@@ -21,9 +21,9 @@ const nextConfig: NextConfig = {
   },
 
   async headers() {
-    // if (!isProduction) {
-    //   return [];
-    // }
+    if (!isProduction) {
+      return [];
+    }
 
     return [
       {
