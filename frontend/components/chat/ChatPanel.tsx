@@ -618,7 +618,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   );
 
   const handleSendMessage = useCallback(
-    async (content: string): Promise<boolean> => {
+    (content: string): boolean => {
       if (!conversation || isBusy) {
         return false;
       }
@@ -653,40 +653,44 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           },
         });
 
-        try {
-          setComposerNotice(null);
-          const result = await createEditTask(request);
-          startTask(
-            conversation.id,
-            result.task_id,
-            {
-              task_kind: result.task_kind,
-              status: result.status || 'queued',
-              queue_position: result.queue_position,
-              waiting_count: result.waiting_count,
-            },
-            { logMessageId: placeholderMessageId }
-          );
-          updateConversationDraft(conversation.id, {
-            chat_input: '',
-            pending_edit_prompt: content,
-            pending_edit_task_id: result.task_id,
-          });
-          return true;
-        } catch (error) {
-          deleteMessage(conversation.id, placeholderMessageId);
-          const message = error instanceof ApiError ? error.message : '创建文件修改任务失败，请稍后重试';
-          setComposerNotice(message);
-          addMessage(conversation.id, {
-            type: 'system',
-            content: message,
-            status: 'completed',
-          });
-          return true;
-        }
+        setComposerNotice(null);
+        updateConversationDraft(conversation.id, { chat_input: '' });
+
+        void (async () => {
+          try {
+            const result = await createEditTask(request);
+            startTask(
+              conversation.id,
+              result.task_id,
+              {
+                task_kind: result.task_kind,
+                status: result.status || 'queued',
+                queue_position: result.queue_position,
+                waiting_count: result.waiting_count,
+              },
+              { logMessageId: placeholderMessageId }
+            );
+            updateConversationDraft(conversation.id, {
+              pending_edit_prompt: content,
+              pending_edit_task_id: result.task_id,
+            });
+          } catch (error) {
+            deleteMessage(conversation.id, placeholderMessageId);
+            const message =
+              error instanceof ApiError ? error.message : '创建文件修改任务失败，请稍后重试';
+            setComposerNotice(message);
+            addMessage(conversation.id, {
+              type: 'system',
+              content: message,
+              status: 'completed',
+            });
+          }
+        })();
+
+        return true;
       }
 
-      await sendUserMessage(content, {
+      void sendUserMessage(content, {
         appendUserMessage: true,
       });
       updateConversationDraft(conversation.id, { chat_input: '' });

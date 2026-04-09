@@ -136,6 +136,17 @@ const mockCancelTask = cancelTask as jest.MockedFunction<typeof cancelTask>;
 const mockCreateEditTask = createEditTask as jest.MockedFunction<typeof createEditTask>;
 const mockUploadFile = uploadFile as jest.MockedFunction<typeof uploadFile>;
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve, reject };
+}
+
 function mockUserStream(events: UserStreamEvent[], terminalError?: unknown) {
   mockStreamUserMessage.mockImplementationOnce(async (_payload, options = {}) => {
     for (const event of events) {
@@ -680,6 +691,122 @@ describe('ChatPanel', () => {
       expect(conversation.messages).toHaveLength(2);
       expect(conversation.messages[1].type).toBe('ai');
       expect(conversation.messages[1].status).toBe('completed');
+    });
+  });
+
+  it('clears the normal chat draft immediately after send is accepted', async () => {
+    const deferred = createDeferred<void>();
+
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '你好',
+        },
+      },
+    }));
+
+    mockStreamUserMessage.mockImplementationOnce(async (_payload, options = {}) => {
+      await options.onEvent?.({ event: 'route', data: { route: 'reply' } });
+      await deferred.promise;
+      await options.onEvent?.({ event: 'done', data: { content: '你好，请问有什么可以帮你？' } });
+    });
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => expect(mockStreamUserMessage).toHaveBeenCalledTimes(1));
+    expect(useChatStore.getState().getConversationDraft('conv-1')?.chat_input).toBe('');
+
+    deferred.resolve();
+
+    await waitFor(() => {
+      const conversation = useChatStore.getState().conversations[0];
+      expect(conversation.messages[1].status).toBe('completed');
+    });
+  });
+
+  it('clears the edit draft immediately after task creation starts', async () => {
+    const deferred = createDeferred<Awaited<ReturnType<typeof createEditTask>>>();
+
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请把交付日期改成合同签订后 30 天内',
+          input_mode: 'edit',
+          edit_file: {
+            id: 'file-1',
+            file_path: 'D:/UploadFiles/edit.docx',
+            file_name: 'edit.docx',
+            original_name: 'edit.docx',
+            size: 128,
+            upload_time: new Date().toISOString(),
+          },
+          tender_lx: 0,
+          fund_lx: 1,
+          insertion_config: {
+            before_text: '第三章 采购需求',
+            after_text: '第四章 响应文件有关格式',
+          },
+          tender_data: {
+            project_name: '示例项目',
+            project_number: 'ZBGG-2026-001',
+            project_content: '原始内容',
+            bzj_rule: '',
+            buyer_name: '示例单位',
+            project_zbr_xbr: '',
+            zbr_xbr_tel: '',
+            zbr_pinyin: '',
+            shell_start_date: '',
+            shell_end_date: '',
+            submit_date: '',
+            platform: '',
+            service_fee: '',
+            tender_lx: 0,
+            fund_source_lx: 1,
+          },
+        },
+      },
+    }));
+
+    mockCreateEditTask.mockImplementationOnce(() => deferred.promise);
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => expect(mockCreateEditTask).toHaveBeenCalledTimes(1));
+    expect(useChatStore.getState().getConversationDraft('conv-1')?.chat_input).toBe('');
+
+    deferred.resolve({
+      task_id: 'task-edit',
+      task_kind: 'edit',
+      status: 'queued',
+      queue_position: 0,
+      waiting_count: 0,
+    });
+
+    await waitFor(() => {
+      const draft = useChatStore.getState().getConversationDraft('conv-1');
+      expect(draft?.pending_edit_task_id).toBe('task-edit');
     });
   });
 
