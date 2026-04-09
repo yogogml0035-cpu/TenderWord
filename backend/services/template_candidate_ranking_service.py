@@ -137,7 +137,6 @@ class TemplateCandidateRankingService:
             model_provider=settings.TEMPLATE_CANDIDATE_RANKING_LLM_PROVIDER,
             system_prompt=rendered_prompt.system_prompt,
             user_prompt=rendered_prompt.user_prompt,
-            timeout_seconds=10,
             check_interval=2.0,
         )
         ordered_indexes = parse_template_candidate_ranking_output(

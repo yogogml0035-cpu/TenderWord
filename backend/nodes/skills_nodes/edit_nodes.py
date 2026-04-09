@@ -258,7 +258,6 @@ def edit_text(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
             system_prompt=rendered_prompt.system_prompt,
             user_prompt=rendered_prompt.user_prompt,
             callbacks=callbacks,
-            timeout_seconds=10,
             check_interval=3.0,
         )
     )

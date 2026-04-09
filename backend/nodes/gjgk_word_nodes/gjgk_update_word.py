@@ -40,6 +40,7 @@ from backend.util.word_util import (  # noqa: E402
     open_document_with_retry,
     save_document_with_retry,
     unprotect_document,
+    normalize_word_insert_text,
     wdActiveEndPageNumber,
     wdCollapseEnd,
     wdCollapseStart,
@@ -750,7 +751,7 @@ def _insert_text_line(
     if log_parts is not None:
         log_parts.append(_describe_range_state(doc, insert_range, label="文本插入前"))
     start_pos = int(insert_range.Start)
-    inserted_text = line + "\r"
+    inserted_text = normalize_word_insert_text(line) + "\r"
     effective_start = start_pos
     live_end = start_pos
 
@@ -890,7 +891,9 @@ def _insert_table(
                     doc.Range(cell_range.Start, cell_range.End - 1).Delete()
 
                 cell_range = cell.Range
-                cell_text = re.sub(r"(?i)<br\s*/?>", "\r", str(cell_value or ""))
+                cell_text = normalize_word_insert_text(
+                    str(cell_value or ""), break_char="\r"
+                )
                 cell_range.InsertBefore(cell_text)
 
                 cell_range = cell.Range

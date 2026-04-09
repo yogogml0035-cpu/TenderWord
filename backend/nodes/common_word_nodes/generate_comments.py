@@ -33,7 +33,6 @@ from backend.util.log_util.prompt_log import get_generate_prompt_log_dir
 from backend.util.log_util.progress_log import progress_log
 
 # 模块级常量
-TIMEOUT_SECONDS = 10  # LLM 超时时间（秒）
 CHECK_INTERVAL = 3.0  # 心跳检查间隔（秒）
 
 # Prompt 注册表：根据 tender_type 选择对应的 prompt
@@ -206,7 +205,6 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
                 callbacks=callbacks,
                 model_override=llm_model_override,
                 extra_params_override=llm_extra_params_override,
-                timeout_seconds=TIMEOUT_SECONDS,
                 check_interval=CHECK_INTERVAL,
             )
         )

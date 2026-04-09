@@ -71,6 +71,11 @@ from backend.util.word_util.anchor_utils import (
     _pick_anchor,
 )
 
+from backend.util.word_util.word_insert_text import (
+    WORD_MANUAL_LINE_BREAK,
+    normalize_word_insert_text,
+)
+
 __all__ = [
     # word_application_util
     "create_word_application",
@@ -119,4 +124,7 @@ __all__ = [
     "find_anchor_with_find",
     "_iter_paragraph_hits",
     "_pick_anchor",
+    # word_insert_text
+    "WORD_MANUAL_LINE_BREAK",
+    "normalize_word_insert_text",
 ]

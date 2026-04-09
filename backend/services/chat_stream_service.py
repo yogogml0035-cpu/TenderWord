@@ -13,7 +13,11 @@ import httpx
 from openai import AsyncOpenAI
 
 from backend.config.settings import settings
-from backend.util.common_util.llm_stream_utils import MODEL_CONFIGS, ensure_llm_env
+from backend.util.common_util.llm_stream_utils import (
+    MODEL_CONFIGS,
+    ensure_llm_env,
+    get_llm_timeout_seconds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +95,7 @@ async def stream_chat_response(
     client = AsyncOpenAI(
         api_key=api_key,
         base_url=base_url,
-        timeout=httpx.Timeout(30.0, connect=10.0),
+        timeout=httpx.Timeout(get_llm_timeout_seconds(), connect=10.0),
         max_retries=0,
     )
     full_parts: list[str] = []

@@ -135,7 +135,6 @@ class UserRoutingService:
                 on_chunk=_handle_stream_chunk,
                 on_request_messages=_capture_request_messages,
             ),
-            timeout_seconds=30,
             check_interval=2.0,
         )
 

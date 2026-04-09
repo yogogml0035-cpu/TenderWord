@@ -119,6 +119,10 @@ class Settings(BaseSettings):
         default="qwen-plus",
         description="Qwen 默认模型",
     )
+    LLM_STREAM_TIMEOUT_SECONDS: int = Field(
+        default=20,
+        description="LLM 流式响应超时时间（秒）",
+    )
 
     # ========================================
     # LangFuse 配置（可选）

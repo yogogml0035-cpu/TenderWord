@@ -15,6 +15,17 @@ ENV_SETUP_HINT = (
     "请在系统环境变量或 backend/.env 中补齐后重试（可参考 backend/.env.example）。"
 )
 
+
+def get_llm_timeout_seconds(timeout_seconds: Optional[int] = None) -> int:
+    """返回有效的 LLM 流式超时时间（秒）。"""
+    effective_timeout = (
+        settings.LLM_STREAM_TIMEOUT_SECONDS
+        if timeout_seconds is None
+        else timeout_seconds
+    )
+    return max(int(effective_timeout), 1)
+
+
 class LLMTimeoutError(Exception):
     """大模型响应超时异常"""
 
@@ -183,7 +194,7 @@ async def stream_llm_completion(
     callbacks: Optional[StreamCallbacks] = None,
     model_override: Optional[str] = None,
     extra_params_override: Optional[dict[str, Any]] = None,
-    timeout_seconds: int = 10,
+    timeout_seconds: Optional[int] = None,
     check_interval: float = 3.0,
 ) -> str:
     """
@@ -195,7 +206,7 @@ async def stream_llm_completion(
         system_prompt: 系统提示词（可选）
         user_prompt: 用户提示词（可选）
         callbacks: 回调函数集合
-        timeout_seconds: 超时时间（秒），默认 10 秒
+        timeout_seconds: 超时时间（秒），未传时读取配置
         check_interval: 心跳检查间隔（秒），默认 3 秒
 
     Returns:
@@ -209,13 +220,16 @@ async def stream_llm_completion(
     # 获取模型配置，默认使用 deepseek
     config = MODEL_CONFIGS.get(model_provider, MODEL_CONFIGS["deepseek"])
     ensure_llm_env(model_provider)
+    effective_timeout_seconds = get_llm_timeout_seconds(timeout_seconds)
 
     callbacks = callbacks or StreamCallbacks()
     display_name = config.display_name
     if model_override:
         display_name = f"{display_name} ({model_override})"
     heartbeat = HeartbeatMonitor(
-        display_name, timeout_seconds=timeout_seconds, check_interval=check_interval
+        display_name,
+        timeout_seconds=effective_timeout_seconds,
+        check_interval=check_interval,
     )
 
     content_parts: list[str] = []
@@ -238,7 +252,7 @@ async def stream_llm_completion(
             config=config,
             model_override=model_override,
             extra_params_override=extra_params_override,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=effective_timeout_seconds,
             heartbeat=heartbeat,
             on_chunk=_on_chunk_received,
             on_request_messages=callbacks.on_request_messages,

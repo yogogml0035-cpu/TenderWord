@@ -13,6 +13,7 @@ from backend.util.common_util.llm_stream_utils import (
     ModelConfig,
     MODEL_CONFIGS,
     ensure_llm_env,
+    get_llm_timeout_seconds,
     stream_llm_completion,
 )
 
@@ -47,6 +48,7 @@ __all__ = [
     "ModelConfig",
     "MODEL_CONFIGS",
     "ensure_llm_env",
+    "get_llm_timeout_seconds",
     "stream_llm_completion",
     # fetch_tender_data
     "fetch_tender_data",

@@ -99,7 +99,6 @@ def _select_rewrite_target_index(user_prompt: str, rewrite_messages: List[Rewrit
             user_prompt=rendered_bundle.rendered_prompt.user_prompt,
             callbacks=callbacks,
             extra_params_override={"temperature": 0.0},
-            timeout_seconds=20,
             check_interval=3.0,
         )
     )

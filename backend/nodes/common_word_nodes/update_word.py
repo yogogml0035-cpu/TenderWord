@@ -29,6 +29,8 @@ from backend.util.word_util import (
     close_word_application,
     open_document_with_retry,
     unprotect_document,
+    WORD_MANUAL_LINE_BREAK,
+    normalize_word_insert_text,
 )
 from backend.util.word_util import (
     wdGoToPage,
@@ -147,8 +149,6 @@ def _resolve_block_flow(protected_fields: Dict[str, Any]) -> Dict[str, Any]:
         "block2_mode": block2_mode,
         "block3_anchor": block3_anchor,
     }
-
-
 
 
 def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
@@ -911,7 +911,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 def insert_content_with_formatting(insert_range, line):
                     ensure_editable_insert_range(insert_range)
                     start_pos = insert_range.End
-                    insert_range.InsertAfter(line + "\r")
+                    insert_range.InsertAfter(normalize_word_insert_text(line) + "\r")
                     end_pos = insert_range.End
                     inserted_rng = doc.Range(start_pos, end_pos - 1)
 
@@ -968,7 +968,9 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
 
                                 cell_range = cell.Range
                                 cell_text = "" if val is None else str(val)
-                                cell_text = re.sub(r"(?i)<br\s*/?>", "\r", cell_text)
+                                cell_text = normalize_word_insert_text(
+                                    cell_text, break_char="\r"
+                                )
                                 cell_range.InsertBefore(cell_text)
 
                                 cell_range = cell.Range
@@ -1078,7 +1080,9 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     inserted = 0
                     for item in items:
                         if item["type"] == "text":
-                            s = chr(11) + item["line"]
+                            s = WORD_MANUAL_LINE_BREAK + normalize_word_insert_text(
+                                item["line"]
+                            )
                             st = int(rng.Start)
                             rng.InsertAfter(s)
                             ed = int(rng.End)
@@ -1100,7 +1104,9 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                                     f"    警告: 内联插入表格失败，改为文本: {e}"
                                 )
                                 for row in item["rows"]:
-                                    s = chr(11) + " | ".join(row)
+                                    s = WORD_MANUAL_LINE_BREAK + normalize_word_insert_text(
+                                        " | ".join(row)
+                                    )
                                     st = int(rng.Start)
                                     rng.InsertAfter(s)
                                     rng.Collapse(wdCollapseEnd)

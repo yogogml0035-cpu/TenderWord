@@ -160,8 +160,6 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
             messages,
         )
 
-    # 超时配置
-    TIMEOUT_SECONDS = 10  # 超时时间
     CHECK_INTERVAL = 3.0  # 检查间隔
 
     # 创建回调函数集合
@@ -185,7 +183,6 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         callbacks=callbacks,
-        timeout_seconds=TIMEOUT_SECONDS,
         check_interval=CHECK_INTERVAL,
     ))
     if callable(complete_callback):
