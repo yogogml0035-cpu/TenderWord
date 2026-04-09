@@ -1,309 +1,179 @@
 # TenderWord
 
-TenderWord 是面向招标文件生成与修改的前后端分离系统。当前仓库以 Windows + Word COM 作为完整运行前提，围绕"创建任务 -> 队列串行执行 -> SSE 推送 -> 下载 / 继续修改"组织前后端能力。
+TenderWord 是一个前后端分离的招标文档生成系统。完整功能依赖 Windows + Word COM。
 
-## 当前仓库
+这份 README 只保留新机器首次安装最需要的流程：
 
-- 前端：Next.js 16、React 19、Tailwind CSS 4、Zustand
-- 后端：FastAPI、LangGraph、pywin32
-- 前端 UI 类型：`xjcg`、`gngk`、`gjgk`
-- 后端 `form_type`：`xjcg_tender`、`gngk_zc_tender`、`gngk_cz_tender`、`gjgk_tender`
-- `gngk` 会按 `fund_source_lx` 在前端转换阶段拆分为 `gngk_zc_tender` / `gngk_cz_tender`
-- 真实 API 前缀：`/api`
-- 真实工作台路由：`/tender`
+- 方案 A：仓库克隆在 WSL 中，前端在 WSL 安装和运行，后端通过 Windows Python + Word COM 启动
+- 方案 B：仓库直接克隆在 Windows 中，前后端都在 Windows 安装和启动
 
-代码是真源。README 只提供导航和启动说明；接口形状、SSE 事件、任务状态、前后端共享类型以代码为准。
+如果 README 和代码冲突，以代码为准。
 
-## 核心能力
+## 准备条件
 
-- 招标基础数据拉取：`/api/tender/{tender_no}`
-- 文件上传：`/api/upload`、`/api/upload/multiple`
-- 文档生成任务：`/api/generate`
-- 任务状态 / 取消 / 心跳：`/api/tasks`
-- SSE 进度流：`/api/stream/{task_id}`
-- 生成文件下载：`/api/download/{file_path}`
-- 会话心跳：`/api/conversations/{conversation_id}/heartbeat`
-- 用户消息统一入口：`/api/user/stream`
-- 模板候选与代理下载：`/api/template-candidates`
+- Windows 10/11
+- 本机已安装 Microsoft Word 或兼容 COM 的 Office 环境
+- Windows Python 3.10+
+- Node.js 20.9+，推荐 Node 20 LTS
+- 端口 `8000`、`8502` 未被占用
 
-## 系统要求
+前端当前真实约束：
 
-| 组件 | 要求 |
-|------|------|
-| 操作系统 | Windows 10/11 或 Windows Server 2019+ |
-| Python | 3.10+ |
-| Node.js | 18+ |
-| Office | Microsoft Word 或兼容 COM 的本地 Office 环境 |
+- `frontend/package.json` 要求 `Node >= 20.9.0`
+- `frontend/.npmrc` 固定使用 `https://registry.npmjs.org/`
+- fresh clone 推荐使用 `npm ci`
 
-默认端口：
+## 方案 A：仓库克隆在 WSL 中
 
-- 前端：`8502`
-- 后端：`8000`
+这是当前更推荐的开发方式。
 
-## 快速开始
+- 前端依赖和 `npm run dev` 放在 WSL/Linux
+- 后端依赖和 Word COM 放在 Windows
+- 启动入口使用 `./scripts/start-dev-wsl.sh`
 
-### 1. 准备后端
+### 1. 在 WSL 中安装前端
+
+```bash
+cd /home/<your-user>/path/to/TenderWord-WSL/frontend
+
+# 如果你使用 nvm/fnm，可以先切到 Node 20
+# nvm use
+
+node -v
+
+npm ci
+cp .env.local.example .env.local
+```
+
+默认情况下，`frontend/.env.local` 里的 `NEXT_PUBLIC_API_URL` 保持 `http://localhost:8000` 即可；如果你有局域网访问需求，再按需修改。
+
+### 2. 在 Windows PowerShell 中安装后端
+
+仓库虽然在 WSL 中，但后端虚拟环境必须由 Windows Python 创建，不能用 WSL 的 Python 创建。
 
 ```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
+cd \\wsl.localhost\<WSL发行版名>\home\<your-user>\path\to\TenderWord-WSL\backend
+py -m venv .venv
+.\.venv\Scripts\pip.exe install -r requirements.txt
+copy .env.example .env
+```
+
+`backend/.env` 至少确认两类配置：
+
+- `UPLOAD_DIR` 指向 Windows 下可写目录，例如 `D:/UploadFiles`
+- 至少配置一个可用的 LLM Key，例如 `DEEPSEEK_API_KEY`
+
+### 3. 从 WSL 启动项目
+
+```bash
+cd /home/<your-user>/path/to/TenderWord-WSL
+./scripts/start-dev-wsl.sh
+```
+
+这个脚本会做两件事：
+
+- 在 Windows 侧启动后端
+- 在当前 WSL 终端启动前端 `npm run dev`
+
+首次使用时的重要说明：
+
+- 如果你在 WSL 里直接调用 Windows 侧 `start-dev.ps1`，可能会遇到“权限不够”“禁止运行脚本”或 `ExecutionPolicy` 相关报错
+- 在 WSL 中不要把 `start-dev.ps1` 当成首选入口
+- 正确做法是直接使用 `./scripts/start-dev-wsl.sh`
+- 该脚本内部会通过 Windows `pwsh.exe` / `powershell.exe` 以 `-ExecutionPolicy Bypass` 调起 `start-dev.ps1`
+
+### 4. 访问地址
+
+- 前端首页：<http://localhost:8502>
+- 前端工作台：<http://localhost:8502/tender>
+- 后端健康检查：<http://localhost:8000/health>
+
+## 方案 B：仓库直接克隆在 Windows 中
+
+如果你不打算把仓库放在 WSL，可以直接在 Windows 里完成全部安装和启动。
+
+### 1. 安装后端
+
+```powershell
+cd <repo>\backend
+py -m venv .venv
+.\.venv\Scripts\pip.exe install -r requirements.txt
 copy .env.example .env
 ```
 
 `backend/.env` 至少确认：
 
-- `UPLOAD_DIR` 指向可写目录
+- `UPLOAD_DIR` 指向 Windows 下可写目录
 - 至少配置一个可用的 LLM Key
-- 如果需要 Swagger，设置 `DEBUG=true`
 
-### 2. 准备前端
+### 2. 安装前端
 
 ```powershell
-cd frontend
-npm install
+cd <repo>\frontend
+npm ci
 copy .env.local.example .env.local
 ```
 
-`frontend/.env.local` 支持配置多个后端地址，按当前页面主机名优先匹配：
+如果 `node -v` 小于 `20.9.0`，先升级 Node，再执行 `npm ci`。
 
-```dotenv
-NEXT_PUBLIC_API_URL=http://localhost:8000,http://10.11.11.44:8000
-```
+### 3. 从 Windows 启动项目
 
-### 3. 启动方式
-
-推荐从仓库根目录执行脚本。
-
-| 场景 | 命令 | 说明 |
-|------|------|------|
-| 日常开发联调 | `.\scripts\start-dev.ps1` | 启动后端热重载和前端 `next dev`，会弹出两个 PowerShell 窗口 |
-| 停止服务 | `.\scripts\stop-build.ps1` | 停止 `.runtime\build` 记录的前后端进程并清理状态文件 |
-
-如果你在 WSL 中工作，但仍要复用 Windows 侧的 Python / Node / Word COM 环境，可使用 `scripts/` 下的桥接脚本：
-
-| 场景 | 命令 | 说明 |
-|------|------|------|
-| 日常开发联调（WSL 入口） | `./scripts/start-dev-wsl.sh` | 从 WSL 调起 Windows PowerShell 版 `start-dev.ps1` |
-
-脚本启动前会检查：
-
-- 脚本会自动将 `scripts/` 的上一级识别为仓库根目录；从仓库根目录执行最直观
-- `backend/.venv/Scripts/python.exe` 存在
-- `backend/.env`、`frontend/.env.local` 存在
-- `frontend/node_modules` 存在
-- `8000` / `8502` 端口未被占用
-
-### 4. WSL 使用说明
-
-- `scripts/start-dev-wsl.sh` 只是桥接包装器，本质上仍在 Windows 侧执行 `ps1` 脚本。
-- 这类脚本仅用于开发便利，不代表 TenderWord 支持 Linux / WSL 原生运行。
-- 完整文档生成、修改与 COM 相关能力仍然依赖 Windows + Word COM。
-- 推荐从仓库根目录调用。
-
-使用前提：
-
-- 当前终端必须运行在 WSL 中。
-- WSL 需要开启 Windows interop，至少能在 WSL 中找到 `pwsh.exe`、`cmd.exe`、`wslpath`。
-- WSL wrapper 会优先使用 `pwsh.exe`（PowerShell 7）；当前仓库的 `ps1` 含有 UTF-8 中文内容，`powershell.exe`（Windows PowerShell 5.1）在部分环境里可能误读脚本源码。
-- Windows 侧项目环境必须已经准备好：
-  - `backend/.venv/Scripts/python.exe`
-  - `backend/.venv` 必须由 Windows Python 创建，不能用 WSL 里的 `/usr/bin/python3 -m venv .venv`
-  - `backend/.env`
-  - `frontend/.env.local`
-  - `frontend/node_modules`
-
-推荐使用步骤：
-
-1. 在 WSL 中进入仓库根目录。
-2. 开发模式下执行 `./scripts/start-dev-wsl.sh`。
-
-常用命令：
-
-```bash
-cd /home/wsq12/linux/code/TenderWord-linux-feat-wsq
-
-# 开发联调：Windows 侧拉起后端窗口，当前 WSL 终端运行前端
-./scripts/start-dev-wsl.sh
-```
-
-如果你之前在 WSL 中执行过 `python3 -m venv backend/.venv`，需要先在 Windows PowerShell 里重建后端虚拟环境：
+推荐命令：
 
 ```powershell
-cd \\wsl.localhost\Ubuntu\home\wsq12\linux\code\TenderWord-linux-feat-wsq\backend
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-运行结果说明：
-
-- `./scripts/start-dev-wsl.sh` 成功后，会由 Windows 侧弹出后端 PowerShell 窗口，并在当前 WSL 终端直接运行前端 `npm run dev`。
-- 这样开发模式下的前端文件监听由 WSL/Linux 负责，避免 Windows 在 `\\wsl.localhost\...` 或映射盘路径上运行 `next dev` 时出现 Watchpack/UNC 监听异常。
-
-如果脚本启动失败，优先检查：
-
-- WSL 中是否能执行 `powershell.exe` / `pwsh.exe` 和 `cmd.exe`
-- WSL 中是否能执行 `pwsh.exe`；如果只能执行 `powershell.exe`，可能会遇到脚本中文被误读的问题
-- Windows 侧虚拟环境、前端依赖和 `.env` 文件是否已准备
-- 端口 `8000` / `8502` 或你自定义的端口是否已被占用
-
-### 5. 手动启动 fallback
-
-后端：
-
-```powershell
-cd backend
-.\.venv\Scripts\activate
-python main.py
-```
-
-或热重载：
-
-```powershell
-cd backend
-.\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-前端：
-
-```powershell
-cd frontend
-npm run dev
-```
-
-生产构建式前端：
-
-```powershell
-cd frontend
-npm ci
-npm run build
-npm run start
-```
-
-## 常用访问地址
-
-- 首页：<http://localhost:8502>
-- 工作台：<http://localhost:8502/tender>
-- 后端健康检查：<http://localhost:8000/health>
-- Swagger：<http://localhost:8000/docs>（仅 `DEBUG=true`）
-
-## 类型与流程说明
-
-前端和后端对"招标类型"的粒度不同，文档和代码都要分清这两层：
-
-- 前端页面与表单注册使用 `TenderType`：`xjcg`、`gngk`、`gjgk`
-- 后端生成入口使用 `FormType`：`xjcg_tender`、`gngk_zc_tender`、`gngk_cz_tender`、`gjgk_tender`
-- `gngk` 在 `frontend/lib/formDataConverter.ts` 按 `fund_source_lx` 映射到自筹 / 财政两套 graph
-
-当前关键链路：
-
-1. 前端解析 URL 参数，确定页面类型与招标编号
-2. 前端调用 `/api/tender/{tender_no}` 拉取基础数据
-3. 上传模板 / 参数文件到 `/api/upload`
-4. 前端将表单数据转换为 `GenerateRequest`
-5. 后端创建任务并进入 `task_queue_manager`
-6. 前端通过 `/api/stream/{task_id}` 订阅日志、进度、LLM 输出、完成 / 失败事件
-7. 完成后通过 `/api/download/{file_path}` 下载结果文件
-
-## 关键目录
-
-```text
-frontend/                     Next.js 前端
-  app/                        页面入口（`/`、`/tender`）
-  components/                 表单、聊天、布局和通用 UI
-  lib/api.ts                  前端统一 API 封装
-  lib/formDataConverter.ts    前端 UI 类型 -> 后端 form_type 映射
-  stores/                     Zustand 状态管理
-  types/                      前端共享类型
-  utils/                      URL 参数与类型映射
-
-backend/                      FastAPI + LangGraph 后端
-  api/                        `/api` 路由
-  graphs/                     LangGraph 工作流
-  states/                     graph state 定义
-  nodes/                      公共 / 类型特化节点
-  prompts/                    Prompt Layer
-  services/                   业务服务
-  skills/                     task 型 skill runtime（当前含 rewrite）
-  task/                       任务队列、取消、心跳
-  util/word_util/             Word COM 工具封装
-  tests/                      后端测试
-  main.py                     FastAPI 入口
-
-asset/                        长期知识包与规则沉淀
-guide/                        本地 Git / worktree 操作说明，不是产品真源
-scripts/
-  start-dev.ps1               本地开发启动脚本
-  stop-build.ps1              停止后台服务脚本
-  start-dev-wsl.sh            WSL 开发联调入口脚本
-AGENTS.md                     仓库级执行规范
-```
-
-## 开发与验证
-
-前端：
-
-```powershell
-cd frontend
-npm run lint
-npm run type-check
-npm run test
-npm run test:e2e
-```
-
-后端：
-
-```powershell
-cd backend
-python -m pytest tests -v
-python scripts/diagnose_word.py
-```
-
-文档修改的最低验证建议：
-
-- 确认 README 中提到的脚本、目录、环境模板文件真实存在
-- 确认命令与端口和 `package.json` / `backend/main.py` 保持一致
-
-## 常见排障
-
-### PowerShell 阻止脚本执行
-
-```powershell
+cd <repo>
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-dev.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-build.ps1
 ```
 
-如果是从 WSL 调用，优先使用：
+如果你的 PowerShell 已允许本地脚本执行，也可以直接：
+
+```powershell
+cd <repo>
+.\scripts\start-dev.ps1
+```
+
+### 4. 访问地址
+
+- 前端首页：<http://localhost:8502>
+- 前端工作台：<http://localhost:8502/tender>
+- 后端健康检查：<http://localhost:8000/health>
+
+## 常见问题
+
+### 1. WSL 里第一次启动提示权限不够
+
+现象通常是：
+
+- 在 WSL 中直接执行 Windows 侧 `start-dev.ps1`
+- PowerShell 报“权限不足”“禁止运行脚本”或 `ExecutionPolicy` 错误
+
+处理方式：
 
 ```bash
 ./scripts/start-dev-wsl.sh
 ```
 
-### 端口占用
+### 2. 前端安装失败
 
-```powershell
-netstat -ano | findstr :8000
-netstat -ano | findstr :8502
-taskkill /PID <PID> /F
-```
+优先检查：
 
-### build 模式日志位置
+- `node -v` 是否不低于 `20.9.0`
+- 当前目录是否是 `frontend/`
+- 是否使用了 `npm ci`
+- `npm config get registry` 是否输出 `https://registry.npmjs.org/`
 
-`.runtime\build\` 下会保留：
+### 3. 启动脚本报缺少文件
 
-- `backend.stdout.log`
-- `backend.stderr.log`
-- `frontend.stdout.log`
-- `frontend.stderr.log`
+启动前这几个文件必须已经存在：
 
-### README 和代码冲突
+- `backend/.venv/Scripts/python.exe`
+- `backend/.env`
+- `frontend/node_modules`
+- `frontend/.env.local`
 
-优先相信代码，并顺手修正文档。当前仓库没有顶层 `docs/` 目录；代码注释里仍有少量 `docs/api-contract.md` 一类历史引用，应按代码而不是按这些注释理解系统。
+## 相关入口
 
-## 相关文件
-
-- [AGENTS.md](./AGENTS.md)：仓库级智能体 / 工程约束
-- [asset/README.md](./asset/README.md)：知识包索引
-- [backend/main.py](./backend/main.py)：后端入口与健康检查
-- [frontend/lib/api.ts](./frontend/lib/api.ts)：前端 API 真入口
+- 前端入口：[frontend/package.json](/home/hsikey/CompanyProject/TenderWord-WSL/frontend/package.json)
+- 后端入口：[backend/main.py](/home/hsikey/CompanyProject/TenderWord-WSL/backend/main.py)
+- Windows 启动脚本：[scripts/start-dev.ps1](/home/hsikey/CompanyProject/TenderWord-WSL/scripts/start-dev.ps1)
+- WSL 启动脚本：[scripts/start-dev-wsl.sh](/home/hsikey/CompanyProject/TenderWord-WSL/scripts/start-dev-wsl.sh)

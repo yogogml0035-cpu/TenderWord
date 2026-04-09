@@ -51,7 +51,7 @@ describe('createSSEConnection', () => {
   });
 
   it('selects a single valid API base URL when NEXT_PUBLIC_API_URL contains multiple candidates', () => {
-    process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8000,http://10.11.11.44:8000';
+    process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8000,http://10.11.1.99:8000';
 
     createSSEConnection('/api/stream/task-1');
 
