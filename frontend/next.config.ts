@@ -1,9 +1,25 @@
 import type { NextConfig } from 'next';
-import { resolveApiBaseUrl } from './lib/apiBaseUrl';
+import { parseApiBaseUrlCandidates, resolveApiBaseUrl } from './lib/apiBaseUrl';
 
 const isProduction = process.env.NODE_ENV === 'production';
+const allowedDevOrigins = Array.from(
+  new Set(
+    ['localhost', '127.0.0.1', ...parseApiBaseUrlCandidates(process.env.NEXT_PUBLIC_API_URL)]
+      .map((candidate) => {
+        try {
+          return candidate.includes('://') ? new URL(candidate).hostname : candidate;
+        } catch {
+          return null;
+        }
+      })
+      .filter((hostname): hostname is string => Boolean(hostname))
+  )
+);
 
 const nextConfig: NextConfig = {
+  // Reuse configured LAN/local API hosts so dev-only assets such as HMR can load via IP.
+  allowedDevOrigins,
+
   // ========================================
   // API 代理配置 - 开发时转发到后端
   // ========================================
