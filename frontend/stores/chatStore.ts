@@ -1,7 +1,13 @@
 import { create } from 'zustand';
 import { createJSONStorage, devtools, persist } from 'zustand/middleware';
 import type { TenderType, FundLx, TenderLx } from '@/types';
-import type { TaskKind, TaskStatus, TenderData, TenderTypeInfo } from '@/types/api';
+import type {
+  GenerationStyle,
+  TaskKind,
+  TaskStatus,
+  TenderData,
+  TenderTypeInfo,
+} from '@/types/api';
 import type { TenderFetchState } from '@/lib/tenderFetch';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
@@ -71,6 +77,7 @@ export interface ConversationFormDraft {
   tender_lx?: TenderLx;
   fund_lx?: FundLx;
   model?: 'deepseek' | 'qwen' | 'doubao';
+  generation_style?: GenerationStyle;
   input_mode?: 'normal' | 'edit';
   edit_file?: ConversationDraftFile | null;
   insertion_config?: {
@@ -583,6 +590,7 @@ export const useChatStore = create<ChatStore>()(
             conversationDrafts: {
               ...state.conversationDrafts,
               [conversation.id]: {
+                generation_style: 'template',
                 model: 'deepseek',
               },
             },

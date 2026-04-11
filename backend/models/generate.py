@@ -25,6 +25,13 @@ class LLMModel(str, Enum):
     DOUBAO = "doubao"
 
 
+class GenerationStyle(str, Enum):
+    """生成风格枚举，仅影响初次 generate 的 prompt 路由。"""
+
+    TEMPLATE = "template"
+    PARAM = "param"
+
+
 class FormType(str, Enum):
     """
     表单类型枚举
@@ -75,6 +82,10 @@ class GenerateRequest(BaseModel):
     insertion_config: Optional[InsertionConfig] = Field(
         default=None, description="插入锚点配置（可选）"
     )
+    generation_style: GenerationStyle = Field(
+        default=GenerationStyle.TEMPLATE,
+        description="生成风格（仅初次 generate 生效）",
+    )
     conversation_id: Optional[str] = Field(
         default=None, description="会话ID，用于会话级 rewrite 历史与状态管理"
     )
@@ -112,6 +123,7 @@ class GenerateRequest(BaseModel):
                     "before_text": "第三章 采购需求",
                     "after_text": "第四章 响应文件有关格式",
                 },
+                "generation_style": "template",
                 "model": "deepseek",
             }
         }

@@ -30,6 +30,7 @@ from .generate import (
     FileRequirement,
     FormRequirementsResponse,
     FormType,
+    GenerationStyle,
     GenerateRequest,
     GenerateResponse,
     GenerateResult,
@@ -110,6 +111,7 @@ __all__ = [
     # 生成相关
     "LLMModel",
     "FormType",
+    "GenerationStyle",
     "EditTaskRequest",
     "GenerateRequest",
     "GenerateResponse",

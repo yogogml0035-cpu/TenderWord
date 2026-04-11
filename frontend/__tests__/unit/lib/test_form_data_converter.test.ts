@@ -51,6 +51,53 @@ const baseFiles = {
 
 describe('formDataConverter', () => {
   it.each([
+    ['xjcg', () =>
+      convertXjcgFormToApiRequest({
+        tender_no: 'XJCG-001',
+        tender_lx: 1,
+        fund_lx: 0,
+        generation_style: 'param',
+        tender_data: baseTenderData,
+        model: 'deepseek',
+        files: baseFiles,
+        insertion_config: {
+          before_text: '第三章  采购需求',
+          after_text: '第四章  响应文件有关格式',
+        },
+      })],
+    ['gngk', () =>
+      convertGngkFormToApiRequest({
+        tender_no: 'GNGK-001',
+        tender_lx: 1,
+        fund_lx: 1,
+        generation_style: 'param',
+        tender_data: baseTenderData,
+        model: 'deepseek',
+        files: baseFiles,
+        insertion_config: {
+          before_text: '第三章 招标内容及要求',
+          after_text: '第四章 投标文件有关格式',
+        },
+      })],
+    ['gjgk', () =>
+      convertGjgkFormToApiRequest({
+        tender_no: 'GJGK-001',
+        tender_lx: 1,
+        fund_lx: 1,
+        generation_style: 'param',
+        tender_data: baseTenderData,
+        model: 'deepseek',
+        files: baseFiles,
+        insertion_config: {
+          before_text: '技术规格及要求',
+          after_text: '附件1：投标文件封面（格式）',
+        },
+      })],
+  ] as const)('forwards generation_style for %s converters', (_tenderType, buildRequest) => {
+    expect(buildRequest().generation_style).toBe('param');
+  });
+
+  it.each([
     { tender_lx: 0 as const, fund_lx: 0 as const, expected: 'gngk_hw_zc_tender' },
     { tender_lx: 0 as const, fund_lx: 1 as const, expected: 'gngk_hw_cz_tender' },
     { tender_lx: 1 as const, fund_lx: 0 as const, expected: 'gngk_fw_zc_tender' },
@@ -60,6 +107,7 @@ describe('formDataConverter', () => {
       tender_no: 'GNGK-001',
       tender_lx,
       fund_lx,
+      generation_style: 'template',
       tender_data: baseTenderData,
       model: 'deepseek',
       files: baseFiles,
@@ -79,6 +127,7 @@ describe('formDataConverter', () => {
       tender_no: 'XJCG-001',
       tender_lx: 1,
       fund_lx: 0,
+      generation_style: 'template',
       tender_data: baseTenderData,
       model: 'deepseek',
       files: baseFiles,
@@ -97,6 +146,7 @@ describe('formDataConverter', () => {
       tender_no: 'GJGK-001',
       tender_lx: 1,
       fund_lx: 1,
+      generation_style: 'template',
       tender_data: baseTenderData,
       model: 'deepseek',
       files: baseFiles,

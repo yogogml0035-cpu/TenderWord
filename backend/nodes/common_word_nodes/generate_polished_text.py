@@ -7,7 +7,7 @@ import time
 from typing import Callable, Optional
 
 from backend.skills import get_skill_registry
-from backend.prompts.generate_prompt import GENERATE_PROMPT_REGISTRY, render_generate_prompt
+from backend.prompts.generate_prompt import render_generate_prompt
 from backend.prompts.skill_prompt import render_task_skill_prompt
 from backend.prompts.types import (
     GeneratePromptInput,
@@ -27,9 +27,6 @@ from backend.util.log_util.skill_audit_log import (
     resolve_task_audit_log_path,
     write_task_audit_stage,
 )
-
-PROMPT_REGISTRY = GENERATE_PROMPT_REGISTRY
-
 
 def _sanitize_filename(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', "_", name).strip()
@@ -91,6 +88,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
         rendered_prompt = render_generate_prompt(
             GeneratePromptInput(
                 tender_type=tender_type,
+                generation_style=str(state.get("generation_style") or "template"),
                 project_info=str(state.get("project_content", "") or ""),
                 tender_params=tender_params,
                 origin_tender_params=origin_tender_params,

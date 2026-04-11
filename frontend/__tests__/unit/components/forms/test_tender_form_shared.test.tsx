@@ -388,6 +388,25 @@ describe('TenderFormShared', () => {
     );
   });
 
+  it('renders generation style inside advanced settings with template default and restores param draft', () => {
+    const firstRender = renderSharedForm();
+
+    expect(screen.getByRole('heading', { name: '高级设置（可选）' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '生成风格' })).not.toBeInTheDocument();
+    expect(screen.getByText('生成风格')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: '生成风格' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '按模板优先' })).toHaveClass('bg-blue-600');
+    expect(screen.getByRole('button', { name: '按参数优先' })).not.toHaveClass('bg-blue-600');
+
+    firstRender.unmount();
+    renderSharedForm({
+      initialDraft: { generation_style: 'param' },
+    });
+
+    expect(screen.getByRole('button', { name: '按参数优先' })).toHaveClass('bg-blue-600');
+    expect(screen.getByRole('button', { name: '按模板优先' })).not.toHaveClass('bg-blue-600');
+  });
+
   it.each([
     ['xjcg', '询价采购'],
     ['gngk', '国内公开'],
@@ -583,6 +602,7 @@ describe('TenderFormShared', () => {
     expect(onSubmit.mock.calls[0][0]).toMatchObject({
       tender_no: 'TEST-001',
       tender_lx: 0,
+      generation_style: 'template',
       tender_data: {
         ...mockTenderData,
         tender_lx: 0,
@@ -597,6 +617,51 @@ describe('TenderFormShared', () => {
         tender_params: [expect.objectContaining({ file_path: 'D:/UploadFiles/params.docx' })],
       },
     });
+  });
+
+  it('persists generation style through draft updates and submit payload', async () => {
+    const user = userEvent.setup();
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <>
+          <TenderFormShared
+            tenderType="xjcg"
+            onSubmit={onSubmit}
+            initialDraft={draft}
+            onDraftChange={(updates) => {
+              setDraft((previous) => mergeDraftState(previous, updates));
+            }}
+          />
+          <pre data-testid="draft-state">{JSON.stringify(draft)}</pre>
+        </>
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    await user.click(screen.getByRole('button', { name: '按参数优先' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('draft-state')).toHaveTextContent('"generation_style":"param"')
+    );
+    expect(screen.getByRole('button', { name: '按参数优先' })).toHaveClass('bg-blue-600');
+
+    await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+    await user.click(screen.getByLabelText('上传模板文件（可选）'));
+    await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
+    await user.click(screen.getByRole('button', { name: '开始生成' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        generation_style: 'param',
+      })
+    );
   });
 
   it('shows missing anchor validation only on submit', async () => {

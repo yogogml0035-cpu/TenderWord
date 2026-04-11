@@ -22,6 +22,7 @@ import {
   selectTemplateCandidate,
 } from '@/lib/api';
 import type {
+  GenerationStyle,
   TemplateCandidate,
   TemplateCandidateRanking,
   TemplateSelectedFile,
@@ -46,6 +47,7 @@ export interface BaseTenderFormData {
   tender_no: string;
   tender_lx: TenderLx;
   fund_lx: FundLx;
+  generation_style: GenerationStyle;
   tender_data: TenderData;
   model: ModelType;
   files: {
@@ -92,6 +94,7 @@ const gngkFiscalInsertionConfigDefaults: TenderInsertionConfig = {
   before_text: '第四章  招标需求',
   after_text: '第五章  评标方法与程序',
 };
+const defaultGenerationStyle: GenerationStyle = 'template';
 
 function toDraftFile(file: UploadedFile | null | undefined): ConversationDraftFile | undefined {
   if (!file) {
@@ -274,6 +277,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         ? draftFundLx
         : 0;
   const [localFundLx, setLocalFundLx] = useState<FundLx>(initialFundLx);
+  const [localGenerationStyle, setLocalGenerationStyle] = useState<GenerationStyle>(
+    initialDraft?.generation_style === 'param' ? 'param' : defaultGenerationStyle
+  );
   const [insertionConfig, setInsertionConfig] = useState<TenderInsertionConfig>(() => {
     const gngkScopedInsertion =
       initialDraft?.gngk_insertion_configs?.[initialFundLx] ?? initialDraft?.insertion_config;
@@ -317,6 +323,10 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     onDraftChange && (initialDraft?.fund_lx === 0 || initialDraft?.fund_lx === 1)
       ? initialDraft.fund_lx
       : localFundLx;
+  const generationStyle: GenerationStyle =
+    onDraftChange && initialDraft?.generation_style
+      ? initialDraft.generation_style
+      : localGenerationStyle;
   const tenderData = onDraftChange
     ? initialDraft?.tender_data || initialTenderData || null
     : localTenderData;
@@ -567,6 +577,20 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       window.history.replaceState(window.history.state, '', url.toString());
     },
     [onDraftChange, tenderLx]
+  );
+
+  const handleGenerationStyleChange = useCallback(
+    (nextGenerationStyle: GenerationStyle) => {
+      if (generationStyle === nextGenerationStyle) {
+        return;
+      }
+
+      setLocalGenerationStyle(nextGenerationStyle);
+      onDraftChange?.({
+        generation_style: nextGenerationStyle,
+      });
+    },
+    [generationStyle, onDraftChange]
   );
 
   const handleBeforeTextChange = useCallback(
@@ -837,6 +861,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         tender_no: tenderNo,
         tender_lx: tenderLx,
         fund_lx: fundLx,
+        generation_style: generationStyle,
         tender_data: {
           ...tenderData,
           tender_lx: tenderLx,
@@ -859,6 +884,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       fundLx,
       tenderData,
       selectedModel,
+      generationStyle,
       originFile,
       cleanDraftFile,
       paramFiles,
@@ -1040,6 +1066,39 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
               placeholder="插入位置后的章节标题"
               helperText="系统将在该文本位置之前插入生成的内容"
             />
+
+            <div className="space-y-1.5">
+              <p className="block text-sm font-semibold text-[var(--foreground)]">生成风格</p>
+              <div role="group" aria-label="生成风格" className={segmentedControlClassName}>
+                <button
+                  type="button"
+                  onClick={() => handleGenerationStyleChange('template')}
+                  disabled={isSubmitting}
+                  className={cn(
+                    segmentedToggleButtonClassName,
+                    generationStyle === 'template'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'bg-transparent text-slate-700 hover:bg-white/80'
+                  )}
+                >
+                  按模板优先
+                </button>
+                <span aria-hidden className="h-6 w-px bg-slate-200" />
+                <button
+                  type="button"
+                  onClick={() => handleGenerationStyleChange('param')}
+                  disabled={isSubmitting}
+                  className={cn(
+                    segmentedToggleButtonClassName,
+                    generationStyle === 'param'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'bg-transparent text-slate-700 hover:bg-white/80'
+                  )}
+                >
+                  按参数优先
+                </button>
+              </div>
+            </div>
           </div>
         </FormSection>
 

@@ -102,17 +102,21 @@ describe('chatStore conversation scoped selectors', () => {
 
     act(() => {
       useChatStore.getState().updateConversationDraft(convA, {
+        generation_style: 'template',
         tender_no: 'TN-001',
         model: 'deepseek',
       });
       useChatStore.getState().updateConversationDraft(convB, {
+        generation_style: 'param',
         tender_no: 'TN-002',
         model: 'qwen',
       });
     });
 
+    expect(useChatStore.getState().getConversationDraft(convA)?.generation_style).toBe('template');
     expect(useChatStore.getState().getConversationDraft(convA)?.tender_no).toBe('TN-001');
     expect(useChatStore.getState().getConversationDraft(convA)?.model).toBe('deepseek');
+    expect(useChatStore.getState().getConversationDraft(convB)?.generation_style).toBe('param');
     expect(useChatStore.getState().getConversationDraft(convB)?.tender_no).toBe('TN-002');
     expect(useChatStore.getState().getConversationDraft(convB)?.model).toBe('qwen');
   });
@@ -138,6 +142,9 @@ describe('chatStore conversation scoped selectors', () => {
       conversationId = useChatStore.getState().createConversation('TN-DEFAULT', 'xjcg');
     });
 
+    expect(useChatStore.getState().getConversationDraft(conversationId)?.generation_style).toBe(
+      'template'
+    );
     expect(useChatStore.getState().getConversationDraft(conversationId)?.model).toBe('deepseek');
   });
 

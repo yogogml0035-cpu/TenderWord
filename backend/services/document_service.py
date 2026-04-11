@@ -722,6 +722,9 @@ class DocumentService:
         # 构建状态
         tender_type = request.form_type.value.replace("_tender", "")
         conversation_id = str(getattr(request, "conversation_id", "") or "").strip()
+        generation_style = getattr(request, "generation_style", "template")
+        if hasattr(generation_style, "value"):
+            generation_style = generation_style.value
         project_number = tender_data.project_number or ""
         if tender_type == "gjgk":
             project_number = normalize_gjgk_project_number(project_number)
@@ -731,6 +734,7 @@ class DocumentService:
             "conversation_id": conversation_id,
             "user_session_id": conversation_id,
             "tender_type": tender_type,
+            "generation_style": str(generation_style or "template"),
             # 项目信息
             "project_name": tender_data.project_name or "",
             "project_number": project_number,

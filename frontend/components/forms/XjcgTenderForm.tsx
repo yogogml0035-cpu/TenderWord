@@ -11,6 +11,7 @@ export interface XjcgTenderFormData {
   tender_no: string;
   tender_lx: BaseTenderFormData['tender_lx'];
   fund_lx: BaseTenderFormData['fund_lx'];
+  generation_style: BaseTenderFormData['generation_style'];
   tender_data: BaseTenderFormData['tender_data'];
   model: BaseTenderFormData['model'];
   files: BaseTenderFormData['files'];

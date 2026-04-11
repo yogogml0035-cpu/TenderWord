@@ -135,6 +135,8 @@ export interface InsertionConfig {
   after_text?: string;
 }
 
+export type GenerationStyle = 'template' | 'param';
+
 export interface GenerateRequest {
   form_type:
     | 'xjcg_tender'
@@ -146,6 +148,7 @@ export interface GenerateRequest {
   tender_data: TenderData;
   file_paths: FilesConfig;
   insertion_config?: InsertionConfig;
+  generation_style?: GenerationStyle;
   conversation_id?: string;
   model: 'deepseek' | 'qwen' | 'doubao';
 }
