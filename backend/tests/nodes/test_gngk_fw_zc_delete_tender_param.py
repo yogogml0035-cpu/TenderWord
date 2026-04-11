@@ -36,6 +36,9 @@ class _FakeRange:
     def InsertParagraphAfter(self) -> None:
         self._doc.text = self._doc.text[: self.End] + "\r" + self._doc.text[self.End :]
 
+    def Delete(self) -> None:
+        self._doc.text = self._doc.text[: self.Start] + self._doc.text[self.End :]
+
 
 class _FakeParagraph:
     def __init__(self, doc: "_FakeDoc", start: int, end: int) -> None:
@@ -54,10 +57,14 @@ class _FakeDoc:
     def Paragraphs(self) -> list[_FakeParagraph]:
         paragraphs: list[_FakeParagraph] = []
         start = 0
-        for paragraph_text in self.text.split("\r"):
-            end = start + len(paragraph_text)
+        while start < len(self.text):
+            next_break = self.text.find("\r", start)
+            if next_break >= 0:
+                end = next_break + 1
+            else:
+                end = len(self.text)
             paragraphs.append(_FakeParagraph(self, start, end))
-            start = end + 1
+            start = end
         return paragraphs
 
 
@@ -113,3 +120,19 @@ def test_insert_paragraph_break_before_field_skips_when_no_safe_position(
 
     assert inserted is False
     assert doc.text == original_text
+
+
+def test_cleanup_service_field_residual_paragraphs_removes_non_field_paragraphs() -> None:
+    doc = _FakeDoc(
+        "前文\r服务地点：上海\r旧条款段落\r服务期限：12个月\r\x0c\r付款方式：月结\r"
+    )
+
+    deleted_count = delete_module._cleanup_service_field_residual_paragraphs(
+        doc,
+        cleanup_start=2,
+        cleanup_end=doc.Content.End,
+        log=None,
+    )
+
+    assert deleted_count == 2
+    assert doc.text == "前文\r服务地点：上海\r服务期限：12个月\r付款方式：月结\r"

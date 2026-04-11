@@ -14,6 +14,111 @@ _SERVICE_FIELD_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("服务期限", ("服务期限：", "服务期限:")),
     ("付款方式", ("付款方式：", "付款方式:")),
 )
+_CLEANUP_INVISIBLE_CHARS = (
+    "\r",
+    "\n",
+    "\t",
+    "\x07",
+    "\x0b",
+    "\x0c",
+    "\a",
+    "\u00a0",
+    "\u2000",
+    "\u2001",
+    "\u2002",
+    "\u2003",
+    "\u2004",
+    "\u2005",
+    "\u2006",
+    "\u2007",
+    "\u2008",
+    "\u2009",
+    "\u200a",
+    "\u200b",
+    "\u3000",
+    "\ufeff",
+)
+
+
+def _normalize_cleanup_text(text: str) -> str:
+    normalized = str(text or "")
+    for invisible_char in _CLEANUP_INVISIBLE_CHARS:
+        normalized = normalized.replace(invisible_char, "")
+    return normalized.strip()
+
+
+def _paragraph_contains_service_field(paragraph_text: str) -> bool:
+    return any(
+        marker in (paragraph_text or "")
+        for _field_name, markers in _SERVICE_FIELD_MARKERS
+        for marker in markers
+    )
+
+
+def _cleanup_service_field_residual_paragraphs(
+    doc,
+    cleanup_start: Optional[int],
+    cleanup_end: Optional[int],
+    *,
+    log=_common_delete_tender_param._visible_log,
+) -> int:
+    if cleanup_start is None or cleanup_end is None:
+        return 0
+
+    try:
+        normalized_start = max(0, int(cleanup_start))
+        normalized_end = max(normalized_start, int(cleanup_end))
+    except Exception:
+        return 0
+
+    paragraphs = getattr(doc, "Paragraphs", None)
+    if paragraphs is None:
+        return 0
+
+    try:
+        paragraph_iter = iter(paragraphs)
+    except TypeError:
+        try:
+            paragraph_iter = (paragraphs(index) for index in range(1, paragraphs.Count + 1))
+        except Exception:
+            return 0
+
+    paragraphs_to_delete = []
+    for para in paragraph_iter:
+        try:
+            para_rng = para.Range
+            para_start = int(para_rng.Start)
+            para_end = int(para_rng.End)
+        except Exception:
+            continue
+
+        if para_start < normalized_start or para_start >= normalized_end:
+            continue
+
+        para_text = str(getattr(para_rng, "Text", "") or "")
+        if _paragraph_contains_service_field(para_text):
+            continue
+        paragraphs_to_delete.append(para_rng)
+
+    deleted_count = 0
+    for para_rng in reversed(paragraphs_to_delete):
+        try:
+            paragraph_text = str(getattr(para_rng, "Text", "") or "")
+            para_rng.Delete()
+            deleted_count += 1
+            if log:
+                if _normalize_cleanup_text(paragraph_text):
+                    log(
+                        "已删除服务三字段区间内的残留正文段落"
+                    )
+                else:
+                    log(
+                        "已删除服务三字段区间内的空白/分页痕迹段落"
+                    )
+        except Exception:
+            continue
+
+    return deleted_count
 
 
 def _find_marker_offset(paragraph_text: str, markers: tuple[str, ...]) -> int:
@@ -224,6 +329,30 @@ def _restore_protected_field_paragraph_boundaries(
         print(f'[delete_tender_param] 提示: "{payment_field_name}"后已存在回车或未找到可编辑位置')
         if log:
             log(f'"{payment_field_name}"后已存在回车或未找到可编辑位置')
+
+    payment_para_rng = _common_delete_tender_param._find_paragraph_containing_any(
+        doc,
+        payment_markers,
+        min_start=search_start,
+        max_start=search_end,
+    )
+    cleanup_end = None
+    if payment_para_rng is not None:
+        try:
+            cleanup_end = int(payment_para_rng.End)
+        except Exception:
+            cleanup_end = None
+
+    cleaned_count = _cleanup_service_field_residual_paragraphs(
+        doc,
+        cleanup_start=before_end_pos,
+        cleanup_end=cleanup_end,
+        log=log,
+    )
+    if cleaned_count > 0:
+        print(f"[delete_tender_param] 已清理服务三字段区间残留段落 {cleaned_count} 个")
+        if log:
+            log(f"已清理服务三字段区间残留段落 {cleaned_count} 个")
 
 
 _gngk_fw_zc_delete_tender_param_globals = dict(_common_delete_tender_param.__dict__)

@@ -9,15 +9,18 @@ from __future__ import annotations
 
 import pathlib
 import re
+import shutil
+import stat
 import sys
 import time
 from typing import Any, Dict, Optional
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[3]
+BACKEND_ROOT = PROJECT_ROOT / "backend"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from backend.config.tender_config import get_anchor_target_sizes
+from backend.config.tender_config import get_anchor_target_sizes, get_default_anchor_texts
 from backend.nodes.common_word_nodes.comment_writeback import write_polished_comments
 from backend.nodes.common_word_nodes.update_word import (
     _apply_standard_insert_format,
@@ -51,6 +54,92 @@ from backend.util.word_util.anchor_utils import (
 
 
 PROTECTED_FIELD_KEYWORDS = ("服务地点", "服务期限", "付款方式")
+NODE_NAME = "gngk_fw_zc_update_word"
+DEFAULT_MANUAL_TEST_SOURCE_DOC = (
+    BACKEND_ROOT
+    / "test_doc"
+    / "复旦大学附属华山医院虹桥院区VRV空调和分体式空调维护保养251498-招标文件-发售稿.doc"
+)
+DEFAULT_MANUAL_TEST_SUFFIX = "-gngk-fw-zc-update-test"
+_CLEANUP_INVISIBLE_CHARS = (
+    "\r",
+    "\n",
+    "\t",
+    "\x07",
+    "\x0b",
+    "\x0c",
+    "\a",
+    "\u00a0",
+    "\u2000",
+    "\u2001",
+    "\u2002",
+    "\u2003",
+    "\u2004",
+    "\u2005",
+    "\u2006",
+    "\u2007",
+    "\u2008",
+    "\u2009",
+    "\u200a",
+    "\u200b",
+    "\u3000",
+    "\ufeff",
+)
+MANUAL_TEST_INSERT_TEXT = """一、项目概述
+1、项目名称：复旦大学附属华山医院院本部1号楼急诊改扩建区域风机盘管空气过滤器更换及设备保养
+2、服务地点：复旦大学附属华山医院院本部1号楼急诊改扩建区域
+3、服务期限：2026年6月16日-2029年6月15日
+4、付款方式：
+11)前三季度维保费用的支付方式遵循季度结算原则。即甲方需按每季度（每三个月）一次的频率向乙方支付相应的维保服务费用。
+2)最后一季度付款：年度维保工作结束后第三个月，经过甲方的考核评估，甲方向乙方支付相应的维保服务费用。
+3)每次付款前，乙方的服务质量须经过甲方的考核评估。只有在满足合同约定的服务标准时，甲方方才承担支付当期维保费用的责任。
+4)在考核过程中，若发现乙方存在违约或未达到约定服务标准的情形，甲方有权根据合同中规定的考核说明，对应付款项进行相应扣减。
+5)扣款的具体数额及条件应详细列明于合同中的《维保项目管理考核表》章节中的考核说明，并以此为依据执行。任何扣款必须符合该等条款的规定，并且乙方应提前得到通知，明确扣款的原因及金额。
+6)所有扣款处理应在当季度维保费用支付前完成，以确保支付金额的准确性。
+7)甲方应于每次考核合格确认后的30个工作日内，将扣除相应扣款后的维保费用支付给乙方。
+四、服务内容及要求
+1、投标人需提供具体维保方案、维修方案、应急预案
+2、基础维保内容包括但不限于：
+| 序号 | 检 查 项 目 |
+| --- | --- |
+| 01 | 检查或清洗室内机盘管翅片 |
+| 02 | 测量风速、温度 |
+| 03 | 检查空调电脑板、除尘 |
+| 04 | 检查各接线柱螺栓是否收紧 |
+| 05 | 检查各接线插片、插头、插座是否牢固 |
+| 06 | 检查空调机组运行高、低压力 |
+| 07 | 检测控制箱，除垢处理 |
+| 08 | 检查空调机组的运行电流 |
+| 09 | 检查风机盘管的电动执行阀机构状况 |
+| 10 | 检查风机盘管的水过滤器通过性 |
+| 11 | 检查风机盘管的冷凝水排水是否畅通 |
+| 12 | 检插或更换空调各易损件 |
+| 13 | 温度传感器性能定期巡检及功能检查 |
+| 14 | 检查线控器、遥控器 |"""
+
+
+def _normalize_cleanup_text(text: str) -> str:
+    normalized = str(text or "")
+    for invisible_char in _CLEANUP_INVISIBLE_CHARS:
+        normalized = normalized.replace(invisible_char, "")
+    return normalized.strip()
+
+
+def _is_effectively_empty_text(text: str) -> bool:
+    return _normalize_cleanup_text(text) == ""
+
+
+def _validate_block_window(range_start: int, range_end: int, *, label: str) -> None:
+    if int(range_end) < int(range_start):
+        raise ValueError(f"{label}字段区间非法，停止以避免错误插入")
+
+
+def _resolve_block4_insert_start(payment_end: int, bound_end: int) -> int:
+    payment_end = int(payment_end)
+    bound_end = int(bound_end)
+    if payment_end > bound_end:
+        raise ValueError("付款方式字段位置超出插入边界，停止以避免侵入后置章节")
+    return min(payment_end, bound_end)
 
 
 def _parse_keyword_line(line: Optional[str], keyword: str) -> tuple[str, Optional[str]]:
@@ -664,6 +753,26 @@ def gngk_fw_zc_update_word(
                         pos -= 1
                     return None
 
+                def find_prev_editable_pos_bounded(
+                    before_pos: int,
+                    bound_start: int,
+                    max_lookback: int = 4000,
+                ) -> Optional[int]:
+                    doc_end = int(doc.Content.End)
+                    pos = int(min(max(0, before_pos), doc_end))
+                    lower_bound = int(min(max(0, bound_start), doc_end))
+                    lookback = min(max_lookback, max(0, pos - lower_bound))
+                    for _ in range(lookback + 1):
+                        try:
+                            if not is_range_locked(doc.Range(pos, pos)):
+                                return pos
+                        except Exception:
+                            pass
+                        if pos <= lower_bound:
+                            break
+                        pos -= 1
+                    return None
+
                 def is_locked_exception(error: Exception) -> bool:
                     error_message = str(error).lower()
                     return (
@@ -936,22 +1045,26 @@ def gngk_fw_zc_update_word(
                 insert_rng = selection.Range
                 insert_rng.Collapse(wdCollapseStart)
 
+                block1_items = _convert_lines_to_items(block1)
                 insertion_log_parts.append("  正在插入块1...")
-                service_location_rng = protected_fields["服务地点"]
-                safe_before = find_prev_editable_pos(
-                    int(service_location_rng.Start), max_lookback=20000
-                )
-                if safe_before is None:
-                    safe_before = find_editable_insertion_pos(
-                        int(page_start_after), max_lookahead=20000
+                if block1_items:
+                    service_location_rng = protected_fields["服务地点"]
+                    safe_before = find_prev_editable_pos_bounded(
+                        int(service_location_rng.Start),
+                        int(insertion_bound_start),
+                        max_lookback=20000,
                     )
-                insert_rng.SetRange(safe_before, safe_before)
-                insert_rng.Collapse(wdCollapseStart)
-                insert_items(
-                    insert_rng,
-                    _convert_lines_to_items(block1),
-                    label="块1",
-                )
+                    if safe_before is None:
+                        raise ValueError("块1在服务地点字段前未找到可编辑插入点")
+                    insert_rng.SetRange(safe_before, safe_before)
+                    insert_rng.Collapse(wdCollapseStart)
+                    insert_items(
+                        insert_rng,
+                        block1_items,
+                        label="块1",
+                    )
+                else:
+                    insertion_log_parts.append("    块1为空，跳过")
 
                 insert_prefix_before_keyword("服务地点", service_location_prefix)
                 protected_fields["服务地点"] = (
@@ -959,6 +1072,7 @@ def gngk_fw_zc_update_word(
                 )
                 update_protected_field("服务地点", service_location_value)
 
+                block2_items = _convert_lines_to_items(block2)
                 insertion_log_parts.append("  正在插入块2...")
                 protected_fields["服务地点"] = (
                     refind_protected_paragraph("服务地点") or protected_fields["服务地点"]
@@ -968,21 +1082,27 @@ def gngk_fw_zc_update_word(
                 )
                 start_between = int(protected_fields["服务地点"].End)
                 end_between = int(protected_fields["服务期限"].Start)
-                if end_between < start_between:
-                    raise ValueError("服务期限字段位于服务地点之前，停止以避免错误插入")
+                _validate_block_window(
+                    start_between,
+                    end_between,
+                    label="服务地点与服务期限之间",
+                )
 
-                safe_between = find_next_editable_pos_bounded(
-                    start_between, end_between, max_lookahead=20000
-                )
-                if safe_between is None:
-                    safe_between = find_next_editable_pos(start_between)
-                insert_rng.SetRange(safe_between, safe_between)
-                insert_rng.Collapse(wdCollapseStart)
-                insert_items(
-                    insert_rng,
-                    _convert_lines_to_items(block2),
-                    label="块2",
-                )
+                if block2_items:
+                    safe_between = find_next_editable_pos_bounded(
+                        start_between, end_between, max_lookahead=20000
+                    )
+                    if safe_between is None:
+                        raise ValueError("块2在服务地点与服务期限字段之间未找到可编辑插入点")
+                    insert_rng.SetRange(safe_between, safe_between)
+                    insert_rng.Collapse(wdCollapseStart)
+                    insert_items(
+                        insert_rng,
+                        block2_items,
+                        label="块2",
+                    )
+                else:
+                    insertion_log_parts.append("    块2为空，跳过")
 
                 insert_prefix_before_keyword("服务期限", service_term_prefix)
                 protected_fields["服务期限"] = (
@@ -990,6 +1110,7 @@ def gngk_fw_zc_update_word(
                 )
                 update_protected_field("服务期限", service_term_value)
 
+                block3_items = _convert_lines_to_items(block3)
                 insertion_log_parts.append("  正在插入块3...")
                 protected_fields["服务期限"] = (
                     refind_protected_paragraph("服务期限") or protected_fields["服务期限"]
@@ -999,21 +1120,27 @@ def gngk_fw_zc_update_word(
                 )
                 start_between = int(protected_fields["服务期限"].End)
                 end_between = int(protected_fields["付款方式"].Start)
-                if end_between < start_between:
-                    raise ValueError("付款方式字段位于服务期限之前，停止以避免错误插入")
+                _validate_block_window(
+                    start_between,
+                    end_between,
+                    label="服务期限与付款方式之间",
+                )
 
-                safe_between = find_next_editable_pos_bounded(
-                    start_between, end_between, max_lookahead=20000
-                )
-                if safe_between is None:
-                    safe_between = find_next_editable_pos(start_between)
-                insert_rng.SetRange(safe_between, safe_between)
-                insert_rng.Collapse(wdCollapseStart)
-                insert_items(
-                    insert_rng,
-                    _convert_lines_to_items(block3),
-                    label="块3",
-                )
+                if block3_items:
+                    safe_between = find_next_editable_pos_bounded(
+                        start_between, end_between, max_lookahead=20000
+                    )
+                    if safe_between is None:
+                        raise ValueError("块3在服务期限与付款方式字段之间未找到可编辑插入点")
+                    insert_rng.SetRange(safe_between, safe_between)
+                    insert_rng.Collapse(wdCollapseStart)
+                    insert_items(
+                        insert_rng,
+                        block3_items,
+                        label="块3",
+                    )
+                else:
+                    insertion_log_parts.append("    块3为空，跳过")
 
                 insert_prefix_before_keyword("付款方式", payment_prefix)
                 protected_fields["付款方式"] = (
@@ -1036,51 +1163,49 @@ def gngk_fw_zc_update_word(
                 )
                 payment_method_rng = protected_fields["付款方式"]
                 bound_end_now = int(get_insertion_bound_end())
-                if int(payment_method_rng.End) > bound_end_now:
-                    raise ValueError("付款方式字段位置超出插入边界，停止以避免侵入后置章节")
-
-                payment_end = int(payment_method_rng.End)
-                start_after_payment = min(payment_end + 1, bound_end_now)
+                start_after_payment = _resolve_block4_insert_start(
+                    int(payment_method_rng.End),
+                    bound_end_now,
+                )
                 safe_pos = None
-                if start_after_payment < bound_end_now:
+                use_inline = False
+                if block4_items:
                     safe_pos = find_next_editable_pos_bounded(
                         start_after_payment,
                         bound_end_now,
                         max_lookahead=20000,
                     )
-                if safe_pos is None or safe_pos >= bound_end_now:
-                    if bound_end_now > payment_end:
-                        back = find_prev_editable_pos(
-                            bound_end_now - 1, max_lookback=20000
-                        )
-                        if back is not None and back >= payment_end:
-                            safe_pos = back
-                if safe_pos is None:
-                    safe_pos = start_after_payment
-
-                insert_rng.Start = min(max(0, safe_pos), doc.Content.End)
-                insert_rng.End = insert_rng.Start
-                insert_rng.Collapse(wdCollapseStart)
-                insertion_log_parts.append(
-                    f"    在付款方式字段后插入，位置 {insert_rng.Start}"
-                )
-
-                use_inline = False
-                try:
-                    if is_range_locked(doc.Range(int(insert_rng.Start), int(insert_rng.Start))):
+                    if safe_pos is None:
                         use_inline = True
-                except Exception:
-                    pass
+                        insertion_log_parts.append(
+                            "    块4在付款方式字段后未找到独立可编辑插入点，改用段落末尾内联插入"
+                        )
+                    else:
+                        insert_rng.Start = min(max(0, safe_pos), doc.Content.End)
+                        insert_rng.End = insert_rng.Start
+                        insert_rng.Collapse(wdCollapseStart)
+                        insertion_log_parts.append(
+                            f"    在付款方式字段后插入，位置 {insert_rng.Start}"
+                        )
+                        try:
+                            if is_range_locked(
+                                doc.Range(int(insert_rng.Start), int(insert_rng.Start))
+                            ):
+                                use_inline = True
+                        except Exception:
+                            pass
+                else:
+                    insertion_log_parts.append("    块4为空，跳过")
 
                 inserted_count = 0
-                if use_inline and "付款方式" in protected_fields:
+                if block4_items and use_inline and "付款方式" in protected_fields:
                     insertion_log_parts.append(
                         "    块4将以内联换行追加到付款方式段落末尾"
                     )
                     inserted_count = insert_items_inline_at_end_of_paragraph(
                         protected_fields["付款方式"], block4_items
                     )
-                else:
+                elif block4_items:
                     for item in block4_items:
                         attempts = 0
                         while attempts < 80:
@@ -1131,6 +1256,12 @@ def gngk_fw_zc_update_word(
 
                 insertion_log_parts.append("步骤5：清理空段落与换行...")
 
+                def build_cleanup_range():
+                    return doc.Range(
+                        int(insertion_bound_start),
+                        int(get_insertion_bound_end()),
+                    )
+
                 max_passes = 5
                 total_empty_deleted = 0
 
@@ -1139,18 +1270,8 @@ def gngk_fw_zc_update_word(
                         f"  步骤5.1 第 {pass_num} 轮：删除空段落..."
                     )
 
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                    page_start_final = selection.Start
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
-                    page_end_final = (
-                        selection.Start
-                        if selection.Information(wdActiveEndPageNumber) == next_page
-                        else doc.Content.End
-                    )
-                    page_rng_final = doc.Range(page_start_final, page_end_final)
-
                     empty_deleted = 0
-                    final_paragraphs = list(page_rng_final.Paragraphs)
+                    final_paragraphs = list(build_cleanup_range().Paragraphs)
                     for index in range(len(final_paragraphs) - 1, -1, -1):
                         try:
                             paragraph = final_paragraphs[index]
@@ -1160,29 +1281,7 @@ def gngk_fw_zc_update_word(
                             if is_protected_range(paragraph.Range):
                                 continue
 
-                            raw_text = paragraph.Range.Text.rstrip("\r\n")
-                            cleaned = (
-                                raw_text.replace("\r", "")
-                                .replace("\n", "")
-                                .replace(" ", "")
-                                .replace("\t", "")
-                                .replace("\u00a0", "")
-                                .replace("\u2000", "")
-                                .replace("\u2001", "")
-                                .replace("\u2002", "")
-                                .replace("\u2003", "")
-                                .replace("\u2004", "")
-                                .replace("\u2005", "")
-                                .replace("\u2006", "")
-                                .replace("\u2007", "")
-                                .replace("\u2008", "")
-                                .replace("\u2009", "")
-                                .replace("\u200a", "")
-                                .replace("\u200b", "")
-                                .strip()
-                            )
-
-                            if len(cleaned) == 0:
+                            if _is_effectively_empty_text(paragraph.Range.Text):
                                 paragraph.Range.Delete()
                                 empty_deleted += 1
                                 insertion_log_parts.append(f"    删除空段落，索引 {index}")
@@ -1202,25 +1301,15 @@ def gngk_fw_zc_update_word(
 
                     insertion_log_parts.append("  步骤5.2：清理可编辑段落中的换行...")
 
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                    page_start_clean = selection.Start
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
-                    page_end_clean = (
-                        selection.Start
-                        if selection.Information(wdActiveEndPageNumber) == next_page
-                        else doc.Content.End
-                    )
-                    page_rng_clean = doc.Range(page_start_clean, page_end_clean)
-
                     cleaned_count = 0
                     paragraphs_to_delete = []
 
-                    for paragraph in page_rng_clean.Paragraphs:
+                    for paragraph in build_cleanup_range().Paragraphs:
                         if paragraph.Range.Information(wdWithInTable):
                             continue
 
-                        paragraph_text = paragraph.Range.Text.strip()
-                        if not paragraph_text or paragraph_text == "\r" or paragraph_text == "\n":
+                        paragraph_text = paragraph.Range.Text
+                        if _is_effectively_empty_text(paragraph_text):
                             continue
 
                         if is_protected_range(paragraph.Range):
@@ -1229,16 +1318,24 @@ def gngk_fw_zc_update_word(
                         try:
                             paragraph_range = paragraph.Range
                             full_text = paragraph_range.Text
-                            text_without_mark = full_text.rstrip("\r\n")
-                            if not text_without_mark or len(text_without_mark.strip()) == 0:
+                            text_without_mark = full_text.rstrip("\r\n\a")
+                            if _is_effectively_empty_text(text_without_mark):
                                 continue
 
                             cleaned_text = (
                                 text_without_mark.replace("\r", "")
                                 .replace("\n", "")
                                 .replace("\r\n", "")
+                                .replace("\x07", "")
+                                .replace("\x0b", "")
+                                .replace("\x0c", "")
                             )
-                            cleaned_text = re.sub(r"\s+", " ", cleaned_text).strip()
+                            cleaned_text = re.sub(
+                                r"[\t\u00a0\u2000-\u200b\u3000]+",
+                                " ",
+                                cleaned_text,
+                            )
+                            cleaned_text = re.sub(r" {2,}", " ", cleaned_text).strip()
 
                             if cleaned_text and cleaned_text != text_without_mark:
                                 paragraph_range.Text = cleaned_text + "\r"
@@ -1271,18 +1368,9 @@ def gngk_fw_zc_update_word(
                     )
 
                     insertion_log_parts.append("  步骤5.3：最终检查剩余空段落...")
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                    page_start_final = selection.Start
-                    selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
-                    page_end_final = (
-                        selection.Start
-                        if selection.Information(wdActiveEndPageNumber) == next_page
-                        else doc.Content.End
-                    )
-                    page_rng_final = doc.Range(page_start_final, page_end_final)
 
                     final_empty_deleted = 0
-                    final_paragraphs = list(page_rng_final.Paragraphs)
+                    final_paragraphs = list(build_cleanup_range().Paragraphs)
                     for paragraph in reversed(final_paragraphs):
                         try:
                             if paragraph.Range.Information(wdWithInTable):
@@ -1290,16 +1378,7 @@ def gngk_fw_zc_update_word(
                             if is_protected_range(paragraph.Range):
                                 continue
 
-                            raw_text = paragraph.Range.Text.rstrip("\r\n")
-                            cleaned = (
-                                raw_text.replace("\r", "")
-                                .replace("\n", "")
-                                .replace(" ", "")
-                                .replace("\t", "")
-                                .replace("\u00a0", "")
-                                .strip()
-                            )
-                            if len(cleaned) == 0:
+                            if _is_effectively_empty_text(paragraph.Range.Text):
                                 paragraph.Range.Delete()
                                 final_empty_deleted += 1
                         except Exception:
@@ -1494,9 +1573,99 @@ def gngk_fw_zc_update_word(
     return new_state
 
 
+def _build_manual_test_output_path(source_doc_path: pathlib.Path) -> pathlib.Path:
+    return source_doc_path.with_name(
+        f"{source_doc_path.stem}{DEFAULT_MANUAL_TEST_SUFFIX}{source_doc_path.suffix}"
+    )
+
+
+def _prepare_manual_test_copy(
+    source_doc_path: pathlib.Path, output_path: pathlib.Path
+) -> None:
+    if output_path.exists():
+        output_path.chmod(output_path.stat().st_mode | stat.S_IWUSR)
+        output_path.unlink()
+    shutil.copy2(source_doc_path, output_path)
+    output_path.chmod(output_path.stat().st_mode | stat.S_IWUSR)
+
+
+def _build_manual_test_state(prepared_doc_path: str) -> TenderGraphStateBase:
+    insertion_before_text, insertion_after_text = get_default_anchor_texts("gngk_fw_zc")
+    return TenderGraphStateBase(
+        tender_type="gngk_fw_zc",
+        prepared_doc_path=prepared_doc_path,
+        polished_text=MANUAL_TEST_INSERT_TEXT,
+        insertion_before_text=insertion_before_text,
+        insertion_after_text=insertion_after_text,
+    )
+
+
+def _print_manual_state(state: TenderGraphStateBase) -> None:
+    print("测试状态:")
+    for key, value in state.items():
+        if key == "polished_text":
+            print(f"  {key}: {value[:120]}...")
+        else:
+            print(f"  {key}: {value}")
+
+
+def _run_manual_update_scenario(source_doc_path: pathlib.Path) -> pathlib.Path:
+    if not source_doc_path.exists():
+        raise FileNotFoundError(f"更新测试源文件不存在: {source_doc_path}")
+
+    output_path = _build_manual_test_output_path(source_doc_path)
+    _prepare_manual_test_copy(source_doc_path, output_path)
+    update_state = _build_manual_test_state(str(output_path))
+
+    print("[场景] 国内公开-服务自筹三字段回填")
+    print(f"源文件: {source_doc_path}")
+    print(f"测试副本: {output_path}")
+    print("执行模式: 复制测试文档后直接执行 gngk_fw_zc_update_word")
+    _print_manual_state(update_state)
+    print("-" * 80)
+
+    result_state = gngk_fw_zc_update_word(update_state, config=None)
+    print("✅ gngk_fw_zc_update_word 执行完成")
+    print(f"回填产物: {output_path}")
+    print("插入日志:")
+    for part in str(result_state.get("insertion_log", "")).split("; "):
+        print(f"  - {part}")
+    return output_path
+
+
+def main() -> None:
+    print("=" * 80)
+    print("开始测试国内公开-服务自筹三字段回填场景")
+    print("=" * 80)
+
+    output_path: Optional[pathlib.Path] = None
+    try:
+        output_path = _run_manual_update_scenario(DEFAULT_MANUAL_TEST_SOURCE_DOC)
+    except Exception as exc:
+        print("❌ gngk_fw_zc_update_word 执行失败")
+        print(f"错误信息: {exc}")
+        sys.exit(1)
+
+    print("=" * 80)
+    print("诊断完成")
+    if output_path is not None:
+        print(f"回填产物文件: {output_path}")
+    print("国内公开-服务自筹三字段回填场景执行成功")
+    print("=" * 80)
+
+
 __all__ = [
     "PROTECTED_FIELD_KEYWORDS",
     "gngk_fw_zc_update_word",
     "split_polished_text_into_blocks",
     "_require_all_protected_fields",
+    "_convert_lines_to_items",
+    "_is_effectively_empty_text",
+    "_normalize_cleanup_text",
+    "_resolve_block4_insert_start",
+    "_validate_block_window",
 ]
+
+
+if __name__ == "__main__":
+    main()
