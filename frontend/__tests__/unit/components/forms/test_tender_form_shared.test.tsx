@@ -221,6 +221,20 @@ function mergeDraftState(
     };
   }
 
+  if (updates.gngk_insertion_configs) {
+    nextDraft.gngk_insertion_configs = {
+      ...(previous.gngk_insertion_configs || {}),
+      ...updates.gngk_insertion_configs,
+    };
+  }
+
+  if (updates.gngk_service_insertion_config) {
+    nextDraft.gngk_service_insertion_config = {
+      ...(previous.gngk_service_insertion_config || {}),
+      ...updates.gngk_service_insertion_config,
+    };
+  }
+
   if (updates.files) {
     nextDraft.files = {
       ...(previous.files || { tender_params: [] }),
@@ -782,6 +796,43 @@ describe('TenderFormShared', () => {
     expect(selfFundButton).not.toHaveClass('bg-blue-600');
   });
 
+  it('keeps blank gngk forms on goods plus self-funded defaults', async () => {
+    setUrlParams({ hasParams: false });
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <>
+          <TenderFormShared
+            tenderType="gngk"
+            onSubmit={jest.fn()}
+            initialDraft={draft}
+            onDraftChange={(updates) => {
+              setDraft((previous) => mergeDraftState(previous, updates));
+            }}
+          />
+          <pre data-testid="draft-state">{JSON.stringify(draft)}</pre>
+        </>
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '货物' })).toHaveClass('bg-blue-600')
+    );
+    expect(screen.getByRole('button', { name: '自筹' })).toHaveClass('bg-blue-600');
+    expect(screen.getByPlaceholderText('插入位置前的章节标题')).toHaveValue(
+      '第三章 招标内容及要求'
+    );
+    expect(screen.getByPlaceholderText('插入位置后的章节标题')).toHaveValue(
+      '第四章 投标文件有关格式'
+    );
+    expect(screen.getByTestId('draft-state')).toHaveTextContent('"tender_lx":0');
+    expect(screen.getByTestId('draft-state')).toHaveTextContent('"fund_lx":0');
+  });
+
   it('syncs gngk visible anchors into draft when fund mode switches', async () => {
     const user = userEvent.setup();
     setUrlParams({ tenderType: 'gngk' });
@@ -819,6 +870,56 @@ describe('TenderFormShared', () => {
     expect(screen.getByTestId('draft-state')).toHaveTextContent('第五章 评标方法与程序');
   });
 
+  it('keeps separate goods anchor caches for self-funded and fiscal gngk modes', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk' });
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <>
+          <TenderFormShared
+            tenderType="gngk"
+            onSubmit={jest.fn()}
+            initialDraft={draft}
+            onDraftChange={(updates) => {
+              setDraft((previous) => mergeDraftState(previous, updates));
+            }}
+          />
+          <pre data-testid="draft-state">{JSON.stringify(draft)}</pre>
+        </>
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
+
+    await user.clear(beforeInput);
+    await user.type(beforeInput, '货物自筹前');
+    await user.clear(afterInput);
+    await user.type(afterInput, '货物自筹后');
+
+    await user.click(screen.getByRole('button', { name: '财政' }));
+    await waitFor(() => expect(beforeInput).toHaveValue('第四章  招标需求'));
+    expect(afterInput).toHaveValue('第五章  评标方法与程序');
+
+    await user.clear(beforeInput);
+    await user.type(beforeInput, '货物财政前');
+    await user.clear(afterInput);
+    await user.type(afterInput, '货物财政后');
+
+    await user.click(screen.getByRole('button', { name: '自筹' }));
+    await waitFor(() => expect(beforeInput).toHaveValue('货物自筹前'));
+    expect(afterInput).toHaveValue('货物自筹后');
+
+    await user.click(screen.getByRole('button', { name: '财政' }));
+    await waitFor(() => expect(beforeInput).toHaveValue('货物财政前'));
+    expect(afterInput).toHaveValue('货物财政后');
+  });
+
   it('preserves manually cleared gngk anchors across fund switches', async () => {
     const user = userEvent.setup();
     setUrlParams({ tenderType: 'gngk' });
@@ -852,6 +953,41 @@ describe('TenderFormShared', () => {
     await waitFor(() => expect(beforeInput).toHaveValue(''));
   });
 
+  it('switches to service defaults instead of reusing goods anchors on first gngk service toggle', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk' });
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <TenderFormShared
+          tenderType="gngk"
+          onSubmit={jest.fn()}
+          initialDraft={draft}
+          onDraftChange={(updates) => {
+            setDraft((previous) => mergeDraftState(previous, updates));
+          }}
+        />
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
+
+    await user.clear(beforeInput);
+    await user.type(beforeInput, '货物当前前');
+    await user.clear(afterInput);
+    await user.type(afterInput, '货物当前后');
+
+    await user.click(screen.getByRole('button', { name: '服务' }));
+
+    await waitFor(() => expect(beforeInput).toHaveValue('第三章 招标内容及要求'));
+    expect(afterInput).toHaveValue('第四章 合同条款');
+  });
+
   it('uses URL tender_lx only for initial default and allows manual switching afterwards', async () => {
     const user = userEvent.setup();
     setUrlParams({ tenderType: 'gngk', tenderLx: 1 });
@@ -883,6 +1019,124 @@ describe('TenderFormShared', () => {
 
     await waitFor(() => expect(goodsButton).toHaveClass('bg-blue-600'));
     expect(serviceButton).not.toHaveClass('bg-blue-600');
+  });
+
+  it('shares one service anchor cache across gngk fund switches', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk', tenderLx: 1, fundLx: 0 });
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <>
+          <TenderFormShared
+            tenderType="gngk"
+            onSubmit={jest.fn()}
+            initialDraft={draft}
+            onDraftChange={(updates) => {
+              setDraft((previous) => mergeDraftState(previous, updates));
+            }}
+          />
+          <pre data-testid="draft-state">{JSON.stringify(draft)}</pre>
+        </>
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
+
+    await waitFor(() => expect(beforeInput).toHaveValue('第三章 招标内容及要求'));
+    expect(afterInput).toHaveValue('第四章 合同条款');
+
+    await user.clear(beforeInput);
+    await user.type(beforeInput, '服务共享前');
+    await user.clear(afterInput);
+    await user.type(afterInput, '服务共享后');
+
+    await user.click(screen.getByRole('button', { name: '财政' }));
+
+    await waitFor(() => expect(beforeInput).toHaveValue('服务共享前'));
+    expect(afterInput).toHaveValue('服务共享后');
+    expect(screen.getByTestId('draft-state')).toHaveTextContent('"gngk_service_insertion_config"');
+  });
+
+  it('restores goods anchors for the active fund after leaving gngk service mode', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk', fundLx: 1 });
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <TenderFormShared
+          tenderType="gngk"
+          onSubmit={jest.fn()}
+          initialDraft={draft}
+          onDraftChange={(updates) => {
+            setDraft((previous) => mergeDraftState(previous, updates));
+          }}
+        />
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
+
+    await waitFor(() => expect(beforeInput).toHaveValue('第四章  招标需求'));
+    expect(afterInput).toHaveValue('第五章  评标方法与程序');
+
+    await user.clear(beforeInput);
+    await user.type(beforeInput, '货物财政前');
+    await user.clear(afterInput);
+    await user.type(afterInput, '货物财政后');
+
+    await user.click(screen.getByRole('button', { name: '服务' }));
+    await waitFor(() => expect(afterInput).toHaveValue('第四章 合同条款'));
+
+    await user.clear(beforeInput);
+    await user.type(beforeInput, '服务共享前');
+    await user.clear(afterInput);
+    await user.type(afterInput, '服务共享后');
+
+    await user.click(screen.getByRole('button', { name: '货物' }));
+
+    await waitFor(() => expect(beforeInput).toHaveValue('货物财政前'));
+    expect(afterInput).toHaveValue('货物财政后');
+  });
+
+  it('keeps legacy service drafts on their saved insertion_config until a shared cache is created', async () => {
+    const onDraftChange = jest.fn();
+    setUrlParams({ hasParams: false });
+
+    renderSharedForm({
+      tenderType: 'gngk',
+      onDraftChange,
+      initialDraft: {
+        tender_lx: 1,
+        fund_lx: 0,
+        insertion_config: {
+          before_text: '旧服务前',
+          after_text: '旧服务后',
+        },
+      },
+    });
+
+    expect(screen.getByPlaceholderText('插入位置前的章节标题')).toHaveValue('旧服务前');
+    expect(screen.getByPlaceholderText('插入位置后的章节标题')).toHaveValue('旧服务后');
+
+    await waitFor(() =>
+      expect(onDraftChange).toHaveBeenCalledWith({
+        gngk_service_insertion_config: {
+          before_text: '旧服务前',
+          after_text: '旧服务后',
+        },
+      })
+    );
   });
 
   it('does not overwrite the tender_lx button from fetched type info', async () => {

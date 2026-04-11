@@ -94,6 +94,10 @@ export interface ConversationFormDraft {
       after_text: string;
     };
   };
+  gngk_service_insertion_config?: {
+    before_text: string;
+    after_text: string;
+  };
   chat_input?: string;
   pending_rewrite_prompt?: string;
   pending_rewrite_task_id?: string;
@@ -177,6 +181,20 @@ function mergeConversationDraft(
     nextDraft.insertion_config = {
       ...(base.insertion_config || {}),
       ...updates.insertion_config,
+    };
+  }
+
+  if (updates.gngk_insertion_configs) {
+    nextDraft.gngk_insertion_configs = {
+      ...(base.gngk_insertion_configs || {}),
+      ...updates.gngk_insertion_configs,
+    };
+  }
+
+  if (updates.gngk_service_insertion_config) {
+    nextDraft.gngk_service_insertion_config = {
+      ...(base.gngk_service_insertion_config || {}),
+      ...updates.gngk_service_insertion_config,
     };
   }
 

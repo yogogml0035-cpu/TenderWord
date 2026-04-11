@@ -94,6 +94,10 @@ const gngkFiscalInsertionConfigDefaults: TenderInsertionConfig = {
   before_text: '第四章  招标需求',
   after_text: '第五章  评标方法与程序',
 };
+const gngkServiceInsertionConfigDefaults: TenderInsertionConfig = {
+  before_text: '第三章 招标内容及要求',
+  after_text: '第四章 合同条款',
+};
 const defaultGenerationStyle: GenerationStyle = 'template';
 
 function toDraftFile(file: UploadedFile | null | undefined): ConversationDraftFile | undefined {
@@ -130,9 +134,14 @@ function areInsertionConfigsEqual(
 
 function resolveDefaultInsertionConfig(
   tenderType: TenderType,
+  tenderLx: TenderLx,
   fundLx: FundLx,
   variantDefaults: TenderInsertionConfig
 ): TenderInsertionConfig {
+  if (tenderType === 'gngk' && tenderLx === 1) {
+    return gngkServiceInsertionConfigDefaults;
+  }
+
   if (tenderType === 'gngk' && fundLx === 1) {
     return gngkFiscalInsertionConfigDefaults;
   }
@@ -148,6 +157,126 @@ function resolveInsertionConfig(
     before_text: current?.before_text ?? fallback.before_text,
     after_text: current?.after_text ?? fallback.after_text,
   };
+}
+
+function mergeDraftStateLike(
+  draft: ConversationFormDraft | null | undefined,
+  updates: Partial<ConversationFormDraft>
+): ConversationFormDraft {
+  return {
+    ...(draft || {}),
+    ...updates,
+    ...(updates.insertion_config
+      ? {
+          insertion_config: {
+            ...(draft?.insertion_config || {}),
+            ...updates.insertion_config,
+          },
+        }
+      : {}),
+    ...(updates.gngk_insertion_configs
+      ? {
+          gngk_insertion_configs: {
+            ...(draft?.gngk_insertion_configs || {}),
+            ...updates.gngk_insertion_configs,
+          },
+        }
+      : {}),
+    ...(updates.gngk_service_insertion_config
+      ? {
+          gngk_service_insertion_config: {
+            ...(draft?.gngk_service_insertion_config || {}),
+            ...updates.gngk_service_insertion_config,
+          },
+        }
+      : {}),
+  };
+}
+
+function resolveGngkScopedInsertionConfig(
+  draft: ConversationFormDraft | null | undefined,
+  tenderLx: TenderLx,
+  fundLx: FundLx,
+  useLegacyServiceDraftFallback = false
+): Partial<TenderInsertionConfig> | null | undefined {
+  if (tenderLx === 1) {
+    return (
+      draft?.gngk_service_insertion_config ??
+      (useLegacyServiceDraftFallback ? draft?.insertion_config : undefined)
+    );
+  }
+
+  return draft?.gngk_insertion_configs?.[fundLx];
+}
+
+function resolveVisibleInsertionConfig(
+  tenderType: TenderType,
+  draft: ConversationFormDraft | null | undefined,
+  tenderLx: TenderLx,
+  fundLx: FundLx,
+  variantDefaults: TenderInsertionConfig,
+  useLegacyServiceDraftFallback = false
+): TenderInsertionConfig {
+  const fallback = resolveDefaultInsertionConfig(tenderType, tenderLx, fundLx, variantDefaults);
+  const scopedInsertion =
+    tenderType === 'gngk'
+      ? resolveGngkScopedInsertionConfig(
+          draft,
+          tenderLx,
+          fundLx,
+          useLegacyServiceDraftFallback
+        )
+      : draft?.insertion_config;
+
+  return resolveInsertionConfig(scopedInsertion, fallback);
+}
+
+function buildGngkModeCacheUpdates(
+  draft: ConversationFormDraft | null | undefined,
+  tenderLx: TenderLx,
+  fundLx: FundLx,
+  insertionConfig: TenderInsertionConfig
+): Partial<ConversationFormDraft> {
+  if (tenderLx === 1) {
+    if (areInsertionConfigsEqual(draft?.gngk_service_insertion_config, insertionConfig)) {
+      return {};
+    }
+
+    return {
+      gngk_service_insertion_config: insertionConfig,
+    };
+  }
+
+  if (areInsertionConfigsEqual(draft?.gngk_insertion_configs?.[fundLx], insertionConfig)) {
+    return {};
+  }
+
+  return {
+    gngk_insertion_configs: {
+      ...(draft?.gngk_insertion_configs || {}),
+      [fundLx]: insertionConfig,
+    },
+  };
+}
+
+function buildVisibleInsertionDraftUpdates(
+  draft: ConversationFormDraft | null | undefined,
+  tenderType: TenderType,
+  tenderLx: TenderLx,
+  fundLx: FundLx,
+  insertionConfig: TenderInsertionConfig
+): Partial<ConversationFormDraft> {
+  const updates: Partial<ConversationFormDraft> = {};
+
+  if (!areInsertionConfigsEqual(draft?.insertion_config, insertionConfig)) {
+    updates.insertion_config = insertionConfig;
+  }
+
+  if (tenderType === 'gngk') {
+    Object.assign(updates, buildGngkModeCacheUpdates(draft, tenderLx, fundLx, insertionConfig));
+  }
+
+  return updates;
 }
 
 function buildTemplateCandidateCacheKey(tenderNo: string, projectName: string | null): string {
@@ -281,15 +410,13 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     initialDraft?.generation_style === 'param' ? 'param' : defaultGenerationStyle
   );
   const [insertionConfig, setInsertionConfig] = useState<TenderInsertionConfig>(() => {
-    const gngkScopedInsertion =
-      initialDraft?.gngk_insertion_configs?.[initialFundLx] ?? initialDraft?.insertion_config;
-    return resolveInsertionConfig(
-      gngkScopedInsertion,
-      resolveDefaultInsertionConfig(
-        tenderType,
-        initialFundLx,
-        variantConfig.insertionConfigDefaults
-      )
+    return resolveVisibleInsertionConfig(
+      tenderType,
+      initialDraft,
+      initialTenderLx,
+      initialFundLx,
+      variantConfig.insertionConfigDefaults,
+      tenderType === 'gngk' && initialTenderLx === 1
     );
   });
   const [error, setError] = useState<string | null>(null);
@@ -365,20 +492,6 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       updates.fund_lx = initialFundLx;
     }
 
-    if (tenderType === 'gngk' && shouldUpdateFund) {
-      const scopedConfig = initialDraft?.gngk_insertion_configs?.[initialFundLx];
-      const nextInsertion = resolveInsertionConfig(
-        scopedConfig,
-        resolveDefaultInsertionConfig(
-          tenderType,
-          initialFundLx,
-          variantConfig.insertionConfigDefaults
-        )
-      );
-      updates.insertion_config = nextInsertion;
-      setInsertionConfig(nextInsertion);
-    }
-
     setLocalTenderLx(initialTenderLx);
     setLocalFundLx(initialFundLx);
 
@@ -388,14 +501,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   }, [
     initialDraft?.tender_lx,
     initialDraft?.fund_lx,
-    initialDraft?.gngk_insertion_configs,
     initialTenderLx,
     initialFundLx,
     onDraftChange,
-    tenderType,
-    variantConfig.insertionConfigDefaults,
-    variantConfig.insertionConfigDefaults.after_text,
-    variantConfig.insertionConfigDefaults.before_text,
   ]);
 
   useEffect(() => {
@@ -405,26 +513,20 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
 
     const updates: Partial<ConversationFormDraft> = {};
 
-    if (!areInsertionConfigsEqual(initialDraft?.insertion_config, insertionConfig)) {
-      updates.insertion_config = insertionConfig;
-    }
-
-    if (tenderType === 'gngk') {
-      const currentScopedConfig = initialDraft?.gngk_insertion_configs?.[fundLx];
-      if (!areInsertionConfigsEqual(currentScopedConfig, insertionConfig)) {
-        updates.gngk_insertion_configs = {
-          ...(initialDraft?.gngk_insertion_configs || {}),
-          [fundLx]: insertionConfig,
-        };
-      }
-    }
+    Object.assign(
+      updates,
+      buildVisibleInsertionDraftUpdates(initialDraft, tenderType, tenderLx, fundLx, insertionConfig)
+    );
 
     if (Object.keys(updates).length > 0) {
       onDraftChange(updates);
     }
   }, [
+    initialDraft,
+    tenderLx,
     fundLx,
     initialDraft?.gngk_insertion_configs,
+    initialDraft?.gngk_service_insertion_config,
     initialDraft?.insertion_config,
     insertionConfig,
     onDraftChange,
@@ -525,24 +627,36 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       };
 
       if (tenderType === 'gngk') {
-        const currentScopedConfigs = initialDraft?.gngk_insertion_configs || {};
-        const nextScopedConfigs = {
-          ...currentScopedConfigs,
-          [fundLx]: insertionConfig,
-        };
-        const targetScoped = nextScopedConfigs[nextFundLx];
-        const nextInsertion = resolveInsertionConfig(
-          targetScoped,
-          resolveDefaultInsertionConfig(
+        const currentModeCacheUpdates = buildGngkModeCacheUpdates(
+          initialDraft,
+          tenderLx,
+          fundLx,
+          insertionConfig
+        );
+        const nextDraft = mergeDraftStateLike(initialDraft, currentModeCacheUpdates);
+        const nextInsertion = resolveVisibleInsertionConfig(
+          tenderType,
+          nextDraft,
+          tenderLx,
+          nextFundLx,
+          variantConfig.insertionConfigDefaults
+        );
+
+        Object.assign(nextUpdates, currentModeCacheUpdates);
+        Object.assign(
+          nextUpdates,
+          buildVisibleInsertionDraftUpdates(
+            nextDraft,
             tenderType,
+            tenderLx,
             nextFundLx,
-            variantConfig.insertionConfigDefaults
+            nextInsertion
           )
         );
 
-        nextUpdates.gngk_insertion_configs = nextScopedConfigs;
-        nextUpdates.insertion_config = nextInsertion;
-        setInsertionConfig(nextInsertion);
+        if (!areInsertionConfigsEqual(insertionConfig, nextInsertion)) {
+          setInsertionConfig(nextInsertion);
+        }
       }
 
       onDraftChange?.(nextUpdates);
@@ -552,8 +666,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       window.history.replaceState(window.history.state, '', url.toString());
     },
     [
+      tenderLx,
       fundLx,
-      initialDraft?.gngk_insertion_configs,
+      initialDraft,
       insertionConfig,
       onDraftChange,
       tenderType,
@@ -568,15 +683,58 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       }
 
       setLocalTenderLx(nextTenderLx);
-      onDraftChange?.({
+      const nextUpdates: Partial<ConversationFormDraft> = {
         tender_lx: nextTenderLx,
-      });
+      };
+
+      if (tenderType === 'gngk') {
+        const currentModeCacheUpdates = buildGngkModeCacheUpdates(
+          initialDraft,
+          tenderLx,
+          fundLx,
+          insertionConfig
+        );
+        const nextDraft = mergeDraftStateLike(initialDraft, currentModeCacheUpdates);
+        const nextInsertion = resolveVisibleInsertionConfig(
+          tenderType,
+          nextDraft,
+          nextTenderLx,
+          fundLx,
+          variantConfig.insertionConfigDefaults
+        );
+
+        Object.assign(nextUpdates, currentModeCacheUpdates);
+        Object.assign(
+          nextUpdates,
+          buildVisibleInsertionDraftUpdates(
+            nextDraft,
+            tenderType,
+            nextTenderLx,
+            fundLx,
+            nextInsertion
+          )
+        );
+
+        if (!areInsertionConfigsEqual(insertionConfig, nextInsertion)) {
+          setInsertionConfig(nextInsertion);
+        }
+      }
+
+      onDraftChange?.(nextUpdates);
 
       const url = new URL(window.location.href);
       url.searchParams.set('tender_lx', String(nextTenderLx));
       window.history.replaceState(window.history.state, '', url.toString());
     },
-    [onDraftChange, tenderLx]
+    [
+      fundLx,
+      initialDraft,
+      insertionConfig,
+      onDraftChange,
+      tenderLx,
+      tenderType,
+      variantConfig.insertionConfigDefaults,
+    ]
   );
 
   const handleGenerationStyleChange = useCallback(
@@ -597,38 +755,22 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     (value: string) => {
       const next = { ...insertionConfig, before_text: value };
       setInsertionConfig(next);
-      if (tenderType === 'gngk') {
-        onDraftChange?.({
-          insertion_config: next,
-          gngk_insertion_configs: {
-            ...(initialDraft?.gngk_insertion_configs || {}),
-            [fundLx]: next,
-          },
-        });
-      } else {
-        onDraftChange?.({ insertion_config: next });
-      }
+      onDraftChange?.(
+        buildVisibleInsertionDraftUpdates(initialDraft, tenderType, tenderLx, fundLx, next)
+      );
     },
-    [fundLx, initialDraft?.gngk_insertion_configs, insertionConfig, onDraftChange, tenderType]
+    [fundLx, initialDraft, insertionConfig, onDraftChange, tenderLx, tenderType]
   );
 
   const handleAfterTextChange = useCallback(
     (value: string) => {
       const next = { ...insertionConfig, after_text: value };
       setInsertionConfig(next);
-      if (tenderType === 'gngk') {
-        onDraftChange?.({
-          insertion_config: next,
-          gngk_insertion_configs: {
-            ...(initialDraft?.gngk_insertion_configs || {}),
-            [fundLx]: next,
-          },
-        });
-      } else {
-        onDraftChange?.({ insertion_config: next });
-      }
+      onDraftChange?.(
+        buildVisibleInsertionDraftUpdates(initialDraft, tenderType, tenderLx, fundLx, next)
+      );
     },
-    [fundLx, initialDraft?.gngk_insertion_configs, insertionConfig, onDraftChange, tenderType]
+    [fundLx, initialDraft, insertionConfig, onDraftChange, tenderLx, tenderType]
   );
 
   const originUploaderFiles = useMemo(() => (originFile ? [originFile] : []), [originFile]);

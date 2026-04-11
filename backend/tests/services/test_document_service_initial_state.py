@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from backend.config.tender_config import get_default_anchor_texts
 from backend.models.generate import (
     EditTaskRequest,
     FormType,
@@ -8,13 +11,16 @@ from backend.models.generate import (
     LLMModel,
 )
 from backend.models.tender import TenderData
-from backend.services.document_service import DocumentService
+from backend.services.document_service import DocumentService, REWRITE_DEFAULT_ANCHORS
 
 
 def build_request(
     *,
     origin_tender: str | None,
     template: str | None,
+    form_type: FormType = FormType.GJGK_TENDER,
+    tender_lx: int = 0,
+    fund_source_lx: int = 1,
     generation_style: GenerationStyle = GenerationStyle.TEMPLATE,
 ) -> GenerateRequest:
     file_paths: dict[str, object] = {"tender_params": ["D:/UploadFiles/params.docx"]}
@@ -24,7 +30,7 @@ def build_request(
         file_paths["template"] = template
 
     return GenerateRequest(
-        form_type=FormType.GJGK_TENDER,
+        form_type=form_type,
         tender_data=TenderData(
             project_name="国际公开测试项目",
             project_number="0811-254DSITC2512",
@@ -39,8 +45,8 @@ def build_request(
             submit_date="2026-04-09",
             platform="平台",
             service_fee="1000",
-            tender_lx=0,
-            fund_source_lx=1,
+            tender_lx=tender_lx,
+            fund_source_lx=fund_source_lx,
         ),
         file_paths=file_paths,
         generation_style=generation_style,
@@ -89,6 +95,91 @@ def test_build_initial_state_carries_generation_style() -> None:
     state = service._build_initial_state(request, task_id="task-3")
 
     assert state["generation_style"] == "param"
+
+
+@pytest.mark.parametrize(
+    ("tender_type", "expected_before", "expected_after"),
+    [
+        ("gngk_fw_zc", "第三章 招标内容及要求", "第四章 合同条款"),
+        ("gngk_fw_cz", "第三章 招标内容及要求", "第四章 合同条款"),
+        ("gngk_hw_zc", "第三章 招标内容及要求", "第四章 投标文件有关格式"),
+        ("gngk_hw_cz", "第四章  招标需求", "第五章  评标方法与程序"),
+    ],
+)
+def test_gngk_anchor_config_defaults_follow_goods_and_service_rules(
+    tender_type: str, expected_before: str, expected_after: str
+) -> None:
+    assert get_default_anchor_texts(tender_type) == (expected_before, expected_after)
+
+
+@pytest.mark.parametrize(
+    ("tender_type", "expected_before", "expected_after"),
+    [
+        ("gngk_fw_zc", "第三章 招标内容及要求", "第四章 合同条款"),
+        ("gngk_fw_cz", "第三章 招标内容及要求", "第四章 合同条款"),
+        ("gngk_hw_zc", "第三章 招标内容及要求", "第四章 投标文件有关格式"),
+        ("gngk_hw_cz", "第四章  招标需求", "第五章  评标方法与程序"),
+    ],
+)
+def test_rewrite_default_anchors_follow_gngk_goods_and_service_rules(
+    tender_type: str, expected_before: str, expected_after: str
+) -> None:
+    assert REWRITE_DEFAULT_ANCHORS[tender_type] == (expected_before, expected_after)
+
+
+@pytest.mark.parametrize(
+    ("form_type", "tender_lx", "fund_source_lx", "expected_before", "expected_after"),
+    [
+        (
+            FormType.GNGK_FW_ZC_TENDER,
+            1,
+            0,
+            "第三章 招标内容及要求",
+            "第四章 合同条款",
+        ),
+        (
+            FormType.GNGK_FW_CZ_TENDER,
+            1,
+            1,
+            "第三章 招标内容及要求",
+            "第四章 合同条款",
+        ),
+        (
+            FormType.GNGK_HW_ZC_TENDER,
+            0,
+            0,
+            "第三章 招标内容及要求",
+            "第四章 投标文件有关格式",
+        ),
+        (
+            FormType.GNGK_HW_CZ_TENDER,
+            0,
+            1,
+            "第四章  招标需求",
+            "第五章  评标方法与程序",
+        ),
+    ],
+)
+def test_build_initial_state_uses_gngk_mode_specific_default_anchors(
+    form_type: FormType,
+    tender_lx: int,
+    fund_source_lx: int,
+    expected_before: str,
+    expected_after: str,
+) -> None:
+    service = object.__new__(DocumentService)
+    request = build_request(
+        origin_tender="D:/UploadFiles/review.docx",
+        template="D:/UploadFiles/template.docx",
+        form_type=form_type,
+        tender_lx=tender_lx,
+        fund_source_lx=fund_source_lx,
+    )
+
+    state = service._build_initial_state(request, task_id="task-gngk-defaults")
+
+    assert state["insertion_before_text"] == expected_before
+    assert state["insertion_after_text"] == expected_after
 
 
 def test_edit_and_rewrite_initial_state_do_not_receive_generation_style() -> None:
