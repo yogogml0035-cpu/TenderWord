@@ -509,89 +509,161 @@ def gngk_fw_zc_update_word(
 
                 bound_start_for_delete = int(insertion_bound_start)
                 bound_end_for_delete = int(get_insertion_bound_end())
-                deletion_rng = doc.Range(bound_start_for_delete, bound_end_for_delete)
                 insertion_log_parts.append(
                     f"步骤3：清理插入区间可编辑内容（{bound_start_for_delete} - {bound_end_for_delete}）..."
                 )
 
+                # ---- 循环式删除（参考 delete_tender_param.py）----
+                # 每一步重新构建 Range、重新获取 Tables/Paragraphs，
+                # 确保 COM 对象始终有效，避免一次性遍历导致的遗漏。
                 deleted_tables = 0
-                try:
-                    tables = deletion_rng.Tables
-                    for table_index in range(tables.Count, 0, -1):
-                        try:
-                            table = tables(table_index)
-                            if is_protected_range(table.Range):
-                                continue
-                            table.Range.Delete()
-                            deleted_tables += 1
-                        except Exception:
-                            continue
-                except Exception:
-                    pass
-
                 deleted_paras = 0
-                paragraphs = list(deletion_rng.Paragraphs)
-                for index in range(len(paragraphs) - 1, -1, -1):
+                max_delete_steps = 2000
+                delete_step = 0
+                current_delete_pos = bound_start_for_delete
+
+                while delete_step < max_delete_steps:
+                    delete_step += 1
+                    current_bound_end = int(get_insertion_bound_end())
+
+                    # 区间已清空
+                    if current_delete_pos >= current_bound_end:
+                        break
+
+                    delete_rng = doc.Range(current_delete_pos, current_bound_end)
+                    deleted_something = False
+
+                    # 策略1: 尝试大块删除整个非保护区间
+                    # 先检查区间内是否存在保护字段
+                    has_protected = False
                     try:
-                        paragraph = paragraphs[index]
-                        paragraph_text = paragraph.Range.Text.strip()
-                        if (
-                            not paragraph_text
-                            or paragraph_text == "\r"
-                            or paragraph_text == "\n"
-                        ):
-                            continue
-                        if is_protected_range(paragraph.Range):
-                            continue
-                        paragraph.Range.Delete()
-                        deleted_paras += 1
+                        for _kw, _prng in protected_fields.items():
+                            try:
+                                _ps = int(_prng.Start)
+                                _pe = int(_prng.End)
+                                if not (_pe <= current_delete_pos or _ps >= current_bound_end):
+                                    has_protected = True
+                                    break
+                            except Exception:
+                                continue
                     except Exception:
-                        continue
+                        pass
+
+                    if not has_protected:
+                        # 区间内无保护字段，尝试整段删除
+                        try:
+                            delete_rng.Delete()
+                            insertion_log_parts.append(
+                                f"  步骤3 大块删除成功 ({current_delete_pos}-{current_bound_end})"
+                            )
+                            break
+                        except Exception:
+                            pass  # 失败则回退到逐元素策略
+
+                    # 策略2: 先尝试删除区间内第一个非保护表格
+                    try:
+                        tables = delete_rng.Tables
+                        if tables.Count > 0:
+                            tbl = tables(1)
+                            tbl_rng = tbl.Range
+                            tbl_start = int(tbl_rng.Start)
+                            tbl_end = int(tbl_rng.End)
+
+                            if is_protected_range(tbl_rng):
+                                # 保护表格，跳过
+                                current_delete_pos = tbl_end
+                                deleted_something = True
+                            else:
+                                # 如果表格起点前有非保护内容，先清理它们
+                                if tbl_start > current_delete_pos:
+                                    pre_rng = doc.Range(current_delete_pos, tbl_start)
+                                    if not is_protected_range(pre_rng):
+                                        try:
+                                            pre_rng.Delete()
+                                            deleted_something = True
+                                            continue
+                                        except Exception:
+                                            # 删除前置内容失败，跳到表格起点继续
+                                            current_delete_pos = tbl_start
+                                            deleted_something = True
+                                            continue
+
+                                # 删除表格本身
+                                try:
+                                    tbl.Delete()
+                                    deleted_tables += 1
+                                    deleted_something = True
+                                    continue
+                                except Exception:
+                                    try:
+                                        tbl_rng.Delete()
+                                        deleted_tables += 1
+                                        deleted_something = True
+                                        continue
+                                    except Exception:
+                                        # 删不掉，跳过此表格
+                                        current_delete_pos = tbl_end
+                                        deleted_something = True
+                                        continue
+                    except Exception:
+                        pass
+
+                    # 策略3: 逐段落删除
+                    if not deleted_something:
+                        try:
+                            paras = delete_rng.Paragraphs
+                            if paras.Count > 0:
+                                para = paras(1)
+                                para_rng = para.Range
+                                para_start = int(para_rng.Start)
+                                para_end = int(para_rng.End)
+
+                                if is_protected_range(para_rng):
+                                    current_delete_pos = para_end
+                                    deleted_something = True
+                                else:
+                                    try:
+                                        para_rng.Delete()
+                                        deleted_paras += 1
+                                        deleted_something = True
+                                        continue
+                                    except Exception:
+                                        current_delete_pos = para_end
+                                        deleted_something = True
+                                        continue
+                        except Exception:
+                            pass
+
+                    # 策略4: 小块字符删除
+                    if not deleted_something:
+                        try:
+                            chunk_size = min(50, current_bound_end - current_delete_pos)
+                            if chunk_size > 0:
+                                chunk_end = current_delete_pos + chunk_size
+                                small_rng = doc.Range(current_delete_pos, chunk_end)
+                                if is_protected_range(small_rng):
+                                    current_delete_pos = chunk_end
+                                    continue
+                                try:
+                                    small_rng.Delete()
+                                    continue
+                                except Exception:
+                                    current_delete_pos = chunk_end
+                                    continue
+                        except Exception:
+                            pass
+
+                    # 无法删除任何内容，强制前进
+                    if not deleted_something:
+                        current_delete_pos += 1
+                        if current_delete_pos >= current_bound_end:
+                            break
 
                 insertion_log_parts.append(
-                    f"步骤3完成：已删除表格 {deleted_tables} 个，删除段落 {deleted_paras} 个。"
+                    f"步骤3完成：循环 {delete_step} 步，已删除表格 {deleted_tables} 个，"
+                    f"删除段落 {deleted_paras} 个。"
                 )
                 insertion_log_parts.append("步骤4：按服务三字段顺序插入内容...")
-
-                selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
-                page_start_after = selection.Start
-                selection.GoTo(wdGoToPage, wdGoToAbsolute, next_page)
-                page_end_after = (
-                    selection.Start
-                    if selection.Information(wdActiveEndPageNumber) == next_page
-                    else doc.Content.End
-                )
-                if int(page_end_after) < int(get_insertion_bound_end()):
-                    page_end_after = int(get_insertion_bound_end())
-                page_rng_after = doc.Range(page_start_after, page_end_after)
-
-                try:
-                    deleted_tables = 0
-                    tables = page_rng_after.Tables
-                    for table_index in range(tables.Count, 0, -1):
-                        try:
-                            table = tables(table_index)
-                            if is_protected_range(table.Range):
-                                continue
-                            cleaned = (
-                                table.Range.Text.replace("\r", "")
-                                .replace("\n", "")
-                                .replace("\x07", "")
-                                .replace(" ", "")
-                                .replace("\t", "")
-                                .strip()
-                            )
-                            if not cleaned:
-                                table.Range.Delete()
-                                deleted_tables += 1
-                        except Exception:
-                            continue
-                    if deleted_tables > 0:
-                        insertion_log_parts.append(
-                            f"步骤3附加：删除空白表格 {deleted_tables} 个。"
-                        )
-                except Exception:
-                    pass
 
                 def refind_protected_paragraph(keyword: str):
                     bound_end = int(get_insertion_bound_end())
