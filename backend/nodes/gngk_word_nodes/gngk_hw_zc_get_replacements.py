@@ -221,7 +221,7 @@ GNGK_REPLACEMENT_FIELDS: List[ReplacementFieldSpec] = [
 ]
 
 
-def gngk_get_replacements(
+def gngk_hw_zc_get_replacements(
     state: GngkTenderGraphState, config
 ) -> GngkTenderGraphState:
     """Thin wrapper around the shared get_replacements core."""
@@ -282,7 +282,7 @@ if __name__ == "__main__":
         }
 
         try:
-            result_state = gngk_get_replacements(test_state, config=None)
+            result_state = gngk_hw_zc_get_replacements(test_state, config=None)
 
             placeholder_mapping = result_state.get("placeholder_mapping", {})
             if placeholder_mapping:

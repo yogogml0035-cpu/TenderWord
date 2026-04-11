@@ -28,6 +28,32 @@ def test_dispatch_tender_aware_delete_section_routes_all_gjgk_variants(monkeypat
     assert called == ["gjgk:1"]
 
 
+def test_dispatch_tender_aware_delete_section_routes_gngk_fw_zc_to_service_handler(
+    monkeypatch,
+) -> None:
+    called: list[str] = []
+
+    monkeypatch.setattr(
+        tender_aware_word_dispatch,
+        "gngk_fw_zc_delete_tender_param",
+        lambda state, config: called.append(str(state.get("tender_type")))
+        or {"route": "gngk_fw_zc"},
+    )
+    monkeypatch.setattr(
+        tender_aware_word_dispatch,
+        "delete_tender_param",
+        lambda state, config: called.append("common") or {"route": "common"},
+    )
+
+    result = tender_aware_word_dispatch.dispatch_tender_aware_delete_section(
+        {"tender_type": "gngk_fw_zc"},
+        config=None,
+    )
+
+    assert result["route"] == "gngk_fw_zc"
+    assert called == ["gngk_fw_zc"]
+
+
 def test_dispatch_tender_aware_update_word_falls_back_to_common_for_non_gjgk(monkeypatch) -> None:
     called: list[str] = []
 
@@ -49,6 +75,32 @@ def test_dispatch_tender_aware_update_word_falls_back_to_common_for_non_gjgk(mon
 
     assert result["route"] == "common"
     assert called == ["common"]
+
+
+def test_dispatch_tender_aware_update_word_routes_gngk_fw_zc_to_service_handler(
+    monkeypatch,
+) -> None:
+    called: list[str] = []
+
+    monkeypatch.setattr(
+        tender_aware_word_dispatch,
+        "gngk_fw_zc_update_word",
+        lambda state, config: called.append(str(state.get("tender_type")))
+        or {"route": "gngk_fw_zc"},
+    )
+    monkeypatch.setattr(
+        tender_aware_word_dispatch,
+        "update_word",
+        lambda state, config: called.append("common") or {"route": "common"},
+    )
+
+    result = tender_aware_word_dispatch.dispatch_tender_aware_update_word(
+        {"tender_type": "gngk_fw_zc"},
+        config=None,
+    )
+
+    assert result["route"] == "gngk_fw_zc"
+    assert called == ["gngk_fw_zc"]
 
 
 def test_edit_workflow_keeps_public_node_names_and_uses_shared_dispatch_handlers() -> None:
