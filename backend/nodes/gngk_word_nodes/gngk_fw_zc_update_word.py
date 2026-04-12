@@ -507,163 +507,7 @@ def gngk_fw_zc_update_word(
                         f"  付款方式前缀: {payment_prefix.strip()}"
                     )
 
-                bound_start_for_delete = int(insertion_bound_start)
-                bound_end_for_delete = int(get_insertion_bound_end())
-                insertion_log_parts.append(
-                    f"步骤3：清理插入区间可编辑内容（{bound_start_for_delete} - {bound_end_for_delete}）..."
-                )
-
-                # ---- 循环式删除（参考 delete_tender_param.py）----
-                # 每一步重新构建 Range、重新获取 Tables/Paragraphs，
-                # 确保 COM 对象始终有效，避免一次性遍历导致的遗漏。
-                deleted_tables = 0
-                deleted_paras = 0
-                max_delete_steps = 2000
-                delete_step = 0
-                current_delete_pos = bound_start_for_delete
-
-                while delete_step < max_delete_steps:
-                    delete_step += 1
-                    current_bound_end = int(get_insertion_bound_end())
-
-                    # 区间已清空
-                    if current_delete_pos >= current_bound_end:
-                        break
-
-                    delete_rng = doc.Range(current_delete_pos, current_bound_end)
-                    deleted_something = False
-
-                    # 策略1: 尝试大块删除整个非保护区间
-                    # 先检查区间内是否存在保护字段
-                    has_protected = False
-                    try:
-                        for _kw, _prng in protected_fields.items():
-                            try:
-                                _ps = int(_prng.Start)
-                                _pe = int(_prng.End)
-                                if not (_pe <= current_delete_pos or _ps >= current_bound_end):
-                                    has_protected = True
-                                    break
-                            except Exception:
-                                continue
-                    except Exception:
-                        pass
-
-                    if not has_protected:
-                        # 区间内无保护字段，尝试整段删除
-                        try:
-                            delete_rng.Delete()
-                            insertion_log_parts.append(
-                                f"  步骤3 大块删除成功 ({current_delete_pos}-{current_bound_end})"
-                            )
-                            break
-                        except Exception:
-                            pass  # 失败则回退到逐元素策略
-
-                    # 策略2: 先尝试删除区间内第一个非保护表格
-                    try:
-                        tables = delete_rng.Tables
-                        if tables.Count > 0:
-                            tbl = tables(1)
-                            tbl_rng = tbl.Range
-                            tbl_start = int(tbl_rng.Start)
-                            tbl_end = int(tbl_rng.End)
-
-                            if is_protected_range(tbl_rng):
-                                # 保护表格，跳过
-                                current_delete_pos = tbl_end
-                                deleted_something = True
-                            else:
-                                # 如果表格起点前有非保护内容，先清理它们
-                                if tbl_start > current_delete_pos:
-                                    pre_rng = doc.Range(current_delete_pos, tbl_start)
-                                    if not is_protected_range(pre_rng):
-                                        try:
-                                            pre_rng.Delete()
-                                            deleted_something = True
-                                            continue
-                                        except Exception:
-                                            # 删除前置内容失败，跳到表格起点继续
-                                            current_delete_pos = tbl_start
-                                            deleted_something = True
-                                            continue
-
-                                # 删除表格本身
-                                try:
-                                    tbl.Delete()
-                                    deleted_tables += 1
-                                    deleted_something = True
-                                    continue
-                                except Exception:
-                                    try:
-                                        tbl_rng.Delete()
-                                        deleted_tables += 1
-                                        deleted_something = True
-                                        continue
-                                    except Exception:
-                                        # 删不掉，跳过此表格
-                                        current_delete_pos = tbl_end
-                                        deleted_something = True
-                                        continue
-                    except Exception:
-                        pass
-
-                    # 策略3: 逐段落删除
-                    if not deleted_something:
-                        try:
-                            paras = delete_rng.Paragraphs
-                            if paras.Count > 0:
-                                para = paras(1)
-                                para_rng = para.Range
-                                para_start = int(para_rng.Start)
-                                para_end = int(para_rng.End)
-
-                                if is_protected_range(para_rng):
-                                    current_delete_pos = para_end
-                                    deleted_something = True
-                                else:
-                                    try:
-                                        para_rng.Delete()
-                                        deleted_paras += 1
-                                        deleted_something = True
-                                        continue
-                                    except Exception:
-                                        current_delete_pos = para_end
-                                        deleted_something = True
-                                        continue
-                        except Exception:
-                            pass
-
-                    # 策略4: 小块字符删除
-                    if not deleted_something:
-                        try:
-                            chunk_size = min(50, current_bound_end - current_delete_pos)
-                            if chunk_size > 0:
-                                chunk_end = current_delete_pos + chunk_size
-                                small_rng = doc.Range(current_delete_pos, chunk_end)
-                                if is_protected_range(small_rng):
-                                    current_delete_pos = chunk_end
-                                    continue
-                                try:
-                                    small_rng.Delete()
-                                    continue
-                                except Exception:
-                                    current_delete_pos = chunk_end
-                                    continue
-                        except Exception:
-                            pass
-
-                    # 无法删除任何内容，强制前进
-                    if not deleted_something:
-                        current_delete_pos += 1
-                        if current_delete_pos >= current_bound_end:
-                            break
-
-                insertion_log_parts.append(
-                    f"步骤3完成：循环 {delete_step} 步，已删除表格 {deleted_tables} 个，"
-                    f"删除段落 {deleted_paras} 个。"
-                )
-                insertion_log_parts.append("步骤4：按服务三字段顺序插入内容...")
+                insertion_log_parts.append("步骤3：按服务三字段顺序插入内容...")
 
                 def refind_protected_paragraph(keyword: str):
                     bound_end = int(get_insertion_bound_end())
@@ -1326,7 +1170,7 @@ def gngk_fw_zc_update_word(
                     f"  块4插入完成: {inserted_count}/{len(block4_items)} 条。"
                 )
 
-                insertion_log_parts.append("步骤5：清理空段落与换行...")
+                insertion_log_parts.append("步骤4：清理空段落与换行...")
 
                 def build_cleanup_range():
                     return doc.Range(
@@ -1339,7 +1183,7 @@ def gngk_fw_zc_update_word(
 
                 for pass_num in range(1, max_passes + 1):
                     insertion_log_parts.append(
-                        f"  步骤5.1 第 {pass_num} 轮：删除空段落..."
+                        f"  步骤4.1 第 {pass_num} 轮：删除空段落..."
                     )
 
                     empty_deleted = 0
@@ -1371,7 +1215,7 @@ def gngk_fw_zc_update_word(
                         )
                         break
 
-                    insertion_log_parts.append("  步骤5.2：清理可编辑段落中的换行...")
+                    insertion_log_parts.append("  步骤4.2：清理可编辑段落中的换行...")
 
                     cleaned_count = 0
                     paragraphs_to_delete = []
@@ -1436,10 +1280,10 @@ def gngk_fw_zc_update_word(
                                 insertion_log_parts.append(f"    警告: 无法删除段落: {error}")
 
                     insertion_log_parts.append(
-                        f"  步骤5.2完成：清理 {cleaned_count} 段，删除 {len(paragraphs_to_delete)} 个空段。"
+                        f"  步骤4.2完成：清理 {cleaned_count} 段，删除 {len(paragraphs_to_delete)} 个空段。"
                     )
 
-                    insertion_log_parts.append("  步骤5.3：最终检查剩余空段落...")
+                    insertion_log_parts.append("  步骤4.3：最终检查剩余空段落...")
 
                     final_empty_deleted = 0
                     final_paragraphs = list(build_cleanup_range().Paragraphs)
@@ -1458,10 +1302,10 @@ def gngk_fw_zc_update_word(
 
                     if final_empty_deleted > 0:
                         insertion_log_parts.append(
-                            f"  步骤5.3完成：删除剩余空段 {final_empty_deleted} 个。"
+                            f"  步骤4.3完成：删除剩余空段 {final_empty_deleted} 个。"
                         )
                     else:
-                        insertion_log_parts.append("  步骤5.3完成：未发现剩余空段。")
+                        insertion_log_parts.append("  步骤4.3完成：未发现剩余空段。")
 
                 try:
                     def visible_text(text: str) -> str:
@@ -1551,13 +1395,13 @@ def gngk_fw_zc_update_word(
 
                     if trimmed_tables > 0 or deleted_empty_tables > 0:
                         insertion_log_parts.append(
-                            f"  步骤5.4完成：修剪表格 {trimmed_tables} 个，删除尾部空行 {trimmed_rows_total} 行，删除空表格 {deleted_empty_tables} 个。"
+                            f"  步骤4.4完成：修剪表格 {trimmed_tables} 个，删除尾部空行 {trimmed_rows_total} 行，删除空表格 {deleted_empty_tables} 个。"
                         )
                 except Exception:
                     pass
 
                 insertion_log_parts.append(
-                    "步骤5完成：已清理可编辑内容中的空段落与多余换行。"
+                    "步骤4完成：已清理可编辑内容中的空段落与多余换行。"
                 )
                 insertion_log_parts.append("内容处理成功。")
 
@@ -1661,17 +1505,6 @@ def _prepare_manual_test_copy(
     output_path.chmod(output_path.stat().st_mode | stat.S_IWUSR)
 
 
-def _build_manual_test_state(prepared_doc_path: str) -> TenderGraphStateBase:
-    insertion_before_text, insertion_after_text = get_default_anchor_texts("gngk_fw_zc")
-    return TenderGraphStateBase(
-        tender_type="gngk_fw_zc",
-        prepared_doc_path=prepared_doc_path,
-        polished_text=MANUAL_TEST_INSERT_TEXT,
-        insertion_before_text=insertion_before_text,
-        insertion_after_text=insertion_after_text,
-    )
-
-
 def _print_manual_state(state: TenderGraphStateBase) -> None:
     print("测试状态:")
     for key, value in state.items():
@@ -1681,43 +1514,83 @@ def _print_manual_state(state: TenderGraphStateBase) -> None:
             print(f"  {key}: {value}")
 
 
-def _run_manual_update_scenario(source_doc_path: pathlib.Path) -> pathlib.Path:
+def _run_manual_delete_then_update_scenario(
+    source_doc_path: pathlib.Path,
+) -> pathlib.Path:
+    """先执行 delete 节点再执行 update_word，模拟 e2e graph 流程。"""
+    from backend.nodes.gngk_word_nodes.gngk_fw_zc_delete_tender_param import (
+        gngk_fw_zc_delete_tender_param,
+    )
+
     if not source_doc_path.exists():
         raise FileNotFoundError(f"更新测试源文件不存在: {source_doc_path}")
 
     output_path = _build_manual_test_output_path(source_doc_path)
     _prepare_manual_test_copy(source_doc_path, output_path)
-    update_state = _build_manual_test_state(str(output_path))
 
-    print("[场景] 国内公开-服务自筹三字段回填")
+    insertion_before_text, insertion_after_text = get_default_anchor_texts("gngk_fw_zc")
+
+    # ---- 步骤1: 执行 delete 节点 ----
+    delete_state = TenderGraphStateBase(
+        tender_type="gngk_fw_zc",
+        prepared_doc_path=str(output_path),
+        insertion_before_text=insertion_before_text,
+        insertion_after_text=insertion_after_text,
+    )
+
+    print("[场景] 国内公开-服务自筹三字段回填（delete → update_word）")
     print(f"源文件: {source_doc_path}")
     print(f"测试副本: {output_path}")
-    print("执行模式: 复制测试文档后直接执行 gngk_fw_zc_update_word")
+    print("执行模式: 先执行 gngk_fw_zc_delete_tender_param，再执行 gngk_fw_zc_update_word")
+    print()
+    print("=" * 40 + " 步骤1: delete_tender_param " + "=" * 40)
+    _print_manual_state(delete_state)
+    print("-" * 80)
+
+    delete_result = gngk_fw_zc_delete_tender_param(delete_state, config=None)
+    print("✅ gngk_fw_zc_delete_tender_param 执行完成")
+    print()
+
+    # ---- 步骤2: 执行 update_word 节点 ----
+    update_state = TenderGraphStateBase(
+        tender_type="gngk_fw_zc",
+        prepared_doc_path=str(output_path),
+        polished_text=MANUAL_TEST_INSERT_TEXT,
+        insertion_before_text=insertion_before_text,
+        insertion_after_text=insertion_after_text,
+    )
+
+    print("=" * 40 + " 步骤2: update_word " + "=" * 40)
     _print_manual_state(update_state)
     print("-" * 80)
 
-    result_state = gngk_fw_zc_update_word(update_state, config=None)
+    update_result = gngk_fw_zc_update_word(update_state, config=None)
     print("✅ gngk_fw_zc_update_word 执行完成")
     print(f"回填产物: {output_path}")
     print("插入日志:")
-    for part in str(result_state.get("insertion_log", "")).split("; "):
+    for part in str(update_result.get("insertion_log", "")).split("; "):
         print(f"  - {part}")
     return output_path
 
 
 def main() -> None:
     print("=" * 80)
-    print("开始测试国内公开-服务自筹三字段回填场景")
+    print("开始测试国内公开-服务自筹三字段回填场景（delete → update_word）")
     print("=" * 80)
 
     output_path: Optional[pathlib.Path] = None
     try:
-        output_path = _run_manual_update_scenario(DEFAULT_MANUAL_TEST_SOURCE_DOC)
+        output_path = _run_manual_delete_then_update_scenario(
+            DEFAULT_MANUAL_TEST_SOURCE_DOC
+        )
     except Exception as exc:
-        print("❌ gngk_fw_zc_update_word 执行失败")
+        print("❌ 执行失败")
         print(f"错误信息: {exc}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
+    print()
     print("=" * 80)
     print("诊断完成")
     if output_path is not None:
