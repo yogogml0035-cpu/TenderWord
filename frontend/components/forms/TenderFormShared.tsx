@@ -98,7 +98,9 @@ const gngkServiceInsertionConfigDefaults: TenderInsertionConfig = {
   before_text: '第三章 招标内容及要求',
   after_text: '第四章 合同条款',
 };
-const defaultGenerationStyle: GenerationStyle = 'template';
+function resolveDefaultGenerationStyle(tenderLx: TenderLx): GenerationStyle {
+  return tenderLx === 1 ? 'param' : 'template';
+}
 
 function toDraftFile(file: UploadedFile | null | undefined): ConversationDraftFile | undefined {
   if (!file) {
@@ -407,7 +409,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         : 0;
   const [localFundLx, setLocalFundLx] = useState<FundLx>(initialFundLx);
   const [localGenerationStyle, setLocalGenerationStyle] = useState<GenerationStyle>(
-    initialDraft?.generation_style === 'param' ? 'param' : defaultGenerationStyle
+    initialDraft?.generation_style
+      ? initialDraft.generation_style
+      : resolveDefaultGenerationStyle(initialTenderLx)
   );
   const [insertionConfig, setInsertionConfig] = useState<TenderInsertionConfig>(() => {
     return resolveVisibleInsertionConfig(
@@ -686,6 +690,10 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       const nextUpdates: Partial<ConversationFormDraft> = {
         tender_lx: nextTenderLx,
       };
+
+      const nextDefaultStyle = resolveDefaultGenerationStyle(nextTenderLx);
+      setLocalGenerationStyle(nextDefaultStyle);
+      nextUpdates.generation_style = nextDefaultStyle;
 
       if (tenderType === 'gngk') {
         const currentModeCacheUpdates = buildGngkModeCacheUpdates(
