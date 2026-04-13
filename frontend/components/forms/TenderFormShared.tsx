@@ -29,6 +29,7 @@ import type {
   TenderTypeInfo,
 } from '@/types/api';
 import { generateConversationTitle, shouldAutoUpdateConversationTitle } from '@/lib/chat-utils';
+import { syncBrowserUrlToConversation } from '@/utils/tenderTypeMapper';
 import { TenderNoInput, type TenderData } from './TenderNoInput';
 import { FileUploader, type UploadedFile } from './FileUploader';
 import { TemplateCandidateDialog } from './TemplateCandidateDialog';
@@ -392,20 +393,24 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     initialDraft?.tender_lx === 0 || initialDraft?.tender_lx === 1
       ? initialDraft.tender_lx
       : undefined;
+  // Priority: draft > URL > default (0=货物)
+  // Draft is authoritative for existing conversations; URL only wins when
+  // page.tsx explicitly wrote the deep-link values into the draft first.
   const initialTenderLx: TenderLx =
-    urlTenderLx === 0 || urlTenderLx === 1
-      ? urlTenderLx
-      : draftTenderLx === 0 || draftTenderLx === 1
-        ? draftTenderLx
+    draftTenderLx === 0 || draftTenderLx === 1
+      ? draftTenderLx
+      : urlTenderLx === 0 || urlTenderLx === 1
+        ? urlTenderLx
         : 0;
   const [localTenderLx, setLocalTenderLx] = useState<TenderLx>(initialTenderLx);
   const draftFundLx: FundLx | undefined =
     initialDraft?.fund_lx === 0 || initialDraft?.fund_lx === 1 ? initialDraft.fund_lx : undefined;
+  // Priority: draft > URL > default (0=自筹)
   const initialFundLx: FundLx =
-    urlFundLx === 0 || urlFundLx === 1
-      ? urlFundLx
-      : draftFundLx === 0 || draftFundLx === 1
-        ? draftFundLx
+    draftFundLx === 0 || draftFundLx === 1
+      ? draftFundLx
+      : urlFundLx === 0 || urlFundLx === 1
+        ? urlFundLx
         : 0;
   const [localFundLx, setLocalFundLx] = useState<FundLx>(initialFundLx);
   const [localGenerationStyle, setLocalGenerationStyle] = useState<GenerationStyle>(
@@ -665,9 +670,12 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
 
       onDraftChange?.(nextUpdates);
 
-      const url = new URL(window.location.href);
-      url.searchParams.set('fund_lx', String(nextFundLx));
-      window.history.replaceState(window.history.state, '', url.toString());
+      syncBrowserUrlToConversation({
+        tenderType,
+        tenderno: tenderNo || urlTenderNo,
+        tender_lx: tenderLx,
+        fund_lx: nextFundLx,
+      });
     },
     [
       tenderLx,
@@ -675,7 +683,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       initialDraft,
       insertionConfig,
       onDraftChange,
+      tenderNo,
       tenderType,
+      urlTenderNo,
       variantConfig.insertionConfigDefaults,
     ]
   );
@@ -730,9 +740,12 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
 
       onDraftChange?.(nextUpdates);
 
-      const url = new URL(window.location.href);
-      url.searchParams.set('tender_lx', String(nextTenderLx));
-      window.history.replaceState(window.history.state, '', url.toString());
+      syncBrowserUrlToConversation({
+        tenderType,
+        tenderno: tenderNo || urlTenderNo,
+        tender_lx: nextTenderLx,
+        fund_lx: fundLx,
+      });
     },
     [
       fundLx,
@@ -740,7 +753,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       insertionConfig,
       onDraftChange,
       tenderLx,
+      tenderNo,
       tenderType,
+      urlTenderNo,
       variantConfig.insertionConfigDefaults,
     ]
   );

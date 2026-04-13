@@ -220,6 +220,127 @@ describe('chatStore conversation scoped selectors', () => {
     );
   });
 
+  describe('findGngkConversationByIdentity', () => {
+    it('matches gngk conversation by tenderno + tender_lx + fund_lx', () => {
+      useChatStore.setState((state) => ({
+        ...state,
+        conversations: [
+          {
+            id: 'conv-hw-zc',
+            title: 'GNGK-HW-ZC',
+            tenderType: 'gngk',
+            createdAt: 1,
+            updatedAt: 10,
+            messages: [],
+          },
+          {
+            id: 'conv-fw-zc',
+            title: 'GNGK-FW-ZC',
+            tenderType: 'gngk',
+            createdAt: 2,
+            updatedAt: 20,
+            messages: [],
+          },
+        ],
+        conversationDrafts: {
+          'conv-hw-zc': { tender_no: 'TN-001', tender_lx: 0, fund_lx: 0, model: 'deepseek' },
+          'conv-fw-zc': { tender_no: 'TN-001', tender_lx: 1, fund_lx: 0, model: 'deepseek' },
+        },
+      }));
+
+      const store = useChatStore.getState();
+      // Match 货物+自筹
+      expect(store.findGngkConversationByIdentity('TN-001', 0, 0)?.id).toBe('conv-hw-zc');
+      // Match 服务+自筹
+      expect(store.findGngkConversationByIdentity('TN-001', 1, 0)?.id).toBe('conv-fw-zc');
+      // No match for 货物+财政
+      expect(store.findGngkConversationByIdentity('TN-001', 0, 1)).toBeNull();
+    });
+
+    it('returns the most recently updated conversation when multiple same-identity exist', () => {
+      useChatStore.setState((state) => ({
+        ...state,
+        conversations: [
+          {
+            id: 'conv-old',
+            title: 'OLD',
+            tenderType: 'gngk',
+            createdAt: 1,
+            updatedAt: 5,
+            messages: [],
+          },
+          {
+            id: 'conv-new',
+            title: 'NEW',
+            tenderType: 'gngk',
+            createdAt: 2,
+            updatedAt: 50,
+            messages: [],
+          },
+        ],
+        conversationDrafts: {
+          'conv-old': { tender_no: 'TN-SAME', tender_lx: 0, fund_lx: 0, model: 'deepseek' },
+          'conv-new': { tender_no: 'TN-SAME', tender_lx: 0, fund_lx: 0, model: 'deepseek' },
+        },
+      }));
+
+      expect(useChatStore.getState().findGngkConversationByIdentity('TN-SAME', 0, 0)?.id).toBe(
+        'conv-new'
+      );
+    });
+
+    it('normalizes tender number for case-insensitive matching', () => {
+      useChatStore.setState((state) => ({
+        ...state,
+        conversations: [
+          {
+            id: 'conv-a',
+            title: 'A',
+            tenderType: 'gngk',
+            createdAt: 1,
+            updatedAt: 10,
+            messages: [],
+          },
+        ],
+        conversationDrafts: {
+          'conv-a': { tender_no: 'tn-case', tender_lx: 1, fund_lx: 1, model: 'deepseek' },
+        },
+      }));
+
+      expect(
+        useChatStore.getState().findGngkConversationByIdentity('TN-CASE', 1, 1)?.id
+      ).toBe('conv-a');
+    });
+
+    it('defaults to tender_lx=0/fund_lx=0 when draft has no explicit values', () => {
+      useChatStore.setState((state) => ({
+        ...state,
+        conversations: [
+          {
+            id: 'conv-default',
+            title: 'DEFAULT',
+            tenderType: 'gngk',
+            createdAt: 1,
+            updatedAt: 10,
+            messages: [],
+          },
+        ],
+        conversationDrafts: {
+          'conv-default': { tender_no: 'TN-DEF', model: 'deepseek' },
+        },
+      }));
+
+      // Should match 0,0 (defaults)
+      expect(
+        useChatStore.getState().findGngkConversationByIdentity('TN-DEF', 0, 0)?.id
+      ).toBe('conv-default');
+      // Should NOT match 1,0
+      expect(
+        useChatStore.getState().findGngkConversationByIdentity('TN-DEF', 1, 0)
+      ).toBeNull();
+    });
+  });
+
   it('falls back to the same tender type conversation with the latest updatedAt after deletion', () => {
     useChatStore.setState((state) => ({
       ...state,

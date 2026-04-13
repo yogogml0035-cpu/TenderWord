@@ -25,6 +25,7 @@ import {
   inferTenderNoFromConversationTitle,
   normalizeTenderNo,
 } from '@/lib/chat-utils';
+import { syncBrowserUrlToConversation } from '@/utils/tenderTypeMapper';
 
 const TASK_LOG_KIND: TaskMessageKind = 'task-log';
 const TASK_CONTENT_KIND: TaskMessageKind = 'task-content';
@@ -503,6 +504,58 @@ function getMostRecentConversationByTypeFromState(
   );
 }
 
+/**
+ * 从会话和草稿中提取 canonical URL 同步所需的参数。
+ */
+function resolveConversationUrlParams(
+  conversation: Conversation,
+  draft: ConversationFormDraft | undefined
+): { tenderno?: string | null; tender_lx?: TenderLx; fund_lx?: FundLx } {
+  const tenderno =
+    getConversationTenderNo(conversation, draft);
+  const tender_lx: TenderLx | undefined =
+    draft?.tender_lx === 0 || draft?.tender_lx === 1 ? draft.tender_lx : undefined;
+  const fund_lx: FundLx | undefined =
+    draft?.fund_lx === 0 || draft?.fund_lx === 1 ? draft.fund_lx : undefined;
+  return { tenderno, tender_lx, fund_lx };
+}
+
+/**
+ * 按 gngk 子类型精确匹配已有会话。
+ * 匹配维度：tenderType=gngk + tenderno + tender_lx + fund_lx，
+ * 若有多条完全同身份则复用 updatedAt 最新的一条。
+ */
+function findGngkConversationByIdentity(
+  state: Pick<ChatStore, 'conversations' | 'conversationDrafts'>,
+  tenderno: string,
+  tenderLx: TenderLx,
+  fundLx: FundLx
+): Conversation | null {
+  const normalizedTenderNo = normalizeTenderNo(tenderno);
+  if (!normalizedTenderNo) {
+    return null;
+  }
+
+  const candidates = state.conversations
+    .filter((conversation) => {
+      if (conversation.tenderType !== 'gngk') {
+        return false;
+      }
+      const draft = state.conversationDrafts[conversation.id];
+      const convTenderNo = getConversationTenderNo(conversation, draft);
+      if (convTenderNo !== normalizedTenderNo) {
+        return false;
+      }
+      const convTenderLx: TenderLx =
+        draft?.tender_lx === 0 || draft?.tender_lx === 1 ? draft.tender_lx : 0;
+      const convFundLx: FundLx =
+        draft?.fund_lx === 0 || draft?.fund_lx === 1 ? draft.fund_lx : 0;
+      return convTenderLx === tenderLx && convFundLx === fundLx;
+    });
+
+  return sortConversationsByUpdatedAtDesc(candidates)[0] || null;
+}
+
 interface ChatStore {
   conversations: Conversation[];
   currentConversationId: string | null;
@@ -576,10 +629,16 @@ interface ChatStore {
   clearError: () => void;
   setSelectedTenderType: (type: TenderType | null) => void;
   findConversationByTenderNo: (tenderno: string, tenderType: TenderType) => Conversation | null;
+  findGngkConversationByIdentity: (
+    tenderno: string,
+    tenderLx: TenderLx,
+    fundLx: FundLx
+  ) => Conversation | null;
   findTaskMessageGroup: (taskId: string) => LocatedTaskMessageGroup | null;
   findMessageByTaskId: (taskId: string) => { conversationId: string; message: Message } | null;
   getSortedConversations: () => Conversation[];
   getMostRecentConversationByType: (type: TenderType) => Conversation | null;
+  syncUrlToCurrentConversation: () => void;
   resetSessionState: () => void;
 }
 
@@ -682,7 +741,7 @@ export const useChatStore = create<ChatStore>()(
           });
         },
 
-        setCurrentConversation: (id) =>
+        setCurrentConversation: (id) => {
           set((state) => {
             const nextConversation = id
               ? state.conversations.find((conversation) => conversation.id === id) || null
@@ -699,7 +758,13 @@ export const useChatStore = create<ChatStore>()(
                   )
                 : state.unreadConversationResults,
             };
-          }),
+          });
+
+          // Sync browser URL to reflect the newly selected conversation's state
+          if (id) {
+            get().syncUrlToCurrentConversation();
+          }
+        },
 
         updateConversationDraft: (conversationId, updates) => {
           set((state) => ({
@@ -1599,6 +1664,10 @@ export const useChatStore = create<ChatStore>()(
           );
         },
 
+        findGngkConversationByIdentity: (tenderno, tenderLx, fundLx) => {
+          return findGngkConversationByIdentity(get(), tenderno, tenderLx, fundLx);
+        },
+
         findTaskMessageGroup: (taskId) => {
           const state = get();
           const mappedGroup = state.taskMessageMap[taskId];
@@ -1691,6 +1760,24 @@ export const useChatStore = create<ChatStore>()(
         getMostRecentConversationByType: (type: TenderType) => {
           const state = get();
           return getMostRecentConversationByTypeFromState(state, type);
+        },
+
+        syncUrlToCurrentConversation: () => {
+          const state = get();
+          const conversation = state.conversations.find(
+            (conv) => conv.id === state.currentConversationId
+          );
+          if (!conversation) {
+            return;
+          }
+          const draft = state.conversationDrafts[conversation.id];
+          const urlParams = resolveConversationUrlParams(conversation, draft);
+          syncBrowserUrlToConversation({
+            tenderType: conversation.tenderType,
+            tenderno: urlParams.tenderno,
+            tender_lx: urlParams.tender_lx,
+            fund_lx: urlParams.fund_lx,
+          });
         },
 
         resetSessionState: () =>

@@ -1,4 +1,5 @@
 import {
+  buildCanonicalSearchParams,
   getTenderTypeFromParams,
   getUrlParamsForTenderType,
   isValidTenderType,
@@ -131,5 +132,67 @@ describe('tenderTypeMapper', () => {
 
     expect(result.tenderType).toBe('gjgk');
     expect(result.params.fund_lx).toBeUndefined();
+  });
+});
+
+describe('buildCanonicalSearchParams', () => {
+  it('produces xjcg canonical params ignoring tender_lx/fund_lx input', () => {
+    const search = buildCanonicalSearchParams({
+      tenderType: 'xjcg',
+      tender_lx: 1,
+      fund_lx: 1,
+      tenderno: 'TEST001',
+    });
+    expect(search.get('tender_lx')).toBe('0');
+    expect(search.get('purchase_method')).toBe('5');
+    expect(search.get('fund_lx')).toBe('0');
+    expect(search.get('tenderno')).toBe('TEST001');
+  });
+
+  it('produces gjgk canonical params ignoring tender_lx/fund_lx input', () => {
+    const search = buildCanonicalSearchParams({
+      tenderType: 'gjgk',
+      tender_lx: 1,
+      fund_lx: 0,
+    });
+    expect(search.get('tender_lx')).toBe('0');
+    expect(search.get('purchase_method')).toBe('0');
+    expect(search.get('fund_lx')).toBe('1');
+    expect(search.has('tenderno')).toBe(false);
+  });
+
+  it('produces gngk canonical params with tender_lx/fund_lx from input', () => {
+    const search = buildCanonicalSearchParams({
+      tenderType: 'gngk',
+      tender_lx: 1,
+      fund_lx: 1,
+      tenderno: 'GNGK001',
+    });
+    expect(search.get('tender_lx')).toBe('1');
+    expect(search.get('purchase_method')).toBe('2');
+    expect(search.get('fund_lx')).toBe('1');
+    expect(search.get('tenderno')).toBe('GNGK001');
+  });
+
+  it('defaults gngk to 货物+自筹 when tender_lx/fund_lx are omitted', () => {
+    const search = buildCanonicalSearchParams({ tenderType: 'gngk' });
+    expect(search.get('tender_lx')).toBe('0');
+    expect(search.get('fund_lx')).toBe('0');
+  });
+
+  it('omits tenderno when it is empty or whitespace', () => {
+    const search = buildCanonicalSearchParams({
+      tenderType: 'gngk',
+      tenderno: '  ',
+    });
+    expect(search.has('tenderno')).toBe(false);
+  });
+
+  it('omits tenderno when null', () => {
+    const search = buildCanonicalSearchParams({
+      tenderType: 'gngk',
+      tenderno: null,
+    });
+    expect(search.has('tenderno')).toBe(false);
   });
 });

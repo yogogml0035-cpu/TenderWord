@@ -32,7 +32,7 @@ const CONVERSATION_ID_SEPARATOR = '\u0001';
  * 需要被 Suspense 包裹
  */
 function TenderPageContent() {
-  const { tenderno, tenderType, isValid, hasParams } = useUrlParams();
+  const { tenderno, tenderType, tender_lx, fund_lx, isValid, hasParams } = useUrlParams();
   const hydrated = useHydrated();
   const processedUrlConversationKeyRef = useRef<string | null>(null);
 
@@ -40,6 +40,7 @@ function TenderPageContent() {
     createConversation,
     conversations,
     findConversationByTenderNo,
+    findGngkConversationByIdentity,
     getConversationDraft,
     setCurrentConversation,
     setSelectedTenderType,
@@ -70,17 +71,37 @@ function TenderPageContent() {
       return;
     }
 
-    const urlConversationKey = `${tenderType}:${normalizedTenderNo}`;
+    // Include tender_lx/fund_lx in the dedup key for gngk so that
+    // different subtypes (e.g. 货物 vs 服务) produce different keys.
+    const resolvedTenderLx = tender_lx === 0 || tender_lx === 1 ? tender_lx : 0;
+    const resolvedFundLx = fund_lx === 0 || fund_lx === 1 ? fund_lx : 0;
+    const subtypeSuffix = tenderType === 'gngk'
+      ? `:${resolvedTenderLx}:${resolvedFundLx}`
+      : '';
+    const urlConversationKey = `${tenderType}:${normalizedTenderNo}${subtypeSuffix}`;
     if (processedUrlConversationKeyRef.current === urlConversationKey) {
       return;
     }
     processedUrlConversationKeyRef.current = urlConversationKey;
 
-    const existingConversation = findConversationByTenderNo(normalizedTenderNo, tenderType);
+    // For gngk, use identity matching (tenderno + tender_lx + fund_lx)
+    const existingConversation = tenderType === 'gngk'
+      ? findGngkConversationByIdentity(normalizedTenderNo, resolvedTenderLx, resolvedFundLx)
+      : findConversationByTenderNo(normalizedTenderNo, tenderType);
+
     const generatedTitle = generateConversationTitle(normalizedTenderNo);
     const conversationId =
       existingConversation?.id ||
       createConversation(normalizedTenderNo, tenderType, generatedTitle);
+
+    // For newly created gngk conversations from deep-link, persist the URL's tender_lx/fund_lx
+    if (!existingConversation && tenderType === 'gngk') {
+      updateConversationDraft(conversationId, {
+        tender_lx: resolvedTenderLx,
+        fund_lx: resolvedFundLx,
+      });
+    }
+
     setCurrentConversation(conversationId);
 
     if (
@@ -130,8 +151,11 @@ function TenderPageContent() {
     isValid,
     tenderType,
     tenderno,
+    tender_lx,
+    fund_lx,
     createConversation,
     findConversationByTenderNo,
+    findGngkConversationByIdentity,
     getConversationDraft,
     setCurrentConversation,
     setSelectedTenderType,

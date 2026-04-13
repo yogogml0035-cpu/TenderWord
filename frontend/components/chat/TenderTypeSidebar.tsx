@@ -6,6 +6,7 @@ import type { TenderType as TenderTypeId } from '@/types';
 import type { Conversation } from '@/types/chat';
 import { useChatStore } from '@/stores/chatStore';
 import { useHydrated } from '@/hooks/useHydrated';
+import { syncBrowserUrlToConversation } from '@/utils/tenderTypeMapper';
 import { cn } from '@/lib/utils';
 
 interface SidebarTenderType {
@@ -170,17 +171,22 @@ export function TenderTypeSidebar({ onNewChat }: TenderTypeSidebarProps) {
 
     const typeConversations = conversationsByType[type];
     if (typeConversations.length > 0) {
+      // setCurrentConversation already syncs URL via syncUrlToCurrentConversation
       setCurrentConversation(typeConversations[0].id);
       return;
     }
 
     createConversation('新对话', type);
+    // Reset URL to type defaults for a new blank conversation
+    syncBrowserUrlToConversation({ tenderType: type });
   };
 
   const handleNewChat = (type: TenderTypeId) => {
     closeContextMenu();
     setSelectedTenderType(type);
     createConversation('新对话', type);
+    // Reset URL to type defaults for a blank new conversation
+    syncBrowserUrlToConversation({ tenderType: type });
     if (onNewChat) {
       onNewChat(type);
     }

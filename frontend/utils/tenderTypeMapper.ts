@@ -22,6 +22,64 @@ const DEFAULT_URL_PARAMS_BY_TYPE: Record<
 };
 
 /**
+ * 会话状态 -> canonical URL search params 的构造参数
+ */
+export interface CanonicalUrlParams {
+  tenderType: TenderType;
+  tenderno?: string | null;
+  tender_lx?: TenderLx;
+  fund_lx?: FundLx;
+}
+
+/**
+ * 根据会话状态构造 canonical URL search string。
+ * - xjcg/gjgk：使用各自 DEFAULT_URL_PARAMS_BY_TYPE，不读 tender_lx/fund_lx 入参。
+ * - gngk：同步 tender_lx / fund_lx（缺省回退到默认 0/0）。
+ * - 如果有 tenderno 则带上，否则移除。
+ */
+export function buildCanonicalSearchParams(params: CanonicalUrlParams): URLSearchParams {
+  const defaults = DEFAULT_URL_PARAMS_BY_TYPE[params.tenderType];
+  if (!defaults) {
+    return new URLSearchParams();
+  }
+
+  const isGngk = params.tenderType === 'gngk';
+  const tenderLx = isGngk && (params.tender_lx === 0 || params.tender_lx === 1)
+    ? params.tender_lx
+    : defaults.tender_lx;
+  const fundLx = isGngk && (params.fund_lx === 0 || params.fund_lx === 1)
+    ? params.fund_lx
+    : defaults.fund_lx;
+
+  const search = new URLSearchParams();
+  search.set('tender_lx', String(tenderLx));
+  search.set('purchase_method', String(defaults.purchase_method));
+  search.set('fund_lx', String(fundLx));
+
+  const trimmedTenderNo = params.tenderno?.trim();
+  if (trimmedTenderNo) {
+    search.set('tenderno', trimmedTenderNo);
+  }
+
+  return search;
+}
+
+/**
+ * 将浏览器 URL 同步为给定会话状态的 canonical 形式（replaceState）。
+ * 在 SSR 或 typeof window === 'undefined' 时静默跳过。
+ */
+export function syncBrowserUrlToConversation(params: CanonicalUrlParams): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const search = buildCanonicalSearchParams(params);
+  const url = new URL(window.location.href);
+  url.search = search.toString();
+  window.history.replaceState(window.history.state, '', url.toString());
+}
+
+/**
  * URL参数接口
  */
 export interface TenderUrlParams {
