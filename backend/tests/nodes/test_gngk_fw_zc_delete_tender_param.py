@@ -9,6 +9,15 @@ from __future__ import annotations
 
 import importlib
 
+from backend.helper.word_helper.cleanup_ops import (
+    normalize_cleanup_text,
+    is_effectively_empty_text,
+)
+from backend.helper.word_helper.range_utils import (
+    range_overlaps,
+    is_protected_range,
+)
+
 delete_module = importlib.import_module(
     "backend.nodes.gngk_word_nodes.gngk_fw_zc_delete_tender_param"
 )
@@ -16,27 +25,27 @@ delete_module = importlib.import_module(
 
 def test_normalize_cleanup_text_removes_invisible_chars() -> None:
     text = "\r\n服务地点\t\u00a0\u200b"
-    result = delete_module._normalize_cleanup_text(text)
+    result = normalize_cleanup_text(text)
     assert result == "服务地点"
 
 
 def test_normalize_cleanup_text_empty() -> None:
-    assert delete_module._normalize_cleanup_text("") == ""
-    assert delete_module._normalize_cleanup_text("\r\n\t") == ""
+    assert normalize_cleanup_text("") == ""
+    assert normalize_cleanup_text("\r\n\t") == ""
 
 
 def test_is_effectively_empty_text() -> None:
-    assert delete_module._is_effectively_empty_text("") is True
-    assert delete_module._is_effectively_empty_text("\r\n") is True
-    assert delete_module._is_effectively_empty_text("\u200b\u00a0") is True
-    assert delete_module._is_effectively_empty_text("内容") is False
+    assert is_effectively_empty_text("") is True
+    assert is_effectively_empty_text("\r\n") is True
+    assert is_effectively_empty_text("\u200b\u00a0") is True
+    assert is_effectively_empty_text("内容") is False
 
 
 def test_range_overlaps() -> None:
-    assert delete_module._range_overlaps(0, 10, 5, 15) is True
-    assert delete_module._range_overlaps(0, 10, 10, 20) is False
-    assert delete_module._range_overlaps(5, 15, 0, 10) is True
-    assert delete_module._range_overlaps(0, 5, 10, 15) is False
+    assert range_overlaps(0, 10, 5, 15) is True
+    assert range_overlaps(0, 10, 10, 20) is False
+    assert range_overlaps(5, 15, 0, 10) is True
+    assert range_overlaps(0, 5, 10, 15) is False
 
 
 def test_is_protected_range_with_overlap() -> None:
@@ -51,11 +60,11 @@ def test_is_protected_range_with_overlap() -> None:
     }
 
     # 与受保护字段重叠
-    assert delete_module._is_protected_range(FakeRange(15, 25), protected_fields) is True
+    assert is_protected_range(FakeRange(15, 25), protected_fields) is True
     # 不重叠
-    assert delete_module._is_protected_range(FakeRange(0, 5), protected_fields) is False
+    assert is_protected_range(FakeRange(0, 5), protected_fields) is False
     # 完全在受保护字段内
-    assert delete_module._is_protected_range(FakeRange(12, 18), protected_fields) is True
+    assert is_protected_range(FakeRange(12, 18), protected_fields) is True
 
 
 def test_is_protected_range_no_overlap() -> None:
@@ -68,19 +77,19 @@ def test_is_protected_range_no_overlap() -> None:
         "付款方式": FakeRange(50, 60),
     }
 
-    assert delete_module._is_protected_range(FakeRange(0, 49), protected_fields) is False
-    assert delete_module._is_protected_range(FakeRange(60, 70), protected_fields) is False
+    assert is_protected_range(FakeRange(0, 49), protected_fields) is False
+    assert is_protected_range(FakeRange(60, 70), protected_fields) is False
 
 
 def test_visible_text_strips_all_invisible() -> None:
     text = "\r\n\x07\x0b\x0c\a \t\u00a0\u3000\u200b\ufeff内容\r"
-    result = delete_module._visible_text(text)
+    result = normalize_cleanup_text(text)
     assert result == "内容"
 
 
 def test_visible_text_empty() -> None:
-    assert delete_module._visible_text("") == ""
-    assert delete_module._visible_text("\r\n\t ") == ""
+    assert normalize_cleanup_text("") == ""
+    assert normalize_cleanup_text("\r\n\t ") == ""
 
 
 def test_require_all_protected_fields_raises_on_missing() -> None:

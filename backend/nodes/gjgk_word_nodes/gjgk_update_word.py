@@ -44,13 +44,26 @@ from backend.util.word_util import (  # noqa: E402
     wdActiveEndPageNumber,
     wdCollapseEnd,
     wdCollapseStart,
-    wdLineSpace1pt5,
-    wdOutlineLevelBodyText,
     wdWithInTable,
 )
 from backend.util.word_util.anchor_utils import (  # noqa: E402
     find_anchor_range,
     resolve_anchor_content_range,
+)
+from backend.helper.word_helper.range_utils import (  # noqa: E402
+    is_range_locked,
+    is_locked_exception,
+    range_overlaps,
+)
+from backend.helper.word_helper.text_parsing import (  # noqa: E402
+    parse_table_block,
+)
+from backend.helper.word_helper.content_ops import (  # noqa: E402
+    apply_standard_insert_format,
+)
+from backend.helper.word_helper.cleanup_ops import (  # noqa: E402
+    normalize_cleanup_text,
+    cleanup_blank_paragraphs,
 )
 
 NODE_NAME = "gjgk_update_word"
@@ -90,50 +103,6 @@ def _visible_log(message: str) -> None:
     progress_log.info(f"[{NODE_NAME}] {message}")
 
 
-def _is_table_separator_line(line: str) -> bool:
-    return bool(re.match(r"^\s*\|\s*:?-{3,}.*\|\s*$", line))
-
-
-def _parse_table_row(line: str) -> List[str]:
-    cells = [cell.strip() for cell in line.split("|")]
-    if cells and cells[0] == "":
-        cells = cells[1:]
-    if cells and cells[-1] == "":
-        cells = cells[:-1]
-    return cells
-
-
-def _looks_like_table_row(line: str) -> bool:
-    stripped = (line or "").strip()
-    if "|" not in stripped:
-        return False
-    return len(_parse_table_row(stripped)) >= 2
-
-
-def _parse_table_block(lines: List[str], start_idx: int) -> tuple[Optional[List[List[str]]], int]:
-    table_lines: List[str] = []
-    idx = start_idx
-    while idx < len(lines) and lines[idx].strip().startswith("|"):
-        table_lines.append(lines[idx].strip())
-        idx += 1
-
-    if len(table_lines) >= 2 and _is_table_separator_line(table_lines[1]):
-        header = table_lines[0]
-        data_lines = table_lines[2:] if len(table_lines) > 2 else []
-        all_lines = [header] + data_lines
-        return [_parse_table_row(line) for line in all_lines], idx
-
-    fallback_lines: List[str] = []
-    idx = start_idx
-    while idx < len(lines) and _looks_like_table_row(lines[idx]):
-        fallback_lines.append(lines[idx].strip())
-        idx += 1
-    if len(fallback_lines) >= 2:
-        return [_parse_table_row(line) for line in fallback_lines], idx
-
-    return None, start_idx
-
-
 def _build_insert_items(polished_text: str) -> List[Dict[str, Any]]:
     normalized_text = polished_text.replace("\r\n", "\n").replace("\r", "\n")
     raw_lines = [line.rstrip() for line in normalized_text.split("\n")]
@@ -146,7 +115,7 @@ def _build_insert_items(polished_text: str) -> List[Dict[str, Any]]:
             idx += 1
             continue
 
-        maybe_table, next_idx = _parse_table_block(raw_lines, idx)
+        maybe_table, next_idx = parse_table_block(raw_lines, idx)
         if maybe_table:
             items.append({"type": "table", "rows": maybe_table})
             idx = next_idx
@@ -159,38 +128,6 @@ def _build_insert_items(polished_text: str) -> List[Dict[str, Any]]:
         items.pop()
 
     return items
-
-
-def _apply_standard_insert_format(
-    inserted_rng,
-    *,
-    font_name: str = INSERT_FONT_NAME,
-    font_size: int = INSERT_FONT_SIZE,
-) -> None:
-    inserted_rng.Font.Name = font_name
-    inserted_rng.Font.Size = font_size
-    inserted_rng.Font.Bold = False
-
-    paragraph_format = inserted_rng.ParagraphFormat
-    paragraph_format.LineSpacingRule = wdLineSpace1pt5
-    paragraph_format.LeftIndent = 0
-    paragraph_format.FirstLineIndent = 0
-    paragraph_format.OutlineLevel = wdOutlineLevelBodyText
-
-    for attr, value in (
-        ("SpaceBeforeAuto", False),
-        ("SpaceAfterAuto", False),
-        ("SpaceBefore", 0),
-        ("SpaceAfter", 0),
-        ("PageBreakBefore", False),
-        ("KeepWithNext", False),
-        ("KeepTogether", False),
-        ("WidowControl", False),
-    ):
-        try:
-            setattr(paragraph_format, attr, value)
-        except Exception:
-            continue
 
 
 def _resolve_gjgk_content_range(doc, word_app, before_hit, after_hit) -> Dict[str, int]:
@@ -211,64 +148,6 @@ def _set_collapsed_range(insert_range, position: int) -> None:
 
 def _build_bootstrap_marker() -> str:
     return f"{BOOTSTRAP_MARKER_PREFIX}{time.time_ns()}]]"
-
-
-def _range_overlaps(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
-    return not (int(a_end) <= int(b_start) or int(b_end) <= int(a_start))
-
-
-def _is_locked_exception(exc: Exception) -> bool:
-    error_text = str(exc).lower()
-    return "锁定" in error_text or "locked" in error_text or "-2146823683" in error_text
-
-
-def _is_range_locked(doc, rng) -> bool:
-    try:
-        if hasattr(rng, "Locked") and rng.Locked:
-            return True
-    except Exception:
-        pass
-
-    try:
-        editors = getattr(rng, "Editors", None)
-        editors_count = int(getattr(editors, "Count", 0))
-        if editors_count > 0:
-            return False
-    except Exception:
-        pass
-
-    try:
-        fields = rng.Fields
-        count = int(getattr(fields, "Count", 0))
-        for idx in range(1, count + 1):
-            try:
-                field = fields(idx)
-                if hasattr(field, "Locked") and field.Locked:
-                    return True
-            except Exception:
-                continue
-    except Exception:
-        pass
-
-    try:
-        protection_type = int(getattr(doc, "ProtectionType", -1))
-    except Exception:
-        protection_type = -1
-
-    # -1 means wdNoProtection. In protected documents, prefer non-writing checks above
-    # and only use write-probe as the final fallback.
-    try:
-        marker = "\u200b"
-        test_pos = int(getattr(rng, "End", getattr(rng, "Start", 0)))
-        probe_rng = doc.Range(test_pos, test_pos)
-        probe_rng.InsertAfter(marker)
-        inserted = doc.Range(test_pos, min(test_pos + 1, int(doc.Content.End)))
-        if str(getattr(inserted, "Text", "") or "") == marker:
-            inserted.Delete()
-            return False
-        return protection_type != -1
-    except Exception as exc:
-        return _is_locked_exception(exc) or (protection_type != -1)
 
 
 def _get_position_page(doc, position: int, fallback_page: int) -> int:
@@ -300,7 +179,7 @@ def _find_next_editable_pos_bounded(
 
     for _ in range(max_lookahead + 1):
         try:
-            if not _is_range_locked(doc, doc.Range(pos, pos)):
+            if not is_range_locked(doc, doc.Range(pos, pos)):
                 return pos
         except Exception:
             pass
@@ -367,7 +246,7 @@ def _find_next_non_table_editable_pos_bounded(
     for _ in range(max_lookahead + 1):
         probe = doc.Range(pos, pos)
         try:
-            if not _is_within_table(probe) and not _is_range_locked(doc, probe):
+            if not _is_within_table(probe) and not is_range_locked(doc, probe):
                 return pos
         except Exception:
             pass
@@ -451,7 +330,7 @@ def _find_first_insert_position_on_anchor_page(
             break
 
         probe = doc.Range(pos, pos)
-        if _is_range_locked(doc, probe):
+        if is_range_locked(doc, probe):
             if pos >= scan_end:
                 break
             pos += 1
@@ -491,7 +370,7 @@ def _find_next_editable_pos_on_page_bounded(
             break
         probe = doc.Range(pos, pos)
         try:
-            if (not _is_within_table(probe)) and (not _is_range_locked(doc, probe)):
+            if (not _is_within_table(probe)) and (not is_range_locked(doc, probe)):
                 return pos
         except Exception:
             pass
@@ -514,7 +393,7 @@ def _reposition_insert_range_if_locked(
         cur_pos = int(insert_start)
 
     try:
-        if not _is_range_locked(doc, doc.Range(cur_pos, cur_pos)):
+        if not is_range_locked(doc, doc.Range(cur_pos, cur_pos)):
             return False
     except Exception:
         return False
@@ -564,9 +443,9 @@ def _delete_original_content(
                 table = tables(idx)
                 table_start = int(table.Range.Start)
                 table_end = int(table.Range.End)
-                if not _range_overlaps(table_start, table_end, range_start, initial_end):
+                if not range_overlaps(table_start, table_end, range_start, initial_end):
                     continue
-                if _is_range_locked(doc, table.Range):
+                if is_range_locked(doc, table.Range):
                     skipped_tables += 1
                     continue
                 table.Range.Delete()
@@ -587,9 +466,9 @@ def _delete_original_content(
         try:
             para_start = int(para.Range.Start)
             para_end = int(para.Range.End)
-            if not _range_overlaps(para_start, para_end, range_start, int(get_bound_end())):
+            if not range_overlaps(para_start, para_end, range_start, int(get_bound_end())):
                 continue
-            if _is_range_locked(doc, para.Range):
+            if is_range_locked(doc, para.Range):
                 skipped_paragraphs += 1
                 continue
             para.Range.Delete()
@@ -607,7 +486,7 @@ def _delete_original_content(
     latest_end = int(get_bound_end())
     if latest_end > int(range_start):
         try:
-            if not _is_range_locked(doc, doc.Range(int(range_start), latest_end)):
+            if not is_range_locked(doc, doc.Range(int(range_start), latest_end)):
                 doc.Range(int(range_start), latest_end).Delete()
                 used_fallback_delete = True
         except Exception:
@@ -642,7 +521,7 @@ def _ensure_insert_range(
     _set_collapsed_range(insert_range, pos)
 
     try:
-        if _is_range_locked(doc, doc.Range(pos, pos)):
+        if is_range_locked(doc, doc.Range(pos, pos)):
             pos2 = _find_next_editable_pos_bounded(
                 doc,
                 start_pos=pos + 1,
@@ -682,13 +561,6 @@ def _trim_leading_layout_controls(
         log_parts.append(f"局部清理起点控制符 {removed} 个")
 
     return cursor
-
-
-def _normalize_visible_paragraph_text(text: str) -> str:
-    normalized = str(text or "")
-    for control_char in ("\r", "\n", "\a", "\v", "\f"):
-        normalized = normalized.replace(control_char, "")
-    return normalized.strip()
 
 
 def _prime_empty_insert_slot(
@@ -768,7 +640,7 @@ def _insert_text_line(
         if live_end > start_pos and live_start > start_pos:
             effective_start = live_start
     except Exception as exc:
-        if not _is_locked_exception(exc):
+        if not is_locked_exception(exc):
             raise
 
         fallback_inserted = False
@@ -812,7 +684,7 @@ def _insert_text_line(
 
     end_pos = max(int(live_end), int(effective_start) + len(inserted_text))
     inserted_rng = doc.Range(effective_start, max(effective_start, end_pos - 1))
-    _apply_standard_insert_format(inserted_rng)
+    apply_standard_insert_format(inserted_rng)
     _set_collapsed_range(insert_range, end_pos)
     _ensure_insert_range(
         doc,
@@ -897,7 +769,7 @@ def _insert_table(
                 cell_range.InsertBefore(cell_text)
 
                 cell_range = cell.Range
-                _apply_standard_insert_format(cell_range)
+                apply_standard_insert_format(cell_range)
                 cell_range.ParagraphFormat.Alignment = 0
                 cell.VerticalAlignment = 1
             except Exception:
@@ -958,7 +830,7 @@ def _remove_marker_paragraphs(
     removed = 0
     for para in reversed(paragraphs):
         try:
-            para_text = _normalize_visible_paragraph_text(getattr(para.Range, "Text", ""))
+            para_text = normalize_cleanup_text(getattr(para.Range, "Text", ""))
             if para_text != marker_text:
                 continue
             para.Range.Delete()
@@ -969,38 +841,6 @@ def _remove_marker_paragraphs(
     if removed > 0 and log_parts is not None:
         log_parts.append(f"已清理 bootstrap 标记段落 {removed} 个")
     return removed
-
-
-def _cleanup_blank_paragraphs(
-    doc,
-    *,
-    range_start: int,
-    range_end: int,
-    log_parts: List[str],
-) -> None:
-    if int(range_end) <= int(range_start):
-        return
-
-    try:
-        paragraphs = list(doc.Range(int(range_start), int(range_end)).Paragraphs)
-    except Exception:
-        return
-
-    deleted = 0
-    for para in reversed(paragraphs):
-        try:
-            if _is_within_table(para.Range):
-                continue
-            para_text = _normalize_visible_paragraph_text(getattr(para.Range, "Text", ""))
-            if para_text:
-                continue
-            para.Range.Delete()
-            deleted += 1
-        except Exception:
-            continue
-
-    if deleted > 0:
-        log_parts.append(f"清理空白段落 {deleted} 个")
 
 
 def _build_manual_test_output_path(source_doc_path: pathlib.Path) -> pathlib.Path:
@@ -1083,7 +923,7 @@ def _describe_range_state(doc, rng, *, label: str = "") -> str:
     except Exception:
         pass
     try:
-        locked = _is_range_locked(doc, rng)
+        locked = is_range_locked(doc, rng)
     except Exception:
         pass
 
@@ -1188,7 +1028,7 @@ def diagnose_gjgk_lock(
                 "pos": pos,
                 "page": _get_position_page(doc, pos, content_range.get("start_page", 1)),
                 "is_within_table": _is_within_table(probe),
-                "is_range_locked": _is_range_locked(doc, probe),
+                "is_range_locked": is_range_locked(doc, probe),
             }
 
             try:
@@ -1448,7 +1288,7 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
                         f"插入异常 item={item_idx}/{len(items)} attempt={attempts}: {exc}; {current_state}"
                     )
 
-                    if _is_locked_exception(exc):
+                    if is_locked_exception(exc):
                         try:
                             cur_pos = int(insert_range.Start)
                         except Exception:
@@ -1529,7 +1369,7 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
         if has_explicit_blank_lines:
             log_parts.append("检测到输入包含显式空行，跳过空白段落清理")
         else:
-            _cleanup_blank_paragraphs(
+            cleanup_blank_paragraphs(
                 doc,
                 range_start=insert_start,
                 range_end=inserted_end,

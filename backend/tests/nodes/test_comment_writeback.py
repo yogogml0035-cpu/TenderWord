@@ -710,7 +710,7 @@ def test_gjgk_update_word_writes_comments_before_save(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         gjgk_update_word_module,
-        "_cleanup_blank_paragraphs",
+        "cleanup_blank_paragraphs",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
@@ -861,7 +861,7 @@ def _patch_gjgk_node(monkeypatch, fake_doc, writeback_result):
     )
     monkeypatch.setattr(
         gjgk_update_word_module,
-        "_cleanup_blank_paragraphs",
+        "cleanup_blank_paragraphs",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(

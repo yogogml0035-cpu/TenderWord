@@ -49,106 +49,51 @@ from backend.util.word_util.anchor_utils import (
 )
 from backend.util.log_util.progress_log import progress_log
 
+from backend.helper.word_helper.range_utils import (
+    is_range_locked,
+    is_locked_exception,
+    range_overlaps,
+    is_protected_range,
+    find_editable_insertion_pos,
+    find_next_editable_pos,
+    find_next_editable_pos_bounded,
+    find_prev_editable_pos,
+    ensure_editable_insert_range,
+)
+from backend.helper.word_helper.text_parsing import (
+    parse_table_block,
+    convert_lines_to_items,
+)
+from backend.helper.word_helper.protected_fields import (
+    scan_protected_fields_in_range,
+    collect_protected_fields,
+    refresh_protected_fields,
+    validate_required_protected_fields,
+    resolve_block_flow,
+    refind_protected_paragraph,
+    insert_prefix_before_keyword,
+    update_protected_field,
+)
+from backend.helper.word_helper.content_ops import (
+    apply_standard_insert_format,
+    insert_content_with_formatting,
+    insert_table_with_formatting,
+    insert_items_inline_at_end_of_paragraph,
+)
+from backend.helper.word_helper.cleanup_ops import (
+    multi_pass_cleanup,
+    normalize_cleanup_text,
+)
+
 
 REQUIRED_PROTECTED_FIELD_KEYWORDS = ("交付日期", "付款方式")
 PROTECTED_FIELD_SCAN_MARGIN = 400
 
-
-def _is_keyword_paragraph(text: str, keyword: str) -> bool:
-    return keyword in text and ("：" in text or ":" in text)
-
-
-def _scan_protected_fields_in_range(doc, keywords, range_start: int, range_end: int):
-    found = {}
-    if range_end <= range_start:
-        return found
-
-    try:
-        paragraphs = doc.Range(int(range_start), int(range_end)).Paragraphs
-    except Exception:
-        return found
-
-    for para in paragraphs:
-        para_text = str(getattr(para.Range, "Text", "") or "").strip()
-        if not para_text:
-            continue
-        for keyword in keywords:
-            if keyword not in found and _is_keyword_paragraph(para_text, keyword):
-                found[keyword] = para.Range
-    return found
-
-
-def _collect_protected_fields(
-    doc,
-    keywords,
-    target_range,
-    fallback_range,
-    boundary_margin: int = PROTECTED_FIELD_SCAN_MARGIN,
-):
-    found = {}
-    scan_ranges = [target_range, fallback_range]
-
-    if fallback_range:
-        doc_end = int(getattr(getattr(doc, "Content", None), "End", fallback_range[1]))
-        expanded_start = max(0, int(fallback_range[0]) - boundary_margin)
-        expanded_end = min(doc_end, int(fallback_range[1]) + boundary_margin)
-        expanded_range = (expanded_start, expanded_end)
-        if expanded_range not in scan_ranges:
-            scan_ranges.append(expanded_range)
-
-    for scan_start, scan_end in scan_ranges:
-        missing = [keyword for keyword in keywords if keyword not in found]
-        if not missing:
-            break
-        found.update(_scan_protected_fields_in_range(doc, missing, scan_start, scan_end))
-
-    return found
-
-
-def _refresh_protected_fields(
-    doc,
-    keywords,
-    range_start: int,
-    range_end: int,
-    existing_fields: Optional[Dict[str, Any]] = None,
-):
-    """在删除可编辑内容后，按最新文档位置重新绑定受保护字段段落。"""
-
-    refreshed = dict(existing_fields or {})
-    refreshed.update(
-        _scan_protected_fields_in_range(doc, keywords, int(range_start), int(range_end))
-    )
-    return refreshed
-
-
-def _validate_required_protected_fields(
-    protected_fields, required_keywords=REQUIRED_PROTECTED_FIELD_KEYWORDS
-):
-    missing = [keyword for keyword in required_keywords if keyword not in protected_fields]
-    if missing:
-        raise ValueError(f"缺少关键受保护字段: {', '.join(missing)}")
-
-
-def _resolve_block_flow(protected_fields: Dict[str, Any]) -> Dict[str, Any]:
-    """根据已识别的受保护字段，返回与 master 对齐的块插入控制流。"""
-
-    has_delivery = "交付日期" in protected_fields
-    has_payment = "付款方式" in protected_fields
-
-    if has_delivery and has_payment:
-        block2_mode = "between_delivery_payment"
-    elif has_delivery:
-        block2_mode = "after_delivery"
-    else:
-        block2_mode = "skip"
-
-    block3_anchor = "after_payment" if has_payment else "before_after_anchor"
-    return {
-        "has_delivery": has_delivery,
-        "has_payment": has_payment,
-        "block2_mode": block2_mode,
-        "block3_anchor": block3_anchor,
-    }
+# ---- 向后兼容别名 ----
+# gngk_fw_zc_delete_tender_param 之前从本文件 import 这些名称；
+# 重构后已迁移到 helper，但为安全起见保留别名供尚未更新的下游使用。
+_collect_protected_fields = collect_protected_fields
+_refresh_protected_fields = refresh_protected_fields
 
 
 def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
@@ -240,76 +185,11 @@ def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
     }
 
 
-def _is_table_separator_line(line: str) -> bool:
-    return bool(re.match(r"^\s*\|\s*:?-{3,}.*\|\s*$", line))
-
-
-def _parse_table_row(line: str) -> list[str]:
-    cells = [cell.strip() for cell in line.split("|")]
-    if cells and cells[0] == "":
-        cells = cells[1:]
-    if cells and cells[-1] == "":
-        cells = cells[:-1]
-    return cells
-
-
-def _looks_like_table_row(line: str) -> bool:
-    stripped = (line or "").strip()
-    if "|" not in stripped:
-        return False
-    return len(_parse_table_row(stripped)) >= 2
-
-
-def _parse_table_block(lines: list[str], start_idx: int) -> tuple[Optional[list[list[str]]], int]:
-    table_lines: list[str] = []
-    idx = start_idx
-    while idx < len(lines) and lines[idx].strip().startswith("|"):
-        table_lines.append(lines[idx].strip())
-        idx += 1
-
-    if len(table_lines) >= 2 and _is_table_separator_line(table_lines[1]):
-        header = table_lines[0]
-        data_lines = table_lines[2:] if len(table_lines) > 2 else []
-        all_lines = [header] + data_lines
-        return [_parse_table_row(line) for line in all_lines], idx
-
-    fallback_lines: list[str] = []
-    idx = start_idx
-    while idx < len(lines) and _looks_like_table_row(lines[idx]):
-        fallback_lines.append(lines[idx].strip())
-        idx += 1
-    if len(fallback_lines) >= 2:
-        return [_parse_table_row(line) for line in fallback_lines], idx
-
-    return None, start_idx
-
-
-def _apply_standard_insert_format(
-    inserted_rng,
-    *,
-    font_name: str,
-    font_size: int,
-) -> None:
-    inserted_rng.Font.Name = font_name
-    inserted_rng.Font.Size = font_size
-    inserted_rng.Font.Bold = False
-
-    paragraph_format = inserted_rng.ParagraphFormat
-    paragraph_format.LineSpacingRule = wdLineSpace1pt5
-    paragraph_format.LeftIndent = 0
-    paragraph_format.FirstLineIndent = 0
-    paragraph_format.OutlineLevel = wdOutlineLevelBodyText
-
-    for attr, value in (
-        ("SpaceBeforeAuto", False),
-        ("SpaceAfterAuto", False),
-        ("SpaceBefore", 0),
-        ("SpaceAfter", 0),
-    ):
-        try:
-            setattr(paragraph_format, attr, value)
-        except Exception:
-            continue
+# ---- 向后兼容别名 ----
+# gngk_fw_zc_update_word 之前从本文件 import _parse_table_block / _apply_standard_insert_format；
+# 重构后已迁移到 helper，保留别名。
+_parse_table_block = parse_table_block
+_apply_standard_insert_format = apply_standard_insert_format
 
 
 def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
@@ -1113,7 +993,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                                     inserted += 1
                     return inserted
 
-                flow = _resolve_block_flow(protected_fields)
+                flow = resolve_block_flow(protected_fields)
 
                 # 插入块1（始终执行，优先在交付日期前，否则回退到目标页起始可编辑位置）
                 insertion_log_parts.append("  正在插入块1...")

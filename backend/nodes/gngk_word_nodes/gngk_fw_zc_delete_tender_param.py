@@ -22,10 +22,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.config.tender_config import get_anchor_target_sizes, get_default_anchor_texts
-from backend.nodes.common_word_nodes.update_word import (
-    _collect_protected_fields as _common_collect_protected_fields,
-    _refresh_protected_fields as _common_refresh_protected_fields,
+from backend.helper.word_helper.protected_fields import (
+    collect_protected_fields as _base_collect_protected_fields,
+    refresh_protected_fields as _base_refresh_protected_fields,
+    validate_required_protected_fields,
 )
+from backend.helper.word_helper.range_utils import is_protected_range, range_overlaps
+from backend.helper.word_helper.cleanup_ops import multi_pass_cleanup
 from backend.states import TenderGraphStateBase
 from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
@@ -35,11 +38,8 @@ from backend.util.word_util import (
     save_document_with_retry,
     unprotect_document,
     wdActiveEndPageNumber,
-    wdCollapseEnd,
-    wdFindStop,
     wdGoToAbsolute,
     wdGoToPage,
-    wdWithInTable,
 )
 from backend.util.word_util.anchor_utils import (
     find_anchor_range,
@@ -49,99 +49,28 @@ from backend.util.word_util.anchor_utils import (
 NODE_NAME = "gngk_fw_zc_delete_tender_param"
 PROTECTED_FIELD_KEYWORDS = ("服务地点", "服务期限", "付款方式")
 
-_CLEANUP_INVISIBLE_CHARS = (
-    "\r",
-    "\n",
-    "\t",
-    "\x07",
-    "\x0b",
-    "\x0c",
-    "\a",
-    "\u00a0",
-    "\u2000",
-    "\u2001",
-    "\u2002",
-    "\u2003",
-    "\u2004",
-    "\u2005",
-    "\u2006",
-    "\u2007",
-    "\u2008",
-    "\u2009",
-    "\u200a",
-    "\u200b",
-    "\u3000",
-    "\ufeff",
-)
-
 
 # ---------------------------------------------------------------------------
 # 辅助函数
 # ---------------------------------------------------------------------------
 
-def _normalize_cleanup_text(text: str) -> str:
-    normalized = str(text or "")
-    for ch in _CLEANUP_INVISIBLE_CHARS:
-        normalized = normalized.replace(ch, "")
-    return normalized.strip()
-
-
-def _is_effectively_empty_text(text: str) -> bool:
-    return _normalize_cleanup_text(text) == ""
-
-
 def _require_all_protected_fields(
     protected_fields: Dict[str, Any],
     required_keywords: tuple[str, ...] = PROTECTED_FIELD_KEYWORDS,
 ) -> None:
-    missing = [kw for kw in required_keywords if kw not in protected_fields]
-    if missing:
-        raise ValueError(f"缺少关键受保护字段: {', '.join(missing)}")
+    validate_required_protected_fields(protected_fields, required_keywords)
 
 
 def _collect_protected_fields(*args, **kwargs) -> Dict[str, Any]:
-    pf = _common_collect_protected_fields(*args, **kwargs)
+    pf = _base_collect_protected_fields(*args, **kwargs)
     _require_all_protected_fields(pf)
     return pf
 
 
 def _refresh_protected_fields(*args, **kwargs) -> Dict[str, Any]:
-    pf = _common_refresh_protected_fields(*args, **kwargs)
+    pf = _base_refresh_protected_fields(*args, **kwargs)
     _require_all_protected_fields(pf)
     return pf
-
-
-def _range_overlaps(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
-    return not (a_end <= b_start or b_end <= a_start)
-
-
-def _is_protected_range(rng, protected_fields: Dict[str, Any]) -> bool:
-    try:
-        rs = int(rng.Start)
-        re_ = int(rng.End)
-    except Exception:
-        return False
-    for prng in protected_fields.values():
-        try:
-            ps = int(prng.Start)
-            pe = int(prng.End)
-        except Exception:
-            continue
-        if _range_overlaps(rs, re_, ps, pe):
-            return True
-    return False
-
-
-def _visible_text(text: str) -> str:
-    if not text:
-        return ""
-    result = text
-    for ch in ("\r", "\n", "\x07", "\x0b", "\x0c", "\a", " ", "\t",
-               "\u00a0", "\u3000", "\u2000", "\u2001", "\u2002", "\u2003",
-               "\u2004", "\u2005", "\u2006", "\u2007", "\u2008", "\u2009",
-               "\u200a", "\u200b", "\ufeff"):
-        result = result.replace(ch, "")
-    return result.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -366,13 +295,13 @@ def gngk_fw_zc_delete_tender_param(
                         tbl_start = int(tbl_rng.Start)
                         tbl_end = int(tbl_rng.End)
 
-                        if _is_protected_range(tbl_rng, protected_fields):
+                        if is_protected_range(tbl_rng, protected_fields):
                             current_pos = tbl_end
                             deleted_something = True
                         else:
                             if tbl_start > current_pos:
                                 pre_rng = doc.Range(current_pos, tbl_start)
-                                if not _is_protected_range(pre_rng, protected_fields):
+                                if not is_protected_range(pre_rng, protected_fields):
                                     try:
                                         pre_rng.Delete()
                                         deleted_something = True
@@ -410,7 +339,7 @@ def gngk_fw_zc_delete_tender_param(
                             para_start = int(para_rng.Start)
                             para_end = int(para_rng.End)
 
-                            if _is_protected_range(para_rng, protected_fields):
+                            if is_protected_range(para_rng, protected_fields):
                                 current_pos = para_end
                                 deleted_something = True
                             else:
@@ -433,7 +362,7 @@ def gngk_fw_zc_delete_tender_param(
                         if chunk_size > 0:
                             chunk_end = current_pos + chunk_size
                             small_rng = doc.Range(current_pos, chunk_end)
-                            if _is_protected_range(small_rng, protected_fields):
+                            if is_protected_range(small_rng, protected_fields):
                                 current_pos = chunk_end
                                 continue
                             try:
@@ -470,163 +399,14 @@ def gngk_fw_zc_delete_tender_param(
             # ==================================================================
             log_parts.append("步骤3：清理空段落与换行...")
 
-            def build_cleanup_range():
-                return doc.Range(
-                    int(insertion_bound_start),
-                    int(get_bound_end()),
-                )
-
-            max_passes = 5
-            total_empty_deleted = 0
-
-            for pass_num in range(1, max_passes + 1):
-                # 3.1 删除空段落
-                empty_deleted = 0
-                final_paragraphs = list(build_cleanup_range().Paragraphs)
-                for idx in range(len(final_paragraphs) - 1, -1, -1):
-                    try:
-                        paragraph = final_paragraphs[idx]
-                        if paragraph.Range.Information(wdWithInTable):
-                            continue
-                        if _is_protected_range(paragraph.Range, protected_fields):
-                            continue
-                        if _is_effectively_empty_text(paragraph.Range.Text):
-                            paragraph.Range.Delete()
-                            empty_deleted += 1
-                    except Exception:
-                        pass
-
-                total_empty_deleted += empty_deleted
-                log_parts.append(
-                    f"  第 {pass_num} 轮：删除空段 {empty_deleted} 个"
-                )
-
-                if empty_deleted == 0:
-                    break
-
-                # 3.2 清理可编辑段落中的换行
-                cleaned_count = 0
-                paragraphs_to_delete = []
-
-                for paragraph in build_cleanup_range().Paragraphs:
-                    if paragraph.Range.Information(wdWithInTable):
-                        continue
-                    paragraph_text = paragraph.Range.Text
-                    if _is_effectively_empty_text(paragraph_text):
-                        continue
-                    if _is_protected_range(paragraph.Range, protected_fields):
-                        continue
-
-                    try:
-                        paragraph_range = paragraph.Range
-                        full_text = paragraph_range.Text
-                        text_without_mark = full_text.rstrip("\r\n\a")
-                        if _is_effectively_empty_text(text_without_mark):
-                            continue
-
-                        cleaned_text = (
-                            text_without_mark.replace("\r", "")
-                            .replace("\n", "")
-                            .replace("\r\n", "")
-                            .replace("\x07", "")
-                            .replace("\x0b", "")
-                            .replace("\x0c", "")
-                        )
-                        cleaned_text = re.sub(
-                            r"[\t\u00a0\u2000-\u200b\u3000]+", " ", cleaned_text
-                        )
-                        cleaned_text = re.sub(r" {2,}", " ", cleaned_text).strip()
-
-                        if cleaned_text and cleaned_text != text_without_mark:
-                            paragraph_range.Text = cleaned_text + "\r"
-                            cleaned_count += 1
-                        elif not cleaned_text:
-                            paragraphs_to_delete.append(paragraph_range)
-                    except Exception:
-                        pass
-
-                for prng in reversed(paragraphs_to_delete):
-                    try:
-                        prng.Delete()
-                    except Exception:
-                        pass
-
-                # 3.3 最终检查剩余空段落
-                final_paragraphs = list(build_cleanup_range().Paragraphs)
-                for paragraph in reversed(final_paragraphs):
-                    try:
-                        if paragraph.Range.Information(wdWithInTable):
-                            continue
-                        if _is_protected_range(paragraph.Range, protected_fields):
-                            continue
-                        if _is_effectively_empty_text(paragraph.Range.Text):
-                            paragraph.Range.Delete()
-                    except Exception:
-                        pass
-
-            # 3.4 修剪空表格尾行 / 删除完全空的表格
-            try:
-                def _row_is_empty(row) -> bool:
-                    try:
-                        cells = row.Cells
-                        for ci in range(1, cells.Count + 1):
-                            try:
-                                txt = cells(ci).Range.Text
-                            except Exception:
-                                txt = ""
-                            if _visible_text(txt):
-                                return False
-                        return True
-                    except Exception:
-                        return False
-
-                def _trim_table_trailing_empty_rows(table) -> int:
-                    removed = 0
-                    try:
-                        for ri in range(table.Rows.Count, 0, -1):
-                            try:
-                                row = table.Rows(ri)
-                                if _row_is_empty(row):
-                                    row.Delete()
-                                    removed += 1
-                                else:
-                                    break
-                            except Exception:
-                                break
-                    except Exception:
-                        return removed
-                    return removed
-
-                tbl_range = doc.Range(
-                    int(insertion_bound_start), int(get_bound_end())
-                )
-                tbls = tbl_range.Tables
-                trimmed_tables = 0
-                trimmed_rows = 0
-                deleted_empty_tables = 0
-
-                for ti in range(tbls.Count, 0, -1):
-                    try:
-                        tbl = tbls(ti)
-                        rr = _trim_table_trailing_empty_rows(tbl)
-                        if rr > 0:
-                            trimmed_tables += 1
-                            trimmed_rows += rr
-                        if not _visible_text(tbl.Range.Text):
-                            tbl.Range.Delete()
-                            deleted_empty_tables += 1
-                    except Exception:
-                        continue
-
-                if trimmed_tables > 0 or deleted_empty_tables > 0:
-                    log_parts.append(
-                        f"  修剪表格 {trimmed_tables} 个（删除空行 {trimmed_rows} 行），"
-                        f"删除空表格 {deleted_empty_tables} 个"
-                    )
-            except Exception:
-                pass
-
-            log_parts.append("步骤3完成：已清理空段落与多余换行。")
+            multi_pass_cleanup(
+                doc,
+                build_range_fn=lambda: (int(insertion_bound_start), int(get_bound_end())),
+                is_protected_fn=lambda rng: is_protected_range(rng, protected_fields),
+                log_parts=log_parts,
+                max_passes=5,
+                step_label="步骤3",
+            )
 
             # ==================================================================
             # 保存文档

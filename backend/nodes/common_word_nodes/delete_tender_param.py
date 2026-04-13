@@ -44,6 +44,10 @@ from backend.util.word_util.anchor_utils import (
     iter_anchor_text_variants,
     resolve_anchor_content_range,
 )
+from backend.helper.word_helper.range_utils import (
+    is_range_locked,
+    find_safe_insert_position,
+)
 
 NODE_NAME = "delete_tender_param"
 HEARTBEAT_INTERVAL_SECONDS = 5.0
@@ -111,44 +115,6 @@ def _find_anchor_fast(
             find_rng.End = doc_content.End
     return None
 
-
-def _is_range_locked(rng, doc) -> bool:
-    """检测范围是否被保护（含字段保护检测）。"""
-    try:
-        if hasattr(rng, "Locked") and rng.Locked:
-            return True
-    except Exception:
-        pass
-
-    try:
-        fields = rng.Fields
-        count = fields.Count
-        for i in range(1, count + 1):
-            try:
-                field = fields(i)
-                if hasattr(field, "Locked") and field.Locked:
-                    return True
-            except Exception:
-                continue
-    except Exception:
-        pass
-
-    try:
-        marker = "\u200b"
-        test_pos = rng.End
-        probe_rng = doc.Range(test_pos, test_pos)
-        probe_rng.InsertAfter(marker)
-        inserted = doc.Range(test_pos, test_pos + 1)
-        if inserted.Text == marker:
-            inserted.Delete()
-            return False
-    except Exception as probe_e:
-        err = str(probe_e).lower()
-        if "锁定" in err or "locked" in err or "-2146823683" in err:
-            return True
-    return False
-
-
 def _find_paragraph_containing_any(
     doc,
     texts: tuple[str, ...],
@@ -188,53 +154,6 @@ def _find_first_visible_insert_offset(paragraph_text: str) -> int:
     return 0
 
 
-def _find_safe_insert_position(
-    doc,
-    candidate_positions,
-    *,
-    max_forward_scan_chars: int = 0,
-    field_name: str = "",
-    log=_visible_log,
-) -> Optional[int]:
-    """在候选位置中寻找首个可编辑插入点，必要时向后探测。"""
-    try:
-        doc_end = int(doc.Content.End)
-    except Exception:
-        return None
-
-    seen_positions: set[int] = set()
-    locked_positions = 0
-
-    for candidate in candidate_positions:
-        if candidate is None:
-            continue
-        base_pos = min(max(0, int(candidate)), doc_end)
-        for offset in range(max_forward_scan_chars + 1):
-            pos = min(base_pos + offset, doc_end)
-            if pos in seen_positions:
-                continue
-            seen_positions.add(pos)
-
-            try:
-                probe_rng = doc.Range(pos, pos)
-            except Exception:
-                continue
-
-            if _is_range_locked(probe_rng, doc):
-                locked_positions += 1
-                continue
-
-            if log and offset > 0 and field_name:
-                log(
-                    f'{field_name}字段候选位置受保护，改用偏移 {offset} 的可编辑位置'
-                )
-            return pos
-
-    if log and field_name and locked_positions > 0:
-        log(f'{field_name}字段跳过了 {locked_positions} 个受保护位置')
-    return None
-
-
 def _insert_paragraph_break_before_delivery(
     doc,
     delivery_para_rng,
@@ -255,7 +174,7 @@ def _insert_paragraph_break_before_delivery(
                 paragraph_start,
             ]
 
-            safe_insert_pos = _find_safe_insert_position(
+            safe_insert_pos = find_safe_insert_position(
                 doc,
                 paragraph_candidates,
                 max_forward_scan_chars=24 if _uses_wide_scan_window(tender_type) else 8,
@@ -271,7 +190,7 @@ def _insert_paragraph_break_before_delivery(
     if fallback_pos is None:
         return False
 
-    fallback_insert_pos = _find_safe_insert_position(
+    fallback_insert_pos = find_safe_insert_position(
         doc,
         [fallback_pos],
         max_forward_scan_chars=24 if _uses_wide_scan_window(tender_type) else 8,
@@ -319,7 +238,7 @@ def _ensure_paragraph_break_after_payment(
         return False
 
     max_pos = min(doc_end, payment_end + max_scan_chars)
-    safe_insert_pos = _find_safe_insert_position(
+    safe_insert_pos = find_safe_insert_position(
         doc,
         range(payment_end, max_pos + 1),
         max_forward_scan_chars=8 if _uses_wide_scan_window(tender_type) else 0,
@@ -698,7 +617,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                     if tbl_rng.End > after_start_pos:
                         # 只删除到锚点之前
                         safe_del_rng = doc.Range(tbl_rng.Start, after_start_pos)
-                        if _is_range_locked(safe_del_rng, doc):
+                        if is_range_locked(doc, safe_del_rng):
                             current_pos = after_start_pos
                         else:
                             try:
@@ -710,7 +629,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                         perf_stats["table_time"] += time.time() - t0
                         continue
 
-                    if _is_range_locked(tbl_rng, doc):
+                    if is_range_locked(doc, tbl_rng):
                         current_pos = min(tbl_rng.End, after_start_pos)
                         deleted_something = True
                         perf_stats["table_time"] += time.time() - t0
@@ -743,7 +662,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                         # 检查段落是否超出删除范围
                         if para_rng.End > after_start_pos:
                             safe_del_rng = doc.Range(para_rng.Start, after_start_pos)
-                            if _is_range_locked(safe_del_rng, doc):
+                            if is_range_locked(doc, safe_del_rng):
                                 current_pos = after_start_pos
                             else:
                                 try:
@@ -755,7 +674,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                             perf_stats["para_time"] += time.time() - t0
                             continue
 
-                        if _is_range_locked(para_rng, doc):
+                        if is_range_locked(doc, para_rng):
                             current_pos = min(para_rng.End, after_start_pos)
                             deleted_something = True
                             perf_stats["para_time"] += time.time() - t0
@@ -784,7 +703,7 @@ def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphState
                     if chunk_size > 0:
                         chunk_end = current_pos + chunk_size
                         small_rng = doc.Range(current_pos, chunk_end)
-                        if _is_range_locked(small_rng, doc):
+                        if is_range_locked(doc, small_rng):
                             current_pos = chunk_end
                             deleted_something = True
                             continue

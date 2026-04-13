@@ -22,11 +22,42 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from backend.config.tender_config import get_anchor_target_sizes, get_default_anchor_texts
 from backend.nodes.common_word_nodes.comment_writeback import write_polished_comments
-from backend.nodes.common_word_nodes.update_word import (
-    _apply_standard_insert_format,
-    _collect_protected_fields as _common_collect_protected_fields,
-    _parse_table_block,
-    _refresh_protected_fields as _common_refresh_protected_fields,
+from backend.helper.word_helper.protected_fields import (
+    collect_protected_fields as _base_collect_protected_fields,
+    refresh_protected_fields as _base_refresh_protected_fields,
+    validate_required_protected_fields,
+    refind_protected_paragraph,
+    insert_prefix_before_keyword,
+    update_protected_field,
+)
+from backend.helper.word_helper.range_utils import (
+    is_range_locked,
+    is_locked_exception,
+    range_overlaps,
+    is_protected_range,
+    find_editable_insertion_pos,
+    find_next_editable_pos,
+    find_next_editable_pos_bounded,
+    find_prev_editable_pos,
+    find_prev_editable_pos_bounded,
+    ensure_editable_insert_range,
+)
+from backend.helper.word_helper.text_parsing import (
+    parse_table_block,
+    convert_lines_to_items,
+)
+from backend.helper.word_helper.content_ops import (
+    apply_standard_insert_format,
+    insert_content_with_formatting,
+    insert_table_with_formatting,
+    insert_items_inline_at_end_of_paragraph,
+)
+from backend.helper.word_helper.cleanup_ops import (
+    multi_pass_cleanup,
+    normalize_cleanup_text,
+    is_effectively_empty_text,
+    row_is_empty,
+    trim_table_trailing_empty_rows,
 )
 from backend.states import TenderGraphStateBase
 from backend.util.log_util.progress_log import progress_log
@@ -61,30 +92,6 @@ DEFAULT_MANUAL_TEST_SOURCE_DOC = (
     / "复旦大学附属华山医院虹桥院区VRV空调和分体式空调维护保养251498-招标文件-发售稿.doc"
 )
 DEFAULT_MANUAL_TEST_SUFFIX = "-gngk-fw-zc-update-test"
-_CLEANUP_INVISIBLE_CHARS = (
-    "\r",
-    "\n",
-    "\t",
-    "\x07",
-    "\x0b",
-    "\x0c",
-    "\a",
-    "\u00a0",
-    "\u2000",
-    "\u2001",
-    "\u2002",
-    "\u2003",
-    "\u2004",
-    "\u2005",
-    "\u2006",
-    "\u2007",
-    "\u2008",
-    "\u2009",
-    "\u200a",
-    "\u200b",
-    "\u3000",
-    "\ufeff",
-)
 MANUAL_TEST_INSERT_TEXT = """一、项目概述
 1、项目名称：复旦大学附属华山医院院本部1号楼急诊改扩建区域风机盘管空气过滤器更换及设备保养
 2、服务地点：复旦大学附属华山医院院本部1号楼急诊改扩建区域
@@ -116,17 +123,6 @@ MANUAL_TEST_INSERT_TEXT = """一、项目概述
 | 12 | 检插或更换空调各易损件 |
 | 13 | 温度传感器性能定期巡检及功能检查 |
 | 14 | 检查线控器、遥控器 |"""
-
-
-def _normalize_cleanup_text(text: str) -> str:
-    normalized = str(text or "")
-    for invisible_char in _CLEANUP_INVISIBLE_CHARS:
-        normalized = normalized.replace(invisible_char, "")
-    return normalized.strip()
-
-
-def _is_effectively_empty_text(text: str) -> bool:
-    return _normalize_cleanup_text(text) == ""
 
 
 def _validate_block_window(range_start: int, range_end: int, *, label: str) -> None:
@@ -165,19 +161,17 @@ def _require_all_protected_fields(
     protected_fields: Dict[str, Any],
     required_keywords: tuple[str, ...] = PROTECTED_FIELD_KEYWORDS,
 ) -> None:
-    missing = [keyword for keyword in required_keywords if keyword not in protected_fields]
-    if missing:
-        raise ValueError(f"缺少关键受保护字段: {', '.join(missing)}")
+    validate_required_protected_fields(protected_fields, required_keywords)
 
 
 def _collect_protected_fields(*args, **kwargs) -> Dict[str, Any]:
-    protected_fields = _common_collect_protected_fields(*args, **kwargs)
+    protected_fields = _base_collect_protected_fields(*args, **kwargs)
     _require_all_protected_fields(protected_fields)
     return protected_fields
 
 
 def _refresh_protected_fields(*args, **kwargs) -> Dict[str, Any]:
-    protected_fields = _common_refresh_protected_fields(*args, **kwargs)
+    protected_fields = _base_refresh_protected_fields(*args, **kwargs)
     _require_all_protected_fields(protected_fields)
     return protected_fields
 
@@ -253,7 +247,7 @@ def _convert_lines_to_items(lines: list[str]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     index = 0
     while index < len(lines):
-        maybe_table, next_index = _parse_table_block(lines, index)
+        maybe_table, next_index = parse_table_block(lines, index)
         if maybe_table:
             items.append({"type": "table", "rows": maybe_table})
             index = next_index
@@ -796,7 +790,7 @@ def gngk_fw_zc_update_word(
                                 cell_range.InsertBefore(cell_text)
 
                                 cell_range = cell.Range
-                                _apply_standard_insert_format(
+                                apply_standard_insert_format(
                                     cell_range,
                                     font_name=insert_font_name,
                                     font_size=insert_font_size,
@@ -1197,7 +1191,7 @@ def gngk_fw_zc_update_word(
                             if is_protected_range(paragraph.Range):
                                 continue
 
-                            if _is_effectively_empty_text(paragraph.Range.Text):
+                            if is_effectively_empty_text(paragraph.Range.Text):
                                 paragraph.Range.Delete()
                                 empty_deleted += 1
                                 insertion_log_parts.append(f"    删除空段落，索引 {index}")
@@ -1225,7 +1219,7 @@ def gngk_fw_zc_update_word(
                             continue
 
                         paragraph_text = paragraph.Range.Text
-                        if _is_effectively_empty_text(paragraph_text):
+                        if is_effectively_empty_text(paragraph_text):
                             continue
 
                         if is_protected_range(paragraph.Range):
@@ -1235,7 +1229,7 @@ def gngk_fw_zc_update_word(
                             paragraph_range = paragraph.Range
                             full_text = paragraph_range.Text
                             text_without_mark = full_text.rstrip("\r\n\a")
-                            if _is_effectively_empty_text(text_without_mark):
+                            if is_effectively_empty_text(text_without_mark):
                                 continue
 
                             cleaned_text = (
@@ -1294,7 +1288,7 @@ def gngk_fw_zc_update_word(
                             if is_protected_range(paragraph.Range):
                                 continue
 
-                            if _is_effectively_empty_text(paragraph.Range.Text):
+                            if is_effectively_empty_text(paragraph.Range.Text):
                                 paragraph.Range.Delete()
                                 final_empty_deleted += 1
                         except Exception:
@@ -1605,8 +1599,6 @@ __all__ = [
     "split_polished_text_into_blocks",
     "_require_all_protected_fields",
     "_convert_lines_to_items",
-    "_is_effectively_empty_text",
-    "_normalize_cleanup_text",
     "_resolve_block4_insert_start",
     "_validate_block_window",
 ]

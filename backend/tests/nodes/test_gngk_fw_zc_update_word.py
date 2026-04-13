@@ -4,12 +4,12 @@ import pytest
 
 from backend.nodes.gngk_word_nodes.gngk_fw_zc_update_word import (
     _convert_lines_to_items,
-    _is_effectively_empty_text,
     _require_all_protected_fields,
     _resolve_block4_insert_start,
     _validate_block_window,
     split_polished_text_into_blocks,
 )
+from backend.helper.word_helper.cleanup_ops import is_effectively_empty_text
 
 
 def test_split_polished_text_into_blocks_splits_service_three_field_flow() -> None:
@@ -138,5 +138,5 @@ def test_strict_block_helpers_reject_invalid_windows_and_after_anchor_overflow()
 
 
 def test_is_effectively_empty_text_treats_page_break_artifacts_as_empty() -> None:
-    assert _is_effectively_empty_text("\r\n\x0c\u200b")
-    assert not _is_effectively_empty_text("第四章 合同条款")
+    assert is_effectively_empty_text("\r\n\x0c\u200b")
+    assert not is_effectively_empty_text("第四章 合同条款")
