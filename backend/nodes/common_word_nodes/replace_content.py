@@ -24,6 +24,37 @@ from backend.util.word_util import (
     wdActiveEndPageNumber,
 )
 
+SPECIAL_PROJECT_NAME_COMMENT = "此次文件由AI生成，请业务员不要删除，由管理组统一删除"
+
+
+def _comment_exists_at_range(doc, check_range) -> bool:
+    """Check if a comment already exists at the specified range."""
+    try:
+        if doc.Comments.Count == 0:
+            return False
+        for i in range(1, doc.Comments.Count + 1):
+            comment = doc.Comments(i)
+            scope = comment.Scope
+            if scope.Start == check_range.Start and scope.End == check_range.End:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _delete_comment_at_range(doc, target_range) -> bool:
+    """Delete comment if one exists at the target range."""
+    try:
+        for i in range(1, doc.Comments.Count + 1):
+            comment = doc.Comments(i)
+            scope = comment.Scope
+            if scope.Start == target_range.Start and scope.End == target_range.End:
+                comment.Delete()
+                return True
+        return False
+    except Exception:
+        return False
+
 
 def _get_page_number(rng) -> int:
     """
@@ -125,9 +156,18 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
         "total_comment_error": 0,
     }
     
+    project_name_special_log = {
+        "first_hit_page": None,
+        "was_overwrite": False,
+        "success": False,
+        "fallback_page": None,
+    }
+    
     # 记录失败的替换详情
     failed_replacements = []
     found_any_replacements = {}
+    
+    has_special_comment_been_placed_project_name = False
     
     try:
         # 使用统一的工具函数创建 Word 应用程序
@@ -198,15 +238,18 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
         header_story_types = {1, 6, 7, 10}  # 正文和所有页眉
         body_story_types = {1}  # 只处理正文
         
-        def process_replacements_in_range(rng, replacements_to_process, story_type_name, allow_comments: bool):
-            """在指定的 Range 中处理替换"""
+        def process_replacements_in_range(rng, replacements_to_process, story_type_name, allow_comments: bool, story_type: int):
+            
+            nonlocal has_special_comment_been_placed_project_name
             
             for rep_idx, (search_text, replace_text) in enumerate(replacements_to_process, 1):
                 normalized_search_text = _normalize_find_text(search_text)
                 normalized_replace_text = _normalize_replace_text(replace_text)
                 progress_log.debug(f"  [{rep_idx}/{len(replacements_to_process)}] 正在在 [{story_type_name}] 中搜索 {repr(normalized_search_text)}...")
                 
-                # 创建搜索范围的副本，避免丢失原始引用
+                is_project_name = (search_text == project_name_placeholder)
+                is_body = (story_type == 1)
+                
                 search_rng = rng.Duplicate
                 find = search_rng.Find
                 find.ClearFormatting()
@@ -217,13 +260,11 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
                 find.MatchWholeWord = False
                 
                 count = 0
-                # Execute 返回 True 如果找到
                 while find.Execute():
                     count += 1
                     total_stats["total_found"] += 1
                     found_any_replacements[normalized_search_text] = True
                     
-                    # 获取页数
                     page_num = _get_page_number(search_rng)
                     page_info = f"第 {page_num} 页" if page_num > 0 else "未知页码"
                     
@@ -233,12 +274,39 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
                         progress_log.info(f"    [已替换] {repr(normalized_search_text)} -> {repr(normalized_replace_text)} 在 {page_info}")
 
                         if allow_comments and normalized_replace_text is not None and str(normalized_replace_text).strip() != "":
-                            try:
-                                doc.Comments.Add(Range=search_rng.Duplicate, Text=str("ERP数据"))
-                                total_stats["total_comment_added"] += 1
-                            except Exception as e:
-                                total_stats["total_comment_error"] += 1
-                                failed_replacements.append((normalized_search_text, page_num, f"添加批注失败: {e}"))
+                            should_try_special_comment = (
+                                is_project_name
+                                and is_body
+                                and not has_special_comment_been_placed_project_name
+                            )
+                            
+                            if should_try_special_comment:
+                                comment_rng = search_rng.Duplicate
+                                try:
+                                    existing_deleted = _delete_comment_at_range(doc, comment_rng)
+                                    if existing_deleted:
+                                        project_name_special_log["was_overwrite"] = True
+                                    doc.Comments.Add(Range=comment_rng, Text=SPECIAL_PROJECT_NAME_COMMENT)
+                                    has_special_comment_been_placed_project_name = True
+                                    total_stats["total_comment_added"] += 1
+                                    project_name_special_log["first_hit_page"] = page_num
+                                    project_name_special_log["success"] = True
+                                    progress_log.info(f"    [特殊批注] project_name 首次命中在 {page_info}，{'覆盖已有批注' if existing_deleted else '添加新批注'}")
+                                except Exception as e:
+                                    total_stats["total_comment_error"] += 1
+                                    progress_log.warning(f"    [特殊批注失败] project_name 首次命中在 {page_info} 操作失败: {e}，跳过此处，等待后续命中")
+                                    project_name_special_log["first_hit_page"] = page_num
+                                    search_rng.Collapse(wdCollapseEnd)
+                                    continue
+                            else:
+                                try:
+                                    doc.Comments.Add(Range=search_rng.Duplicate, Text=str("ERP数据"))
+                                    total_stats["total_comment_added"] += 1
+                                    if is_project_name and is_body and has_special_comment_been_placed_project_name and project_name_special_log.get("fallback_page") is None:
+                                        project_name_special_log["fallback_page"] = page_num
+                                except Exception as e:
+                                    total_stats["total_comment_error"] += 1
+                                    failed_replacements.append((normalized_search_text, page_num, f"添加批注失败: {e}"))
                         
                         search_rng.Collapse(wdCollapseEnd)
                     except Exception as e:
@@ -269,22 +337,20 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
                 # 1. 优先处理项目内容（只在正文中）
                 if project_content_replacements and story_type in project_content_story_types:
                     progress_log.debug(f"正在处理 [{story_type_name}]...")
-                    process_replacements_in_range(rng, project_content_replacements, story_type_name, allow_comments=(enable_erp_comments and story_type == 1))
+                    process_replacements_in_range(rng, project_content_replacements, story_type_name, allow_comments=(enable_erp_comments and story_type == 1), story_type=story_type)
                 
                 # 2. 处理项目名称和项目编号（在正文和页眉中）
                 if header_replacements and story_type in header_story_types:
-                    # 如果已经在处理 project_content 时打印过，这里不再重复打印
                     if not (project_content_replacements and story_type in project_content_story_types):
                         progress_log.debug(f"正在处理 [{story_type_name}]...")
-                    process_replacements_in_range(rng, header_replacements, story_type_name, allow_comments=(enable_erp_comments and story_type == 1))
+                    process_replacements_in_range(rng, header_replacements, story_type_name, allow_comments=(enable_erp_comments and story_type == 1), story_type=story_type)
                 
                 # 3. 处理其他内容（只在正文中）
                 if body_replacements and story_type in body_story_types:
-                    # 如果已经在处理 project_content 或 header 时打印过，这里不再重复打印
                     if not (project_content_replacements and story_type in project_content_story_types) and \
                        not (header_replacements and story_type in header_story_types):
                         progress_log.debug(f"正在处理 [{story_type_name}]...")
-                    process_replacements_in_range(rng, body_replacements, story_type_name, allow_comments=(enable_erp_comments and story_type == 1))
+                    process_replacements_in_range(rng, body_replacements, story_type_name, allow_comments=(enable_erp_comments and story_type == 1), story_type=story_type)
                 
                 try:
                     rng = rng.NextStoryRange
@@ -300,6 +366,21 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
         if enable_erp_comments:
             replacement_log_parts.append(f"  已添加批注: {total_stats['total_comment_added']}")
             replacement_log_parts.append(f"  批注失败: {total_stats['total_comment_error']}")
+            if project_name_placeholder:
+                replacement_log_parts.append("")
+                replacement_log_parts.append("project_name 特殊批注:")
+                if project_name_special_log["success"]:
+                    action = "覆盖已有批注" if project_name_special_log["was_overwrite"] else "新增批注"
+                    page_str = f"第 {project_name_special_log['first_hit_page']} 页" if project_name_special_log["first_hit_page"] else "未知页码"
+                    replacement_log_parts.append(f"  首次命中: {page_str} ({action})")
+                    if project_name_special_log.get("fallback_page") is not None:
+                        fallback_str = f"第 {project_name_special_log['fallback_page']} 页"
+                        replacement_log_parts.append(f"  后续ERP数据批注首次出现: {fallback_str}")
+                elif project_name_special_log["first_hit_page"] is not None:
+                    page_str = f"第 {project_name_special_log['first_hit_page']} 页" if project_name_special_log["first_hit_page"] else "未知页码"
+                    replacement_log_parts.append(f"  首次命中: {page_str} (操作失败，未设置特殊批注)")
+                else:
+                    replacement_log_parts.append("  未在正文中找到 project_name")
         
         if failed_replacements:
             replacement_log_parts.append("")
