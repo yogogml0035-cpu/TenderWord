@@ -23,6 +23,7 @@ from backend.states import TenderGraphStateBase
 from backend.nodes.common_word_nodes.comment_writeback import write_polished_comments
 from backend.config.tender_config import (
     get_anchor_target_sizes,
+    get_protected_field_profile,
 )
 from backend.util.word_util import (
     create_word_application,
@@ -49,10 +50,7 @@ from backend.util.word_util.anchor_utils import (
 from backend.util.log_util.progress_log import progress_log
 
 from backend.helper.word_helper.range_utils import (
-    is_range_locked,
     is_locked_exception,
-    range_overlaps,
-    is_protected_range,
     find_editable_insertion_pos,
     find_next_editable_pos,
     find_next_editable_pos_bounded,
@@ -65,11 +63,8 @@ from backend.helper.word_helper.text_parsing import (
     split_text_by_keywords,
 )
 from backend.helper.word_helper.protected_fields import (
-    scan_protected_fields_in_range,
-    collect_protected_fields,
-    refresh_protected_fields,
-    collect_suspicious_protected_field_hits,
-    format_missing_protected_field_error,
+    collect_profile_protected_fields,
+    refresh_profile_protected_fields,
     normalize_protected_field_paragraphs,
     resolve_block_flow,
     refind_protected_paragraph,
@@ -88,85 +83,17 @@ from backend.helper.word_helper.cleanup_ops import (
 )
 
 
-DELIVERY_DATE_MARKER = "交付日期："
-PAYMENT_METHOD_MARKER = "付款方式："
-REQUIRED_PROTECTED_FIELD_MARKERS = (
-    DELIVERY_DATE_MARKER,
-    PAYMENT_METHOD_MARKER,
+COMMON_TWO_FIELD_PROFILE = get_protected_field_profile("xjcg")
+DELIVERY_DATE_MARKER, PAYMENT_METHOD_MARKER = (
+    COMMON_TWO_FIELD_PROFILE.ordered_markers
 )
-PROTECTED_FIELD_SCAN_MARGIN = 400
 
-def _build_scan_ranges(
-    target_range: tuple[int, int] | None = None,
-    fallback_range: tuple[int, int] | None = None,
+
+def split_polished_text_into_blocks(
+    polished_text: str,
     *,
-    range_start: int | None = None,
-    range_end: int | None = None,
-) -> list[tuple[int, int]]:
-    scan_ranges: list[tuple[int, int]] = []
-    if target_range:
-        scan_ranges.append((int(target_range[0]), int(target_range[1])))
-    if fallback_range:
-        scan_ranges.append((int(fallback_range[0]), int(fallback_range[1])))
-    if range_start is not None and range_end is not None:
-        scan_ranges.append((int(range_start), int(range_end)))
-    return scan_ranges
-
-
-def _require_all_protected_fields(
-    protected_fields: Dict[str, Any],
-    *,
-    doc=None,
-    scan_ranges: list[tuple[int, int]] | None = None,
-) -> None:
-    missing = [
-        marker
-        for marker in REQUIRED_PROTECTED_FIELD_MARKERS
-        if marker not in protected_fields
-    ]
-    if not missing:
-        return
-    suspicious_hits = (
-        collect_suspicious_protected_field_hits(doc, missing, scan_ranges or [])
-        if doc is not None
-        else {}
-    )
-    raise ValueError(
-        format_missing_protected_field_error(
-            missing,
-            suspicious_hits,
-            prefix="缺少关键受保护字段",
-        )
-    )
-
-
-def _collect_protected_fields(*args, **kwargs) -> Dict[str, Any]:
-    protected_fields = collect_protected_fields(*args, **kwargs)
-    _require_all_protected_fields(
-        protected_fields,
-        doc=kwargs.get("doc"),
-        scan_ranges=_build_scan_ranges(
-            kwargs.get("target_range"),
-            kwargs.get("fallback_range"),
-        ),
-    )
-    return protected_fields
-
-
-def _refresh_protected_fields(*args, **kwargs) -> Dict[str, Any]:
-    protected_fields = refresh_protected_fields(*args, **kwargs)
-    _require_all_protected_fields(
-        protected_fields,
-        doc=kwargs.get("doc"),
-        scan_ranges=_build_scan_ranges(
-            range_start=kwargs.get("range_start"),
-            range_end=kwargs.get("range_end"),
-        ),
-    )
-    return protected_fields
-
-
-def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
+    profile=COMMON_TWO_FIELD_PROFILE,
+) -> Dict[str, Any]:
     """
     将修改文本按关键字（交付日期、付款方式）拆分为三个块。
 
@@ -186,24 +113,25 @@ def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
         - block2: 交付日期和付款方式之间的内容
         - block3: 付款方式之后的内容
     """
+    delivery_marker, payment_marker = profile.ordered_markers
     split_data = split_text_by_keywords(
         polished_text,
-        REQUIRED_PROTECTED_FIELD_MARKERS,
+        profile.ordered_markers,
         strip_empty_lines=True,
-        require_all=True,
-        require_order=True,
+        require_all=profile.require_all,
+        require_order=profile.require_order,
     )
     content_list = split_data["content_list"]
     keyword_lines = split_data["keyword_lines"]
     keyword_parsed = split_data["keyword_parsed"]
     blocks = split_data["blocks"]
 
-    delivery_date_line = keyword_lines[DELIVERY_DATE_MARKER]
-    payment_method_line = keyword_lines[PAYMENT_METHOD_MARKER]
-    delivery_prefix = str(keyword_parsed[DELIVERY_DATE_MARKER].get("prefix") or "")
-    delivery_value = keyword_parsed[DELIVERY_DATE_MARKER].get("value")
-    payment_prefix = str(keyword_parsed[PAYMENT_METHOD_MARKER].get("prefix") or "")
-    payment_value = keyword_parsed[PAYMENT_METHOD_MARKER].get("value")
+    delivery_date_line = keyword_lines[delivery_marker]
+    payment_method_line = keyword_lines[payment_marker]
+    delivery_prefix = str(keyword_parsed[delivery_marker].get("prefix") or "")
+    delivery_value = keyword_parsed[delivery_marker].get("value")
+    payment_prefix = str(keyword_parsed[payment_marker].get("prefix") or "")
+    payment_value = keyword_parsed[payment_marker].get("value")
 
     block1 = blocks[0] if len(blocks) > 0 else []
     block2 = blocks[1] if len(blocks) > 1 else []
@@ -254,6 +182,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     insertion_before_text = state.get("insertion_before_text")
     insertion_after_text = state.get("insertion_after_text")
     tender_type = state.get("tender_type", "xjcg")
+    protected_profile = get_protected_field_profile(str(tender_type or "xjcg"))
 
     if not prepared_doc_path:
         raise ValueError("需要 prepared_doc_path 来插入内容到 Word 文档")
@@ -266,7 +195,10 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
 
     before_size, after_size = get_anchor_target_sizes(str(tender_type or "xjcg"))
 
-    split_result = split_polished_text_into_blocks(polished_text)
+    split_result = split_polished_text_into_blocks(
+        polished_text,
+        profile=protected_profile,
+    )
     content_list = split_result["content_list"]
 
     insertion_log_parts = []
@@ -434,7 +366,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 page_rng = doc.Range(page_start, page_end)
 
                 # 步骤1：优先在目标页定位受保护字段，必要时回查锚点边界范围
-                protected_markers = list(REQUIRED_PROTECTED_FIELD_MARKERS)
+                protected_markers = list(protected_profile.ordered_markers)
                 target_range = (int(page_start), int(page_end))
                 fallback_range = (
                     int(insertion_bound_start),
@@ -457,9 +389,9 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         f"  已预规范化受保护字段冒号 {normalized_marker_count} 处。"
                     )
 
-                protected_fields = _collect_protected_fields(
+                protected_fields = collect_profile_protected_fields(
                     doc=doc,
-                    markers=protected_markers,
+                    profile=protected_profile,
                     target_range=target_range,
                     fallback_range=fallback_range,
                 )
@@ -638,9 +570,9 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     insertion_log_parts.append(
                         f"  重绑前再次规范化受保护字段冒号 {refreshed_marker_count} 处。"
                     )
-                protected_fields = _refresh_protected_fields(
+                protected_fields = refresh_profile_protected_fields(
                     doc=doc,
-                    markers=protected_markers,
+                    profile=protected_profile,
                     range_start=int(insertion_bound_start),
                     range_end=int(get_insertion_bound_end()),
                     existing_fields=protected_fields,

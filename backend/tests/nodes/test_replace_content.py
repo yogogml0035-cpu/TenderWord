@@ -249,7 +249,7 @@ def test_project_name_first_hit_uses_special_then_erp(monkeypatch, tmp_path) -> 
     assert "特殊批注最终落位: 第 1 个正文 project_name 命中" in result["replacement_log"]
 
 
-def test_project_name_first_hit_overwrites_existing_comment(monkeypatch, tmp_path) -> None:
+def test_project_name_first_hit_preserves_existing_comment_and_adds_ai_comment(monkeypatch, tmp_path) -> None:
     body_text = "X <PN> Y"
     body = _FakeStory(story_type=1, text=body_text, page_number=5, offset=0)
     doc = _FakeDocument([body])
@@ -262,9 +262,50 @@ def test_project_name_first_hit_overwrites_existing_comment(monkeypatch, tmp_pat
 
     result = _run_replace_content(monkeypatch, tmp_path=tmp_path, doc=doc)
 
+    assert doc.Comments.Count == 2
+    assert doc.Comments(1).Text == "人工批注"
+    assert doc.Comments(2).Text == replace_content_module.PROJECT_NAME_FIRST_HIT_COMMENT
+    assert "首个候选处理方式: 新增批注" in result["replacement_log"]
+
+
+def test_project_name_first_hit_dedupes_existing_ai_comment_on_nearby_anchor(monkeypatch, tmp_path) -> None:
+    body_text = "X <PN> Y"
+    body = _FakeStory(story_type=1, text=body_text, page_number=6, offset=0)
+    doc = _FakeDocument([body])
+    first_start = body_text.find("<PN>")
+    ai_comment_start = first_start + len("<PN>")
+    doc.Comments.append_existing_comment(
+        start=first_start,
+        end=first_start + len("<PN>"),
+        text="人工批注",
+    )
+    doc.Comments.append_existing_comment(
+        start=ai_comment_start,
+        end=ai_comment_start + 1,
+        text=replace_content_module.PROJECT_NAME_FIRST_HIT_COMMENT,
+    )
+
+    result = _run_replace_content(monkeypatch, tmp_path=tmp_path, doc=doc)
+
+    assert doc.Comments.Count == 2
+    assert doc.Comments(1).Text == "人工批注"
+    assert doc.Comments(2).Text == replace_content_module.PROJECT_NAME_FIRST_HIT_COMMENT
+    assert "首个候选处理方式: 已存在同文案，跳过重复新增" in result["replacement_log"]
+
+
+def test_project_name_first_hit_retries_on_nearby_anchor(monkeypatch, tmp_path) -> None:
+    body_text = "Head <PN> Tail"
+    body = _FakeStory(story_type=1, text=body_text, page_number=7, offset=0)
+    doc = _FakeDocument([body])
+    first_start = body_text.find("<PN>")
+    doc.Comments.fail_on_add_starts.add(first_start)
+
+    result = _run_replace_content(monkeypatch, tmp_path=tmp_path, doc=doc)
+
     assert doc.Comments.Count == 1
     assert doc.Comments(1).Text == replace_content_module.PROJECT_NAME_FIRST_HIT_COMMENT
-    assert "首个候选处理方式: 改写已有批注" in result["replacement_log"]
+    assert doc.Comments(1).Range.Start == first_start + len("P001")
+    assert "首个候选处理方式: 邻位新增批注" in result["replacement_log"]
 
 
 def test_project_name_first_hit_failure_falls_back_to_next_match(monkeypatch, tmp_path) -> None:
@@ -273,7 +314,13 @@ def test_project_name_first_hit_failure_falls_back_to_next_match(monkeypatch, tm
     doc = _FakeDocument([body])
     first_start = body_text.find("<PN>")
     second_start = body_text.find("<PN>", first_start + 1)
-    doc.Comments.fail_on_add_starts.add(first_start)
+    doc.Comments.fail_on_add_starts.update(
+        {
+            first_start - 1,
+            first_start,
+            first_start + len("P001"),
+        }
+    )
 
     result = _run_replace_content(monkeypatch, tmp_path=tmp_path, doc=doc)
 

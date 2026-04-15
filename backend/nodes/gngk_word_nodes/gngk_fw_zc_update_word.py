@@ -20,13 +20,15 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from backend.config.tender_config import get_anchor_target_sizes, get_default_anchor_texts
+from backend.config.tender_config import (
+    get_anchor_target_sizes,
+    get_default_anchor_texts,
+    get_protected_field_profile,
+)
 from backend.nodes.common_word_nodes.comment_writeback import write_polished_comments
 from backend.helper.word_helper.protected_fields import (
-    collect_protected_fields as _base_collect_protected_fields,
-    refresh_protected_fields as _base_refresh_protected_fields,
-    collect_suspicious_protected_field_hits,
-    format_missing_protected_field_error,
+    collect_profile_protected_fields,
+    refresh_profile_protected_fields,
     normalize_protected_field_paragraphs,
     refind_protected_paragraph,
     insert_prefix_before_keyword,
@@ -86,13 +88,9 @@ from backend.util.word_util.anchor_utils import (
 )
 
 
-SERVICE_LOCATION_MARKER = "服务地点："
-SERVICE_TERM_MARKER = "服务期限："
-PAYMENT_METHOD_MARKER = "付款方式："
-PROTECTED_FIELD_MARKERS = (
-    SERVICE_LOCATION_MARKER,
-    SERVICE_TERM_MARKER,
-    PAYMENT_METHOD_MARKER,
+GNGK_THREE_FIELD_PROFILE = get_protected_field_profile("gngk_fw_zc")
+SERVICE_LOCATION_MARKER, SERVICE_TERM_MARKER, PAYMENT_METHOD_MARKER = (
+    GNGK_THREE_FIELD_PROFILE.ordered_markers
 )
 NODE_NAME = "gngk_fw_zc_update_word"
 DEFAULT_MANUAL_TEST_SOURCE_DOC = (
@@ -147,62 +145,11 @@ def _resolve_block4_insert_start(payment_end: int, bound_end: int) -> int:
     return min(payment_end, bound_end)
 
 
-def _require_all_protected_fields(
-    protected_fields: Dict[str, Any],
+def split_polished_text_into_blocks(
+    polished_text: str,
     *,
-    doc=None,
-    scan_ranges: list[tuple[int, int]] | None = None,
-) -> None:
-    missing = [
-        marker for marker in PROTECTED_FIELD_MARKERS if marker not in protected_fields
-    ]
-    if not missing:
-        return
-    suspicious_hits = (
-        collect_suspicious_protected_field_hits(doc, missing, scan_ranges or [])
-        if doc is not None
-        else {}
-    )
-    raise ValueError(
-        format_missing_protected_field_error(
-            missing,
-            suspicious_hits,
-            prefix="缺少关键受保护字段",
-        )
-    )
-
-
-def _collect_protected_fields(*args, **kwargs) -> Dict[str, Any]:
-    protected_fields = _base_collect_protected_fields(*args, **kwargs)
-    _require_all_protected_fields(
-        protected_fields,
-        doc=kwargs.get("doc"),
-        scan_ranges=[
-            tuple(kwargs["target_range"]),
-            tuple(kwargs["fallback_range"]),
-        ]
-        if kwargs.get("fallback_range")
-        else [tuple(kwargs["target_range"])],
-    )
-    return protected_fields
-
-
-def _refresh_protected_fields(*args, **kwargs) -> Dict[str, Any]:
-    protected_fields = _base_refresh_protected_fields(*args, **kwargs)
-    _require_all_protected_fields(
-        protected_fields,
-        doc=kwargs.get("doc"),
-        scan_ranges=[
-            (
-                int(kwargs.get("range_start", 0)),
-                int(kwargs.get("range_end", 0)),
-            )
-        ],
-    )
-    return protected_fields
-
-
-def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
+    profile=GNGK_THREE_FIELD_PROFILE,
+) -> Dict[str, Any]:
     """
     将 `gngk_fw_zc` 的 polished_text 按服务三字段拆成四个块。
 
@@ -213,13 +160,16 @@ def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
     if not str(polished_text or "").strip():
         raise ValueError("polished_text 为空，无法拆分服务三字段内容")
 
+    service_location_marker, service_term_marker, payment_method_marker = (
+        profile.ordered_markers
+    )
     try:
         split_data = split_text_by_keywords(
             polished_text,
-            PROTECTED_FIELD_MARKERS,
+            profile.ordered_markers,
             strip_empty_lines=True,
-            require_all=True,
-            require_order=True,
+            require_all=profile.require_all,
+            require_order=profile.require_order,
         )
     except ValueError as error:
         message = str(error)
@@ -234,16 +184,16 @@ def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
     keyword_parsed = split_data["keyword_parsed"]
     blocks = split_data["blocks"]
 
-    service_location_line = keyword_lines[SERVICE_LOCATION_MARKER]
-    service_term_line = keyword_lines[SERVICE_TERM_MARKER]
-    payment_method_line = keyword_lines[PAYMENT_METHOD_MARKER]
+    service_location_line = keyword_lines[service_location_marker]
+    service_term_line = keyword_lines[service_term_marker]
+    payment_method_line = keyword_lines[payment_method_marker]
 
-    service_location_prefix = str(keyword_parsed[SERVICE_LOCATION_MARKER].get("prefix") or "")
-    service_location_value = keyword_parsed[SERVICE_LOCATION_MARKER].get("value")
-    service_term_prefix = str(keyword_parsed[SERVICE_TERM_MARKER].get("prefix") or "")
-    service_term_value = keyword_parsed[SERVICE_TERM_MARKER].get("value")
-    payment_prefix = str(keyword_parsed[PAYMENT_METHOD_MARKER].get("prefix") or "")
-    payment_value = keyword_parsed[PAYMENT_METHOD_MARKER].get("value")
+    service_location_prefix = str(keyword_parsed[service_location_marker].get("prefix") or "")
+    service_location_value = keyword_parsed[service_location_marker].get("value")
+    service_term_prefix = str(keyword_parsed[service_term_marker].get("prefix") or "")
+    service_term_value = keyword_parsed[service_term_marker].get("value")
+    payment_prefix = str(keyword_parsed[payment_method_marker].get("prefix") or "")
+    payment_value = keyword_parsed[payment_method_marker].get("value")
 
     return {
         "content_list": content_list,
@@ -289,6 +239,7 @@ def gngk_fw_zc_update_word(
     insertion_before_text = state.get("insertion_before_text")
     insertion_after_text = state.get("insertion_after_text")
     tender_type = state.get("tender_type", "gngk_fw_zc")
+    protected_profile = get_protected_field_profile(str(tender_type or "gngk_fw_zc"))
 
     if not prepared_doc_path:
         raise ValueError("需要 prepared_doc_path 来插入内容到 Word 文档")
@@ -300,7 +251,10 @@ def gngk_fw_zc_update_word(
         )
 
     before_size, after_size = get_anchor_target_sizes(str(tender_type or "gngk_fw_zc"))
-    split_result = split_polished_text_into_blocks(polished_text)
+    split_result = split_polished_text_into_blocks(
+        polished_text,
+        profile=protected_profile,
+    )
 
     insertion_log_parts: list[str] = []
     word = None
@@ -443,7 +397,7 @@ def gngk_fw_zc_update_word(
                 raise ValueError(f"目标页 {target_page} 范围为空，无法定位受保护字段")
 
             if page_end > page_start:
-                protected_markers = list(PROTECTED_FIELD_MARKERS)
+                protected_markers = list(protected_profile.ordered_markers)
                 target_range = (int(page_start), int(page_end))
                 fallback_range = (
                     int(insertion_bound_start),
@@ -466,9 +420,9 @@ def gngk_fw_zc_update_word(
                         f"  已预规范化服务三字段冒号 {normalized_marker_count} 处。"
                     )
 
-                protected_fields = _collect_protected_fields(
+                protected_fields = collect_profile_protected_fields(
                     doc=doc,
-                    markers=protected_markers,
+                    profile=protected_profile,
                     target_range=target_range,
                     fallback_range=fallback_range,
                 )
@@ -553,9 +507,9 @@ def gngk_fw_zc_update_word(
                     insertion_log_parts.append(
                         f"  重绑前再次规范化服务三字段冒号 {refreshed_marker_count} 处。"
                     )
-                protected_fields = _refresh_protected_fields(
+                protected_fields = refresh_profile_protected_fields(
                     doc=doc,
-                    markers=protected_markers,
+                    profile=protected_profile,
                     range_start=int(insertion_bound_start),
                     range_end=int(get_insertion_bound_end()),
                     existing_fields=protected_fields,
@@ -1629,10 +1583,9 @@ def main() -> None:
 
 
 __all__ = [
-    "PROTECTED_FIELD_MARKERS",
+    "GNGK_THREE_FIELD_PROFILE",
     "gngk_fw_zc_update_word",
     "split_polished_text_into_blocks",
-    "_require_all_protected_fields",
     "_convert_lines_to_items",
     "_resolve_block4_insert_start",
     "_validate_block_window",

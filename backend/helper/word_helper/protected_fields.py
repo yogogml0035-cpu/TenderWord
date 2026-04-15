@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from backend.config.tender_config import ProtectedFieldProfile
 from backend.util.word_util import wdCollapseEnd, wdFindStop, wdWithInTable
 
 CANONICAL_PROTECTED_FIELD_COLON = "："
@@ -209,6 +210,53 @@ def format_missing_protected_field_error(
     return message
 
 
+def build_protected_field_scan_ranges(
+    target_range: tuple[int, int] | None = None,
+    fallback_range: tuple[int, int] | None = None,
+    *,
+    range_start: int | None = None,
+    range_end: int | None = None,
+) -> list[tuple[int, int]]:
+    scan_ranges: list[tuple[int, int]] = []
+    if target_range:
+        scan_ranges.append((int(target_range[0]), int(target_range[1])))
+    if fallback_range:
+        scan_ranges.append((int(fallback_range[0]), int(fallback_range[1])))
+    if range_start is not None and range_end is not None:
+        scan_ranges.append((int(range_start), int(range_end)))
+    return scan_ranges
+
+
+def validate_profile_required_protected_fields(
+    protected_fields: Dict[str, Any],
+    profile: ProtectedFieldProfile,
+    *,
+    doc=None,
+    scan_ranges: Sequence[tuple[int, int]] | None = None,
+    prefix: str = "缺少关键受保护字段",
+) -> None:
+    if not profile.require_all:
+        return
+
+    required_markers = normalize_protected_field_markers(profile.ordered_markers)
+    missing = [marker for marker in required_markers if marker not in protected_fields]
+    if not missing:
+        return
+
+    suspicious_hits = (
+        collect_suspicious_protected_field_hits(doc, missing, scan_ranges or [])
+        if doc is not None
+        else {}
+    )
+    raise ValueError(
+        format_missing_protected_field_error(
+            missing,
+            suspicious_hits,
+            prefix=prefix,
+        )
+    )
+
+
 def _is_table_paragraph(para_rng: Any) -> bool:
     try:
         return bool(para_rng.Information(wdWithInTable))
@@ -375,6 +423,64 @@ def validate_required_protected_fields(
                 prefix="缺少关键受保护字段",
             )
         )
+
+
+def collect_profile_protected_fields(
+    doc,
+    *,
+    profile: ProtectedFieldProfile,
+    target_range: tuple[int, int],
+    fallback_range: Optional[tuple[int, int]],
+    boundary_margin: int = PROTECTED_FIELD_SCAN_MARGIN,
+    prefix: str = "缺少关键受保护字段",
+) -> Dict[str, Any]:
+    protected_fields = collect_protected_fields(
+        doc=doc,
+        markers=list(profile.ordered_markers),
+        target_range=target_range,
+        fallback_range=fallback_range,
+        boundary_margin=boundary_margin,
+    )
+    validate_profile_required_protected_fields(
+        protected_fields,
+        profile,
+        doc=doc,
+        scan_ranges=build_protected_field_scan_ranges(
+            target_range=target_range,
+            fallback_range=fallback_range,
+        ),
+        prefix=prefix,
+    )
+    return protected_fields
+
+
+def refresh_profile_protected_fields(
+    doc,
+    *,
+    profile: ProtectedFieldProfile,
+    range_start: int,
+    range_end: int,
+    existing_fields: Optional[Dict[str, Any]] = None,
+    prefix: str = "缺少关键受保护字段",
+) -> Dict[str, Any]:
+    protected_fields = refresh_protected_fields(
+        doc=doc,
+        markers=list(profile.ordered_markers),
+        range_start=range_start,
+        range_end=range_end,
+        existing_fields=existing_fields,
+    )
+    validate_profile_required_protected_fields(
+        protected_fields,
+        profile,
+        doc=doc,
+        scan_ranges=build_protected_field_scan_ranges(
+            range_start=range_start,
+            range_end=range_end,
+        ),
+        prefix=prefix,
+    )
+    return protected_fields
 
 
 def resolve_block_flow(protected_fields: Dict[str, Any]) -> Dict[str, Any]:

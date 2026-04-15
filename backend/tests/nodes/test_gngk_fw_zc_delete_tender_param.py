@@ -7,20 +7,22 @@ gngk_fw_zc_delete_tender_param 节点的单元测试。
 
 from __future__ import annotations
 
-import importlib
+import pytest
 
+from backend.config.tender_config import get_protected_field_profile
 from backend.helper.word_helper.cleanup_ops import (
     normalize_cleanup_text,
     is_effectively_empty_text,
+)
+from backend.helper.word_helper.protected_fields import (
+    validate_profile_required_protected_fields,
 )
 from backend.helper.word_helper.range_utils import (
     range_overlaps,
     is_protected_range,
 )
 
-delete_module = importlib.import_module(
-    "backend.nodes.gngk_word_nodes.gngk_fw_zc_delete_tender_param"
-)
+GNGK_THREE_FIELD_PROFILE = get_protected_field_profile("gngk_fw_zc")
 
 
 def test_normalize_cleanup_text_removes_invisible_chars() -> None:
@@ -93,16 +95,16 @@ def test_visible_text_empty() -> None:
 
 
 def test_require_all_protected_fields_raises_on_missing() -> None:
-    import pytest
-
     with pytest.raises(ValueError, match="缺少关键受保护字段: 付款方式："):
-        delete_module._require_all_protected_fields(
+        validate_profile_required_protected_fields(
             {"服务地点：": None, "服务期限：": None},
+            GNGK_THREE_FIELD_PROFILE,
         )
 
 
 def test_require_all_protected_fields_passes_when_all_present() -> None:
     # Should not raise
-    delete_module._require_all_protected_fields(
+    validate_profile_required_protected_fields(
         {"服务地点：": None, "服务期限：": None, "付款方式：": None},
+        GNGK_THREE_FIELD_PROFILE,
     )

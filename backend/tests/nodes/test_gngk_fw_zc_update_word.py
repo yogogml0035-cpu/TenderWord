@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import pytest
 
+from backend.config.tender_config import get_protected_field_profile
+from backend.helper.word_helper.protected_fields import (
+    refresh_profile_protected_fields,
+    validate_profile_required_protected_fields,
+)
 from backend.nodes.gngk_word_nodes.gngk_fw_zc_update_word import (
-    _refresh_protected_fields,
     _convert_lines_to_items,
-    _require_all_protected_fields,
     _resolve_block4_insert_start,
     _validate_block_window,
     split_polished_text_into_blocks,
 )
 from backend.helper.word_helper.cleanup_ops import is_effectively_empty_text
 from backend.util.word_util import wdWithInTable
+
+GNGK_THREE_FIELD_PROFILE = get_protected_field_profile("gngk_fw_zc")
 
 
 def test_split_polished_text_into_blocks_splits_service_three_field_flow() -> None:
@@ -67,13 +72,14 @@ def test_split_polished_text_into_blocks_rejects_missing_or_out_of_order_fields(
         )
 
 
-def test_require_all_protected_fields_raises_when_service_field_missing() -> None:
+def test_validate_profile_required_protected_fields_raises_when_service_field_missing() -> None:
     with pytest.raises(ValueError, match="缺少关键受保护字段: 服务期限："):
-        _require_all_protected_fields(
+        validate_profile_required_protected_fields(
             {
                 "服务地点：": object(),
                 "付款方式：": object(),
-            }
+            },
+            GNGK_THREE_FIELD_PROFILE,
         )
 
 
@@ -237,9 +243,9 @@ def test_refresh_protected_fields_fails_fast_when_only_fuzzy_hits_exist() -> Non
     )
 
     with pytest.raises(ValueError, match="缺少关键受保护字段: 服务期限："):
-        _refresh_protected_fields(
+        refresh_profile_protected_fields(
             doc=doc,
-            markers=["服务地点：", "服务期限：", "付款方式："],
+            profile=GNGK_THREE_FIELD_PROFILE,
             range_start=0,
             range_end=10_000,
             existing_fields={},

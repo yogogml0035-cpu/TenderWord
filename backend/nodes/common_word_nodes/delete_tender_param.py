@@ -26,7 +26,9 @@ from backend.config.tender_config import (
     get_anchor_target_sizes,
     get_content_update_mode,
     get_default_anchor_texts,
+    get_protected_field_profile,
 )
+from backend.helper.word_helper.protected_fields import extract_protected_field_name
 from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
     create_word_application,
@@ -51,6 +53,20 @@ from backend.helper.word_helper.range_utils import (
 
 NODE_NAME = "delete_tender_param"
 HEARTBEAT_INTERVAL_SECONDS = 5.0
+COMMON_TWO_FIELD_PROFILE = get_protected_field_profile("xjcg")
+DELIVERY_DATE_MARKER, PAYMENT_METHOD_MARKER = (
+    COMMON_TWO_FIELD_PROFILE.ordered_markers
+)
+DELIVERY_DATE_FIELD_NAME = extract_protected_field_name(DELIVERY_DATE_MARKER)
+PAYMENT_METHOD_FIELD_NAME = extract_protected_field_name(PAYMENT_METHOD_MARKER)
+DELIVERY_DATE_MARKER_VARIANTS = (
+    DELIVERY_DATE_MARKER,
+    DELIVERY_DATE_MARKER.replace("：", ":"),
+)
+PAYMENT_METHOD_MARKER_VARIANTS = (
+    PAYMENT_METHOD_MARKER,
+    PAYMENT_METHOD_MARKER.replace("：", ":"),
+)
 
 
 def _visible_log(message: str) -> None:
@@ -178,7 +194,7 @@ def _insert_paragraph_break_before_delivery(
                 doc,
                 paragraph_candidates,
                 max_forward_scan_chars=24 if _uses_wide_scan_window(tender_type) else 8,
-                field_name="交付日期",
+                field_name=DELIVERY_DATE_FIELD_NAME,
                 log=log,
             )
             if safe_insert_pos is not None:
@@ -194,7 +210,7 @@ def _insert_paragraph_break_before_delivery(
         doc,
         [fallback_pos],
         max_forward_scan_chars=24 if _uses_wide_scan_window(tender_type) else 8,
-        field_name="交付日期",
+        field_name=DELIVERY_DATE_FIELD_NAME,
         log=log,
     )
     if fallback_insert_pos is None:
@@ -242,7 +258,7 @@ def _ensure_paragraph_break_after_payment(
         doc,
         range(payment_end, max_pos + 1),
         max_forward_scan_chars=8 if _uses_wide_scan_window(tender_type) else 0,
-        field_name="付款方式",
+        field_name=PAYMENT_METHOD_FIELD_NAME,
         log=log,
     )
     if safe_insert_pos is None:
@@ -283,18 +299,18 @@ def _restore_protected_field_paragraph_boundaries(
 
     delivery_para_rng = _find_paragraph_containing_any(
         doc,
-        ("交付日期：", "交付日期:"),
+        DELIVERY_DATE_MARKER_VARIANTS,
         min_start=search_start,
         max_start=search_end,
     )
     if log:
-        log('开始修复"交付日期"前的段落边界')
+        log(f'开始修复"{DELIVERY_DATE_FIELD_NAME}"前的段落边界')
     if delivery_para_rng is None:
         print(
-            '[delete_tender_param] 提示: 在局部扫描范围内未找到"交付日期"锚点，回退到删除起点补段落边界'
+            f'[delete_tender_param] 提示: 在局部扫描范围内未找到"{DELIVERY_DATE_FIELD_NAME}"锚点，回退到删除起点补段落边界'
         )
         if log:
-            log('在局部扫描范围内未找到"交付日期"字段，回退到删除起点补段落边界')
+            log(f'在局部扫描范围内未找到"{DELIVERY_DATE_FIELD_NAME}"字段，回退到删除起点补段落边界')
     delivery_fixed = _insert_paragraph_break_before_delivery(
         doc,
         delivery_para_rng,
@@ -303,26 +319,26 @@ def _restore_protected_field_paragraph_boundaries(
         log=log,
     )
     if delivery_fixed:
-        print('[delete_tender_param] 已补齐"交付日期"前的段落边界')
+        print(f'[delete_tender_param] 已补齐"{DELIVERY_DATE_FIELD_NAME}"前的段落边界')
         if log:
-            log('已补齐"交付日期"前的段落边界')
+            log(f'已补齐"{DELIVERY_DATE_FIELD_NAME}"前的段落边界')
     else:
-        print('[delete_tender_param] 警告: 未能补齐"交付日期"前的段落边界')
+        print(f'[delete_tender_param] 警告: 未能补齐"{DELIVERY_DATE_FIELD_NAME}"前的段落边界')
         if log:
-            log('未能补齐"交付日期"前的段落边界')
+            log(f'未能补齐"{DELIVERY_DATE_FIELD_NAME}"前的段落边界')
 
     payment_para_rng = _find_paragraph_containing_any(
         doc,
-        ("付款方式：", "付款方式:"),
+        PAYMENT_METHOD_MARKER_VARIANTS,
         min_start=search_start,
         max_start=search_end,
     )
     if log:
-        log('开始修复"付款方式"后的回车')
+        log(f'开始修复"{PAYMENT_METHOD_FIELD_NAME}"后的回车')
     if payment_para_rng is None:
-        print('[delete_tender_param] 提示: 在局部扫描范围内未找到"付款方式"锚点，跳过补回车')
+        print(f'[delete_tender_param] 提示: 在局部扫描范围内未找到"{PAYMENT_METHOD_FIELD_NAME}"锚点，跳过补回车')
         if log:
-            log('在局部扫描范围内未找到"付款方式"字段，跳过补回车')
+            log(f'在局部扫描范围内未找到"{PAYMENT_METHOD_FIELD_NAME}"字段，跳过补回车')
         return
 
     if _ensure_paragraph_break_after_payment(
@@ -331,13 +347,13 @@ def _restore_protected_field_paragraph_boundaries(
         tender_type=tender_type,
         log=log,
     ):
-        print('[delete_tender_param] 已补齐"付款方式"后的回车')
+        print(f'[delete_tender_param] 已补齐"{PAYMENT_METHOD_FIELD_NAME}"后的回车')
         if log:
-            log('已补齐"付款方式"后的回车')
+            log(f'已补齐"{PAYMENT_METHOD_FIELD_NAME}"后的回车')
     else:
-        print('[delete_tender_param] 提示: "付款方式"后已存在回车或未找到可编辑位置')
+        print(f'[delete_tender_param] 提示: "{PAYMENT_METHOD_FIELD_NAME}"后已存在回车或未找到可编辑位置')
         if log:
-            log('"付款方式"后已存在回车或未找到可编辑位置')
+            log(f'"{PAYMENT_METHOD_FIELD_NAME}"后已存在回车或未找到可编辑位置')
 
 
 def delete_tender_param(state: TenderGraphStateBase, config) -> TenderGraphStateBase:

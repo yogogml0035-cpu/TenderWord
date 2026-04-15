@@ -91,12 +91,13 @@ def _get_comment_range(comment: Any) -> Any | None:
     return None
 
 
-def _find_overlapping_comment(doc, target_rng) -> Any | None:
+def _get_overlapping_comments(doc, target_rng) -> list[Any]:
+    overlapping_comments: list[Any] = []
     try:
         comments = doc.Comments
         count = int(comments.Count)
     except Exception:
-        return None
+        return overlapping_comments
 
     for idx in range(1, count + 1):
         try:
@@ -117,30 +118,114 @@ def _find_overlapping_comment(doc, target_rng) -> Any | None:
             continue
 
         if _ranges_overlap(comment_start, comment_end, target_start, target_end):
-            return comment
+            overlapping_comments.append(comment)
 
-    return None
+    return overlapping_comments
 
 
-def _overwrite_comment_text(comment: Any, text: str) -> None:
-    set_text = str(text)
-    errors: list[Exception] = []
+def _normalize_comment_text(text: Any) -> str:
+    value = str(text or "")
+    return value.replace("\x07", "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def _get_comment_text(comment: Any) -> str:
+    for getter in (
+        lambda: comment.Text,
+        lambda: comment.Range.Text,
+    ):
+        try:
+            return _normalize_comment_text(getter())
+        except Exception:
+            continue
+
+    return ""
+
+
+def _build_adjacent_comment_ranges(target_rng) -> list[Any]:
+    candidate_ranges: list[Any] = []
+    seen_positions: set[tuple[int, int]] = set()
 
     try:
-        comment.Range.Text = set_text
-        return
-    except Exception as exc:
-        errors.append(exc)
+        target_start = int(target_rng.Start)
+        target_end = int(target_rng.End)
+    except Exception:
+        return candidate_ranges
+
+    for start, end in (
+        (target_end, target_end + 1),
+        (target_start - 1, target_start),
+    ):
+        if start < 0 or end <= start:
+            continue
+
+        try:
+            candidate_rng = target_rng.Duplicate
+            candidate_rng.Start = start
+            candidate_rng.End = end
+            candidate_start = int(candidate_rng.Start)
+            candidate_end = int(candidate_rng.End)
+            candidate_text = str(candidate_rng.Text or "")
+        except Exception:
+            continue
+
+        position_key = (candidate_start, candidate_end)
+        if candidate_end <= candidate_start or not candidate_text or position_key in seen_positions:
+            continue
+
+        seen_positions.add(position_key)
+        candidate_ranges.append(candidate_rng)
+
+    return candidate_ranges
+
+
+def _has_comment_with_text_on_ranges(doc, target_ranges: list[Any], text: str) -> bool:
+    normalized_target_text = _normalize_comment_text(text)
+    if not normalized_target_text:
+        return False
+
+    seen_comment_ids: set[int] = set()
+    for target_rng in target_ranges:
+        for comment in _get_overlapping_comments(doc, target_rng):
+            comment_id = id(comment)
+            if comment_id in seen_comment_ids:
+                continue
+            seen_comment_ids.add(comment_id)
+            if _get_comment_text(comment) == normalized_target_text:
+                return True
+
+    return False
+
+
+def _add_project_name_first_hit_comment(doc, target_rng) -> str:
+    candidate_ranges = [target_rng.Duplicate]
+    candidate_ranges.extend(_build_adjacent_comment_ranges(target_rng))
+
+    if _has_comment_with_text_on_ranges(doc, candidate_ranges, PROJECT_NAME_FIRST_HIT_COMMENT):
+        return "已存在同文案，跳过重复新增"
 
     try:
-        comment.Text = set_text
-        return
-    except Exception as exc:
-        errors.append(exc)
+        doc.Comments.Add(
+            Range=target_rng.Duplicate,
+            Text=PROJECT_NAME_FIRST_HIT_COMMENT,
+        )
+        return "新增批注"
+    except Exception as primary_error:
+        last_error: Exception = primary_error
 
-    if errors:
-        raise RuntimeError(f"改写已有批注失败: {errors[-1]}") from errors[-1]
-    raise RuntimeError("改写已有批注失败: 未知错误")
+    for candidate_rng in candidate_ranges[1:]:
+        if _get_overlapping_comments(doc, candidate_rng):
+            continue
+
+        try:
+            doc.Comments.Add(
+                Range=candidate_rng.Duplicate,
+                Text=PROJECT_NAME_FIRST_HIT_COMMENT,
+            )
+            return "邻位新增批注"
+        except Exception as candidate_error:
+            last_error = candidate_error
+
+    raise RuntimeError(f"原范围新增失败且邻位重试未成功: {last_error}") from last_error
 
 
 def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
@@ -386,18 +471,9 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
                                     project_name_comment_tracker["first_candidate_page"] = page_num
 
                                 try:
-                                    existing_comment = _find_overlapping_comment(doc, search_rng)
-                                    if existing_comment is not None:
-                                        _overwrite_comment_text(existing_comment, PROJECT_NAME_FIRST_HIT_COMMENT)
-                                        comment_write_mode = "改写已有批注"
-                                    else:
-                                        doc.Comments.Add(
-                                            Range=search_rng.Duplicate,
-                                            Text=PROJECT_NAME_FIRST_HIT_COMMENT,
-                                        )
-                                        comment_write_mode = "新增批注"
-
-                                    total_stats["total_comment_added"] += 1
+                                    comment_write_mode = _add_project_name_first_hit_comment(doc, search_rng)
+                                    if comment_write_mode != "已存在同文案，跳过重复新增":
+                                        total_stats["total_comment_added"] += 1
                                     project_name_comment_tracker["final_success"] = True
                                     project_name_comment_tracker["final_mode"] = comment_write_mode
                                     project_name_comment_tracker["final_hit_index"] = current_hit_index

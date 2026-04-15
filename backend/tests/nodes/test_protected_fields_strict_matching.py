@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from backend.config.tender_config import get_protected_field_profile
 from backend.helper.word_helper.protected_fields import (
     collect_protected_fields,
+    collect_profile_protected_fields,
     match_protected_field_line,
     normalize_protected_field_paragraphs,
     normalize_protected_field_text,
@@ -15,6 +17,7 @@ from backend.util.word_util import wdCollapseEnd, wdWithInTable
 DELIVERY_DATE_MARKER = "交付日期："
 PAYMENT_METHOD_MARKER = "付款方式："
 SERVICE_TERM_MARKER = "服务期限："
+COMMON_TWO_FIELD_PROFILE = get_protected_field_profile("xjcg")
 
 
 @dataclass
@@ -247,6 +250,30 @@ def test_normalize_protected_field_paragraphs_and_collect_refresh_use_canonical_
     )
     assert set(refreshed.keys()) == {DELIVERY_DATE_MARKER, PAYMENT_METHOD_MARKER}
     assert refreshed[PAYMENT_METHOD_MARKER].Text == "付款方式：按季度结算"
+
+
+def test_collect_profile_protected_fields_fails_fast_with_suspicious_hits() -> None:
+    doc = _FakeDoc(
+        [
+            ("本项目交付日期：合同签订后30天", False),
+            ("付款方式：按季度结算", False),
+        ]
+    )
+
+    try:
+        collect_profile_protected_fields(
+            doc=doc,
+            profile=COMMON_TWO_FIELD_PROFILE,
+            target_range=(0, 10_000),
+            fallback_range=None,
+        )
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected collect_profile_protected_fields to fail fast")
+
+    assert "缺少关键受保护字段: 交付日期：" in message
+    assert "可疑命中: 交付日期： -> 本项目交付日期：合同签订后30天" in message
 
 
 def test_refind_protected_paragraph_skips_table_hits_and_returns_strict_line() -> None:

@@ -26,6 +26,14 @@ class TenderAnchorConfig:
     content_update_mode: str = CONTENT_UPDATE_MODE_PROTECTED_FIELDS
 
 
+@dataclass(frozen=True)
+class ProtectedFieldProfile:
+    key: str
+    ordered_markers: tuple[str, ...]
+    require_all: bool = True
+    require_order: bool = True
+
+
 # 历史单字号配置仍保留给旧逻辑/默认回退使用，避免误伤现有类型。
 TARGET_SIZES: Dict[str, float] = {
     "xjcg": 18.0,
@@ -40,6 +48,8 @@ TARGET_SIZES: Dict[str, float] = {
 
 
 DEFAULT_TENDER_TYPE = "xjcg"
+COMMON_TWO_FIELD_PROFILE_KEY = "common_two_field"
+GNGK_THREE_FIELD_PROFILE_KEY = "gngk_three_field"
 GNGK_TENDER_TYPES = frozenset(
     {
         "gngk",
@@ -111,6 +121,21 @@ ANCHOR_CONFIGS: Dict[str, TenderAnchorConfig] = {
     ),
 }
 
+PROTECTED_FIELD_PROFILES: Dict[str, ProtectedFieldProfile] = {
+    COMMON_TWO_FIELD_PROFILE_KEY: ProtectedFieldProfile(
+        key=COMMON_TWO_FIELD_PROFILE_KEY,
+        ordered_markers=("交付日期：", "付款方式："),
+    ),
+    GNGK_THREE_FIELD_PROFILE_KEY: ProtectedFieldProfile(
+        key=GNGK_THREE_FIELD_PROFILE_KEY,
+        ordered_markers=("服务地点：", "服务期限：", "付款方式："),
+    ),
+}
+
+PROTECTED_FIELD_PROFILE_OVERRIDES: Dict[str, str] = {
+    "gngk_fw_zc": GNGK_THREE_FIELD_PROFILE_KEY,
+}
+
 
 def get_anchor_config(tender_type: str) -> TenderAnchorConfig:
     normalized_type = str(tender_type or "").strip() or DEFAULT_TENDER_TYPE
@@ -153,6 +178,24 @@ def get_content_start_mode(tender_type: str) -> str:
 def get_content_update_mode(tender_type: str) -> str:
     anchor_config = get_anchor_config(tender_type)
     return anchor_config.content_update_mode
+
+
+def get_protected_field_profile(tender_type: str) -> ProtectedFieldProfile:
+    normalized_type = str(tender_type or "").strip() or DEFAULT_TENDER_TYPE
+    content_update_mode = get_content_update_mode(normalized_type)
+    if content_update_mode != CONTENT_UPDATE_MODE_PROTECTED_FIELDS:
+        raise ValueError(
+            f"招标类型 {normalized_type} 使用 {content_update_mode} 模式，不支持受保护字段 profile"
+        )
+
+    profile_key = PROTECTED_FIELD_PROFILE_OVERRIDES.get(
+        normalized_type,
+        COMMON_TWO_FIELD_PROFILE_KEY,
+    )
+    profile = PROTECTED_FIELD_PROFILES.get(profile_key)
+    if profile is None:
+        raise ValueError(f"未找到受保护字段 profile: {profile_key}")
+    return profile
 
 
 def get_target_size(tender_type: str) -> float:
