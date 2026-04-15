@@ -25,7 +25,9 @@ from backend.nodes.common_word_nodes.comment_writeback import write_polished_com
 from backend.helper.word_helper.protected_fields import (
     collect_protected_fields as _base_collect_protected_fields,
     refresh_protected_fields as _base_refresh_protected_fields,
-    validate_required_protected_fields,
+    collect_suspicious_protected_field_hits,
+    format_missing_protected_field_error,
+    normalize_protected_field_paragraphs,
     refind_protected_paragraph,
     insert_prefix_before_keyword,
     update_protected_field,
@@ -45,6 +47,7 @@ from backend.helper.word_helper.range_utils import (
 from backend.helper.word_helper.text_parsing import (
     parse_table_block,
     convert_lines_to_items,
+    split_text_by_keywords,
 )
 from backend.helper.word_helper.content_ops import (
     apply_standard_insert_format,
@@ -71,7 +74,6 @@ from backend.util.word_util import (
     wdActiveEndPageNumber,
     wdCollapseEnd,
     wdCollapseStart,
-    wdFindStop,
     wdGoToAbsolute,
     wdGoToPage,
     wdLineSpace1pt5,
@@ -84,7 +86,14 @@ from backend.util.word_util.anchor_utils import (
 )
 
 
-PROTECTED_FIELD_KEYWORDS = ("服务地点", "服务期限", "付款方式")
+SERVICE_LOCATION_MARKER = "服务地点："
+SERVICE_TERM_MARKER = "服务期限："
+PAYMENT_METHOD_MARKER = "付款方式："
+PROTECTED_FIELD_MARKERS = (
+    SERVICE_LOCATION_MARKER,
+    SERVICE_TERM_MARKER,
+    PAYMENT_METHOD_MARKER,
+)
 NODE_NAME = "gngk_fw_zc_update_word"
 DEFAULT_MANUAL_TEST_SOURCE_DOC = (
     BACKEND_ROOT
@@ -138,41 +147,58 @@ def _resolve_block4_insert_start(payment_end: int, bound_end: int) -> int:
     return min(payment_end, bound_end)
 
 
-def _parse_keyword_line(line: Optional[str], keyword: str) -> tuple[str, Optional[str]]:
-    if not line or keyword not in line:
-        return "", None
-
-    match = re.search(
-        rf"^(?P<prefix>.*?){re.escape(keyword)}\s*([：:])(?P<value>.*)$",
-        line,
-    )
-    if match:
-        return match.group("prefix"), match.group("value").lstrip()
-
-    keyword_index = line.find(keyword)
-    prefix = line[:keyword_index]
-    rest = line[keyword_index + len(keyword) :].lstrip()
-    if rest.startswith("：") or rest.startswith(":"):
-        rest = rest[1:]
-    return prefix, rest.lstrip()
-
-
 def _require_all_protected_fields(
     protected_fields: Dict[str, Any],
-    required_keywords: tuple[str, ...] = PROTECTED_FIELD_KEYWORDS,
+    *,
+    doc=None,
+    scan_ranges: list[tuple[int, int]] | None = None,
 ) -> None:
-    validate_required_protected_fields(protected_fields, required_keywords)
+    missing = [
+        marker for marker in PROTECTED_FIELD_MARKERS if marker not in protected_fields
+    ]
+    if not missing:
+        return
+    suspicious_hits = (
+        collect_suspicious_protected_field_hits(doc, missing, scan_ranges or [])
+        if doc is not None
+        else {}
+    )
+    raise ValueError(
+        format_missing_protected_field_error(
+            missing,
+            suspicious_hits,
+            prefix="缺少关键受保护字段",
+        )
+    )
 
 
 def _collect_protected_fields(*args, **kwargs) -> Dict[str, Any]:
     protected_fields = _base_collect_protected_fields(*args, **kwargs)
-    _require_all_protected_fields(protected_fields)
+    _require_all_protected_fields(
+        protected_fields,
+        doc=kwargs.get("doc"),
+        scan_ranges=[
+            tuple(kwargs["target_range"]),
+            tuple(kwargs["fallback_range"]),
+        ]
+        if kwargs.get("fallback_range")
+        else [tuple(kwargs["target_range"])],
+    )
     return protected_fields
 
 
 def _refresh_protected_fields(*args, **kwargs) -> Dict[str, Any]:
     protected_fields = _base_refresh_protected_fields(*args, **kwargs)
-    _require_all_protected_fields(protected_fields)
+    _require_all_protected_fields(
+        protected_fields,
+        doc=kwargs.get("doc"),
+        scan_ranges=[
+            (
+                int(kwargs.get("range_start", 0)),
+                int(kwargs.get("range_end", 0)),
+            )
+        ],
+    )
     return protected_fields
 
 
@@ -184,46 +210,40 @@ def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
     block1 -> 服务地点 -> block2 -> 服务期限 -> block3 -> 付款方式 -> block4
     """
 
-    polished_text_norm = polished_text.replace("\r\n", "\n").replace("\r", "\n")
-    raw_lines = polished_text_norm.split("\n")
-    content_list = [line.rstrip() for line in raw_lines if line.strip() != ""]
-
-    if not content_list:
+    if not str(polished_text or "").strip():
         raise ValueError("polished_text 为空，无法拆分服务三字段内容")
 
-    field_indices: dict[str, int] = {}
-    last_index = -1
-    for keyword in PROTECTED_FIELD_KEYWORDS:
-        field_index = next(
-            (index for index, line in enumerate(content_list) if keyword in line),
-            None,
+    try:
+        split_data = split_text_by_keywords(
+            polished_text,
+            PROTECTED_FIELD_MARKERS,
+            strip_empty_lines=True,
+            require_all=True,
+            require_order=True,
         )
-        if field_index is None:
-            raise ValueError(f"polished_text 缺少关键字段: {keyword}")
-        if field_index <= last_index:
+    except ValueError as error:
+        message = str(error)
+        if "关键字段顺序错误" in message:
             raise ValueError(
-                "polished_text 中关键字段顺序必须为 服务地点 -> 服务期限 -> 付款方式"
-            )
-        field_indices[keyword] = field_index
-        last_index = field_index
+                "polished_text 中关键字段顺序必须为 服务地点： -> 服务期限： -> 付款方式："
+            ) from None
+        raise
 
-    service_location_idx = field_indices["服务地点"]
-    service_term_idx = field_indices["服务期限"]
-    payment_method_idx = field_indices["付款方式"]
+    content_list = split_data["content_list"]
+    keyword_lines = split_data["keyword_lines"]
+    keyword_parsed = split_data["keyword_parsed"]
+    blocks = split_data["blocks"]
 
-    service_location_line = content_list[service_location_idx]
-    service_term_line = content_list[service_term_idx]
-    payment_method_line = content_list[payment_method_idx]
+    service_location_line = keyword_lines[SERVICE_LOCATION_MARKER]
+    service_term_line = keyword_lines[SERVICE_TERM_MARKER]
+    payment_method_line = keyword_lines[PAYMENT_METHOD_MARKER]
 
-    service_location_prefix, service_location_value = _parse_keyword_line(
-        service_location_line, "服务地点"
-    )
-    service_term_prefix, service_term_value = _parse_keyword_line(
-        service_term_line, "服务期限"
-    )
-    payment_prefix, payment_value = _parse_keyword_line(
-        payment_method_line, "付款方式"
-    )
+    service_location_prefix = str(keyword_parsed[SERVICE_LOCATION_MARKER].get("prefix") or "")
+    service_location_value = keyword_parsed[SERVICE_LOCATION_MARKER].get("value")
+    service_term_prefix = str(keyword_parsed[SERVICE_TERM_MARKER].get("prefix") or "")
+    service_term_value = keyword_parsed[SERVICE_TERM_MARKER].get("value")
+    payment_prefix = str(keyword_parsed[PAYMENT_METHOD_MARKER].get("prefix") or "")
+    payment_value = keyword_parsed[PAYMENT_METHOD_MARKER].get("value")
 
     return {
         "content_list": content_list,
@@ -236,10 +256,10 @@ def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
         "service_term_value": service_term_value,
         "payment_prefix": payment_prefix,
         "payment_value": payment_value,
-        "block1": content_list[:service_location_idx],
-        "block2": content_list[service_location_idx + 1 : service_term_idx],
-        "block3": content_list[service_term_idx + 1 : payment_method_idx],
-        "block4": content_list[payment_method_idx + 1 :],
+        "block1": blocks[0] if len(blocks) > 0 else [],
+        "block2": blocks[1] if len(blocks) > 1 else [],
+        "block3": blocks[2] if len(blocks) > 2 else [],
+        "block4": blocks[3] if len(blocks) > 3 else [],
     }
 
 
@@ -423,7 +443,7 @@ def gngk_fw_zc_update_word(
                 raise ValueError(f"目标页 {target_page} 范围为空，无法定位受保护字段")
 
             if page_end > page_start:
-                protected_keywords = list(PROTECTED_FIELD_KEYWORDS)
+                protected_markers = list(PROTECTED_FIELD_MARKERS)
                 target_range = (int(page_start), int(page_end))
                 fallback_range = (
                     int(insertion_bound_start),
@@ -434,16 +454,27 @@ def gngk_fw_zc_update_word(
                     f" 目标页={target_page}({target_range[0]}-{target_range[1]})，"
                     f" 边界范围={fallback_range[0]}-{fallback_range[1]}"
                 )
+                normalized_marker_count = normalize_protected_field_paragraphs(
+                    doc,
+                    protected_markers,
+                    target_range[0],
+                    fallback_range[1],
+                    log_parts=insertion_log_parts,
+                )
+                if normalized_marker_count > 0:
+                    insertion_log_parts.append(
+                        f"  已预规范化服务三字段冒号 {normalized_marker_count} 处。"
+                    )
 
                 protected_fields = _collect_protected_fields(
                     doc=doc,
-                    keywords=protected_keywords,
+                    markers=protected_markers,
                     target_range=target_range,
                     fallback_range=fallback_range,
                 )
-                for keyword, para_rng in protected_fields.items():
+                for marker, para_rng in protected_fields.items():
                     insertion_log_parts.append(
-                        f"  找到受保护字段: {keyword} ({int(para_rng.Start)}-{int(para_rng.End)})"
+                        f"  找到受保护字段: {marker} ({int(para_rng.Start)}-{int(para_rng.End)})"
                     )
 
                 def range_overlaps(
@@ -503,39 +534,35 @@ def gngk_fw_zc_update_word(
 
                 insertion_log_parts.append("步骤3：按服务三字段顺序插入内容...")
 
-                def refind_protected_paragraph(keyword: str):
-                    bound_end = int(get_insertion_bound_end())
-                    search_rng = doc.Range(int(insertion_bound_start), bound_end)
-                    finder = search_rng.Find
-                    finder.ClearFormatting()
-                    finder.Text = keyword
-                    finder.Forward = True
-                    finder.Wrap = wdFindStop
-                    finder.MatchCase = False
-                    finder.MatchWholeWord = False
-                    while finder.Execute():
-                        try:
-                            position = int(search_rng.Start)
-                        except Exception:
-                            position = search_rng.Start
-                        if int(insertion_bound_start) <= position <= bound_end:
-                            para_rng = doc.Range(position, position).Paragraphs(1).Range
-                            para_text = para_rng.Text.strip()
-                            if keyword in para_text and ("：" in para_text or ":" in para_text):
-                                return para_rng
-                        search_rng.Collapse(wdCollapseEnd)
-                    return None
+                def refind_field(marker: str):
+                    return refind_protected_paragraph(
+                        doc=doc,
+                        marker=marker,
+                        bound_start=int(insertion_bound_start),
+                        bound_end=int(get_insertion_bound_end()),
+                    )
 
+                refreshed_marker_count = normalize_protected_field_paragraphs(
+                    doc,
+                    protected_markers,
+                    int(insertion_bound_start),
+                    int(get_insertion_bound_end()),
+                    log_parts=insertion_log_parts,
+                )
+                if refreshed_marker_count > 0:
+                    insertion_log_parts.append(
+                        f"  重绑前再次规范化服务三字段冒号 {refreshed_marker_count} 处。"
+                    )
                 protected_fields = _refresh_protected_fields(
                     doc=doc,
-                    keywords=protected_keywords,
+                    markers=protected_markers,
                     range_start=int(insertion_bound_start),
                     range_end=int(get_insertion_bound_end()),
                     existing_fields=protected_fields,
                 )
-                for keyword, para_rng in protected_fields.items():
+                for marker, para_rng in protected_fields.items():
                     insertion_log_parts.append(
-                        f"  重定位受保护字段: {keyword} ({int(para_rng.Start)}-{int(para_rng.End)})"
+                        f"  重定位受保护字段: {marker} ({int(para_rng.Start)}-{int(para_rng.End)})"
                     )
 
                 def is_range_locked(rng) -> bool:
@@ -958,7 +985,7 @@ def gngk_fw_zc_update_word(
                 block1_items = _convert_lines_to_items(block1)
                 insertion_log_parts.append("  正在插入块1...")
                 if block1_items:
-                    service_location_rng = protected_fields["服务地点"]
+                    service_location_rng = protected_fields[SERVICE_LOCATION_MARKER]
                     safe_before = find_prev_editable_pos_bounded(
                         int(service_location_rng.Start),
                         int(insertion_bound_start),
@@ -976,22 +1003,25 @@ def gngk_fw_zc_update_word(
                 else:
                     insertion_log_parts.append("    块1为空，跳过")
 
-                insert_prefix_before_keyword("服务地点", service_location_prefix)
-                protected_fields["服务地点"] = (
-                    refind_protected_paragraph("服务地点") or protected_fields["服务地点"]
+                insert_prefix_before_keyword(SERVICE_LOCATION_MARKER, service_location_prefix)
+                protected_fields[SERVICE_LOCATION_MARKER] = (
+                    refind_field(SERVICE_LOCATION_MARKER)
+                    or protected_fields[SERVICE_LOCATION_MARKER]
                 )
-                update_protected_field("服务地点", service_location_value)
+                update_protected_field(SERVICE_LOCATION_MARKER, service_location_value)
 
                 block2_items = _convert_lines_to_items(block2)
                 insertion_log_parts.append("  正在插入块2...")
-                protected_fields["服务地点"] = (
-                    refind_protected_paragraph("服务地点") or protected_fields["服务地点"]
+                protected_fields[SERVICE_LOCATION_MARKER] = (
+                    refind_field(SERVICE_LOCATION_MARKER)
+                    or protected_fields[SERVICE_LOCATION_MARKER]
                 )
-                protected_fields["服务期限"] = (
-                    refind_protected_paragraph("服务期限") or protected_fields["服务期限"]
+                protected_fields[SERVICE_TERM_MARKER] = (
+                    refind_field(SERVICE_TERM_MARKER)
+                    or protected_fields[SERVICE_TERM_MARKER]
                 )
-                start_between = int(protected_fields["服务地点"].End)
-                end_between = int(protected_fields["服务期限"].Start)
+                start_between = int(protected_fields[SERVICE_LOCATION_MARKER].End)
+                end_between = int(protected_fields[SERVICE_TERM_MARKER].Start)
                 _validate_block_window(
                     start_between,
                     end_between,
@@ -1014,22 +1044,25 @@ def gngk_fw_zc_update_word(
                 else:
                     insertion_log_parts.append("    块2为空，跳过")
 
-                insert_prefix_before_keyword("服务期限", service_term_prefix)
-                protected_fields["服务期限"] = (
-                    refind_protected_paragraph("服务期限") or protected_fields["服务期限"]
+                insert_prefix_before_keyword(SERVICE_TERM_MARKER, service_term_prefix)
+                protected_fields[SERVICE_TERM_MARKER] = (
+                    refind_field(SERVICE_TERM_MARKER)
+                    or protected_fields[SERVICE_TERM_MARKER]
                 )
-                update_protected_field("服务期限", service_term_value)
+                update_protected_field(SERVICE_TERM_MARKER, service_term_value)
 
                 block3_items = _convert_lines_to_items(block3)
                 insertion_log_parts.append("  正在插入块3...")
-                protected_fields["服务期限"] = (
-                    refind_protected_paragraph("服务期限") or protected_fields["服务期限"]
+                protected_fields[SERVICE_TERM_MARKER] = (
+                    refind_field(SERVICE_TERM_MARKER)
+                    or protected_fields[SERVICE_TERM_MARKER]
                 )
-                protected_fields["付款方式"] = (
-                    refind_protected_paragraph("付款方式") or protected_fields["付款方式"]
+                protected_fields[PAYMENT_METHOD_MARKER] = (
+                    refind_field(PAYMENT_METHOD_MARKER)
+                    or protected_fields[PAYMENT_METHOD_MARKER]
                 )
-                start_between = int(protected_fields["服务期限"].End)
-                end_between = int(protected_fields["付款方式"].Start)
+                start_between = int(protected_fields[SERVICE_TERM_MARKER].End)
+                end_between = int(protected_fields[PAYMENT_METHOD_MARKER].Start)
                 _validate_block_window(
                     start_between,
                     end_between,
@@ -1052,11 +1085,12 @@ def gngk_fw_zc_update_word(
                 else:
                     insertion_log_parts.append("    块3为空，跳过")
 
-                insert_prefix_before_keyword("付款方式", payment_prefix)
-                protected_fields["付款方式"] = (
-                    refind_protected_paragraph("付款方式") or protected_fields["付款方式"]
+                insert_prefix_before_keyword(PAYMENT_METHOD_MARKER, payment_prefix)
+                protected_fields[PAYMENT_METHOD_MARKER] = (
+                    refind_field(PAYMENT_METHOD_MARKER)
+                    or protected_fields[PAYMENT_METHOD_MARKER]
                 )
-                update_protected_field("付款方式", payment_value)
+                update_protected_field(PAYMENT_METHOD_MARKER, payment_value)
 
                 block4_items = _convert_lines_to_items(block4)
                 insertion_log_parts.append(f"  插入块4（{len(block4_items)} 条）...")
@@ -1068,10 +1102,11 @@ def gngk_fw_zc_update_word(
                         f"{[item['line'][:30] + '...' if item['type'] == 'text' and len(item['line']) > 30 else item['line'] if item['type'] == 'text' else '<表格>' for item in block4_items]}"
                     )
 
-                protected_fields["付款方式"] = (
-                    refind_protected_paragraph("付款方式") or protected_fields["付款方式"]
+                protected_fields[PAYMENT_METHOD_MARKER] = (
+                    refind_field(PAYMENT_METHOD_MARKER)
+                    or protected_fields[PAYMENT_METHOD_MARKER]
                 )
-                payment_method_rng = protected_fields["付款方式"]
+                payment_method_rng = protected_fields[PAYMENT_METHOD_MARKER]
                 bound_end_now = int(get_insertion_bound_end())
                 start_after_payment = _resolve_block4_insert_start(
                     int(payment_method_rng.End),
@@ -1108,12 +1143,12 @@ def gngk_fw_zc_update_word(
                     insertion_log_parts.append("    块4为空，跳过")
 
                 inserted_count = 0
-                if block4_items and use_inline and "付款方式" in protected_fields:
+                if block4_items and use_inline and PAYMENT_METHOD_MARKER in protected_fields:
                     insertion_log_parts.append(
                         "    块4将以内联换行追加到付款方式段落末尾"
                     )
                     inserted_count = insert_items_inline_at_end_of_paragraph(
-                        protected_fields["付款方式"], block4_items
+                        protected_fields[PAYMENT_METHOD_MARKER], block4_items
                     )
                 elif block4_items:
                     for item in block4_items:
@@ -1594,7 +1629,7 @@ def main() -> None:
 
 
 __all__ = [
-    "PROTECTED_FIELD_KEYWORDS",
+    "PROTECTED_FIELD_MARKERS",
     "gngk_fw_zc_update_word",
     "split_polished_text_into_blocks",
     "_require_all_protected_fields",

@@ -29,6 +29,16 @@ from backend.helper.word_helper.text_parsing import (
 )
 
 from backend.helper.word_helper.protected_fields import (
+    canonicalize_protected_field_marker,
+    extract_protected_field_name,
+    normalize_protected_field_markers,
+    match_protected_field_line,
+    normalize_protected_field_line,
+    normalize_protected_field_text,
+    find_suspicious_protected_field_lines,
+    collect_suspicious_protected_field_hits,
+    format_missing_protected_field_error,
+    normalize_protected_field_paragraphs,
     scan_protected_fields_in_range,
     collect_protected_fields,
     refresh_protected_fields,
@@ -77,6 +87,16 @@ __all__ = [
     "convert_lines_to_items",
     "split_text_by_keywords",
     # protected_fields
+    "canonicalize_protected_field_marker",
+    "extract_protected_field_name",
+    "normalize_protected_field_markers",
+    "match_protected_field_line",
+    "normalize_protected_field_line",
+    "normalize_protected_field_text",
+    "find_suspicious_protected_field_lines",
+    "collect_suspicious_protected_field_hits",
+    "format_missing_protected_field_error",
+    "normalize_protected_field_paragraphs",
     "scan_protected_fields_in_range",
     "collect_protected_fields",
     "refresh_protected_fields",

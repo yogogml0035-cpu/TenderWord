@@ -39,7 +39,6 @@ from backend.util.word_util import (
     wdOutlineLevelBodyText,
     wdCollapseStart,
     wdCollapseEnd,
-    wdFindStop,
     wdActiveEndPageNumber,
     wdWithInTable,
 )
@@ -63,12 +62,15 @@ from backend.helper.word_helper.range_utils import (
 from backend.helper.word_helper.text_parsing import (
     parse_table_block,
     convert_lines_to_items,
+    split_text_by_keywords,
 )
 from backend.helper.word_helper.protected_fields import (
     scan_protected_fields_in_range,
     collect_protected_fields,
     refresh_protected_fields,
-    validate_required_protected_fields,
+    collect_suspicious_protected_field_hits,
+    format_missing_protected_field_error,
+    normalize_protected_field_paragraphs,
     resolve_block_flow,
     refind_protected_paragraph,
     insert_prefix_before_keyword,
@@ -86,14 +88,82 @@ from backend.helper.word_helper.cleanup_ops import (
 )
 
 
-REQUIRED_PROTECTED_FIELD_KEYWORDS = ("交付日期", "付款方式")
+DELIVERY_DATE_MARKER = "交付日期："
+PAYMENT_METHOD_MARKER = "付款方式："
+REQUIRED_PROTECTED_FIELD_MARKERS = (
+    DELIVERY_DATE_MARKER,
+    PAYMENT_METHOD_MARKER,
+)
 PROTECTED_FIELD_SCAN_MARGIN = 400
 
-# ---- 向后兼容别名 ----
-# gngk_fw_zc_delete_tender_param 之前从本文件 import 这些名称；
-# 重构后已迁移到 helper，但为安全起见保留别名供尚未更新的下游使用。
-_collect_protected_fields = collect_protected_fields
-_refresh_protected_fields = refresh_protected_fields
+def _build_scan_ranges(
+    target_range: tuple[int, int] | None = None,
+    fallback_range: tuple[int, int] | None = None,
+    *,
+    range_start: int | None = None,
+    range_end: int | None = None,
+) -> list[tuple[int, int]]:
+    scan_ranges: list[tuple[int, int]] = []
+    if target_range:
+        scan_ranges.append((int(target_range[0]), int(target_range[1])))
+    if fallback_range:
+        scan_ranges.append((int(fallback_range[0]), int(fallback_range[1])))
+    if range_start is not None and range_end is not None:
+        scan_ranges.append((int(range_start), int(range_end)))
+    return scan_ranges
+
+
+def _require_all_protected_fields(
+    protected_fields: Dict[str, Any],
+    *,
+    doc=None,
+    scan_ranges: list[tuple[int, int]] | None = None,
+) -> None:
+    missing = [
+        marker
+        for marker in REQUIRED_PROTECTED_FIELD_MARKERS
+        if marker not in protected_fields
+    ]
+    if not missing:
+        return
+    suspicious_hits = (
+        collect_suspicious_protected_field_hits(doc, missing, scan_ranges or [])
+        if doc is not None
+        else {}
+    )
+    raise ValueError(
+        format_missing_protected_field_error(
+            missing,
+            suspicious_hits,
+            prefix="缺少关键受保护字段",
+        )
+    )
+
+
+def _collect_protected_fields(*args, **kwargs) -> Dict[str, Any]:
+    protected_fields = collect_protected_fields(*args, **kwargs)
+    _require_all_protected_fields(
+        protected_fields,
+        doc=kwargs.get("doc"),
+        scan_ranges=_build_scan_ranges(
+            kwargs.get("target_range"),
+            kwargs.get("fallback_range"),
+        ),
+    )
+    return protected_fields
+
+
+def _refresh_protected_fields(*args, **kwargs) -> Dict[str, Any]:
+    protected_fields = refresh_protected_fields(*args, **kwargs)
+    _require_all_protected_fields(
+        protected_fields,
+        doc=kwargs.get("doc"),
+        scan_ranges=_build_scan_ranges(
+            range_start=kwargs.get("range_start"),
+            range_end=kwargs.get("range_end"),
+        ),
+    )
+    return protected_fields
 
 
 def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
@@ -116,60 +186,28 @@ def split_polished_text_into_blocks(polished_text: str) -> Dict[str, Any]:
         - block2: 交付日期和付款方式之间的内容
         - block3: 付款方式之后的内容
     """
-    polished_text_norm = polished_text.replace("\r\n", "\n").replace("\r", "\n")
-    raw_lines = polished_text_norm.split("\n")
-    content_list = [line.rstrip() for line in raw_lines if line.strip() != ""]
+    split_data = split_text_by_keywords(
+        polished_text,
+        REQUIRED_PROTECTED_FIELD_MARKERS,
+        strip_empty_lines=True,
+        require_all=True,
+        require_order=True,
+    )
+    content_list = split_data["content_list"]
+    keyword_lines = split_data["keyword_lines"]
+    keyword_parsed = split_data["keyword_parsed"]
+    blocks = split_data["blocks"]
 
-    def parse_keyword_line(line: Optional[str], keyword: str):
-        if not line or keyword not in line:
-            return "", None
-        m = re.search(
-            rf"^(?P<prefix>.*?){re.escape(keyword)}\s*([：:])(?P<value>.*)$", line
-        )
-        if m:
-            return m.group("prefix"), m.group("value")
-        idx = line.find(keyword)
-        prefix = line[:idx]
-        rest = line[idx + len(keyword) :]
-        rest = rest.lstrip()
-        if rest.startswith("：") or rest.startswith(":"):
-            rest = rest[1:]
-        return prefix, rest
+    delivery_date_line = keyword_lines[DELIVERY_DATE_MARKER]
+    payment_method_line = keyword_lines[PAYMENT_METHOD_MARKER]
+    delivery_prefix = str(keyword_parsed[DELIVERY_DATE_MARKER].get("prefix") or "")
+    delivery_value = keyword_parsed[DELIVERY_DATE_MARKER].get("value")
+    payment_prefix = str(keyword_parsed[PAYMENT_METHOD_MARKER].get("prefix") or "")
+    payment_value = keyword_parsed[PAYMENT_METHOD_MARKER].get("value")
 
-    delivery_date_idx = next(
-        (i for i, line in enumerate(content_list) if "交付日期" in line), None
-    )
-    payment_method_idx = next(
-        (i for i, line in enumerate(content_list) if "付款方式" in line), None
-    )
-
-    delivery_date_line = (
-        content_list[delivery_date_idx] if delivery_date_idx is not None else None
-    )
-    payment_method_line = (
-        content_list[payment_method_idx] if payment_method_idx is not None else None
-    )
-
-    delivery_prefix, delivery_value = parse_keyword_line(delivery_date_line, "交付日期")
-    payment_prefix, payment_value = parse_keyword_line(payment_method_line, "付款方式")
-
-    block1 = (
-        content_list[:delivery_date_idx]
-        if delivery_date_idx is not None
-        else (content_list[:] if content_list else [])
-    )
-    block2 = (
-        content_list[delivery_date_idx + 1 : payment_method_idx]
-        if delivery_date_idx is not None and payment_method_idx is not None
-        else (
-            content_list[delivery_date_idx + 1 :]
-            if delivery_date_idx is not None
-            else []
-        )
-    )
-    block3 = (
-        content_list[payment_method_idx + 1 :] if payment_method_idx is not None else []
-    )
+    block1 = blocks[0] if len(blocks) > 0 else []
+    block2 = blocks[1] if len(blocks) > 1 else []
+    block3 = blocks[2] if len(blocks) > 2 else []
 
     return {
         "content_list": content_list,
@@ -396,7 +434,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 page_rng = doc.Range(page_start, page_end)
 
                 # 步骤1：优先在目标页定位受保护字段，必要时回查锚点边界范围
-                protected_keywords = list(REQUIRED_PROTECTED_FIELD_KEYWORDS)
+                protected_markers = list(REQUIRED_PROTECTED_FIELD_MARKERS)
                 target_range = (int(page_start), int(page_end))
                 fallback_range = (
                     int(insertion_bound_start),
@@ -407,10 +445,21 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     f" 目标页={target_page}({target_range[0]}-{target_range[1]})，"
                     f" 边界范围={fallback_range[0]}-{fallback_range[1]}"
                 )
+                normalized_marker_count = normalize_protected_field_paragraphs(
+                    doc,
+                    protected_markers,
+                    target_range[0],
+                    fallback_range[1],
+                    log_parts=insertion_log_parts,
+                )
+                if normalized_marker_count > 0:
+                    insertion_log_parts.append(
+                        f"  已预规范化受保护字段冒号 {normalized_marker_count} 处。"
+                    )
 
                 protected_fields = _collect_protected_fields(
                     doc=doc,
-                    keywords=protected_keywords,
+                    markers=protected_markers,
                     target_range=target_range,
                     fallback_range=fallback_range,
                 )
@@ -419,9 +468,9 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         "  未在目标范围内找到受保护字段，将按可编辑边界继续插入。"
                     )
                 else:
-                    for keyword, para_rng in protected_fields.items():
+                    for marker, para_rng in protected_fields.items():
                         insertion_log_parts.append(
-                            f"  找到受保护字段: {keyword} ({int(para_rng.Start)}-{int(para_rng.End)})"
+                            f"  找到受保护字段: {marker} ({int(para_rng.Start)}-{int(para_rng.End)})"
                         )
 
                 def _range_overlaps(
@@ -568,44 +617,38 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 except Exception:
                     pass
 
-                def refind_protected_paragraph(keyword: str):
-                    bound_end = int(get_insertion_bound_end())
-                    search_rng = doc.Range(int(insertion_bound_start), bound_end)
-                    finder = search_rng.Find
-                    finder.ClearFormatting()
-                    finder.Text = keyword
-                    finder.Forward = True
-                    finder.Wrap = wdFindStop
-                    finder.MatchCase = False
-                    finder.MatchWholeWord = False
-                    while finder.Execute():
-                        try:
-                            pos = int(search_rng.Start)
-                        except Exception:
-                            pos = search_rng.Start
-                        if int(insertion_bound_start) <= pos <= bound_end:
-                            para_rng = doc.Range(pos, pos).Paragraphs(1).Range
-                            para_text = para_rng.Text.strip()
-                            if keyword in para_text and (
-                                "：" in para_text or ":" in para_text
-                            ):
-                                return para_rng
-                        search_rng.Collapse(wdCollapseEnd)
-                    return None
+                def refind_field(marker: str):
+                    return refind_protected_paragraph(
+                        doc=doc,
+                        marker=marker,
+                        bound_start=int(insertion_bound_start),
+                        bound_end=int(get_insertion_bound_end()),
+                    )
 
                 # 删除阶段可能补回段落边界，这里先整体重绑一次字段位置，
                 # 后续块插入仍按最新段落范围操作。
+                refreshed_marker_count = normalize_protected_field_paragraphs(
+                    doc,
+                    protected_markers,
+                    int(insertion_bound_start),
+                    int(get_insertion_bound_end()),
+                    log_parts=insertion_log_parts,
+                )
+                if refreshed_marker_count > 0:
+                    insertion_log_parts.append(
+                        f"  重绑前再次规范化受保护字段冒号 {refreshed_marker_count} 处。"
+                    )
                 protected_fields = _refresh_protected_fields(
                     doc=doc,
-                    keywords=protected_keywords,
+                    markers=protected_markers,
                     range_start=int(insertion_bound_start),
                     range_end=int(get_insertion_bound_end()),
                     existing_fields=protected_fields,
                 )
                 if protected_fields:
-                    for keyword, para_rng in protected_fields.items():
+                    for marker, para_rng in protected_fields.items():
                         insertion_log_parts.append(
-                            f"  重定位受保护字段: {keyword} ({int(para_rng.Start)}-{int(para_rng.End)})"
+                            f"  重定位受保护字段: {marker} ({int(para_rng.Start)}-{int(para_rng.End)})"
                         )
                 else:
                     insertion_log_parts.append(
@@ -1002,7 +1045,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 insert_rng.Collapse(wdCollapseStart)
 
                 if flow["has_delivery"]:
-                    delivery_date_rng = protected_fields["交付日期"]
+                    delivery_date_rng = protected_fields[DELIVERY_DATE_MARKER]
                     before_pos = int(delivery_date_rng.Start)
                     safe_before = find_prev_editable_pos(before_pos, max_lookback=20000)
                     if safe_before is None:
@@ -1031,22 +1074,22 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         insertion_log_parts.append(f"    插入项出错: {e}")
 
                 if flow["has_delivery"]:
-                    insert_prefix_before_keyword("交付日期", delivery_prefix)
-                    protected_fields["交付日期"] = (
-                        refind_protected_paragraph("交付日期")
-                        or protected_fields["交付日期"]
+                    insert_prefix_before_keyword(DELIVERY_DATE_MARKER, delivery_prefix)
+                    protected_fields[DELIVERY_DATE_MARKER] = (
+                        refind_field(DELIVERY_DATE_MARKER)
+                        or protected_fields[DELIVERY_DATE_MARKER]
                     )
-                    update_protected_field("交付日期", delivery_value)
+                    update_protected_field(DELIVERY_DATE_MARKER, delivery_value)
 
                     # 插入块2（与 master 对齐：双字段时插中间，仅交付日期时插其后）
                     insertion_log_parts.append("  插入块2...")
                     if flow["block2_mode"] == "between_delivery_payment":
-                        delivery_date_rng = protected_fields["交付日期"]
-                        protected_fields["付款方式"] = (
-                            refind_protected_paragraph("付款方式")
-                            or protected_fields["付款方式"]
+                        delivery_date_rng = protected_fields[DELIVERY_DATE_MARKER]
+                        protected_fields[PAYMENT_METHOD_MARKER] = (
+                            refind_field(PAYMENT_METHOD_MARKER)
+                            or protected_fields[PAYMENT_METHOD_MARKER]
                         )
-                        payment_method_rng = protected_fields["付款方式"]
+                        payment_method_rng = protected_fields[PAYMENT_METHOD_MARKER]
 
                         start_between = int(delivery_date_rng.End)
                         end_between = int(payment_method_rng.Start)
@@ -1081,7 +1124,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                             except Exception as e:
                                 insertion_log_parts.append(f"    插入项出错: {e}")
                     elif flow["block2_mode"] == "after_delivery":
-                        delivery_date_rng = protected_fields["交付日期"]
+                        delivery_date_rng = protected_fields[DELIVERY_DATE_MARKER]
                         start_after = int(delivery_date_rng.End)
                         safe_after = find_next_editable_pos(start_after)
                         insert_rng.SetRange(safe_after, safe_after)
@@ -1106,12 +1149,12 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                                 insertion_log_parts.append(f"    插入项出错: {e}")
 
                     if flow["has_payment"]:
-                        insert_prefix_before_keyword("付款方式", payment_prefix)
-                        protected_fields["付款方式"] = (
-                            refind_protected_paragraph("付款方式")
-                            or protected_fields["付款方式"]
+                        insert_prefix_before_keyword(PAYMENT_METHOD_MARKER, payment_prefix)
+                        protected_fields[PAYMENT_METHOD_MARKER] = (
+                            refind_field(PAYMENT_METHOD_MARKER)
+                            or protected_fields[PAYMENT_METHOD_MARKER]
                         )
-                        update_protected_field("付款方式", payment_value)
+                        update_protected_field(PAYMENT_METHOD_MARKER, payment_value)
 
                 # 插入块3（有付款方式则插其后，否则回退到后置锚点前）
                 block3_items = convert_lines_to_items(block3)
@@ -1124,12 +1167,15 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         f"{[item['line'][:30] + '...' if item['type'] == 'text' and len(item['line']) > 30 else item['line'] if item['type'] == 'text' else '<表格>' for item in block3_items]}"
                     )
 
-                if flow["block3_anchor"] == "after_payment" and "付款方式" in protected_fields:
-                    protected_fields["付款方式"] = (
-                        refind_protected_paragraph("付款方式")
-                        or protected_fields["付款方式"]
+                if (
+                    flow["block3_anchor"] == "after_payment"
+                    and PAYMENT_METHOD_MARKER in protected_fields
+                ):
+                    protected_fields[PAYMENT_METHOD_MARKER] = (
+                        refind_field(PAYMENT_METHOD_MARKER)
+                        or protected_fields[PAYMENT_METHOD_MARKER]
                     )
-                    payment_method_rng = protected_fields["付款方式"]
+                    payment_method_rng = protected_fields[PAYMENT_METHOD_MARKER]
                     bound_end_now = int(get_insertion_bound_end())
                     if int(payment_method_rng.End) > bound_end_now:
                         raise ValueError(
@@ -1175,12 +1221,12 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     pass
 
                 inserted_count = 0
-                if use_inline and "付款方式" in protected_fields:
+                if use_inline and PAYMENT_METHOD_MARKER in protected_fields:
                     insertion_log_parts.append(
                         "    块3将以内联换行追加到付款方式段落末尾"
                     )
                     inserted_count = insert_items_inline_at_end_of_paragraph(
-                        protected_fields["付款方式"], block3_items
+                        protected_fields[PAYMENT_METHOD_MARKER], block3_items
                     )
                 else:
                     for item in block3_items:

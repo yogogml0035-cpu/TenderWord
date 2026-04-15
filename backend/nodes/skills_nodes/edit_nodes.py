@@ -17,6 +17,7 @@ from backend.skills import get_skill_registry
 from backend.states import TaskSkillGraphState
 from backend.util.common_util import StreamCallbacks, stream_llm_completion
 from backend.util.log_util.progress_log import progress_log
+from backend.util.log_util.prompt_log import write_edit_generate_log_artifacts
 from backend.util.log_util.skill_audit_log import (
     EDIT_STAGE_TEXT_REQUEST,
     resolve_task_audit_log_path,
@@ -264,6 +265,21 @@ def edit_text(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
 
     if callable(complete_callback):
         complete_callback(str(content))
+
+    task_id = str(configurable.get("task_id") or state.get("task_id") or "").strip()
+    if not task_id:
+        task_id = f"edit_{uuid.uuid4().hex[:8]}"
+    try:
+        write_edit_generate_log_artifacts(
+            __file__,
+            task_id=task_id,
+            rendered_prompt=(
+                f"{rendered_prompt.system_prompt}\n{rendered_prompt.user_prompt}"
+            ),
+            generated_content=str(content),
+        )
+    except Exception as e:
+        progress_log.debug(f"警告: 保存 edit generate_log 产物失败: {e}")
 
     return TaskSkillGraphState(
         polished_text=str(content),

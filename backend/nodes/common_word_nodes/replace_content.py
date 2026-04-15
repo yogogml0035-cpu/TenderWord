@@ -5,6 +5,7 @@ import time
 import pathlib
 import sys
 from dataclasses import dataclass
+from typing import Any
 
 # 添加项目根目录到 sys.path
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -69,6 +70,77 @@ class ReplacementEntry:
     search_text: str
     replace_text: str
     comment_label: str | None = None
+
+
+ERP_COMMENT_LABEL = "ERP数据"
+PROJECT_NAME_FIRST_HIT_COMMENT = "此次文件由AI生成，请业务员不要删除，由管理组统一删除"
+
+
+def _ranges_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+    return not (int(a_end) <= int(b_start) or int(b_end) <= int(a_start))
+
+
+def _get_comment_range(comment: Any) -> Any | None:
+    for attr in ("Scope", "Reference", "Range"):
+        try:
+            value = getattr(comment, attr)
+        except Exception:
+            value = None
+        if value is not None:
+            return value
+    return None
+
+
+def _find_overlapping_comment(doc, target_rng) -> Any | None:
+    try:
+        comments = doc.Comments
+        count = int(comments.Count)
+    except Exception:
+        return None
+
+    for idx in range(1, count + 1):
+        try:
+            comment = comments(idx)
+        except Exception:
+            continue
+
+        comment_rng = _get_comment_range(comment)
+        if comment_rng is None:
+            continue
+
+        try:
+            comment_start = int(comment_rng.Start)
+            comment_end = int(comment_rng.End)
+            target_start = int(target_rng.Start)
+            target_end = int(target_rng.End)
+        except Exception:
+            continue
+
+        if _ranges_overlap(comment_start, comment_end, target_start, target_end):
+            return comment
+
+    return None
+
+
+def _overwrite_comment_text(comment: Any, text: str) -> None:
+    set_text = str(text)
+    errors: list[Exception] = []
+
+    try:
+        comment.Range.Text = set_text
+        return
+    except Exception as exc:
+        errors.append(exc)
+
+    try:
+        comment.Text = set_text
+        return
+    except Exception as exc:
+        errors.append(exc)
+
+    if errors:
+        raise RuntimeError(f"改写已有批注失败: {errors[-1]}") from errors[-1]
+    raise RuntimeError("改写已有批注失败: 未知错误")
 
 
 def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
@@ -171,7 +243,7 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
             ReplacementEntry(
                 search_text=str(search_text or ""),
                 replace_text=str(replace_text or ""),
-                comment_label="ERP数据" if enable_erp_comments else None,
+                comment_label=ERP_COMMENT_LABEL if enable_erp_comments else None,
             )
             for search_text, replace_text in (replacements or [])
             if str(search_text or "").strip()
@@ -201,6 +273,23 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
         project_content_v1_placeholder = placeholder_mapping.get("project_content_v1")
         project_number_placeholder = placeholder_mapping.get("project_number")
         project_name_placeholder = placeholder_mapping.get("project_name")
+        enable_project_name_first_hit_comment = bool(
+            enable_erp_comments
+            and project_name_placeholder
+            and str(project_name_placeholder).strip()
+        )
+        project_name_comment_tracker = {
+            "first_candidate_hit": False,
+            "first_candidate_mode": "",
+            "first_candidate_page": -1,
+            "first_candidate_error": "",
+            "fallback_count": 0,
+            "total_candidates": 0,
+            "final_success": False,
+            "final_mode": "",
+            "final_hit_index": 0,
+            "final_page": -1,
+        }
         
         # 将替换对分为三类：
         # 1. project_content_replacements - 项目内容（含 project_content 与 project_content_v1，最先处理，只在正文中）
@@ -244,12 +333,16 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
         header_story_types = {1, 6, 7, 10}  # 正文和所有页眉
         body_story_types = {1}  # 只处理正文
         
-        def process_replacements_in_range(rng, replacements_to_process, story_type_name, allow_comments: bool):
+        def process_replacements_in_range(rng, replacements_to_process, story_type_name, story_type: int, allow_comments: bool):
             """在指定的 Range 中处理替换"""
             
             for rep_idx, entry in enumerate(replacements_to_process, 1):
                 normalized_search_text = _normalize_find_text(entry.search_text)
                 normalized_replace_text = _normalize_replace_text(entry.replace_text)
+                is_project_name_entry = bool(
+                    enable_project_name_first_hit_comment
+                    and entry.search_text == project_name_placeholder
+                )
                 progress_log.debug(f"  [{rep_idx}/{len(replacements_to_process)}] 正在在 [{story_type_name}] 中搜索 {repr(normalized_search_text)}...")
                 
                 # 创建搜索范围的副本，避免丢失原始引用
@@ -280,12 +373,60 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
 
                         comment_label = entry.comment_label if allow_comments else None
                         if comment_label and normalized_replace_text is not None and str(normalized_replace_text).strip() != "":
-                            try:
-                                doc.Comments.Add(Range=search_rng.Duplicate, Text=str(comment_label))
-                                total_stats["total_comment_added"] += 1
-                            except Exception as e:
-                                total_stats["total_comment_error"] += 1
-                                failed_replacements.append((normalized_search_text, page_num, f"添加批注失败: {e}"))
+                            should_apply_first_hit_comment = bool(
+                                is_project_name_entry
+                                and story_type == 1
+                                and not project_name_comment_tracker["final_success"]
+                            )
+                            if should_apply_first_hit_comment:
+                                project_name_comment_tracker["total_candidates"] += 1
+                                current_hit_index = int(project_name_comment_tracker["total_candidates"])
+                                if current_hit_index == 1:
+                                    project_name_comment_tracker["first_candidate_hit"] = True
+                                    project_name_comment_tracker["first_candidate_page"] = page_num
+
+                                try:
+                                    existing_comment = _find_overlapping_comment(doc, search_rng)
+                                    if existing_comment is not None:
+                                        _overwrite_comment_text(existing_comment, PROJECT_NAME_FIRST_HIT_COMMENT)
+                                        comment_write_mode = "改写已有批注"
+                                    else:
+                                        doc.Comments.Add(
+                                            Range=search_rng.Duplicate,
+                                            Text=PROJECT_NAME_FIRST_HIT_COMMENT,
+                                        )
+                                        comment_write_mode = "新增批注"
+
+                                    total_stats["total_comment_added"] += 1
+                                    project_name_comment_tracker["final_success"] = True
+                                    project_name_comment_tracker["final_mode"] = comment_write_mode
+                                    project_name_comment_tracker["final_hit_index"] = current_hit_index
+                                    project_name_comment_tracker["final_page"] = page_num
+                                    if current_hit_index == 1:
+                                        project_name_comment_tracker["first_candidate_mode"] = comment_write_mode
+                                except Exception as e:
+                                    total_stats["total_comment_error"] += 1
+                                    failed_replacements.append(
+                                        (
+                                            normalized_search_text,
+                                            page_num,
+                                            f"project_name 首命中特殊批注失败: {e}",
+                                        )
+                                    )
+                                    project_name_comment_tracker["fallback_count"] += 1
+                                    if current_hit_index == 1:
+                                        project_name_comment_tracker["first_candidate_mode"] = "处理失败"
+                                        project_name_comment_tracker["first_candidate_error"] = str(e)
+                                    progress_log.warning(
+                                        f"    [批注特殊处理失败] project_name 在 {page_info} 第 {current_hit_index} 个命中写入长提示失败: {e}"
+                                    )
+                            else:
+                                try:
+                                    doc.Comments.Add(Range=search_rng.Duplicate, Text=str(comment_label))
+                                    total_stats["total_comment_added"] += 1
+                                except Exception as e:
+                                    total_stats["total_comment_error"] += 1
+                                    failed_replacements.append((normalized_search_text, page_num, f"添加批注失败: {e}"))
                         
                         search_rng.Collapse(wdCollapseEnd)
                     except Exception as e:
@@ -320,6 +461,7 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
                         rng,
                         project_content_replacements,
                         story_type_name,
+                        story_type,
                         allow_comments=(enable_erp_comments and story_type == 1),
                     )
                 
@@ -332,6 +474,7 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
                         rng,
                         header_replacements,
                         story_type_name,
+                        story_type,
                         allow_comments=(enable_erp_comments and story_type == 1),
                     )
                 
@@ -345,6 +488,7 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
                         rng,
                         body_replacements,
                         story_type_name,
+                        story_type,
                         allow_comments=(enable_erp_comments and story_type == 1),
                     )
                 
@@ -362,6 +506,39 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
         if enable_erp_comments:
             replacement_log_parts.append(f"  已添加批注: {total_stats['total_comment_added']}")
             replacement_log_parts.append(f"  批注失败: {total_stats['total_comment_error']}")
+            if enable_project_name_first_hit_comment:
+                replacement_log_parts.append("")
+                replacement_log_parts.append("project_name 正文首命中特殊批注轨迹:")
+                replacement_log_parts.append(
+                    f"  首个候选是否命中: {'是' if project_name_comment_tracker['first_candidate_hit'] else '否'}"
+                )
+                if project_name_comment_tracker["first_candidate_hit"]:
+                    replacement_log_parts.append(
+                        f"  首个候选处理方式: {project_name_comment_tracker['first_candidate_mode'] or '未处理'}"
+                    )
+                    first_page_num = int(project_name_comment_tracker["first_candidate_page"])
+                    first_page_info = f"第 {first_page_num} 页" if first_page_num > 0 else "未知页码"
+                    replacement_log_parts.append(f"  首个候选页码: {first_page_info}")
+                    if project_name_comment_tracker["first_candidate_error"]:
+                        replacement_log_parts.append(
+                            f"  首个候选失败原因: {project_name_comment_tracker['first_candidate_error']}"
+                        )
+                replacement_log_parts.append(
+                    f"  是否发生 fallback 到后续 project_name: {'是' if project_name_comment_tracker['fallback_count'] > 0 else '否'}"
+                )
+                replacement_log_parts.append(
+                    f"  fallback 次数: {project_name_comment_tracker['fallback_count']}"
+                )
+                if project_name_comment_tracker["final_success"]:
+                    final_page_num = int(project_name_comment_tracker["final_page"])
+                    final_page_info = f"第 {final_page_num} 页" if final_page_num > 0 else "未知页码"
+                    replacement_log_parts.append(
+                        "  特殊批注最终落位: "
+                        f"第 {project_name_comment_tracker['final_hit_index']} 个正文 project_name 命中"
+                        f"（{final_page_info}，{project_name_comment_tracker['final_mode']}）"
+                    )
+                else:
+                    replacement_log_parts.append("  特殊批注最终落位: 未成功落位")
         
         if failed_replacements:
             replacement_log_parts.append("")

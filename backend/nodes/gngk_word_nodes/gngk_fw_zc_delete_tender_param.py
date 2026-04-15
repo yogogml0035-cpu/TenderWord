@@ -25,7 +25,9 @@ from backend.config.tender_config import get_anchor_target_sizes, get_default_an
 from backend.helper.word_helper.protected_fields import (
     collect_protected_fields as _base_collect_protected_fields,
     refresh_protected_fields as _base_refresh_protected_fields,
-    validate_required_protected_fields,
+    collect_suspicious_protected_field_hits,
+    format_missing_protected_field_error,
+    normalize_protected_field_paragraphs,
 )
 from backend.helper.word_helper.range_utils import is_protected_range, range_overlaps
 from backend.helper.word_helper.cleanup_ops import multi_pass_cleanup
@@ -47,7 +49,14 @@ from backend.util.word_util.anchor_utils import (
 )
 
 NODE_NAME = "gngk_fw_zc_delete_tender_param"
-PROTECTED_FIELD_KEYWORDS = ("服务地点", "服务期限", "付款方式")
+SERVICE_LOCATION_MARKER = "服务地点："
+SERVICE_TERM_MARKER = "服务期限："
+PAYMENT_METHOD_MARKER = "付款方式："
+PROTECTED_FIELD_MARKERS = (
+    SERVICE_LOCATION_MARKER,
+    SERVICE_TERM_MARKER,
+    PAYMENT_METHOD_MARKER,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -56,20 +65,54 @@ PROTECTED_FIELD_KEYWORDS = ("服务地点", "服务期限", "付款方式")
 
 def _require_all_protected_fields(
     protected_fields: Dict[str, Any],
-    required_keywords: tuple[str, ...] = PROTECTED_FIELD_KEYWORDS,
+    *,
+    doc=None,
+    scan_ranges: list[tuple[int, int]] | None = None,
 ) -> None:
-    validate_required_protected_fields(protected_fields, required_keywords)
+    missing = [marker for marker in PROTECTED_FIELD_MARKERS if marker not in protected_fields]
+    if not missing:
+        return
+    suspicious_hits = (
+        collect_suspicious_protected_field_hits(doc, missing, scan_ranges or [])
+        if doc is not None
+        else {}
+    )
+    raise ValueError(
+        format_missing_protected_field_error(
+            missing,
+            suspicious_hits,
+            prefix="缺少关键受保护字段",
+        )
+    )
 
 
 def _collect_protected_fields(*args, **kwargs) -> Dict[str, Any]:
     pf = _base_collect_protected_fields(*args, **kwargs)
-    _require_all_protected_fields(pf)
+    _require_all_protected_fields(
+        pf,
+        doc=kwargs.get("doc"),
+        scan_ranges=[
+            tuple(kwargs["target_range"]),
+            tuple(kwargs["fallback_range"]),
+        ]
+        if kwargs.get("fallback_range")
+        else [tuple(kwargs["target_range"])],
+    )
     return pf
 
 
 def _refresh_protected_fields(*args, **kwargs) -> Dict[str, Any]:
     pf = _base_refresh_protected_fields(*args, **kwargs)
-    _require_all_protected_fields(pf)
+    _require_all_protected_fields(
+        pf,
+        doc=kwargs.get("doc"),
+        scan_ranges=[
+            (
+                int(kwargs.get("range_start", 0)),
+                int(kwargs.get("range_end", 0)),
+            )
+        ],
+    )
     return pf
 
 
@@ -217,7 +260,7 @@ def gngk_fw_zc_delete_tender_param(
             if page_end <= page_start:
                 raise ValueError(f"目标页 {target_page} 范围为空，无法定位受保护字段")
 
-            protected_keywords = list(PROTECTED_FIELD_KEYWORDS)
+            protected_markers = list(PROTECTED_FIELD_MARKERS)
             target_range = (int(page_start), int(page_end))
             fallback_range = (int(insertion_bound_start), int(get_bound_end()))
 
@@ -226,10 +269,21 @@ def gngk_fw_zc_delete_tender_param(
                 f"({target_range[0]}-{target_range[1]})，"
                 f"边界={fallback_range[0]}-{fallback_range[1]}"
             )
+            normalized_marker_count = normalize_protected_field_paragraphs(
+                doc,
+                protected_markers,
+                target_range[0],
+                fallback_range[1],
+                log_parts=log_parts,
+            )
+            if normalized_marker_count > 0:
+                log_parts.append(
+                    f"  已预规范化服务三字段冒号 {normalized_marker_count} 处。"
+                )
 
             protected_fields = _collect_protected_fields(
                 doc=doc,
-                keywords=protected_keywords,
+                markers=protected_markers,
                 target_range=target_range,
                 fallback_range=fallback_range,
             )
@@ -386,9 +440,20 @@ def gngk_fw_zc_delete_tender_param(
             )
 
             # ---- 刷新受保护字段位置 ----
+            refreshed_marker_count = normalize_protected_field_paragraphs(
+                doc,
+                protected_markers,
+                int(insertion_bound_start),
+                int(get_bound_end()),
+                log_parts=log_parts,
+            )
+            if refreshed_marker_count > 0:
+                log_parts.append(
+                    f"  重绑前再次规范化服务三字段冒号 {refreshed_marker_count} 处。"
+                )
             protected_fields = _refresh_protected_fields(
                 doc=doc,
-                keywords=protected_keywords,
+                markers=protected_markers,
                 range_start=int(insertion_bound_start),
                 range_end=int(get_bound_end()),
                 existing_fields=protected_fields,
@@ -470,5 +535,5 @@ def gngk_fw_zc_delete_tender_param(
 
 __all__ = [
     "gngk_fw_zc_delete_tender_param",
-    "PROTECTED_FIELD_KEYWORDS",
+    "PROTECTED_FIELD_MARKERS",
 ]

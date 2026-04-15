@@ -55,8 +55,8 @@ def test_is_protected_range_with_overlap() -> None:
             self.End = end
 
     protected_fields = {
-        "服务地点": FakeRange(10, 20),
-        "服务期限": FakeRange(30, 40),
+        "服务地点：": FakeRange(10, 20),
+        "服务期限：": FakeRange(30, 40),
     }
 
     # 与受保护字段重叠
@@ -74,7 +74,7 @@ def test_is_protected_range_no_overlap() -> None:
             self.End = end
 
     protected_fields = {
-        "付款方式": FakeRange(50, 60),
+        "付款方式：": FakeRange(50, 60),
     }
 
     assert is_protected_range(FakeRange(0, 49), protected_fields) is False
@@ -95,16 +95,14 @@ def test_visible_text_empty() -> None:
 def test_require_all_protected_fields_raises_on_missing() -> None:
     import pytest
 
-    with pytest.raises(ValueError, match="缺少关键受保护字段"):
+    with pytest.raises(ValueError, match="缺少关键受保护字段: 付款方式："):
         delete_module._require_all_protected_fields(
-            {"服务地点": None, "服务期限": None},
-            required_keywords=("服务地点", "服务期限", "付款方式"),
+            {"服务地点：": None, "服务期限：": None},
         )
 
 
 def test_require_all_protected_fields_passes_when_all_present() -> None:
     # Should not raise
     delete_module._require_all_protected_fields(
-        {"服务地点": None, "服务期限": None, "付款方式": None},
-        required_keywords=("服务地点", "服务期限", "付款方式"),
+        {"服务地点：": None, "服务期限：": None, "付款方式：": None},
     )
