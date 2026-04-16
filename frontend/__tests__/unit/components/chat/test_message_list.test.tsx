@@ -125,12 +125,12 @@ describe('MessageList', () => {
     expect(onDownload).toHaveBeenCalledWith('D:/UploadFiles/output.docx', 'output.docx');
   });
 
-  it('renders style writeback summary on the download card when present', () => {
+  it('does not render style writeback summary on the download card when present', () => {
     render(<MessageList messages={createTaskMessages()} />);
 
     expect(
-      screen.getByText('样式回填: 抽取=2, 尝试=2, 成功=1, 跳过=1, 失败=0')
-    ).toBeInTheDocument();
+      screen.queryByText('样式回填: 抽取=2, 尝试=2, 成功=1, 跳过=1, 失败=0')
+    ).not.toBeInTheDocument();
   });
 
   it('shows retry action on failed task content card and invokes callback', () => {

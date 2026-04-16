@@ -73,7 +73,7 @@ class ReplacementEntry:
 
 
 ERP_COMMENT_LABEL = "ERP数据"
-PROJECT_NAME_FIRST_HIT_COMMENT = "此次文件由AI生成，请业务员不要删除，由管理组统一删除"
+PROJECT_NAME_FIRST_HIT_COMMENT = "此次文件由AI生成，请业务员不要删除该条批注，由管理组统一删除"
 
 
 def _ranges_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:

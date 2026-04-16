@@ -48,6 +48,8 @@ class TenderGraphStateBase(BaseState, total=False):
     origin_tender_params: str
     tender_params: str
     inline_style_fragments: List[Dict[str, Any]]
+    verbose_style_progress_logs: bool
+    suppress_comment_progress_logs: bool
 
     replacements: List[Tuple[str, str]]
     placeholder_mapping: Dict[str, str]

@@ -1014,3 +1014,122 @@ def test_gjgk_update_word_no_hard_fail_when_zero_generated(monkeypatch) -> None:
         result["comment_writeback_summary"]
         == "AI批注写入: 生成=0, 成功=0, 失败=0, 跳过=0"
     )
+
+
+def test_gjgk_update_word_hides_comment_progress_logs_in_verbose_edit_mode(monkeypatch) -> None:
+    fake_doc = _FakeDocument("x" * 120)
+    partial_result = {
+        "total": 2,
+        "attempted": 2,
+        "added": 1,
+        "failed": 1,
+        "skipped": 0,
+        "issues": [
+            {
+                "index": 2,
+                "reason": "reference_text_not_found",
+                "reference_text": "z",
+                "comment_text": "c2",
+            },
+        ],
+    }
+    _patch_gjgk_node(monkeypatch, fake_doc, partial_result)
+
+    progress_messages: list[str] = []
+    progress_errors: list[str] = []
+
+    monkeypatch.setattr(
+        gjgk_update_word_module.progress_log,
+        "info",
+        lambda message, *args: progress_messages.append(message % args if args else str(message)),
+    )
+    monkeypatch.setattr(
+        gjgk_update_word_module.progress_log,
+        "error",
+        lambda message, *args: progress_errors.append(message % args if args else str(message)),
+    )
+
+    def _fake_apply_inline_style_fragments(**kwargs):
+        progress_logger = kwargs.get("progress_logger")
+        message = (
+            '步骤6：样式回填[1/1] 成功 | 样式=加粗 | 源文本="原条款" | '
+            '目标文本="新条款" | 得分=0.9100 | 阈值=0.8000'
+        )
+        kwargs["log_parts"].append(message)
+        if callable(progress_logger):
+            progress_logger(message)
+        return {
+            "extracted": 1,
+            "attempted": 1,
+            "applied": 1,
+            "skipped": 0,
+            "failed": 0,
+            "issues": [],
+            "applied_by_style": {"bold": 1},
+            "skipped_by_reason": {},
+        }
+
+    monkeypatch.setattr(
+        gjgk_update_word_module,
+        "apply_inline_style_fragments",
+        _fake_apply_inline_style_fragments,
+    )
+
+    result = gjgk_update_word_module.gjgk_update_word(
+        {
+            "prepared_doc_path": "fake.docx",
+            "polished_text": "新的正文",
+            "polished_comments": [
+                {"reference_text": "a", "comment_text": "c1"},
+            ],
+            "generated_comment_count": 2,
+            "inline_style_fragments": [{"source_text": "原条款"}],
+            "verbose_style_progress_logs": True,
+            "suppress_comment_progress_logs": True,
+            "insertion_before_text": "前锚点",
+            "insertion_after_text": "后锚点",
+        },
+        config=None,
+    )
+
+    assert any("样式回填[1/1] 成功" in message for message in progress_messages)
+    assert not any("AI批注写入" in message for message in progress_messages)
+    assert progress_errors == []
+    assert result["comment_writeback_summary"] == "AI批注写入: 生成=2, 成功=1, 失败=1, 跳过=0"
+
+
+def test_gjgk_update_word_keeps_comment_progress_logs_outside_edit_verbose_mode(monkeypatch) -> None:
+    fake_doc = _FakeDocument("x" * 120)
+    partial_result = {
+        "total": 2,
+        "attempted": 2,
+        "added": 1,
+        "failed": 1,
+        "skipped": 0,
+        "issues": [],
+    }
+    _patch_gjgk_node(monkeypatch, fake_doc, partial_result)
+
+    progress_messages: list[str] = []
+    monkeypatch.setattr(
+        gjgk_update_word_module.progress_log,
+        "info",
+        lambda message, *args: progress_messages.append(message % args if args else str(message)),
+    )
+
+    result = gjgk_update_word_module.gjgk_update_word(
+        {
+            "prepared_doc_path": "fake.docx",
+            "polished_text": "新的正文",
+            "polished_comments": [
+                {"reference_text": "a", "comment_text": "c1"},
+            ],
+            "generated_comment_count": 2,
+            "insertion_before_text": "前锚点",
+            "insertion_after_text": "后锚点",
+        },
+        config=None,
+    )
+
+    assert any("AI批注写入: 生成=2, 成功=1, 失败=1, 跳过=0" in message for message in progress_messages)
+    assert result["comment_writeback_summary"] == "AI批注写入: 生成=2, 成功=1, 失败=1, 跳过=0"

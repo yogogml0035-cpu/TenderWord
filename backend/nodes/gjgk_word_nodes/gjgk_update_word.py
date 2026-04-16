@@ -1068,6 +1068,8 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
     polished_text = state.get("polished_text")
     insertion_before_text = state.get("insertion_before_text")
     insertion_after_text = state.get("insertion_after_text")
+    verbose_style_progress_logs = bool(state.get("verbose_style_progress_logs"))
+    suppress_comment_progress_logs = bool(state.get("suppress_comment_progress_logs"))
 
     if not prepared_doc_path:
         raise ValueError("需要 prepared_doc_path 来插入 gjgk 内容")
@@ -1396,6 +1398,7 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
                 bound_end=int(get_insertion_bound_end()),
                 log_parts=log_parts,
                 step_label="步骤6",
+                progress_logger=progress_log.info if verbose_style_progress_logs else None,
             )
             style_writeback_summary = summarize_style_writeback_result(
                 style_writeback_result
@@ -1423,12 +1426,14 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
 
         # Build summary for logging and state
         summary = f"AI批注写入: 生成={generated_count}, 成功={added}, 失败={failed}, 跳过={skipped}"
-        progress_log.info(summary)
+        if not suppress_comment_progress_logs:
+            progress_log.info(summary)
 
         # Hard fail: if AI generated comments exist but zero were written back
         if generated_count > 0 and added == 0:
             error_msg = f"批注生成成功但写入失败: 生成{generated_count}条, 成功写入0条"
-            progress_log.error(error_msg)
+            if not suppress_comment_progress_logs:
+                progress_log.error(error_msg)
             raise ValueError(error_msg)
 
         # Store detailed results in state for visibility

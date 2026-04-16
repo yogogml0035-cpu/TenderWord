@@ -43,6 +43,11 @@ class _FakeDoc:
         return applied
 
 
+class _FailingDoc(_FakeDoc):
+    def Range(self, start: int, end: int) -> _FakeAppliedRange:
+        raise RuntimeError("RPC write failed")
+
+
 def _make_candidate(
     *,
     text: str,
@@ -324,3 +329,181 @@ def test_build_style_writeback_summary_payload_keeps_summary_fields() -> None:
         "applied_by_style": {"bold": 2},
         "skipped_by_reason": {"low_confidence": 1},
     }
+
+
+def test_build_inline_style_extraction_logs_formats_chinese_details() -> None:
+    logs = style_ops.build_inline_style_extraction_logs(
+        [
+            {
+                "container_type": "table_cell",
+                "container_locator": {"table_index": 2, "row": 3, "col": 1},
+                "source_text": "这是一段非常长的样式文本" * 7,
+                "style_flags": {
+                    "strikethrough": False,
+                    "underline": False,
+                    "bold": True,
+                    "italic": False,
+                },
+                "highlight_color": 7,
+                "source_span_kind": "partial_span",
+            }
+        ]
+    )
+
+    assert len(logs) == 1
+    assert "样式提取[1/1]" in logs[0]
+    assert "样式=" in logs[0]
+    assert "加粗" in logs[0]
+    assert "高亮" in logs[0]
+    assert "容器=表格#2 第3行第1列" in logs[0]
+    assert "范围=局部片段" in logs[0]
+    assert "..." in logs[0]
+
+
+def test_apply_inline_style_fragments_emits_success_detail_logs(monkeypatch) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 1},
+        "source_text": "红字",
+        "normalized_text": normalize_semantic_text("红字"),
+        "container_text": "投标人需提供红字证明材料",
+        "normalized_container_text": normalize_semantic_text("投标人需提供红字证明材料"),
+        "context_before": "提供",
+        "context_after": "证明",
+        "position_ratio": 0.25,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": True,
+            "italic": False,
+        },
+        "font_color": None,
+        "highlight_color": 7,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    candidate_text = "投标人应继续提供新增红字证明材料"
+    candidate = _make_candidate(text=candidate_text, start=50, position_ratio=0.25)
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    progress_messages: list[str] = []
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=200,
+        log_parts=[],
+        progress_logger=progress_messages.append,
+    )
+
+    assert result["applied"] == 1
+    assert any("开始回填行内样式，共 1 个片段" in message for message in progress_messages)
+    assert any(
+        "样式回填[1/1] 成功" in message
+        and "加粗" in message
+        and "高亮" in message
+        and '源文本="红字"' in message
+        and '目标文本="红字"' in message
+        for message in progress_messages
+    )
+    assert any("命中样式: 加粗=1, 高亮=1" in message for message in progress_messages)
+
+
+def test_apply_inline_style_fragments_emits_skip_reason_logs(monkeypatch) -> None:
+    fragment = {
+        "container_type": "table_cell",
+        "container_locator": {"table_index": 1, "row": 2, "col": 1},
+        "source_text": "★质保期",
+        "normalized_text": normalize_semantic_text("★质保期"),
+        "container_text": "★质保期",
+        "normalized_container_text": normalize_semantic_text("★质保期"),
+        "context_before": "",
+        "context_after": "",
+        "position_ratio": 0.6,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": True,
+            "italic": False,
+        },
+        "font_color": None,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "full_container",
+    }
+    candidate = _make_candidate(
+        text="★质保期",
+        start=30,
+        container_type="table_cell",
+        locator={"table_index": 1, "row": 1, "col": 1},
+        position_ratio=0.6,
+    )
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    progress_messages: list[str] = []
+    result = style_ops.apply_inline_style_fragments(
+        doc=_FakeDoc(),
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=100,
+        log_parts=[],
+        progress_logger=progress_messages.append,
+    )
+
+    assert result["skipped"] == 1
+    assert any(
+        "样式回填[1/1] 跳过" in message
+        and "原因=表格结构已变化，无法按原单元格定位" in message
+        for message in progress_messages
+    )
+
+
+def test_apply_inline_style_fragments_emits_failure_logs(monkeypatch) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 1},
+        "source_text": "红字",
+        "normalized_text": normalize_semantic_text("红字"),
+        "container_text": "红字",
+        "normalized_container_text": normalize_semantic_text("红字"),
+        "context_before": "",
+        "context_after": "",
+        "position_ratio": 0.2,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": True,
+            "italic": False,
+        },
+        "font_color": None,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "full_container",
+    }
+    candidate = _make_candidate(text="红字", start=10, position_ratio=0.2)
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    progress_messages: list[str] = []
+    result = style_ops.apply_inline_style_fragments(
+        doc=_FailingDoc(),
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=100,
+        log_parts=[],
+        progress_logger=progress_messages.append,
+    )
+
+    assert result["failed"] == 1
+    assert any(
+        "样式回填[1/1] 失败" in message
+        and "原因=写回样式失败" in message
+        and "错误=RPC write failed" in message
+        for message in progress_messages
+    )

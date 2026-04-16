@@ -244,6 +244,8 @@ def gngk_fw_zc_update_word(
     insertion_after_text = state.get("insertion_after_text")
     tender_type = state.get("tender_type", "gngk_fw_zc")
     protected_profile = get_protected_field_profile(str(tender_type or "gngk_fw_zc"))
+    verbose_style_progress_logs = bool(state.get("verbose_style_progress_logs"))
+    suppress_comment_progress_logs = bool(state.get("suppress_comment_progress_logs"))
 
     if not prepared_doc_path:
         raise ValueError("需要 prepared_doc_path 来插入内容到 Word 文档")
@@ -1403,6 +1405,7 @@ def gngk_fw_zc_update_word(
                         bound_end=int(get_insertion_bound_end()),
                         log_parts=insertion_log_parts,
                         step_label="步骤5",
+                        progress_logger=progress_log.info if verbose_style_progress_logs else None,
                     )
                     style_writeback_summary = summarize_style_writeback_result(
                         style_writeback_result
@@ -1430,13 +1433,15 @@ def gngk_fw_zc_update_word(
                     f"AI批注写入: 生成={generated_count}, 成功={added}, "
                     f"失败={failed}, 跳过={skipped}"
                 )
-                progress_log.info(summary)
+                if not suppress_comment_progress_logs:
+                    progress_log.info(summary)
 
                 if generated_count > 0 and added == 0:
                     error_msg = (
                         f"批注生成成功但写入失败: 生成{generated_count}条, 成功写入0条"
                     )
-                    progress_log.error(error_msg)
+                    if not suppress_comment_progress_logs:
+                        progress_log.error(error_msg)
                     raise ValueError(error_msg)
 
                 comment_writeback_summary = summary

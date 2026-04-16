@@ -8,7 +8,10 @@ import uuid
 from typing import Any, Dict
 
 from backend.config.tender_config import get_anchor_target_sizes
-from backend.helper.word_helper.inline_style_ops import extract_inline_style_fragments
+from backend.helper.word_helper.inline_style_ops import (
+    build_inline_style_extraction_logs,
+    extract_inline_style_fragments,
+)
 from backend.nodes.common_word_nodes.get_comments import (
     result_to_polished_comments,
 )
@@ -84,6 +87,8 @@ def resolve_edit_target(state: TaskSkillGraphState, config) -> TaskSkillGraphSta
         "origin_tender_path": str(edit_output_path),
         "prepared_doc_path": str(edit_output_path),
         "clean_draft_path": str(edit_output_path),
+        "verbose_style_progress_logs": True,
+        "suppress_comment_progress_logs": True,
     }
     return TaskSkillGraphState(**updates)
 
@@ -104,6 +109,7 @@ def extract_edit_context(state: TaskSkillGraphState, config) -> TaskSkillGraphSt
         raise FileNotFoundError(f"extract_edit_context 文档不存在: {file_path}")
 
     tender_type = str(state.get("tender_type") or "xjcg")
+    verbose_style_progress_logs = bool(state.get("verbose_style_progress_logs"))
     before_size, after_size = get_anchor_target_sizes(tender_type)
 
     word_app = None
@@ -176,12 +182,20 @@ def extract_edit_context(state: TaskSkillGraphState, config) -> TaskSkillGraphSt
             start_page,
             end_page,
         )
+        if verbose_style_progress_logs:
+            for message in build_inline_style_extraction_logs(
+                inline_style_fragments,
+                step_label="样式提取",
+            ):
+                progress_log.info("[%s] %s", NODE_NAME_EXTRACT, message)
         return TaskSkillGraphState(
             origin_tender_params=extracted_content,
             polished_comments=polished_comments,
             inline_style_fragments=inline_style_fragments,
             start_page=start_page,
             end_page=end_page,
+            verbose_style_progress_logs=verbose_style_progress_logs,
+            suppress_comment_progress_logs=bool(state.get("suppress_comment_progress_logs")),
         )
     finally:
         close_word_application(

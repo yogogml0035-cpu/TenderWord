@@ -11,6 +11,7 @@ __pycache__/
 *.so
 
 # Python 测试和工具缓存
+.tools
 .vscode
 .pytest_cache
 .codex
@@ -54,6 +55,7 @@ out/
 
 # Node.js
 node_modules/
+node_modules.*
 *.tsbuildinfo
 
 # 文档和测试目录

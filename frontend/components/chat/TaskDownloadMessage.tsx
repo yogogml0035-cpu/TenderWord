@@ -17,10 +17,6 @@ export function TaskDownloadMessage({
 }: TaskDownloadMessageProps) {
   const outputFile = typeof message.metadata?.outputFile === 'string' ? message.metadata.outputFile : '';
   const isModifyTask = message.metadata?.taskKind === 'rewrite' || message.metadata?.taskKind === 'edit';
-  const styleWriteback =
-    typeof message.metadata?.styleWriteback === 'object' && message.metadata.styleWriteback !== null
-      ? message.metadata.styleWriteback
-      : null;
   const fileName =
     typeof message.metadata?.fileName === 'string' && message.metadata.fileName.length > 0
       ? message.metadata.fileName
@@ -62,9 +58,6 @@ export function TaskDownloadMessage({
           <FileText className="h-4 w-4 text-gray-400" />
           <span className="truncate">{fileName}</span>
         </div>
-        {styleWriteback?.summary ? (
-          <p className="mt-2 text-xs leading-5 text-slate-500">{styleWriteback.summary}</p>
-        ) : null}
       </div>
     </div>
   );

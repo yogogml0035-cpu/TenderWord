@@ -235,6 +235,7 @@ $frontendPackage = Join-Path $frontendDir "package.json"
 $backendEnv = Join-Path $backendDir ".env"
 $frontendEnv = Join-Path $frontendDir ".env.local"
 $frontendNodeModules = Join-Path $frontendDir "node_modules"
+$frontendNextCmd = Join-Path $frontendNodeModules ".bin\next.cmd"
 
 Assert-PathExists -Path $backendEntry -FailureMessage "未找到 backend\main.py。请确认当前目录是项目根目录。"
 Assert-PathExists -Path $backendPython -FailureMessage "缺少 backend\.venv\Scripts\python.exe。请先在 backend 目录创建并安装虚拟环境。"
@@ -242,7 +243,6 @@ Assert-WindowsVenvCompatible -PyVenvConfigPath $backendPyVenvConfig -FailureMess
 Assert-PathExists -Path $backendEnv -FailureMessage "缺少 backend\.env。请先参考 backend\.env.example 创建环境文件。"
 
 $shellPath = Get-PowerShellHostPath
-$repoRootIsUnc = Test-IsUncPath -Path $repoRoot
 
 if ($launchFrontend) {
     Assert-PathExists -Path $frontendPackage -FailureMessage "未找到 frontend\package.json。请确认当前目录是项目根目录。"
@@ -257,10 +257,14 @@ if ($launchFrontend) {
     Assert-PortFree -Port 8502
 }
 
-$frontendCommandText = "npm run dev"
+$frontendCommandText = 'if exist "node_modules\.bin\next.cmd" (npm run dev) else (echo [frontend] 检测到缺少 Windows Node.js shim，正在执行 npm ci... && npm ci && npm run dev)'
 $frontendBanner = "[frontend] 正在执行 npm run dev"
 $frontendTitle = "TenderWord Frontend Dev (8502)"
 $frontendSummary = "dev (npm run dev)"
+
+if ($launchFrontend -and -not (Test-Path -LiteralPath $frontendNextCmd)) {
+    Write-Info "检测到 frontend\\node_modules 已存在，但缺少 Windows next.cmd shim；启动时会先执行 npm ci 进行修复。"
+}
 
 Write-Info "运行后端预检查..."
 $backendCheckOutput = & $backendPython -c "import asyncio; import fastapi; import uvicorn; import pydantic_settings; import backend.main" 2>&1
@@ -279,7 +283,24 @@ $frontendProcess = $null
 
 try {
     $backendPythonLiteral = "'" + (Escape-SingleQuotedText -Text $backendPython) + "'"
-    $backendCommandText = "`$env:WATCHFILES_FORCE_POLLING='true'; `$env:WATCHFILES_POLL_DELAY_MS='300'; & $backendPythonLiteral -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-dir ."
+    # 只监听实际源码子目录，避免 watchfiles 扫到 .venv-linux 等开发环境目录。
+    $backendReloadArgsText = @(
+        "--reload"
+        "--reload-dir api"
+        "--reload-dir config"
+        "--reload-dir core"
+        "--reload-dir graphs"
+        "--reload-dir helper"
+        "--reload-dir models"
+        "--reload-dir nodes"
+        "--reload-dir prompts"
+        "--reload-dir services"
+        "--reload-dir skills"
+        "--reload-dir states"
+        "--reload-dir task"
+        "--reload-dir util"
+    ) -join " "
+    $backendCommandText = "`$env:WATCHFILES_FORCE_POLLING='true'; `$env:WATCHFILES_POLL_DELAY_MS='300'; & $backendPythonLiteral -m uvicorn main:app --host 0.0.0.0 --port 8000 $backendReloadArgsText"
     $backendProcess = Start-ServiceWindow `
         -ShellPath $shellPath `
         -Title "TenderWord Backend (8000)" `
@@ -290,22 +311,12 @@ try {
     if ($launchFrontend) {
         Start-Sleep -Seconds 1
 
-        if ($repoRootIsUnc) {
-            $frontendCommandText = 'if exist "node_modules\.bin\next.cmd" (npm run dev) else (echo [frontend] 检测到缺少 Windows Node.js shim，正在执行 npm ci... && npm ci && npm run dev)'
-            $frontendProcess = Start-CmdServiceWindow `
-                -CmdPath $cmdPath `
-                -Title $frontendTitle `
-                -WorkingDirectory $frontendDir `
-                -Banner $frontendBanner `
-                -CommandText $frontendCommandText
-        } else {
-            $frontendProcess = Start-ServiceWindow `
-                -ShellPath $shellPath `
-                -Title $frontendTitle `
-                -WorkingDirectory $frontendDir `
-                -Banner $frontendBanner `
-                -CommandText $frontendCommandText
-        }
+        $frontendProcess = Start-CmdServiceWindow `
+            -CmdPath $cmdPath `
+            -Title $frontendTitle `
+            -WorkingDirectory $frontendDir `
+            -Banner $frontendBanner `
+            -CommandText $frontendCommandText
     }
 } catch {
     if ($backendProcess -and -not $backendProcess.HasExited) {

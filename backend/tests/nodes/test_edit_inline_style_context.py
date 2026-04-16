@@ -15,9 +15,27 @@ class _FakeInspector:
         return {"range_start": range_start, "range_end": range_end}
 
 
+def test_resolve_edit_target_enables_verbose_style_flags(tmp_path: Path) -> None:
+    doc_path = tmp_path / "origin.docx"
+    doc_path.write_bytes(b"origin")
+
+    result = edit_nodes.resolve_edit_target(
+        {
+            "source_origin_tender_path": str(doc_path),
+        },
+        config=None,
+    )
+
+    assert result["verbose_style_progress_logs"] is True
+    assert result["suppress_comment_progress_logs"] is True
+    assert result["prepared_doc_path"].endswith(".docx")
+    assert result["prepared_doc_path"] != str(doc_path)
+
+
 def test_extract_edit_context_injects_inline_style_fragments(monkeypatch, tmp_path: Path) -> None:
     doc_path = tmp_path / "edit-source.docx"
     doc_path.write_bytes(b"docx")
+    progress_messages: list[str] = []
 
     monkeypatch.setattr(
         edit_nodes,
@@ -55,9 +73,29 @@ def test_extract_edit_context_injects_inline_style_fragments(monkeypatch, tmp_pa
     monkeypatch.setattr(
         edit_nodes,
         "extract_inline_style_fragments",
-        lambda **kwargs: [{"source_text": "红字", "container_type": "paragraph"}],
+        lambda **kwargs: [
+            {
+                "source_text": "红字",
+                "container_type": "paragraph",
+                "container_locator": {"paragraph_index": 1},
+                "style_flags": {
+                    "strikethrough": False,
+                    "underline": False,
+                    "bold": True,
+                    "italic": False,
+                },
+                "source_span_kind": "partial_span",
+            }
+        ],
     )
     monkeypatch.setattr(edit_nodes, "close_word_application", lambda **kwargs: None)
+    monkeypatch.setattr(
+        edit_nodes.progress_log,
+        "info",
+        lambda message, *args: progress_messages.append(
+            message % args if args else str(message)
+        ),
+    )
 
     result = edit_nodes.extract_edit_context(
         {
@@ -65,6 +103,8 @@ def test_extract_edit_context_injects_inline_style_fragments(monkeypatch, tmp_pa
             "tender_type": "xjcg",
             "insertion_before_text": "第三章 采购需求",
             "insertion_after_text": "第四章 响应文件有关格式",
+            "verbose_style_progress_logs": True,
+            "suppress_comment_progress_logs": True,
         },
         config=None,
     )
@@ -74,5 +114,23 @@ def test_extract_edit_context_injects_inline_style_fragments(monkeypatch, tmp_pa
         {"reference_text": "原始正文", "comment_text": "保留批注"}
     ]
     assert result["inline_style_fragments"] == [
-        {"source_text": "红字", "container_type": "paragraph"}
+        {
+            "source_text": "红字",
+            "container_type": "paragraph",
+            "container_locator": {"paragraph_index": 1},
+            "style_flags": {
+                "strikethrough": False,
+                "underline": False,
+                "bold": True,
+                "italic": False,
+            },
+            "source_span_kind": "partial_span",
+        }
     ]
+    assert result["verbose_style_progress_logs"] is True
+    assert result["suppress_comment_progress_logs"] is True
+    assert any("已提取编辑正文、批注和样式: comments=1, styles=1, pages=2-4" in msg for msg in progress_messages)
+    assert any(
+        "样式提取[1/1]" in msg and "样式=加粗" in msg and '源文本="红字"' in msg
+        for msg in progress_messages
+    )
