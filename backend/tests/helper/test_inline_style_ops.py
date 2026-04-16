@@ -55,6 +55,8 @@ def _make_candidate(
     container_type: str = "paragraph",
     locator: dict[str, int] | None = None,
     position_ratio: float = 0.2,
+    logical_bound_start: int | None = None,
+    logical_bound_end: int | None = None,
 ) -> Any:
     normalized, normalized_map = style_ops._build_normalized_text_with_visible_map(text)
     visible_chars = []
@@ -69,6 +71,15 @@ def _make_candidate(
                 signature=dict(EMPTY_SIGNATURE),
             )
         )
+    logical_lines = style_ops._build_logical_lines(
+        visible_chars,
+        bound_start=start if logical_bound_start is None else int(logical_bound_start),
+        bound_end=(
+            start + max(len(text), 1) + 1
+            if logical_bound_end is None
+            else int(logical_bound_end)
+        ),
+    )
 
     return style_ops._ContainerCandidate(
         container_type=container_type,
@@ -77,6 +88,7 @@ def _make_candidate(
         visible_text=text,
         normalized_text=normalized,
         normalized_index_to_visible=normalized_map,
+        logical_lines=logical_lines,
         position_ratio=position_ratio,
         range_start=start,
         range_end=start + len(text),
@@ -201,18 +213,24 @@ def test_apply_inline_style_fragments_matches_short_title_when_target_paragraph_
             start=10,
             locator={"paragraph_index": 1},
             position_ratio=0.08,
+            logical_bound_start=0,
+            logical_bound_end=320,
         ),
         _make_candidate(
-            text="二、技术需求（一）大功率电场发生装置★1、常规单极模式：",
+            text="4、付款方式：分期付款\n二、技术需求\n（一）大功率电场发生装置",
             start=180,
             locator={"paragraph_index": 8},
             position_ratio=0.79,
+            logical_bound_start=0,
+            logical_bound_end=320,
         ),
         _make_candidate(
             text="三、其他要求",
             start=260,
             locator={"paragraph_index": 9},
             position_ratio=0.92,
+            logical_bound_start=0,
+            logical_bound_end=320,
         ),
     ]
     monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: candidates)
@@ -227,8 +245,10 @@ def test_apply_inline_style_fragments_matches_short_title_when_target_paragraph_
     )
 
     assert result["applied"] == 1
-    assert doc.applied_ranges[0].Start == 180
-    assert doc.applied_ranges[0].End == 180 + len("二、技术需求（一）大功率电场发生装置★1、常规单极模式：")
+    candidate_text = "4、付款方式：分期付款\n二、技术需求\n（一）大功率电场发生装置"
+    expected_start = 180 + candidate_text.index("二")
+    assert doc.applied_ranges[0].Start == expected_start
+    assert doc.applied_ranges[0].End == expected_start + len("二、技术需求")
     assert doc.applied_ranges[0].Font.Bold is True
 
 
@@ -531,6 +551,97 @@ def test_apply_inline_style_fragments_copies_font_color_for_partial_span(monkeyp
     assert result["applied"] == 1
     assert doc.applied_ranges[0].Font.Color == 255
     assert doc.applied_ranges[0].Start == 40 + candidate_text.index("提")
+
+
+def test_apply_inline_style_fragments_matches_short_partial_inside_logical_line(monkeypatch) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 62},
+        "source_text": "提供",
+        "normalized_text": normalize_semantic_text("提供"),
+        "container_text": "供应商需提供原件",
+        "normalized_container_text": normalize_semantic_text("供应商需提供原件"),
+        "context_before": "需",
+        "context_after": "原件",
+        "position_ratio": 0.76,
+        "local_position_ratio": 0.5,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 255,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    candidate_text = "4、付款方式：按节点支付\n供应商需提供原件\n三、其他要求"
+    candidate = _make_candidate(text=candidate_text, start=120, position_ratio=0.74)
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=260,
+        log_parts=[],
+    )
+
+    expected_start = 120 + candidate_text.index("提")
+    assert result["applied"] == 1
+    assert doc.applied_ranges[0].Start == expected_start
+    assert doc.applied_ranges[0].End == expected_start + len("提供")
+    assert doc.applied_ranges[0].Font.Color == 255
+
+
+def test_apply_inline_style_fragments_skips_ambiguous_short_partial_across_logical_lines(monkeypatch) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 62},
+        "source_text": "提供",
+        "normalized_text": normalize_semantic_text("提供"),
+        "container_text": "提供",
+        "normalized_container_text": normalize_semantic_text("提供"),
+        "context_before": "",
+        "context_after": "",
+        "position_ratio": 0.76,
+        "local_position_ratio": 0.5,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 255,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    candidate = _make_candidate(
+        text="第一行提供资料\n第二行提供原件",
+        start=200,
+        locator={"paragraph_index": 5},
+        position_ratio=0.76,
+    )
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    result = style_ops.apply_inline_style_fragments(
+        doc=_FakeDoc(),
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=260,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert result["issues"][0]["reason"] == "multiple_local_candidates"
 
 
 def test_apply_inline_style_fragments_emits_short_skip_logs_and_keeps_diagnostics(monkeypatch) -> None:

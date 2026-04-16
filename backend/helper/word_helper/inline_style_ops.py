@@ -10,6 +10,7 @@ edit 链路的行内样式抽取与回填 helper。
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Callable, Dict, Iterable, Literal, Optional, Sequence, TypedDict
 
 from backend.helper.word_helper.semantic_matcher import (
@@ -38,6 +39,12 @@ SHORT_FULL_CONTAINER_MAX_LEN = 16
 SHORT_PARTIAL_MAX_LEN = 6
 SUCCESS_EXAMPLE_LIMIT = 3
 SUCCESS_EXAMPLE_TEXT_LIMIT = 24
+HEADING_TEXT_RE = re.compile(
+    r"^\s*(?:"
+    r"第?[一二三四五六七八九十百千]+(?:章|节|部分)"
+    r"|[（(][一二三四五六七八九十]+[)）]"
+    r"|[一二三四五六七八九十]+[、.．])"
+)
 
 STYLE_LABEL_MAP = {
     "bold": "加粗",
@@ -158,9 +165,22 @@ class _ContainerCandidate:
     visible_text: str
     normalized_text: str
     normalized_index_to_visible: list[int]
+    logical_lines: list["_LogicalLine"]
     position_ratio: float
     range_start: int
     range_end: int
+
+
+@dataclass(frozen=True)
+class _LogicalLine:
+    text: str
+    normalized_text: str
+    normalized_index_to_visible: list[int]
+    visible_start: int
+    visible_end: int
+    actual_start: int
+    actual_end: int
+    position_ratio: float
 
 
 @dataclass(frozen=True)
@@ -258,10 +278,20 @@ def _normalized_length(value: Any) -> int:
     return len(str(value or ""))
 
 
+def _looks_like_heading_text(value: Any) -> bool:
+    cleaned = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not cleaned:
+        return False
+    first_line = cleaned.split("\n", 1)[0].strip()
+    return bool(HEADING_TEXT_RE.match(first_line))
+
+
 def _is_short_title_fragment(fragment: InlineStyleFragment) -> bool:
     return (
-        str(fragment.get("source_span_kind") or "partial_span") == "full_container"
+        str(fragment.get("container_type") or "paragraph") == "paragraph"
+        and str(fragment.get("source_span_kind") or "partial_span") == "full_container"
         and _normalized_length(fragment.get("normalized_container_text")) <= SHORT_TITLE_MAX_LEN
+        and _looks_like_heading_text(fragment.get("source_text") or fragment.get("container_text"))
     )
 
 
@@ -507,6 +537,82 @@ def _build_visible_chars(range_obj) -> tuple[list[_VisibleChar], str]:
     return visible_chars, "".join(visible_text_parts)
 
 
+def _build_logical_lines(
+    visible_chars: Sequence[_VisibleChar],
+    *,
+    bound_start: int,
+    bound_end: int,
+) -> list[_LogicalLine]:
+    total_length = max(1, int(bound_end) - int(bound_start))
+    logical_lines: list[_LogicalLine] = []
+    line_text_parts: list[str] = []
+    line_visible_start: Optional[int] = None
+    line_visible_end: Optional[int] = None
+    line_actual_start: Optional[int] = None
+    line_actual_end: Optional[int] = None
+
+    def flush_line() -> None:
+        nonlocal line_text_parts, line_visible_start, line_visible_end, line_actual_start, line_actual_end
+        if (
+            line_visible_start is None
+            or line_visible_end is None
+            or line_actual_start is None
+            or line_actual_end is None
+            or not line_text_parts
+        ):
+            line_text_parts = []
+            line_visible_start = None
+            line_visible_end = None
+            line_actual_start = None
+            line_actual_end = None
+            return
+
+        line_text = "".join(line_text_parts)
+        normalized_text, normalized_index_to_visible = _build_normalized_text_with_visible_map(
+            line_text
+        )
+        if normalized_text:
+            midpoint = (float(line_actual_start) + float(line_actual_end)) / 2.0
+            position_ratio = max(
+                0.0,
+                min(1.0, (midpoint - float(bound_start)) / float(total_length)),
+            )
+            logical_lines.append(
+                _LogicalLine(
+                    text=line_text,
+                    normalized_text=normalized_text,
+                    normalized_index_to_visible=normalized_index_to_visible,
+                    visible_start=int(line_visible_start),
+                    visible_end=int(line_visible_end),
+                    actual_start=int(line_actual_start),
+                    actual_end=int(line_actual_end),
+                    position_ratio=position_ratio,
+                )
+            )
+
+        line_text_parts = []
+        line_visible_start = None
+        line_visible_end = None
+        line_actual_start = None
+        line_actual_end = None
+
+    for char in visible_chars:
+        if char.text == "\n":
+            flush_line()
+            continue
+
+        if line_visible_start is None:
+            line_visible_start = int(char.visible_start)
+            line_actual_start = int(char.start)
+
+        line_text_parts.append(char.text)
+        line_visible_end = int(char.visible_end)
+        line_actual_end = int(char.end)
+
+    flush_line()
+    return logical_lines
+
+
 def _build_normalized_text_with_visible_map(text: str) -> tuple[str, list[int]]:
     cleaned = (
         str(text or "")
@@ -571,6 +677,11 @@ def _build_container_candidate(
         0.0,
         min(1.0, (_safe_int(getattr(range_obj, "Start", bound_start)) - int(bound_start)) / total_length),
     )
+    logical_lines = _build_logical_lines(
+        visible_chars,
+        bound_start=bound_start,
+        bound_end=bound_end,
+    )
 
     return _ContainerCandidate(
         container_type=container_type,
@@ -579,6 +690,7 @@ def _build_container_candidate(
         visible_text=visible_text,
         normalized_text=normalized_text,
         normalized_index_to_visible=normalized_index_to_visible,
+        logical_lines=logical_lines,
         position_ratio=position_ratio,
         range_start=_safe_int(getattr(range_obj, "Start", 0)),
         range_end=_safe_int(getattr(range_obj, "End", 0)),
@@ -1008,19 +1120,26 @@ def _resolve_actual_span(candidate: _ContainerCandidate, visible_start: int, vis
     return int(start_char.start), int(end_char.end)
 
 
-def _locate_exact_occurrences(candidate: _ContainerCandidate, normalized_text: str) -> list[tuple[int, int]]:
+def _locate_exact_occurrences_in_text(
+    normalized_candidate_text: str,
+    normalized_text: str,
+) -> list[tuple[int, int]]:
     occurrences: list[tuple[int, int]] = []
     if not normalized_text:
         return occurrences
 
     start = 0
-    while start < len(candidate.normalized_text):
-        hit = candidate.normalized_text.find(normalized_text, start)
+    while start < len(normalized_candidate_text):
+        hit = normalized_candidate_text.find(normalized_text, start)
         if hit < 0:
             break
         occurrences.append((hit, hit + len(normalized_text)))
         start = hit + 1
     return occurrences
+
+
+def _locate_exact_occurrences(candidate: _ContainerCandidate, normalized_text: str) -> list[tuple[int, int]]:
+    return _locate_exact_occurrences_in_text(candidate.normalized_text, normalized_text)
 
 
 def _build_local_match_from_norm_span(
@@ -1073,6 +1192,148 @@ def _build_local_match_from_norm_span(
     )
 
 
+def _build_local_match_from_line_norm_span(
+    candidate: _ContainerCandidate,
+    *,
+    line: _LogicalLine,
+    fragment: InlineStyleFragment,
+    norm_start: int,
+    norm_end: int,
+    base_score: float,
+) -> Optional[_LocalMatch]:
+    if norm_end <= norm_start:
+        return None
+
+    try:
+        visible_start = line.visible_start + line.normalized_index_to_visible[norm_start]
+        visible_end = (
+            line.visible_start
+            + line.normalized_index_to_visible[norm_end - 1]
+            + 1
+        )
+    except Exception:
+        return None
+
+    if _is_short_title_fragment(fragment) and norm_start == 0:
+        source_text = str(fragment.get("source_text") or "").strip()
+        if source_text and line.text.startswith(source_text):
+            visible_start = line.visible_start
+            visible_end = min(line.visible_start + len(source_text), line.visible_end)
+
+    actual_span = _resolve_actual_span(candidate, visible_start, visible_end)
+    if actual_span is None:
+        return None
+
+    context_score = _context_score(
+        context_before=str(fragment.get("context_before") or ""),
+        context_after=str(fragment.get("context_after") or ""),
+        candidate_text=candidate.visible_text,
+        visible_start=visible_start,
+        visible_end=visible_end,
+    )
+    line_position_score = _position_score(
+        float(fragment.get("position_ratio") or 0.0),
+        line.position_ratio,
+    )
+    final_score = (
+        0.80 * float(base_score)
+        + 0.15 * context_score
+        + 0.05 * line_position_score
+    )
+    return _LocalMatch(
+        visible_start=visible_start,
+        visible_end=visible_end,
+        actual_start=actual_span[0],
+        actual_end=actual_span[1],
+        score=final_score,
+        context_score=context_score,
+        local_position_score=line_position_score,
+    )
+
+
+def _match_short_title_line(
+    candidate: _ContainerCandidate,
+    fragment: InlineStyleFragment,
+) -> tuple[float, float, Optional[_LocalMatch]]:
+    normalized_title = str(fragment.get("normalized_container_text") or "")
+    if not normalized_title:
+        return 0.0, 0.0, None
+
+    best_score = 0.0
+    best_position_score = 0.0
+    best_match: Optional[_LocalMatch] = None
+
+    for line in candidate.logical_lines:
+        hits = _locate_exact_occurrences_in_text(line.normalized_text, normalized_title)
+        if not hits:
+            continue
+
+        line_position_score = _position_score(
+            float(fragment.get("position_ratio") or 0.0),
+            line.position_ratio,
+        )
+        for norm_start, norm_end in hits:
+            match = _build_local_match_from_line_norm_span(
+                candidate,
+                line=line,
+                fragment=fragment,
+                norm_start=norm_start,
+                norm_end=norm_end,
+                base_score=1.0,
+            )
+            if match is None:
+                continue
+
+            combined_score = round(0.68 * match.score + 0.32 * line_position_score, 6)
+            if (
+                combined_score > best_score
+                or (
+                    abs(combined_score - best_score) < 1e-6
+                    and line_position_score > best_position_score
+                )
+            ):
+                best_score = combined_score
+                best_position_score = line_position_score
+                best_match = match
+
+    return best_score, best_position_score, best_match
+
+
+def _best_short_partial_line_hint(
+    candidate: _ContainerCandidate,
+    fragment: InlineStyleFragment,
+) -> tuple[float, float]:
+    normalized_text = str(fragment.get("normalized_text") or "")
+    if not normalized_text:
+        return 0.0, 0.0
+
+    best_score = 0.0
+    best_position_score = 0.0
+    min_text_score = 0.54
+
+    for line in candidate.logical_lines:
+        text_score = _presence_score(normalized_text, line.normalized_text)
+        if text_score < min_text_score:
+            continue
+
+        line_position_score = _position_score(
+            float(fragment.get("position_ratio") or 0.0),
+            line.position_ratio,
+        )
+        combined_score = round(0.72 * text_score + 0.28 * line_position_score, 6)
+        if (
+            combined_score > best_score
+            or (
+                abs(combined_score - best_score) < 1e-6
+                and line_position_score > best_position_score
+            )
+        ):
+            best_score = combined_score
+            best_position_score = line_position_score
+
+    return best_score, best_position_score
+
+
 def _locate_local_span(
     candidate: _ContainerCandidate,
     fragment: InlineStyleFragment,
@@ -1080,6 +1341,89 @@ def _locate_local_span(
     normalized_text = str(fragment.get("normalized_text") or "")
     if not normalized_text:
         return None, "empty_fragment"
+
+    if _is_short_partial_fragment(fragment) and candidate.logical_lines:
+        min_text_score = 0.58
+        line_matches: list[tuple[float, _LocalMatch]] = []
+
+        for line in candidate.logical_lines:
+            text_score = _presence_score(normalized_text, line.normalized_text)
+            if text_score < min_text_score:
+                continue
+
+            exact_hits = _locate_exact_occurrences_in_text(line.normalized_text, normalized_text)
+            if exact_hits:
+                for start, end in exact_hits:
+                    match = _build_local_match_from_line_norm_span(
+                        candidate,
+                        line=line,
+                        fragment=fragment,
+                        norm_start=start,
+                        norm_end=end,
+                        base_score=1.0,
+                    )
+                    if match is not None:
+                        line_matches.append((round(0.72 * match.score + 0.28 * text_score, 6), match))
+                continue
+
+            target_len = len(normalized_text)
+            lower_len = max(1, target_len - min(APPROX_LOCAL_SCAN_WINDOW, max(2, target_len // 3)))
+            upper_len = min(
+                len(line.normalized_text),
+                target_len + min(APPROX_LOCAL_SCAN_WINDOW, max(2, target_len // 3)),
+            )
+            for start in range(0, len(line.normalized_text)):
+                if start + lower_len > len(line.normalized_text):
+                    break
+                for window_len in range(lower_len, upper_len + 1):
+                    end = start + window_len
+                    if end > len(line.normalized_text):
+                        break
+                    segment = line.normalized_text[start:end]
+                    segment_score = semantic_similarity_norm(normalized_text, segment)
+                    if segment_score < min_text_score:
+                        continue
+                    match = _build_local_match_from_line_norm_span(
+                        candidate,
+                        line=line,
+                        fragment=fragment,
+                        norm_start=start,
+                        norm_end=end,
+                        base_score=segment_score,
+                    )
+                    if match is not None:
+                        line_matches.append(
+                            (
+                                round(0.72 * match.score + 0.28 * segment_score, 6),
+                                match,
+                            )
+                        )
+
+        if not line_matches:
+            return None, "low_local_confidence"
+
+        line_matches.sort(
+            key=lambda item: (
+                item[0],
+                item[1].context_score,
+                item[1].local_position_score,
+            ),
+            reverse=True,
+        )
+        if (
+            not str(fragment.get("context_before") or "")
+            and not str(fragment.get("context_after") or "")
+            and len(line_matches) > 1
+        ):
+            return None, "multiple_local_candidates"
+        if (
+            len(line_matches) > 1
+            and abs(line_matches[0][0] - line_matches[1][0]) < 0.02
+            and abs(line_matches[0][1].context_score - line_matches[1][1].context_score) < 0.05
+        ):
+            return None, "multiple_local_candidates"
+
+        return line_matches[0][1], None
 
     exact_hits = _locate_exact_occurrences(candidate, normalized_text)
     exact_matches: list[_LocalMatch] = []
@@ -1206,10 +1550,10 @@ def _final_candidate_score(
 
     if span_kind == "full_container":
         if _is_short_title_fragment(fragment):
+            title_match_score = probe.local_match.score if probe.local_match is not None else 0.0
             return round(
-                0.45 * max(container_score, probe.title_score)
-                + 0.30 * position_score
-                + 0.25 * probe.title_score,
+                0.65 * max(probe.title_score, title_match_score)
+                + 0.35 * position_score,
                 6,
             )
         return round(
@@ -1327,16 +1671,25 @@ def _select_candidate_containers(
         container_score = semantic_similarity_norm(fragment_container_text, candidate.normalized_text)
         local_hint = _presence_score(fragment_local_text, candidate.normalized_text)
         position_score = _position_score(fragment_position, candidate.position_ratio)
-        title_score = _presence_score(fragment_container_text, candidate.normalized_text) if is_title_fragment else 0.0
+        title_score = 0.0
+        title_match: Optional[_LocalMatch] = None
+
+        if is_title_fragment:
+            title_score, position_score, title_match = _match_short_title_line(
+                candidate,
+                fragment,
+            )
+        elif is_short_partial and candidate.logical_lines:
+            local_hint, position_score = _best_short_partial_line_hint(candidate, fragment)
 
         if is_title_fragment:
             coarse_score = round(
-                0.50 * title_score + 0.20 * container_score + 0.30 * position_score,
+                0.70 * title_score + 0.30 * position_score,
                 6,
             )
         elif is_short_partial:
             coarse_score = round(
-                0.55 * local_hint + 0.20 * container_score + 0.25 * position_score,
+                0.60 * local_hint + 0.15 * container_score + 0.25 * position_score,
                 6,
             )
         else:
@@ -1361,6 +1714,7 @@ def _select_candidate_containers(
                 coarse_score=coarse_score,
                 selected=not rejection_reason,
                 rejection_reason=rejection_reason,
+                local_match=title_match,
             )
         )
 
@@ -1467,6 +1821,8 @@ def _resolve_target_text(
         return ""
 
     if str(fragment.get("source_span_kind") or "partial_span") == "full_container":
+        if _is_short_title_fragment(fragment) and local_match is not None:
+            return candidate.visible_text[local_match.visible_start : local_match.visible_end]
         return candidate.visible_text
 
     if local_match is None:
@@ -1727,7 +2083,7 @@ def apply_inline_style_fragments(
         local_failures: list[str] = []
         for probe in candidate_probes:
             candidate = probe.candidate
-            local_match: Optional[_LocalMatch] = None
+            local_match: Optional[_LocalMatch] = probe.local_match
             local_error = None
             if str(fragment.get("source_span_kind") or "partial_span") == "partial_span":
                 local_match, local_error = _locate_local_span(candidate, fragment)
@@ -1735,6 +2091,10 @@ def apply_inline_style_fragments(
                     probe.local_error = local_error
                     local_failures.append(local_error)
                     continue
+            elif _is_short_title_fragment(fragment) and local_match is None:
+                probe.local_error = "no_local_candidate"
+                local_failures.append("no_local_candidate")
+                continue
 
             final_score = _final_candidate_score(
                 fragment=fragment,
@@ -1879,48 +2239,52 @@ def apply_inline_style_fragments(
             continue
 
         if str(fragment.get("source_span_kind") or "partial_span") == "full_container":
-            actual_span = _resolve_actual_span(
-                best_candidate,
-                0,
-                len(best_candidate.visible_text),
-            )
-            if actual_span is None:
-                result["skipped"] += 1
-                _append_issue(
-                    result,
-                    index=index,
-                    reason="empty_target_span",
-                    fragment=fragment,
-                    score=best_score,
+            if _is_short_title_fragment(fragment) and best_local_match is not None:
+                actual_start = best_local_match.actual_start
+                actual_end = best_local_match.actual_end
+            else:
+                actual_span = _resolve_actual_span(
+                    best_candidate,
+                    0,
+                    len(best_candidate.visible_text),
                 )
-                _emit_runtime_log(
-                    log_parts,
-                    _build_writeback_outcome_log(
-                        step_label=step_label,
+                if actual_span is None:
+                    result["skipped"] += 1
+                    _append_issue(
+                        result,
                         index=index,
-                        total=len(fragments),
-                        status="跳过",
-                        fragment=fragment,
                         reason="empty_target_span",
-                    ),
-                    progress_logger,
-                )
-                _emit_diagnostic_log(
-                    _build_writeback_diagnostic_log(
-                        step_label=step_label,
-                        index=index,
-                        total=len(fragments),
-                        status="跳过",
                         fragment=fragment,
-                        reason="empty_target_span",
                         score=best_score,
-                        threshold=threshold,
-                        candidate_details=candidate_details,
-                    ),
-                    diagnostic_logger,
-                )
-                continue
-            actual_start, actual_end = actual_span
+                    )
+                    _emit_runtime_log(
+                        log_parts,
+                        _build_writeback_outcome_log(
+                            step_label=step_label,
+                            index=index,
+                            total=len(fragments),
+                            status="跳过",
+                            fragment=fragment,
+                            reason="empty_target_span",
+                        ),
+                        progress_logger,
+                    )
+                    _emit_diagnostic_log(
+                        _build_writeback_diagnostic_log(
+                            step_label=step_label,
+                            index=index,
+                            total=len(fragments),
+                            status="跳过",
+                            fragment=fragment,
+                            reason="empty_target_span",
+                            score=best_score,
+                            threshold=threshold,
+                            candidate_details=candidate_details,
+                        ),
+                        diagnostic_logger,
+                    )
+                    continue
+                actual_start, actual_end = actual_span
         else:
             if best_local_match is None:
                 result["skipped"] += 1

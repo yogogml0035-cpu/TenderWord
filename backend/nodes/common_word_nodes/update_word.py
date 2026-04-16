@@ -30,7 +30,6 @@ from backend.util.word_util import (
     close_word_application,
     open_document_with_retry,
     unprotect_document,
-    WORD_MANUAL_LINE_BREAK,
     normalize_word_insert_text,
 )
 from backend.util.word_util import (
@@ -75,7 +74,8 @@ from backend.helper.word_helper.content_ops import (
     apply_standard_insert_format,
     insert_content_with_formatting,
     insert_table_with_formatting,
-    insert_items_inline_at_end_of_paragraph,
+    insert_items_inline_at_end_of_paragraph as helper_insert_items_inline_at_end_of_paragraph,
+    resolve_following_insert_pos,
 )
 from backend.helper.word_helper.cleanup_ops import (
     multi_pass_cleanup,
@@ -923,58 +923,15 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         return False
 
                 def insert_items_inline_at_end_of_paragraph(para_rng, items) -> int:
-                    try:
-                        t = para_rng.Text
-                        trim = 0
-                        while t.endswith("\r") or t.endswith("\a"):
-                            t = t[:-1]
-                            trim += 1
-                        pos = int(para_rng.End) - trim
-                    except Exception:
-                        pos = int(getattr(para_rng, "End", 0))
-                    try:
-                        if pos < int(para_rng.Start):
-                            pos = int(para_rng.End) - 1
-                    except Exception:
-                        pass
-                    pos = max(0, pos)
-                    rng = doc.Range(pos, pos)
-                    rng.Collapse(wdCollapseStart)
-                    inserted = 0
-                    for item in items:
-                        if item["type"] == "text":
-                            s = WORD_MANUAL_LINE_BREAK + normalize_word_insert_text(
-                                item["line"]
-                            )
-                            st = int(rng.Start)
-                            rng.InsertAfter(s)
-                            ed = int(rng.End)
-                            try:
-                                ins = doc.Range(st, ed)
-                                ins.Font.Name = insert_font_name
-                                ins.Font.Size = insert_font_size
-                                ins.Font.Bold = False
-                            except Exception:
-                                pass
-                            rng.Collapse(wdCollapseEnd)
-                            inserted += 1
-                        elif item["type"] == "table":
-                            try:
-                                insert_table_with_formatting(rng, item["rows"])
-                                inserted += 1
-                            except Exception as e:
-                                insertion_log_parts.append(
-                                    f"    警告: 内联插入表格失败，改为文本: {e}"
-                                )
-                                for row in item["rows"]:
-                                    s = WORD_MANUAL_LINE_BREAK + normalize_word_insert_text(
-                                        " | ".join(row)
-                                    )
-                                    st = int(rng.Start)
-                                    rng.InsertAfter(s)
-                                    rng.Collapse(wdCollapseEnd)
-                                    inserted += 1
-                    return inserted
+                    return helper_insert_items_inline_at_end_of_paragraph(
+                        doc,
+                        para_rng,
+                        items,
+                        get_bound_end=get_insertion_bound_end,
+                        font_name=insert_font_name,
+                        font_size=insert_font_size,
+                        log_parts=insertion_log_parts,
+                    )
 
                 flow = resolve_block_flow(protected_fields)
 
@@ -1122,27 +1079,29 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                             "付款方式字段位置超出插入边界，停止以避免侵入后置章节"
                         )
                     payment_end = int(payment_method_rng.End)
-                    start_after_payment = min(payment_end + 1, bound_end_now)
-                    safe_pos = None
-                    if start_after_payment < bound_end_now:
-                        safe_pos = find_next_editable_pos_bounded(
-                            start_after_payment, bound_end_now, max_lookahead=20000
-                        )
-                    if safe_pos is None or safe_pos >= bound_end_now:
-                        if bound_end_now > payment_end:
-                            back = find_prev_editable_pos(
-                                bound_end_now - 1, max_lookback=20000
-                            )
-                            if back is not None and back >= payment_end:
-                                safe_pos = back
-                    if safe_pos is None:
-                        safe_pos = start_after_payment
+                    payment_para_end = payment_end
+                    try:
+                        payment_para_end = int(payment_method_rng.Paragraphs(1).Range.End)
+                    except Exception:
+                        payment_para_end = payment_end
+                    safe_pos, prefer_distinct_paragraph = resolve_following_insert_pos(
+                        content_end=payment_end,
+                        paragraph_end=payment_para_end,
+                        bound_end=bound_end_now,
+                        find_next_editable_pos_bounded=find_next_editable_pos_bounded,
+                        find_prev_editable_pos=find_prev_editable_pos,
+                    )
                     insert_rng.Start = min(max(0, safe_pos), doc.Content.End)
                     insert_rng.End = insert_rng.Start
                     insert_rng.Collapse(wdCollapseStart)
-                    insertion_log_parts.append(
-                        f"    在付款方式字段后插入，位置 {insert_rng.Start}"
-                    )
+                    if prefer_distinct_paragraph:
+                        insertion_log_parts.append(
+                            f"    优先在付款方式段落后插入独立段落，位置 {insert_rng.Start}"
+                        )
+                    else:
+                        insertion_log_parts.append(
+                            f"    在付款方式字段后插入，位置 {insert_rng.Start}"
+                        )
                 else:
                     safe_pos = int(get_insertion_bound_end())
                     insert_rng.SetRange(safe_pos, safe_pos)
@@ -1168,7 +1127,9 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     inserted_count = insert_items_inline_at_end_of_paragraph(
                         protected_fields[PAYMENT_METHOD_MARKER], block3_items
                     )
+                    insertion_log_parts.append("    已记录：块3本次发生内联降级写回")
                 else:
+                    insertion_log_parts.append("    已记录：块3本次保持独立段落写回")
                     for item in block3_items:
                         attempts = 0
                         while attempts < 80:

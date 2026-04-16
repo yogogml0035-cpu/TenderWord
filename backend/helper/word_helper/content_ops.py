@@ -189,6 +189,67 @@ def insert_table_with_formatting(
 
 
 # ---------------------------------------------------------------------------
+# 付款方式后插入位置
+# ---------------------------------------------------------------------------
+
+def resolve_following_insert_pos(
+    *,
+    content_end: int,
+    paragraph_end: int,
+    bound_end: int,
+    find_next_editable_pos_bounded: Callable[..., Optional[int]],
+    find_prev_editable_pos: Optional[Callable[..., Optional[int]]] = None,
+    max_lookahead: int = 20000,
+    max_lookback: int = 20000,
+) -> tuple[int, bool]:
+    """
+    解析“字段后续内容”的优先插入位置。
+
+    优先尝试字段所在段落结束后的独立段落位置；只有找不到安全位置时，
+    才退回字段文本结束后的同段落位置，由调用侧决定是否继续内联降级。
+
+    Returns:
+        (safe_pos, prefer_distinct_paragraph)
+    """
+    content_end = int(content_end)
+    paragraph_end = int(paragraph_end)
+    bound_end = int(bound_end)
+
+    preferred_start = min(max(content_end + 1, paragraph_end), bound_end)
+    if preferred_start < bound_end:
+        separate_pos = find_next_editable_pos_bounded(
+            preferred_start,
+            bound_end,
+            max_lookahead=max_lookahead,
+        )
+        if separate_pos is not None and int(separate_pos) < bound_end:
+            return int(separate_pos), True
+
+    safe_pos: Optional[int] = None
+    start_after_content = min(content_end + 1, bound_end)
+    if start_after_content < bound_end:
+        safe_pos = find_next_editable_pos_bounded(
+            start_after_content,
+            bound_end,
+            max_lookahead=max_lookahead,
+        )
+
+    if (
+        (safe_pos is None or int(safe_pos) >= bound_end)
+        and callable(find_prev_editable_pos)
+        and bound_end > content_end
+    ):
+        back = find_prev_editable_pos(bound_end - 1, max_lookback=max_lookback)
+        if back is not None and int(back) >= content_end:
+            safe_pos = int(back)
+
+    if safe_pos is None:
+        safe_pos = start_after_content
+
+    return int(min(max(0, safe_pos), bound_end)), False
+
+
+# ---------------------------------------------------------------------------
 # 内联插入（段落末尾追加）
 # ---------------------------------------------------------------------------
 
