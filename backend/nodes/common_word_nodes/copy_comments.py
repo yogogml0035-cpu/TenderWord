@@ -16,7 +16,6 @@ import sys
 import time
 import logging
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Optional
 
@@ -35,6 +34,11 @@ from backend.util.word_util import (
 from backend.util.word_util import wdFindStop, wdCollapseEnd
 from backend.nodes.common_word_nodes.get_comments import _get_insertion_range
 from backend.config.tender_config import get_anchor_target_sizes
+from backend.helper.word_helper.semantic_matcher import (
+    clean_semantic_text,
+    normalize_semantic_text,
+    semantic_similarity_norm,
+)
 from backend.util.log_util.progress_log import progress_log
 logger = logging.getLogger(__name__)
 
@@ -62,54 +66,15 @@ class CommentAnchor:
 
 
 def _clean_text(text: Optional[str]) -> str:
-    if not text:
-        return ""
-    return (
-        str(text)
-        .replace("\x07", "")
-        .replace("\r", "\n")
-        .replace("\u00a0", " ")
-        .strip()
-    )
+    return clean_semantic_text(text)
 
 
 def _norm_text(text: Optional[str]) -> str:
-    cleaned = _clean_text(text)
-    cleaned = re.sub(r"\s+", "", cleaned)
-    return cleaned
+    return normalize_semantic_text(text)
 
 
 def _similarity_norm(na: str, nb: str) -> float:
-    if not na and not nb:
-        return 1.0
-    if not na or not nb:
-        return 0.0
-    la = len(na)
-    lb = len(nb)
-    max_len = max(la, lb)
-    min_len = min(la, lb)
-    if max_len == 0:
-        return 1.0
-    len_ratio = min_len / max_len
-    if len_ratio < 0.35:
-        return 0.0
-    if max_len <= 160:
-        return SequenceMatcher(None, na, nb).ratio()
-
-    def _bigrams(s: str) -> set[str]:
-        if len(s) < 2:
-            return {s} if s else set()
-        return {s[i : i + 2] for i in range(len(s) - 1)}
-
-    ga = _bigrams(na)
-    gb = _bigrams(nb)
-    if not ga or not gb:
-        return 0.0
-    inter = len(ga & gb)
-    union = len(ga | gb)
-    if union == 0:
-        return 0.0
-    return (inter / union) * len_ratio
+    return semantic_similarity_norm(na, nb)
 
 
 def _similarity(a: Optional[str], b: Optional[str]) -> float:

@@ -242,6 +242,16 @@ describe('useChatSSE', () => {
           message: '任务完成',
           output_file: 'D:/UploadFiles/output.docx',
           processing_time: 12.5,
+          style_writeback: {
+            summary: '样式回填: 抽取=1, 尝试=1, 成功=1, 跳过=0, 失败=0',
+            extracted: 1,
+            attempted: 1,
+            applied: 1,
+            skipped: 0,
+            failed: 0,
+            applied_by_style: { strikethrough: 1 },
+            skipped_by_reason: {},
+          },
         },
       });
     });
@@ -251,6 +261,16 @@ describe('useChatSSE', () => {
     expect(completedGroup?.contentMessage?.status).toBe('completed');
     expect(completedGroup?.contentMessage?.content).toBe('你好啊');
     expect(completedGroup?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
+    expect(completedGroup?.downloadMessage?.metadata?.styleWriteback).toEqual({
+      summary: '样式回填: 抽取=1, 尝试=1, 成功=1, 跳过=0, 失败=0',
+      extracted: 1,
+      attempted: 1,
+      applied: 1,
+      skipped: 0,
+      failed: 0,
+      applied_by_style: { strikethrough: 1 },
+      skipped_by_reason: {},
+    });
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
     expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
   });
@@ -499,6 +519,16 @@ describe('useChatSSE', () => {
         file_size: 123,
         model_used: 'deepseek',
         total_time_seconds: 12.5,
+        style_writeback: {
+          summary: '样式回填: 抽取=2, 尝试=2, 成功=1, 跳过=1, 失败=0',
+          extracted: 2,
+          attempted: 2,
+          applied: 1,
+          skipped: 1,
+          failed: 0,
+          applied_by_style: { bold: 1 },
+          skipped_by_reason: { low_confidence: 1 },
+        },
       },
     });
 
@@ -532,6 +562,16 @@ describe('useChatSSE', () => {
     expect(group?.logMessage?.metadata?.logs).toHaveLength(1);
     expect(group?.contentMessage?.content).toBe('最终内容');
     expect(group?.downloadMessage?.metadata?.fileName).toBe('output.docx');
+    expect(group?.downloadMessage?.metadata?.styleWriteback).toEqual({
+      summary: '样式回填: 抽取=2, 尝试=2, 成功=1, 跳过=1, 失败=0',
+      extracted: 2,
+      attempted: 2,
+      applied: 1,
+      skipped: 1,
+      failed: 0,
+      applied_by_style: { bold: 1 },
+      skipped_by_reason: { low_confidence: 1 },
+    });
     expect(latestOptions?.endpoint).toBe('');
   });
 

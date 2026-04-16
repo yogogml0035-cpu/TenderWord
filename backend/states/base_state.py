@@ -47,6 +47,7 @@ class TenderGraphStateBase(BaseState, total=False):
 
     origin_tender_params: str
     tender_params: str
+    inline_style_fragments: List[Dict[str, Any]]
 
     replacements: List[Tuple[str, str]]
     placeholder_mapping: Dict[str, str]
@@ -62,6 +63,8 @@ class TenderGraphStateBase(BaseState, total=False):
     generated_comment_count: int
     comment_writeback_summary: str
     comment_writeback_result: Optional[Dict[str, Any]]
+    style_writeback_summary: str
+    style_writeback_result: Optional[Dict[str, Any]]
 
     insertion_log: str
     replacement_log: str

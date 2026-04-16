@@ -64,6 +64,10 @@ from backend.helper.word_helper.cleanup_ops import (
     row_is_empty,
     trim_table_trailing_empty_rows,
 )
+from backend.helper.word_helper.inline_style_ops import (
+    apply_inline_style_fragments,
+    summarize_style_writeback_result,
+)
 from backend.states import TenderGraphStateBase
 from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
@@ -266,6 +270,8 @@ def gngk_fw_zc_update_word(
     comment_writeback_failed = 0
     comment_writeback_skipped = 0
     comment_writeback_errors: list[dict[str, str]] = []
+    style_writeback_summary = ""
+    style_writeback_result = None
 
     try:
         word, com_initialized = create_word_application(
@@ -1388,6 +1394,21 @@ def gngk_fw_zc_update_word(
                 )
                 insertion_log_parts.append("内容处理成功。")
 
+                comment_step_label = "步骤5"
+                if "inline_style_fragments" in state:
+                    style_writeback_result = apply_inline_style_fragments(
+                        doc=doc,
+                        inline_style_fragments=state.get("inline_style_fragments"),
+                        bound_start=int(insertion_bound_start),
+                        bound_end=int(get_insertion_bound_end()),
+                        log_parts=insertion_log_parts,
+                        step_label="步骤5",
+                    )
+                    style_writeback_summary = summarize_style_writeback_result(
+                        style_writeback_result
+                    )
+                    comment_step_label = "步骤6"
+
                 polished_comments = state.get("polished_comments") or []
                 generated_count = state.get("generated_comment_count", 0)
 
@@ -1397,6 +1418,7 @@ def gngk_fw_zc_update_word(
                     bound_start=int(insertion_bound_start),
                     bound_end=int(get_insertion_bound_end()),
                     log_parts=insertion_log_parts,
+                    step_label=comment_step_label,
                 )
 
                 added = comment_writeback_result.get("added", 0)
@@ -1457,6 +1479,8 @@ def gngk_fw_zc_update_word(
     new_state_dict["comment_writeback_failed"] = comment_writeback_failed
     new_state_dict["comment_writeback_skipped"] = comment_writeback_skipped
     new_state_dict["comment_writeback_errors"] = comment_writeback_errors
+    new_state_dict["style_writeback_summary"] = style_writeback_summary
+    new_state_dict["style_writeback_result"] = style_writeback_result
     new_state = TenderGraphStateBase(**new_state_dict)
 
     try:

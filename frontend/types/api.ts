@@ -180,12 +180,24 @@ export interface TaskProgress {
   progress_percent: number;
 }
 
+export interface StyleWritebackSummary {
+  summary: string;
+  extracted: number;
+  attempted: number;
+  applied: number;
+  skipped: number;
+  failed: number;
+  applied_by_style: Record<string, number>;
+  skipped_by_reason: Record<string, number>;
+}
+
 export interface TaskResult {
   output_file: string;
   file_name: string;
   file_size: number;
   model_used: string;
   total_time_seconds: number;
+  style_writeback?: StyleWritebackSummary;
 }
 
 // ============================================
@@ -452,8 +464,10 @@ export interface SSEDoneEvent {
   success: boolean;
   message: string;
   output_file?: string;
+  file_name?: string;
   download_url?: string;
   processing_time?: number;
+  style_writeback?: StyleWritebackSummary;
 }
 
 export interface SSEHeartbeatEvent {

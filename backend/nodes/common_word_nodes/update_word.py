@@ -81,6 +81,10 @@ from backend.helper.word_helper.cleanup_ops import (
     multi_pass_cleanup,
     normalize_cleanup_text,
 )
+from backend.helper.word_helper.inline_style_ops import (
+    apply_inline_style_fragments,
+    summarize_style_writeback_result,
+)
 
 
 COMMON_TWO_FIELD_PROFILE = get_protected_field_profile("xjcg")
@@ -212,6 +216,8 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     comment_writeback_failed = 0
     comment_writeback_skipped = 0
     comment_writeback_errors = []
+    style_writeback_summary = ""
+    style_writeback_result = None
 
     try:
         # 使用统一的工具函数创建 Word 应用程序
@@ -1545,6 +1551,21 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 )
                 insertion_log_parts.append("内容处理成功。")
 
+                comment_step_label = "步骤6"
+                if "inline_style_fragments" in state:
+                    style_writeback_result = apply_inline_style_fragments(
+                        doc=doc,
+                        inline_style_fragments=state.get("inline_style_fragments"),
+                        bound_start=int(insertion_bound_start),
+                        bound_end=int(get_insertion_bound_end()),
+                        log_parts=insertion_log_parts,
+                        step_label="步骤6",
+                    )
+                    style_writeback_summary = summarize_style_writeback_result(
+                        style_writeback_result
+                    )
+                    comment_step_label = "步骤7"
+
                 # Capture comment writeback result for tracking and failure detection
                 polished_comments = state.get("polished_comments") or []
                 generated_count = state.get("generated_comment_count", 0)
@@ -1555,6 +1576,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     bound_start=int(insertion_bound_start),
                     bound_end=int(get_insertion_bound_end()),
                     log_parts=insertion_log_parts,
+                    step_label=comment_step_label,
                 )
 
                 # Extract writeback stats
@@ -1617,6 +1639,8 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     new_state_dict["comment_writeback_failed"] = comment_writeback_failed
     new_state_dict["comment_writeback_skipped"] = comment_writeback_skipped
     new_state_dict["comment_writeback_errors"] = comment_writeback_errors
+    new_state_dict["style_writeback_summary"] = style_writeback_summary
+    new_state_dict["style_writeback_result"] = style_writeback_result
     new_state = TenderGraphStateBase(**new_state_dict)
 
     try:

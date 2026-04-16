@@ -8,7 +8,7 @@
 // ============================================
 
 import type { TenderType } from './index';
-import type { TaskKind } from './api';
+import type { StyleWritebackSummary, TaskKind } from './api';
 
 export type MessageType = 'user' | 'ai' | 'system';
 
@@ -79,6 +79,7 @@ export interface Message {
     currentNode?: string;
     currentNodeDisplay?: string;
     lastEventId?: string;
+    styleWriteback?: StyleWritebackSummary;
     localTaskReason?: LocalTaskReason;
     [key: string]: unknown;
   };

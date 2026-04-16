@@ -8,6 +8,7 @@ import uuid
 from typing import Any, Dict
 
 from backend.config.tender_config import get_anchor_target_sizes
+from backend.helper.word_helper.inline_style_ops import extract_inline_style_fragments
 from backend.nodes.common_word_nodes.get_comments import (
     result_to_polished_comments,
 )
@@ -161,17 +162,24 @@ def extract_edit_context(state: TaskSkillGraphState, config) -> TaskSkillGraphSt
             range_end=range_end,
         )
         polished_comments = result_to_polished_comments(result)
+        inline_style_fragments = extract_inline_style_fragments(
+            doc=doc,
+            bound_start=range_start,
+            bound_end=range_end,
+        )
 
         progress_log.info(
-            "[%s] 已提取编辑正文和批注: comments=%d, pages=%d-%d",
+            "[%s] 已提取编辑正文、批注和样式: comments=%d, styles=%d, pages=%d-%d",
             NODE_NAME_EXTRACT,
             len(polished_comments),
+            len(inline_style_fragments),
             start_page,
             end_page,
         )
         return TaskSkillGraphState(
             origin_tender_params=extracted_content,
             polished_comments=polished_comments,
+            inline_style_fragments=inline_style_fragments,
             start_page=start_page,
             end_page=end_page,
         )

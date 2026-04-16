@@ -65,6 +65,10 @@ from backend.helper.word_helper.cleanup_ops import (  # noqa: E402
     normalize_cleanup_text,
     cleanup_blank_paragraphs,
 )
+from backend.helper.word_helper.inline_style_ops import (  # noqa: E402
+    apply_inline_style_fragments,
+    summarize_style_writeback_result,
+)
 
 NODE_NAME = "gjgk_update_word"
 INSERT_FONT_NAME = "宋体"
@@ -1085,6 +1089,13 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
     word = None
     doc = None
     com_initialized = False
+    comment_writeback_summary = ""
+    comment_writeback_added = 0
+    comment_writeback_failed = 0
+    comment_writeback_skipped = 0
+    comment_writeback_errors: list[dict[str, str]] = []
+    style_writeback_summary = ""
+    style_writeback_result = None
 
     try:
         _visible_log("开始执行 gjgk 同页回填")
@@ -1376,6 +1387,21 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
                 log_parts=log_parts,
             )
 
+        comment_step_label = "步骤6"
+        if "inline_style_fragments" in state:
+            style_writeback_result = apply_inline_style_fragments(
+                doc=doc,
+                inline_style_fragments=state.get("inline_style_fragments"),
+                bound_start=int(range_start),
+                bound_end=int(get_insertion_bound_end()),
+                log_parts=log_parts,
+                step_label="步骤6",
+            )
+            style_writeback_summary = summarize_style_writeback_result(
+                style_writeback_result
+            )
+            comment_step_label = "步骤7"
+
         # Capture comment writeback result for tracking and failure detection
         polished_comments = state.get("polished_comments") or []
         generated_count = state.get("generated_comment_count", 0)
@@ -1386,6 +1412,7 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
             bound_start=int(range_start),
             bound_end=int(get_insertion_bound_end()),
             log_parts=log_parts,
+            step_label=comment_step_label,
         )
 
         # Extract writeback stats
@@ -1451,6 +1478,8 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
     new_state["comment_writeback_failed"] = comment_writeback_failed
     new_state["comment_writeback_skipped"] = comment_writeback_skipped
     new_state["comment_writeback_errors"] = comment_writeback_errors
+    new_state["style_writeback_summary"] = style_writeback_summary
+    new_state["style_writeback_result"] = style_writeback_result
     return GjgkTenderGraphState(**new_state)
 
 

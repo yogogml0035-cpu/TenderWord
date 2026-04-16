@@ -69,6 +69,24 @@ from backend.helper.word_helper.cleanup_ops import (
     cleanup_empty_tables,
     multi_pass_cleanup,
 )
+from backend.helper.word_helper.semantic_matcher import (
+    clean_semantic_text,
+    normalize_semantic_text,
+    semantic_similarity,
+    semantic_similarity_norm,
+)
+from backend.helper.word_helper.inline_style_ops import (
+    InlineStyleFlags,
+    InlineStyleContainerLocator,
+    InlineStyleFragment,
+    InlineStyleWritebackIssue,
+    InlineStyleWritebackResult,
+    build_inline_style_fragments_from_text_runs,
+    extract_inline_style_fragments,
+    apply_inline_style_fragments,
+    summarize_style_writeback_result,
+    build_style_writeback_summary_payload,
+)
 
 __all__ = [
     # range_utils
@@ -126,4 +144,20 @@ __all__ = [
     "cleanup_blank_paragraphs",
     "cleanup_empty_tables",
     "multi_pass_cleanup",
+    # semantic_matcher
+    "clean_semantic_text",
+    "normalize_semantic_text",
+    "semantic_similarity",
+    "semantic_similarity_norm",
+    # inline_style_ops
+    "InlineStyleFlags",
+    "InlineStyleContainerLocator",
+    "InlineStyleFragment",
+    "InlineStyleWritebackIssue",
+    "InlineStyleWritebackResult",
+    "build_inline_style_fragments_from_text_runs",
+    "extract_inline_style_fragments",
+    "apply_inline_style_fragments",
+    "summarize_style_writeback_result",
+    "build_style_writeback_summary_payload",
 ]

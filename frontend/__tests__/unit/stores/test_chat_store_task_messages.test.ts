@@ -162,18 +162,33 @@ describe('chatStore task message grouping', () => {
     act(() => {
       useChatStore.getState().startTask('conv-1', 'task-1');
       useChatStore.getState().ensureTaskLogMessage('task-1');
-      useChatStore.getState().completeTask('task-1', 'D:/UploadFiles/output.docx', 'output.docx', {
-        logs: [
-          {
-            id: 'log-1',
-            timestamp: Date.now(),
-            level: 'info',
-            message: '处理完成',
-          },
-        ],
-        aiText: '最终内容',
-        aiComplete: true,
-      });
+      useChatStore.getState().completeTask(
+        'task-1',
+        'D:/UploadFiles/output.docx',
+        'output.docx',
+        {
+          logs: [
+            {
+              id: 'log-1',
+              timestamp: Date.now(),
+              level: 'info',
+              message: '处理完成',
+            },
+          ],
+          aiText: '最终内容',
+          aiComplete: true,
+        },
+        {
+          summary: '样式回填: 抽取=2, 尝试=2, 成功=1, 跳过=1, 失败=0',
+          extracted: 2,
+          attempted: 2,
+          applied: 1,
+          skipped: 1,
+          failed: 0,
+          applied_by_style: { bold: 1 },
+          skipped_by_reason: { low_confidence: 1 },
+        }
+      );
     });
 
     const group = useChatStore.getState().findTaskMessageGroup('task-1');
@@ -182,6 +197,16 @@ describe('chatStore task message grouping', () => {
     expect(group?.contentMessage?.content).toBe('最终内容');
     expect(group?.downloadMessage?.metadata?.messageKind).toBe('task-download');
     expect(group?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
+    expect(group?.downloadMessage?.metadata?.styleWriteback).toEqual({
+      summary: '样式回填: 抽取=2, 尝试=2, 成功=1, 跳过=1, 失败=0',
+      extracted: 2,
+      attempted: 2,
+      applied: 1,
+      skipped: 1,
+      failed: 0,
+      applied_by_style: { bold: 1 },
+      skipped_by_reason: { low_confidence: 1 },
+    });
   });
 
   it('queued terminal task does not create any chat cards', () => {

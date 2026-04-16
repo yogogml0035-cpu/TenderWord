@@ -48,6 +48,16 @@ function createTaskMessages(): Message[] {
         messageKind: 'task-download',
         outputFile: 'D:/UploadFiles/output.docx',
         fileName: 'output.docx',
+        styleWriteback: {
+          summary: '样式回填: 抽取=2, 尝试=2, 成功=1, 跳过=1, 失败=0',
+          extracted: 2,
+          attempted: 2,
+          applied: 1,
+          skipped: 1,
+          failed: 0,
+          applied_by_style: { bold: 1 },
+          skipped_by_reason: { low_confidence: 1 },
+        },
       },
     },
   ];
@@ -113,6 +123,14 @@ describe('MessageList', () => {
     fireEvent.click(screen.getByRole('button', { name: '下载文件' }));
 
     expect(onDownload).toHaveBeenCalledWith('D:/UploadFiles/output.docx', 'output.docx');
+  });
+
+  it('renders style writeback summary on the download card when present', () => {
+    render(<MessageList messages={createTaskMessages()} />);
+
+    expect(
+      screen.getByText('样式回填: 抽取=2, 尝试=2, 成功=1, 跳过=1, 失败=0')
+    ).toBeInTheDocument();
   });
 
   it('shows retry action on failed task content card and invokes callback', () => {

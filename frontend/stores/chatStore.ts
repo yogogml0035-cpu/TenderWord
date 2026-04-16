@@ -3,6 +3,7 @@ import { createJSONStorage, devtools, persist } from 'zustand/middleware';
 import type { TenderType, FundLx, TenderLx } from '@/types';
 import type {
   GenerationStyle,
+  StyleWritebackSummary,
   TaskKind,
   TaskStatus,
   TenderData,
@@ -603,7 +604,8 @@ interface ChatStore {
     taskId: string,
     outputFile?: string,
     fileName?: string,
-    content?: TaskMessageSnapshot
+    content?: TaskMessageSnapshot,
+    styleWriteback?: StyleWritebackSummary
   ) => void;
   failTask: (taskId: string, error: string, content?: TaskMessageSnapshot) => void;
   cancelTask: (taskId: string, content?: TaskMessageSnapshot) => void;
@@ -1045,7 +1047,7 @@ export const useChatStore = create<ChatStore>()(
           });
         },
 
-        completeTask: (taskId, outputFile, fileName, content) => {
+        completeTask: (taskId, outputFile, fileName, content, styleWriteback) => {
           const locatedTaskGroup = get().findTaskMessageGroup(taskId);
           let nextGroup: TaskMessageGroupIds | undefined;
           const terminalConversationId: string | null = locatedTaskGroup?.conversationId || null;
@@ -1103,6 +1105,7 @@ export const useChatStore = create<ChatStore>()(
                     taskKind: get().taskSummaries[taskId]?.task_kind,
                     outputFile,
                     fileName: resolvedFileName,
+                    ...(styleWriteback ? { styleWriteback } : {}),
                   },
                 });
                 downloadMessageId = downloadMessage.id;
@@ -1117,6 +1120,7 @@ export const useChatStore = create<ChatStore>()(
                     taskKind: get().taskSummaries[taskId]?.task_kind,
                     outputFile,
                     fileName: resolvedFileName,
+                    ...(styleWriteback ? { styleWriteback } : {}),
                   },
                 });
               }

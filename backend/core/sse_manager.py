@@ -178,8 +178,10 @@ class SSEManager:
         message: str = "任务完成",
         task_kind: str = "generate",
         output_file: Optional[str] = None,
+        file_name: Optional[str] = None,
         download_url: Optional[str] = None,
         processing_time: Optional[float] = None,
+        style_writeback: Optional[dict] = None,
     ) -> None:
         self._schedule(
             self.send_done(
@@ -188,8 +190,10 @@ class SSEManager:
                 success=success,
                 message=message,
                 output_file=output_file,
+                file_name=file_name,
                 download_url=download_url,
                 processing_time=processing_time,
+                style_writeback=style_writeback,
             )
         )
 
@@ -617,8 +621,10 @@ class SSEManager:
         message: str = "任务完成",
         task_kind: str = "generate",
         output_file: Optional[str] = None,
+        file_name: Optional[str] = None,
         download_url: Optional[str] = None,
         processing_time: Optional[float] = None,
+        style_writeback: Optional[dict] = None,
     ) -> int:
         """发送完成事件.
 
@@ -642,8 +648,10 @@ class SSEManager:
                 "success": success,
                 "message": message,
                 "output_file": output_file,
+                "file_name": file_name,
                 "download_url": download_url,
                 "processing_time": processing_time,
+                "style_writeback": style_writeback,
                 "timestamp": datetime.now().isoformat(),
             },
         )

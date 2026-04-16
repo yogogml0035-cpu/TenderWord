@@ -8,6 +8,7 @@ import type {
   SSEErrorEvent,
   SSELLMEvent,
   SSEProgressEvent,
+  StyleWritebackSummary,
   TaskData,
   TaskKind,
   TaskStatus,
@@ -163,7 +164,7 @@ export function useChatSSE({
       const outputFile =
         typeof rawResult === 'string' && rawResult !== 'success' ? rawResult : undefined;
       const fileName = typeof outputFile === 'string' ? outputFile.split(/[\\/]/).pop() : undefined;
-      return { outputFile, fileName };
+      return { outputFile, fileName, styleWriteback: undefined as StyleWritebackSummary | undefined };
     }
 
     const outputFile =
@@ -174,8 +175,12 @@ export function useChatSSE({
         : typeof outputFile === 'string'
           ? outputFile.split(/[\\/]/).pop()
           : undefined;
+    const styleWriteback =
+      typeof rawResult.style_writeback === 'object' && rawResult.style_writeback !== null
+        ? (rawResult.style_writeback as StyleWritebackSummary)
+        : undefined;
 
-    return { outputFile, fileName };
+    return { outputFile, fileName, styleWriteback };
   }, []);
 
   const finalizeFromTaskStatus = useCallback(
@@ -197,8 +202,8 @@ export function useChatSSE({
       const finalContent = getCurrentContent(targetTaskId, task.status === 'completed');
 
       if (task.status === 'completed') {
-        const { outputFile, fileName } = extractOutputInfo(task);
-        completeTask(targetTaskId, outputFile, fileName, finalContent);
+        const { outputFile, fileName, styleWriteback } = extractOutputInfo(task);
+        completeTask(targetTaskId, outputFile, fileName, finalContent, styleWriteback);
         clearTaskRuntime(targetTaskId);
         onCompleteRef.current?.();
         return;
@@ -379,9 +384,19 @@ export function useChatSSE({
                 : typeof outputFile === 'string'
                   ? outputFile.split(/[\\/]/).pop()
                   : undefined;
+            const styleWriteback =
+              typeof doneData.style_writeback === 'object' && doneData.style_writeback !== null
+                ? doneData.style_writeback
+                : undefined;
             handledTerminalTasksRef.current.add(taskId);
             closeRef.current();
-            completeTask(taskId, outputFile, fileName, getCurrentContent(taskId, true));
+            completeTask(
+              taskId,
+              outputFile,
+              fileName,
+              getCurrentContent(taskId, true),
+              styleWriteback
+            );
             clearTaskRuntime(taskId);
           }
           onCompleteRef.current?.();

@@ -131,6 +131,19 @@ class ProgressEventData(BaseModel):
     )
 
 
+class StyleWritebackSummaryData(BaseModel):
+    """样式回填摘要。"""
+
+    summary: str = Field(default="", description="摘要文本")
+    extracted: int = Field(default=0, description="抽取片段数")
+    attempted: int = Field(default=0, description="尝试回填数")
+    applied: int = Field(default=0, description="成功回填数")
+    skipped: int = Field(default=0, description="跳过数")
+    failed: int = Field(default=0, description="失败数")
+    applied_by_style: Dict[str, int] = Field(default_factory=dict, description="按样式命中数")
+    skipped_by_reason: Dict[str, int] = Field(default_factory=dict, description="按原因跳过数")
+
+
 class DoneEventData(BaseModel):
     """
     完成事件数据模型
@@ -141,8 +154,13 @@ class DoneEventData(BaseModel):
     success: bool = Field(..., description="是否成功")
     message: str = Field(default="", description="消息")
     output_file: Optional[str] = Field(default=None, description="输出文件路径")
+    file_name: Optional[str] = Field(default=None, description="输出文件名")
     download_url: Optional[str] = Field(default=None, description="下载链接")
     processing_time: Optional[float] = Field(default=None, description="处理时间（秒）")
+    style_writeback: Optional[StyleWritebackSummaryData] = Field(
+        default=None,
+        description="edit 样式回填摘要",
+    )
     timestamp: str = Field(
         default_factory=lambda: datetime.now().isoformat(), description="时间戳"
     )

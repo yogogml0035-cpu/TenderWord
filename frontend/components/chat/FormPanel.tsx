@@ -237,21 +237,29 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         if (status === 'completed') {
           let outputFile: string | undefined;
           let fileName: string | undefined;
+          let styleWriteback:
+            | import('@/types/api').StyleWritebackSummary
+            | undefined;
 
           if (typeof task.result === 'string') {
             outputFile = task.result !== 'success' ? task.result : undefined;
           } else if (isRecord(task.result)) {
             const outputFileValue = task.result.output_file;
             const fileNameValue = task.result.file_name;
+            const styleWritebackValue = task.result.style_writeback;
             outputFile = typeof outputFileValue === 'string' ? outputFileValue : undefined;
             fileName = typeof fileNameValue === 'string' ? fileNameValue : undefined;
+            styleWriteback =
+              typeof styleWritebackValue === 'object' && styleWritebackValue !== null
+                ? (styleWritebackValue as import('@/types/api').StyleWritebackSummary)
+                : undefined;
           }
 
           if (!fileName && typeof outputFile === 'string') {
             fileName = outputFile.split(/[\\/]/).pop();
           }
 
-          completeChatTask(taskId, outputFile, fileName, finalContent);
+          completeChatTask(taskId, outputFile, fileName, finalContent, styleWriteback);
           settled = true;
         } else if (status === 'failed') {
           const errorMessage = typeof task.error === 'string' ? task.error : '生成失败';

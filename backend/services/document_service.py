@@ -27,6 +27,9 @@ from backend.models import (
     SSEEvent,
     SSEEventType,
 )
+from backend.helper.word_helper.inline_style_ops import (
+    build_style_writeback_summary_payload,
+)
 from backend.services.conversation_service import get_conversation_service
 from backend.task.task_queue_manager import get_task_queue
 from backend.util.log_util.execution_log import log_generate_task_success
@@ -927,6 +930,17 @@ class DocumentService:
                         audit_state.update(result_state)
                     log_generate_task_success(audit_state)
 
+                completion_result = self._build_task_result_payload(
+                    result_state=result_state,
+                    initial_state=initial_state,
+                    elapsed_time=elapsed_time,
+                    model_provider=model_provider,
+                )
+                self._task_queue.complete_task(task_id, result=completion_result, error=None)
+                style_writeback_summary = None
+                if isinstance(completion_result, dict):
+                    style_writeback_summary = completion_result.get("style_writeback")
+
                 callback.push_done(
                     DoneEventData(
                         task_id=task_id,
@@ -934,7 +948,13 @@ class DocumentService:
                         success=True,
                         message=success_message,
                         output_file=output_file_str,
+                        file_name=(
+                            completion_result.get("file_name")
+                            if isinstance(completion_result, dict)
+                            else None
+                        ),
                         processing_time=elapsed_time,
+                        style_writeback=style_writeback_summary,
                     )
                 )
                 progress_log.info(f"[Task] 任务执行完成: {task_id}")
@@ -948,7 +968,13 @@ class DocumentService:
                         success=True,
                         message=success_message,
                         output_file=output_file_str,
+                        file_name=(
+                            completion_result.get("file_name")
+                            if isinstance(completion_result, dict)
+                            else None
+                        ),
                         processing_time=elapsed_time,
+                        style_writeback=style_writeback_summary,
                     )
                 except Exception:
                     pass
@@ -1055,6 +1081,44 @@ class DocumentService:
 
         snapshot.setdefault("polished_text", str(result_state.get("polished_text") or ""))
         return snapshot
+
+    def _build_task_result_payload(
+        self,
+        *,
+        result_state: Dict[str, Any],
+        initial_state: Dict[str, Any],
+        elapsed_time: float,
+        model_provider: str,
+    ) -> Dict[str, Any]:
+        output_file_value = result_state.get("prepared_doc_path") or initial_state.get(
+            "prepared_doc_path"
+        )
+        output_file = str(output_file_value or "").strip()
+        output_path = pathlib.Path(output_file).expanduser() if output_file else None
+
+        file_name = output_path.name if output_path else ""
+        file_size = 0
+        if output_path and output_path.exists():
+            try:
+                file_size = int(output_path.stat().st_size)
+            except Exception:
+                file_size = 0
+
+        style_writeback = build_style_writeback_summary_payload(
+            result_state.get("style_writeback_result"),
+            str(result_state.get("style_writeback_summary") or ""),
+        )
+
+        payload: Dict[str, Any] = {
+            "output_file": output_file,
+            "file_name": file_name,
+            "file_size": file_size,
+            "model_used": model_provider,
+            "total_time_seconds": round(float(elapsed_time), 3),
+        }
+        if style_writeback is not None:
+            payload["style_writeback"] = style_writeback
+        return payload
 
     def _cleanup_temporary_output(self, file_path: Optional[str]) -> None:
         target = str(file_path or "").strip()
