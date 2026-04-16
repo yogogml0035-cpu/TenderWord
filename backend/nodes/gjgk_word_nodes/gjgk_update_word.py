@@ -1399,6 +1399,7 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
                 log_parts=log_parts,
                 step_label="步骤6",
                 progress_logger=progress_log.info if verbose_style_progress_logs else None,
+                diagnostic_logger=progress_log.debug if verbose_style_progress_logs else None,
             )
             style_writeback_summary = summarize_style_writeback_result(
                 style_writeback_result

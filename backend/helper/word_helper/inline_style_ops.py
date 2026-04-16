@@ -1,10 +1,10 @@
 """
 edit 链路的行内样式抽取与回填 helper。
 
-第一版边界：
+当前边界：
 - 只处理锚点区正文段落与表格单元格
 - 只处理 run/字符级样式，不处理段落版式
-- 仅保守回填唯一高置信命中的片段
+- 回填策略以高召回为先，但仍保留最低安全线避免盲写
 """
 
 from __future__ import annotations
@@ -32,6 +32,12 @@ CONTEXT_CHARS = 24
 CONTAINER_CANDIDATE_LIMIT = 5
 APPROX_LOCAL_SCAN_WINDOW = 18
 LOG_TEXT_LIMIT = 80
+CANDIDATE_DIAGNOSTIC_LIMIT = 3
+SHORT_TITLE_MAX_LEN = 8
+SHORT_FULL_CONTAINER_MAX_LEN = 16
+SHORT_PARTIAL_MAX_LEN = 6
+SUCCESS_EXAMPLE_LIMIT = 3
+SUCCESS_EXAMPLE_TEXT_LIMIT = 24
 
 STYLE_LABEL_MAP = {
     "bold": "加粗",
@@ -51,6 +57,9 @@ REASON_LABEL_MAP = {
     "multiple_candidate_conflict": "存在多个候选位置，无法唯一定位",
     "multiple_local_candidates": "存在多个局部命中位置，无法唯一定位",
     "no_candidate_container": "未找到可回填的目标容器",
+    "no_partial_candidate_container": "未找到可承接局部样式的目标容器",
+    "no_same_table_candidate": "同表内未找到可回填的目标单元格",
+    "no_title_candidate_container": "未找到可承接标题样式的目标段落",
     "no_local_candidate": "未找到局部文本命中位置",
     "table_structure_changed": "表格结构已变化，无法按原单元格定位",
 }
@@ -84,6 +93,7 @@ class InlineStyleFragment(TypedDict, total=False):
     context_before: str
     context_after: str
     position_ratio: float
+    local_position_ratio: float
     style_flags: InlineStyleFlags
     font_color: Optional[int]
     highlight_color: Optional[int]
@@ -161,6 +171,23 @@ class _LocalMatch:
     actual_end: int
     score: float
     context_score: float
+    local_position_score: float
+
+
+@dataclass
+class _CandidateProbe:
+    candidate: _ContainerCandidate
+    container_score: float
+    local_hint_score: float
+    position_score: float
+    title_score: float = 0.0
+    structure_score: float = 0.0
+    coarse_score: float = 0.0
+    final_score: float = 0.0
+    selected: bool = False
+    rejection_reason: str = ""
+    local_error: str = ""
+    local_match: Optional[_LocalMatch] = None
 
 
 def _truncate_log_text(value: Any, *, max_chars: int = LOG_TEXT_LIMIT) -> str:
@@ -227,6 +254,71 @@ def _format_source_span_kind(fragment: InlineStyleFragment) -> str:
     return SPAN_KIND_LABEL_MAP.get(kind, kind)
 
 
+def _normalized_length(value: Any) -> int:
+    return len(str(value or ""))
+
+
+def _is_short_title_fragment(fragment: InlineStyleFragment) -> bool:
+    return (
+        str(fragment.get("source_span_kind") or "partial_span") == "full_container"
+        and _normalized_length(fragment.get("normalized_container_text")) <= SHORT_TITLE_MAX_LEN
+    )
+
+
+def _is_short_partial_fragment(fragment: InlineStyleFragment) -> bool:
+    return (
+        str(fragment.get("source_span_kind") or "partial_span") == "partial_span"
+        and _normalized_length(fragment.get("normalized_text")) <= SHORT_PARTIAL_MAX_LEN
+    )
+
+
+def _candidate_limit(fragment: InlineStyleFragment) -> int:
+    if str(fragment.get("container_type") or "paragraph") == "table_cell":
+        return max(CONTAINER_CANDIDATE_LIMIT, 6)
+    if _is_short_partial_fragment(fragment):
+        return max(CONTAINER_CANDIDATE_LIMIT, 8)
+    if _is_short_title_fragment(fragment):
+        return max(CONTAINER_CANDIDATE_LIMIT, 6)
+    return CONTAINER_CANDIDATE_LIMIT
+
+
+def _approx_local_scan_window(fragment: InlineStyleFragment) -> int:
+    if str(fragment.get("container_type") or "paragraph") == "table_cell":
+        return max(APPROX_LOCAL_SCAN_WINDOW, 24)
+    if _is_short_partial_fragment(fragment):
+        return max(APPROX_LOCAL_SCAN_WINDOW, 28)
+    return APPROX_LOCAL_SCAN_WINDOW
+
+
+def _presence_score(source_text: str, candidate_text: str) -> float:
+    source = str(source_text or "")
+    candidate = str(candidate_text or "")
+    if not source or not candidate:
+        return 0.0
+
+    score = semantic_similarity_norm(source, candidate)
+    if source in candidate:
+        overrun = max(0, len(candidate) - len(source))
+        penalty = min(0.22, (overrun / max(1, len(source))) * 0.04)
+        score = max(score, max(0.72, 1.0 - penalty))
+    elif candidate in source:
+        overrun = max(0, len(source) - len(candidate))
+        penalty = min(0.22, (overrun / max(1, len(candidate))) * 0.04)
+        score = max(score, max(0.72, 1.0 - penalty))
+
+    return round(float(score), 6)
+
+
+def _default_no_candidate_reason(fragment: InlineStyleFragment) -> str:
+    if str(fragment.get("container_type") or "paragraph") == "table_cell":
+        return "no_same_table_candidate"
+    if _is_short_title_fragment(fragment):
+        return "no_title_candidate_container"
+    if str(fragment.get("source_span_kind") or "partial_span") == "partial_span":
+        return "no_partial_candidate_container"
+    return "no_candidate_container"
+
+
 def build_inline_style_extraction_logs(
     inline_style_fragments: Iterable[Dict[str, Any]] | None,
     *,
@@ -262,6 +354,17 @@ def _emit_runtime_log(
     if callable(progress_logger):
         try:
             progress_logger(message)
+        except Exception:
+            pass
+
+
+def _emit_diagnostic_log(
+    message: str,
+    diagnostic_logger: Optional[Callable[[str], Any]] = None,
+) -> None:
+    if callable(diagnostic_logger):
+        try:
+            diagnostic_logger(message)
         except Exception:
             pass
 
@@ -530,6 +633,13 @@ def build_inline_style_fragments_from_text_runs(
 
         context_before = container_visible_text[max(0, current_start - CONTEXT_CHARS) : current_start]
         context_after = container_visible_text[current_end : current_end + CONTEXT_CHARS]
+        local_position_ratio = max(
+            0.0,
+            min(
+                1.0,
+                ((current_start + current_end) / 2.0) / max(1.0, float(len(container_visible_text))),
+            ),
+        )
         source_span_kind: SourceSpanKind = (
             "full_container"
             if normalized_text == normalized_container_text
@@ -547,6 +657,7 @@ def build_inline_style_fragments_from_text_runs(
                 context_before=context_before,
                 context_after=context_after,
                 position_ratio=float(position_ratio),
+                local_position_ratio=float(local_position_ratio),
                 style_flags=dict(current_signature.get("style_flags") or {}),
                 font_color=current_signature.get("font_color"),
                 highlight_color=current_signature.get("highlight_color"),
@@ -815,6 +926,32 @@ def _position_score(source_ratio: float, target_ratio: float) -> float:
     return max(0.0, 1.0 - min(1.0, distance / 0.35))
 
 
+def _local_position_score(fragment: InlineStyleFragment, candidate: _ContainerCandidate, visible_start: int, visible_end: int) -> float:
+    expected_ratio = float(fragment.get("local_position_ratio") or 0.0)
+    actual_ratio = max(
+        0.0,
+        min(
+            1.0,
+            ((float(visible_start) + float(visible_end)) / 2.0)
+            / max(1.0, float(len(candidate.visible_text))),
+        ),
+    )
+    return max(0.0, 1.0 - min(1.0, abs(expected_ratio - actual_ratio) / 0.40))
+
+
+def _table_structure_score(
+    source_locator: InlineStyleContainerLocator,
+    candidate_locator: InlineStyleContainerLocator,
+) -> float:
+    source_row = _safe_int(source_locator.get("row"), 0)
+    source_col = _safe_int(source_locator.get("col"), 0)
+    candidate_row = _safe_int(candidate_locator.get("row"), 0)
+    candidate_col = _safe_int(candidate_locator.get("col"), 0)
+
+    distance = abs(source_row - candidate_row) * 0.75 + abs(source_col - candidate_col)
+    return max(0.0, 1.0 - min(1.0, distance / 4.0))
+
+
 def _append_issue(
     result: InlineStyleWritebackResult,
     *,
@@ -914,7 +1051,17 @@ def _build_local_match_from_norm_span(
         visible_start=visible_start,
         visible_end=visible_end,
     )
-    final_score = 0.90 * float(base_score) + 0.10 * context_score
+    local_position_score = _local_position_score(
+        fragment,
+        candidate,
+        visible_start,
+        visible_end,
+    )
+    final_score = (
+        0.78 * float(base_score)
+        + 0.12 * context_score
+        + 0.10 * local_position_score
+    )
     return _LocalMatch(
         visible_start=visible_start,
         visible_end=visible_end,
@@ -922,6 +1069,7 @@ def _build_local_match_from_norm_span(
         actual_end=actual_span[1],
         score=final_score,
         context_score=context_score,
+        local_position_score=local_position_score,
     )
 
 
@@ -947,12 +1095,10 @@ def _locate_local_span(
             exact_matches.append(match)
 
     if exact_matches:
-        exact_matches.sort(key=lambda item: item.score, reverse=True)
-        if (
-            len(exact_matches) > 1
-            and abs(exact_matches[0].score - exact_matches[1].score) < 0.08
-        ):
-            return None, "multiple_local_candidates"
+        exact_matches.sort(
+            key=lambda item: (item.score, item.context_score, item.local_position_score),
+            reverse=True,
+        )
         return exact_matches[0], None
 
     candidate_text = candidate.normalized_text
@@ -960,11 +1106,17 @@ def _locate_local_span(
     if not candidate_text or target_len == 0:
         return None, "no_local_candidate"
 
-    lower_len = max(1, target_len - min(APPROX_LOCAL_SCAN_WINDOW, max(2, target_len // 3)))
+    scan_window = _approx_local_scan_window(fragment)
+    lower_len = max(1, target_len - min(scan_window, max(2, target_len // 3)))
     upper_len = min(
         len(candidate_text),
-        target_len + min(APPROX_LOCAL_SCAN_WINDOW, max(2, target_len // 3)),
+        target_len + min(scan_window, max(2, target_len // 3)),
     )
+    min_text_score = 0.62
+    if _is_short_partial_fragment(fragment):
+        min_text_score = 0.50
+    elif str(fragment.get("container_type") or "paragraph") == "table_cell":
+        min_text_score = 0.56
 
     matches: list[_LocalMatch] = []
     for start in range(0, len(candidate_text)):
@@ -976,7 +1128,7 @@ def _locate_local_span(
                 break
             segment = candidate_text[start:end]
             text_score = semantic_similarity_norm(normalized_text, segment)
-            if text_score < 0.62:
+            if text_score < min_text_score:
                 continue
             match = _build_local_match_from_norm_span(
                 candidate,
@@ -991,98 +1143,276 @@ def _locate_local_span(
     if not matches:
         return None, "low_local_confidence"
 
-    matches.sort(key=lambda item: item.score, reverse=True)
-    if len(matches) > 1 and abs(matches[0].score - matches[1].score) < 0.06:
-        return None, "multiple_local_candidates"
+    matches.sort(
+        key=lambda item: (item.score, item.context_score, item.local_position_score),
+        reverse=True,
+    )
     return matches[0], None
 
 
 def _adaptive_threshold(fragment: InlineStyleFragment) -> float:
-    if str(fragment.get("source_span_kind") or "partial_span") == "full_container":
-        base_length = len(str(fragment.get("normalized_container_text") or ""))
-        threshold = 0.76
-        if base_length <= 8:
-            threshold = 0.92
-        elif base_length <= 16:
-            threshold = 0.86
-        elif base_length <= 40:
-            threshold = 0.80
-    else:
-        base_length = len(str(fragment.get("normalized_text") or ""))
-        threshold = 0.78
-        if base_length <= 6:
-            threshold = 0.86
-        elif base_length <= 12:
-            threshold = 0.83
-        elif base_length <= 24:
-            threshold = 0.80
+    container_type = str(fragment.get("container_type") or "paragraph")
+    span_kind = str(fragment.get("source_span_kind") or "partial_span")
 
-    if str(fragment.get("container_type") or "paragraph") == "table_cell":
-        threshold += 0.06
+    if container_type == "table_cell":
+        threshold = 0.68
+        if _is_short_partial_fragment(fragment):
+            threshold = 0.64
+        return min(0.92, max(0.60, threshold))
 
-    return min(0.98, threshold)
+    if span_kind == "full_container":
+        base_length = _normalized_length(fragment.get("normalized_container_text"))
+        if _is_short_title_fragment(fragment):
+            return 0.68
+        if base_length <= SHORT_FULL_CONTAINER_MAX_LEN:
+            return 0.74
+        if base_length <= 40:
+            return 0.76
+        return 0.74
+
+    base_length = _normalized_length(fragment.get("normalized_text"))
+    if base_length <= 3:
+        return 0.68
+    if base_length <= SHORT_PARTIAL_MAX_LEN:
+        return 0.70
+    if base_length <= 12:
+        return 0.74
+    if base_length <= 24:
+        return 0.76
+    return 0.78
 
 
 def _final_candidate_score(
     *,
     fragment: InlineStyleFragment,
-    candidate: _ContainerCandidate,
+    probe: _CandidateProbe,
     local_match: Optional[_LocalMatch],
 ) -> float:
-    container_score = semantic_similarity_norm(
-        str(fragment.get("normalized_container_text") or ""),
-        candidate.normalized_text,
-    )
-    position_score = _position_score(
-        float(fragment.get("position_ratio") or 0.0),
-        candidate.position_ratio,
-    )
+    container_type = str(fragment.get("container_type") or "paragraph")
+    span_kind = str(fragment.get("source_span_kind") or "partial_span")
+    container_score = probe.container_score
+    position_score = probe.position_score
+    local_hint_score = probe.local_hint_score
 
-    if str(fragment.get("source_span_kind") or "partial_span") == "full_container":
-        local_score = 1.0
-        return round(0.55 * container_score + 0.20 * position_score + 0.25 * local_score, 6)
-    else:
-        local_score = local_match.score if local_match is not None else 0.0
-        return round(0.35 * container_score + 0.20 * position_score + 0.45 * local_score, 6)
+    if container_type == "table_cell":
+        local_score = local_match.score if local_match is not None else max(local_hint_score, container_score)
+        return round(
+            0.18 * container_score
+            + 0.22 * position_score
+            + 0.25 * probe.structure_score
+            + 0.35 * local_score,
+            6,
+        )
+
+    if span_kind == "full_container":
+        if _is_short_title_fragment(fragment):
+            return round(
+                0.45 * max(container_score, probe.title_score)
+                + 0.30 * position_score
+                + 0.25 * probe.title_score,
+                6,
+            )
+        return round(
+            0.55 * container_score
+            + 0.20 * position_score
+            + 0.25 * max(local_hint_score, probe.title_score),
+            6,
+        )
+
+    local_score = local_match.score if local_match is not None else 0.0
+    if _is_short_partial_fragment(fragment):
+        return round(
+            0.15 * container_score + 0.25 * position_score + 0.60 * local_score,
+            6,
+        )
+    return round(
+        0.25 * container_score + 0.20 * position_score + 0.55 * local_score,
+        6,
+    )
 
 
 def _select_candidate_containers(
     fragment: InlineStyleFragment,
     candidates: Sequence[_ContainerCandidate],
-) -> tuple[list[_ContainerCandidate], Optional[str]]:
+) -> tuple[list[_CandidateProbe], Optional[str], list[_CandidateProbe]]:
     container_type = str(fragment.get("container_type") or "paragraph")
     fragment_locator = dict(fragment.get("container_locator") or {})
+    fragment_container_text = str(fragment.get("normalized_container_text") or "")
+    fragment_local_text = str(fragment.get("normalized_text") or "")
+    fragment_position = float(fragment.get("position_ratio") or 0.0)
 
     typed_candidates = [item for item in candidates if item.container_type == container_type]
     if container_type == "table_cell":
+        if not typed_candidates:
+            return [], "table_structure_changed", []
+
         exact = [
             item
             for item in typed_candidates
             if _container_locator_equals(item.container_locator, fragment_locator)
         ]
-        if not exact:
-            return [], "table_structure_changed"
-        return exact[:1], None
+        if exact:
+            selected = [
+                _CandidateProbe(
+                    candidate=exact[0],
+                    container_score=semantic_similarity_norm(
+                        fragment_container_text,
+                        exact[0].normalized_text,
+                    ),
+                    local_hint_score=_presence_score(fragment_local_text, exact[0].normalized_text),
+                    position_score=_position_score(fragment_position, exact[0].position_ratio),
+                    title_score=_presence_score(fragment_container_text, exact[0].normalized_text),
+                    structure_score=1.0,
+                    coarse_score=1.0,
+                    selected=True,
+                )
+            ]
+            return selected, None, selected
 
-    scored: list[tuple[float, _ContainerCandidate]] = []
-    fragment_container_text = str(fragment.get("normalized_container_text") or "")
-    fragment_local_text = str(fragment.get("normalized_text") or "")
-    fragment_position = float(fragment.get("position_ratio") or 0.0)
+        source_table_index = fragment_locator.get("table_index")
+        same_table = [
+            item
+            for item in typed_candidates
+            if item.container_locator.get("table_index") == source_table_index
+        ]
+        if not same_table:
+            return [], "table_structure_changed", []
+
+        probes: list[_CandidateProbe] = []
+        for candidate in same_table:
+            container_score = semantic_similarity_norm(fragment_container_text, candidate.normalized_text)
+            local_hint = _presence_score(fragment_local_text, candidate.normalized_text)
+            position_score = _position_score(fragment_position, candidate.position_ratio)
+            structure_score = _table_structure_score(fragment_locator, candidate.container_locator)
+            coarse_score = round(
+                0.42 * max(container_score, local_hint)
+                + 0.23 * position_score
+                + 0.35 * structure_score,
+                6,
+            )
+            rejection_reason = ""
+            if max(container_score, local_hint) < 0.18:
+                rejection_reason = "候选单元格语义过弱"
+            elif coarse_score < 0.26:
+                rejection_reason = "同表候选综合分过低"
+            probes.append(
+                _CandidateProbe(
+                    candidate=candidate,
+                    container_score=container_score,
+                    local_hint_score=local_hint,
+                    position_score=position_score,
+                    structure_score=structure_score,
+                    coarse_score=coarse_score,
+                    selected=not rejection_reason,
+                    rejection_reason=rejection_reason,
+                )
+            )
+
+        probes.sort(key=lambda item: (item.coarse_score, item.position_score, item.structure_score), reverse=True)
+        selected = [item for item in probes if item.selected][: _candidate_limit(fragment)]
+        if not selected:
+            return [], "no_same_table_candidate", probes
+        return selected, None, probes
+
+    probes = []
+    is_title_fragment = _is_short_title_fragment(fragment)
+    is_short_partial = _is_short_partial_fragment(fragment)
+    coarse_threshold = 0.35
+    if is_title_fragment:
+        coarse_threshold = 0.40
+    elif is_short_partial:
+        coarse_threshold = 0.34
 
     for candidate in typed_candidates:
         container_score = semantic_similarity_norm(fragment_container_text, candidate.normalized_text)
-        if container_score <= 0:
-            continue
-
+        local_hint = _presence_score(fragment_local_text, candidate.normalized_text)
         position_score = _position_score(fragment_position, candidate.position_ratio)
-        local_hint = semantic_similarity_norm(fragment_local_text, candidate.normalized_text)
-        coarse_score = 0.65 * container_score + 0.20 * position_score + 0.15 * local_hint
-        if coarse_score < 0.35:
-            continue
-        scored.append((coarse_score, candidate))
+        title_score = _presence_score(fragment_container_text, candidate.normalized_text) if is_title_fragment else 0.0
 
-    scored.sort(key=lambda item: item[0], reverse=True)
-    return [item[1] for item in scored[:CONTAINER_CANDIDATE_LIMIT]], None
+        if is_title_fragment:
+            coarse_score = round(
+                0.50 * title_score + 0.20 * container_score + 0.30 * position_score,
+                6,
+            )
+        elif is_short_partial:
+            coarse_score = round(
+                0.55 * local_hint + 0.20 * container_score + 0.25 * position_score,
+                6,
+            )
+        else:
+            coarse_score = round(
+                0.60 * container_score + 0.20 * position_score + 0.20 * local_hint,
+                6,
+            )
+
+        rejection_reason = ""
+        if max(container_score, local_hint, title_score) <= 0:
+            rejection_reason = "候选容器不含目标语义"
+        elif coarse_score < coarse_threshold:
+            rejection_reason = "候选容器粗筛分过低"
+
+        probes.append(
+            _CandidateProbe(
+                candidate=candidate,
+                container_score=container_score,
+                local_hint_score=local_hint,
+                position_score=position_score,
+                title_score=title_score,
+                coarse_score=coarse_score,
+                selected=not rejection_reason,
+                rejection_reason=rejection_reason,
+            )
+        )
+
+    probes.sort(
+        key=lambda item: (item.coarse_score, item.position_score, item.local_hint_score, item.title_score),
+        reverse=True,
+    )
+    selected = [item for item in probes if item.selected][: _candidate_limit(fragment)]
+    if not selected:
+        return [], _default_no_candidate_reason(fragment), probes
+    return selected, None, probes
+
+
+def _format_probe_reason(reason: str) -> str:
+    if not reason:
+        return ""
+    translated = translate_inline_style_reason(reason)
+    if translated != reason:
+        return translated
+    return reason
+
+
+def _build_candidate_diagnostics(probes: Sequence[_CandidateProbe]) -> str:
+    if not probes:
+        return ""
+
+    summaries: list[str] = []
+    for probe in list(probes)[:CANDIDATE_DIAGNOSTIC_LIMIT]:
+        parts = [
+            _format_container_hint(probe.candidate.container_type, probe.candidate.container_locator),
+            f"粗分={probe.coarse_score:.3f}",
+            f"位置={probe.position_score:.2f}",
+        ]
+        if probe.final_score > 0:
+            parts.append(f"终分={probe.final_score:.3f}")
+        if probe.container_score > 0:
+            parts.append(f"容器={probe.container_score:.2f}")
+        if probe.local_hint_score > 0:
+            parts.append(f"片段={probe.local_hint_score:.2f}")
+        if probe.title_score > 0:
+            parts.append(f"标题={probe.title_score:.2f}")
+        if probe.structure_score > 0:
+            parts.append(f"结构={probe.structure_score:.2f}")
+
+        reason = probe.local_error or probe.rejection_reason
+        if reason:
+            parts.append(f"淘汰={_format_probe_reason(reason)}")
+        elif not probe.selected:
+            parts.append("淘汰=未进入候选池")
+        summaries.append("，".join(parts))
+
+    return "； ".join(summaries)
 
 
 def _apply_fragment_style(target_range, fragment: InlineStyleFragment) -> None:
@@ -1145,7 +1475,42 @@ def _resolve_target_text(
     return candidate.visible_text[local_match.visible_start : local_match.visible_end]
 
 
-def _build_writeback_detail_log(
+def _build_writeback_outcome_log(
+    *,
+    step_label: str,
+    index: int,
+    total: int,
+    status: str,
+    fragment: InlineStyleFragment,
+    reason: str = "",
+    target_text: str = "",
+    error: str = "",
+    max_text_chars: int = LOG_TEXT_LIMIT,
+) -> str:
+    message_parts = [
+        f"{step_label}：样式回填{status}[{index}/{total}] {_format_style_labels(fragment)}",
+        f"\"{_truncate_log_text(fragment.get('source_text'), max_chars=max_text_chars)}\"",
+    ]
+
+    if status == "成功":
+        resolved_target = _truncate_log_text(target_text, max_chars=max_text_chars)
+        message_parts[-1] = (
+            f"\"{_truncate_log_text(fragment.get('source_text'), max_chars=max_text_chars)}\""
+            f" -> \"{resolved_target}\""
+        )
+    elif status == "跳过" and reason:
+        message_parts.append(f"原因：{translate_inline_style_reason(reason)}")
+    elif status == "失败":
+        error_text = error or translate_inline_style_reason(reason)
+        if error_text:
+            message_parts.append(
+                f"错误：{_truncate_log_text(error_text, max_chars=max(120, max_text_chars))}"
+            )
+
+    return " | ".join(message_parts)
+
+
+def _build_writeback_diagnostic_log(
     *,
     step_label: str,
     index: int,
@@ -1157,10 +1522,11 @@ def _build_writeback_detail_log(
     score: Optional[float] = None,
     threshold: Optional[float] = None,
     error: str = "",
+    candidate_details: str = "",
     max_text_chars: int = LOG_TEXT_LIMIT,
 ) -> str:
     message_parts = [
-        f"{step_label}：样式回填[{index}/{total}] {status}",
+        f"{step_label}：样式回填诊断[{index}/{total}] {status}",
         f"样式={_format_style_labels(fragment)}",
         f"源文本=\"{_truncate_log_text(fragment.get('source_text'), max_chars=max_text_chars)}\"",
         f"容器={_format_container_hint(str(fragment.get('container_type') or 'paragraph'), fragment.get('container_locator'))}",
@@ -1177,8 +1543,37 @@ def _build_writeback_detail_log(
         message_parts.append(f"原因={translate_inline_style_reason(reason)}")
     if error:
         message_parts.append(f"错误={_truncate_log_text(error, max_chars=max(120, max_text_chars))}")
+    if candidate_details:
+        message_parts.append(
+            f"候选={_truncate_log_text(candidate_details, max_chars=max(220, max_text_chars))}"
+        )
 
     return " | ".join(message_parts)
+
+
+def _build_success_example(fragment: InlineStyleFragment, target_text: str) -> str:
+    style_label = _format_style_labels(fragment)
+    source_text = _truncate_log_text(
+        fragment.get("source_text"),
+        max_chars=SUCCESS_EXAMPLE_TEXT_LIMIT,
+    )
+    resolved_target = _truncate_log_text(
+        target_text,
+        max_chars=SUCCESS_EXAMPLE_TEXT_LIMIT,
+    )
+    return f'{style_label} "{source_text}" -> "{resolved_target}"'
+
+
+def _build_writeback_success_examples_log(
+    *,
+    step_label: str,
+    examples: Sequence[str],
+) -> str:
+    visible_examples = list(examples)[:SUCCESS_EXAMPLE_LIMIT]
+    body = "； ".join(visible_examples)
+    if len(examples) > SUCCESS_EXAMPLE_LIMIT:
+        body = f"{body}；等 {len(examples)} 项"
+    return f"{step_label}：样式回填命中 | {body}"
 
 
 def apply_inline_style_fragments(
@@ -1190,8 +1585,9 @@ def apply_inline_style_fragments(
     log_parts: list[str],
     step_label: str = "步骤6",
     progress_logger: Optional[Callable[[str], Any]] = None,
+    diagnostic_logger: Optional[Callable[[str], Any]] = None,
 ) -> InlineStyleWritebackResult:
-    """将抽取的行内样式保守回填到新正文中。"""
+    """将抽取的行内样式按高召回 + 最低安全线策略回填到新正文中。"""
     fragments = [InlineStyleFragment(**dict(item)) for item in list(inline_style_fragments or [])]
     result: InlineStyleWritebackResult = {
         "extracted": len(fragments),
@@ -1216,7 +1612,7 @@ def apply_inline_style_fragments(
             )
             _emit_runtime_log(
                 log_parts,
-                _build_writeback_detail_log(
+                _build_writeback_outcome_log(
                     step_label=step_label,
                     index=index,
                     total=len(fragments),
@@ -1226,6 +1622,17 @@ def apply_inline_style_fragments(
                 ),
                 progress_logger,
             )
+            _emit_diagnostic_log(
+                _build_writeback_diagnostic_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="跳过",
+                    fragment=fragment,
+                    reason="empty_search_bound",
+                ),
+                diagnostic_logger,
+            )
         return result
 
     if not fragments:
@@ -1233,6 +1640,7 @@ def apply_inline_style_fragments(
         return result
 
     target_containers = _build_target_containers(doc, bound_start=bound_start, bound_end=bound_end)
+    success_examples: list[str] = []
     _emit_runtime_log(
         log_parts,
         f"{step_label}：开始回填行内样式，共 {len(fragments)} 个片段。",
@@ -1241,7 +1649,11 @@ def apply_inline_style_fragments(
 
     for index, fragment in enumerate(fragments, start=1):
         result["attempted"] += 1
-        candidates, no_candidate_reason = _select_candidate_containers(fragment, target_containers)
+        candidate_probes, no_candidate_reason, all_probes = _select_candidate_containers(
+            fragment,
+            target_containers,
+        )
+        candidate_details = _build_candidate_diagnostics(all_probes)
         if no_candidate_reason:
             result["skipped"] += 1
             _append_issue(
@@ -1252,7 +1664,7 @@ def apply_inline_style_fragments(
             )
             _emit_runtime_log(
                 log_parts,
-                _build_writeback_detail_log(
+                _build_writeback_outcome_log(
                     step_label=step_label,
                     index=index,
                     total=len(fragments),
@@ -1262,47 +1674,78 @@ def apply_inline_style_fragments(
                 ),
                 progress_logger,
             )
-            continue
-
-        if not candidates:
-            result["skipped"] += 1
-            _append_issue(
-                result,
-                index=index,
-                reason="no_candidate_container",
-                fragment=fragment,
-            )
-            _emit_runtime_log(
-                log_parts,
-                _build_writeback_detail_log(
+            _emit_diagnostic_log(
+                _build_writeback_diagnostic_log(
                     step_label=step_label,
                     index=index,
                     total=len(fragments),
                     status="跳过",
                     fragment=fragment,
-                    reason="no_candidate_container",
+                    reason=no_candidate_reason,
+                    candidate_details=candidate_details,
                 ),
-                progress_logger,
+                diagnostic_logger,
             )
             continue
 
-        matches: list[tuple[float, _ContainerCandidate, Optional[_LocalMatch]]] = []
+        if not candidate_probes:
+            result["skipped"] += 1
+            reason = _default_no_candidate_reason(fragment)
+            _append_issue(
+                result,
+                index=index,
+                reason=reason,
+                fragment=fragment,
+            )
+            _emit_runtime_log(
+                log_parts,
+                _build_writeback_outcome_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="跳过",
+                    fragment=fragment,
+                    reason=reason,
+                ),
+                progress_logger,
+            )
+            _emit_diagnostic_log(
+                _build_writeback_diagnostic_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="跳过",
+                    fragment=fragment,
+                    reason=reason,
+                    candidate_details=candidate_details,
+                ),
+                diagnostic_logger,
+            )
+            continue
+
+        matches: list[tuple[float, _CandidateProbe, Optional[_LocalMatch]]] = []
         local_failures: list[str] = []
-        for candidate in candidates:
+        for probe in candidate_probes:
+            candidate = probe.candidate
             local_match: Optional[_LocalMatch] = None
             local_error = None
             if str(fragment.get("source_span_kind") or "partial_span") == "partial_span":
                 local_match, local_error = _locate_local_span(candidate, fragment)
                 if local_error:
+                    probe.local_error = local_error
                     local_failures.append(local_error)
                     continue
 
             final_score = _final_candidate_score(
                 fragment=fragment,
-                candidate=candidate,
+                probe=probe,
                 local_match=local_match,
             )
-            matches.append((final_score, candidate, local_match))
+            probe.final_score = final_score
+            probe.local_match = local_match
+            matches.append((final_score, probe, local_match))
+
+        candidate_details = _build_candidate_diagnostics(all_probes)
 
         if not matches:
             reason = "low_confidence"
@@ -1317,7 +1760,7 @@ def apply_inline_style_fragments(
             )
             _emit_runtime_log(
                 log_parts,
-                _build_writeback_detail_log(
+                _build_writeback_outcome_log(
                     step_label=step_label,
                     index=index,
                     total=len(fragments),
@@ -1327,12 +1770,35 @@ def apply_inline_style_fragments(
                 ),
                 progress_logger,
             )
+            _emit_diagnostic_log(
+                _build_writeback_diagnostic_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="跳过",
+                    fragment=fragment,
+                    reason=reason,
+                    candidate_details=candidate_details,
+                ),
+                diagnostic_logger,
+            )
             continue
 
-        matches.sort(key=lambda item: item[0], reverse=True)
-        best_score, best_candidate, best_local_match = matches[0]
+        matches.sort(
+            key=lambda item: (
+                item[0],
+                item[1].position_score,
+                item[2].context_score if item[2] is not None else 0.0,
+                item[2].local_position_score if item[2] is not None else 0.0,
+            ),
+            reverse=True,
+        )
+        best_score, best_probe, best_local_match = matches[0]
+        best_candidate = best_probe.candidate
         threshold = _adaptive_threshold(fragment)
         if best_score < threshold:
+            best_probe.rejection_reason = "终分低于阈值"
+            candidate_details = _build_candidate_diagnostics(all_probes)
             result["skipped"] += 1
             _append_issue(
                 result,
@@ -1343,7 +1809,18 @@ def apply_inline_style_fragments(
             )
             _emit_runtime_log(
                 log_parts,
-                _build_writeback_detail_log(
+                _build_writeback_outcome_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="跳过",
+                    fragment=fragment,
+                    reason="low_confidence",
+                ),
+                progress_logger,
+            )
+            _emit_diagnostic_log(
+                _build_writeback_diagnostic_log(
                     step_label=step_label,
                     index=index,
                     total=len(fragments),
@@ -1352,12 +1829,19 @@ def apply_inline_style_fragments(
                     reason="low_confidence",
                     score=best_score,
                     threshold=threshold,
+                    candidate_details=candidate_details,
                 ),
-                progress_logger,
+                diagnostic_logger,
             )
             continue
 
-        if len(matches) > 1 and abs(best_score - matches[1][0]) < 0.05:
+        if (
+            len(matches) > 1
+            and abs(best_score - matches[1][0]) < 0.01
+            and abs(best_probe.position_score - matches[1][1].position_score) < 0.01
+        ):
+            best_probe.rejection_reason = "候选位置区分度不足"
+            candidate_details = _build_candidate_diagnostics(all_probes)
             result["skipped"] += 1
             _append_issue(
                 result,
@@ -1368,7 +1852,18 @@ def apply_inline_style_fragments(
             )
             _emit_runtime_log(
                 log_parts,
-                _build_writeback_detail_log(
+                _build_writeback_outcome_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="跳过",
+                    fragment=fragment,
+                    reason="multiple_candidate_conflict",
+                ),
+                progress_logger,
+            )
+            _emit_diagnostic_log(
+                _build_writeback_diagnostic_log(
                     step_label=step_label,
                     index=index,
                     total=len(fragments),
@@ -1377,8 +1872,9 @@ def apply_inline_style_fragments(
                     reason="multiple_candidate_conflict",
                     score=best_score,
                     threshold=threshold,
+                    candidate_details=candidate_details,
                 ),
-                progress_logger,
+                diagnostic_logger,
             )
             continue
 
@@ -1399,7 +1895,18 @@ def apply_inline_style_fragments(
                 )
                 _emit_runtime_log(
                     log_parts,
-                    _build_writeback_detail_log(
+                    _build_writeback_outcome_log(
+                        step_label=step_label,
+                        index=index,
+                        total=len(fragments),
+                        status="跳过",
+                        fragment=fragment,
+                        reason="empty_target_span",
+                    ),
+                    progress_logger,
+                )
+                _emit_diagnostic_log(
+                    _build_writeback_diagnostic_log(
                         step_label=step_label,
                         index=index,
                         total=len(fragments),
@@ -1408,8 +1915,9 @@ def apply_inline_style_fragments(
                         reason="empty_target_span",
                         score=best_score,
                         threshold=threshold,
+                        candidate_details=candidate_details,
                     ),
-                    progress_logger,
+                    diagnostic_logger,
                 )
                 continue
             actual_start, actual_end = actual_span
@@ -1425,7 +1933,18 @@ def apply_inline_style_fragments(
                 )
                 _emit_runtime_log(
                     log_parts,
-                    _build_writeback_detail_log(
+                    _build_writeback_outcome_log(
+                        step_label=step_label,
+                        index=index,
+                        total=len(fragments),
+                        status="跳过",
+                        fragment=fragment,
+                        reason="low_local_confidence",
+                    ),
+                    progress_logger,
+                )
+                _emit_diagnostic_log(
+                    _build_writeback_diagnostic_log(
                         step_label=step_label,
                         index=index,
                         total=len(fragments),
@@ -1434,8 +1953,9 @@ def apply_inline_style_fragments(
                         reason="low_local_confidence",
                         score=best_score,
                         threshold=threshold,
+                        candidate_details=candidate_details,
                     ),
-                    progress_logger,
+                    diagnostic_logger,
                 )
                 continue
             actual_start = best_local_match.actual_start
@@ -1452,7 +1972,18 @@ def apply_inline_style_fragments(
             )
             _emit_runtime_log(
                 log_parts,
-                _build_writeback_detail_log(
+                _build_writeback_outcome_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="跳过",
+                    fragment=fragment,
+                    reason="empty_target_span",
+                ),
+                progress_logger,
+            )
+            _emit_diagnostic_log(
+                _build_writeback_diagnostic_log(
                     step_label=step_label,
                     index=index,
                     total=len(fragments),
@@ -1461,8 +1992,9 @@ def apply_inline_style_fragments(
                     reason="empty_target_span",
                     score=best_score,
                     threshold=threshold,
+                    candidate_details=candidate_details,
                 ),
-                progress_logger,
+                diagnostic_logger,
             )
             continue
 
@@ -1471,19 +2003,37 @@ def apply_inline_style_fragments(
             _apply_fragment_style(target_range, fragment)
             result["applied"] += 1
             _increment_applied_style_counters(result["applied_by_style"], fragment)
+            resolved_target_text = _resolve_target_text(
+                fragment,
+                best_candidate,
+                best_local_match,
+            )
+            success_examples.append(_build_success_example(fragment, resolved_target_text))
             _emit_runtime_log(
                 log_parts,
-                _build_writeback_detail_log(
+                _build_writeback_outcome_log(
                     step_label=step_label,
                     index=index,
                     total=len(fragments),
                     status="成功",
                     fragment=fragment,
-                    target_text=_resolve_target_text(fragment, best_candidate, best_local_match),
-                    score=best_score,
-                    threshold=threshold,
+                    target_text=resolved_target_text,
                 ),
                 progress_logger,
+            )
+            _emit_diagnostic_log(
+                _build_writeback_diagnostic_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="成功",
+                    fragment=fragment,
+                    target_text=resolved_target_text,
+                    score=best_score,
+                    threshold=threshold,
+                    candidate_details=candidate_details,
+                ),
+                diagnostic_logger,
             )
         except Exception as exc:
             result["failed"] += 1
@@ -1499,7 +2049,20 @@ def apply_inline_style_fragments(
             result["issues"].append(issue)
             _emit_runtime_log(
                 log_parts,
-                _build_writeback_detail_log(
+                _build_writeback_outcome_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="失败",
+                    fragment=fragment,
+                    target_text=_resolve_target_text(fragment, best_candidate, best_local_match),
+                    reason="apply_failed",
+                    error=str(exc),
+                ),
+                progress_logger,
+            )
+            _emit_diagnostic_log(
+                _build_writeback_diagnostic_log(
                     step_label=step_label,
                     index=index,
                     total=len(fragments),
@@ -1510,12 +2073,22 @@ def apply_inline_style_fragments(
                     score=best_score,
                     threshold=threshold,
                     error=str(exc),
+                    candidate_details=candidate_details,
                 ),
-                progress_logger,
+                diagnostic_logger,
             )
             continue
 
     _emit_runtime_log(log_parts, summarize_style_writeback_result(result), progress_logger)
+    if success_examples:
+        _emit_runtime_log(
+            log_parts,
+            _build_writeback_success_examples_log(
+                step_label=step_label,
+                examples=success_examples,
+            ),
+            progress_logger,
+        )
     return result
 
 

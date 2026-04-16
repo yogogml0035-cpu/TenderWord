@@ -101,6 +101,54 @@ function normalizeLogs(logs: unknown): LogEntry[] {
   });
 }
 
+type StyleWritebackLogStatus = 'success' | 'skip' | 'failure';
+
+function parseStyleWritebackLogMessage(message: string): {
+  status: StyleWritebackLogStatus;
+  badgeLabel: string;
+  badgeClassName: string;
+  textClassName: string;
+  detail: string;
+} | null {
+  const match = message.match(/^(.*?：)?样式回填(成功|跳过|失败)\[(\d+\/\d+)\]\s*(.*)$/);
+  if (!match) {
+    return null;
+  }
+
+  const [, rawStepLabel, rawStatus, rawProgress, rawDetail] = match;
+  const stepLabel = rawStepLabel?.replace(/：$/, '').trim();
+  const detail = [stepLabel, `[${rawProgress}] ${rawDetail}`.trim()].filter(Boolean).join(' ');
+
+  switch (rawStatus) {
+    case '成功':
+      return {
+        status: 'success',
+        badgeLabel: '回填成功',
+        badgeClassName: 'text-green-700 bg-green-50',
+        textClassName: 'text-green-800',
+        detail,
+      };
+    case '跳过':
+      return {
+        status: 'skip',
+        badgeLabel: '回填跳过',
+        badgeClassName: 'text-amber-700 bg-amber-50',
+        textClassName: 'text-amber-800',
+        detail,
+      };
+    case '失败':
+      return {
+        status: 'failure',
+        badgeLabel: '回填失败',
+        badgeClassName: 'text-red-700 bg-red-50',
+        textClassName: 'text-red-800',
+        detail,
+      };
+    default:
+      return null;
+  }
+}
+
 function LogEntryItem({ log }: { log: LogEntry }) {
   const getLevelColor = (level: LogEntry['level']) => {
     switch (level) {
@@ -115,13 +163,21 @@ function LogEntryItem({ log }: { log: LogEntry }) {
     }
   };
 
+  const styleWritebackLog = parseStyleWritebackLogMessage(log.message);
+  const badgeLabel = styleWritebackLog?.badgeLabel ?? log.level.toUpperCase();
+  const badgeClassName = styleWritebackLog?.badgeClassName ?? getLevelColor(log.level);
+  const textClassName = styleWritebackLog?.textClassName ?? 'text-gray-700';
+  const messageText = styleWritebackLog?.detail ?? log.message;
+
   return (
     <div className="flex min-w-0 items-start gap-2 text-xs">
       <span className="shrink-0 text-gray-400">{formatLogTime(log.timestamp)}</span>
-      <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${getLevelColor(log.level)}`}>
-        {log.level.toUpperCase()}
+      <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${badgeClassName}`}>
+        {badgeLabel}
       </span>
-      <span className="min-w-0 break-all whitespace-pre-wrap text-gray-700">{log.message}</span>
+      <span className={`min-w-0 break-all whitespace-pre-wrap ${textClassName}`}>
+        {messageText}
+      </span>
     </div>
   );
 }

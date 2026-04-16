@@ -1051,10 +1051,7 @@ def test_gjgk_update_word_hides_comment_progress_logs_in_verbose_edit_mode(monke
 
     def _fake_apply_inline_style_fragments(**kwargs):
         progress_logger = kwargs.get("progress_logger")
-        message = (
-            '步骤6：样式回填[1/1] 成功 | 样式=加粗 | 源文本="原条款" | '
-            '目标文本="新条款" | 得分=0.9100 | 阈值=0.8000'
-        )
+        message = '步骤6：样式回填成功[1/1] 加粗 | "原条款" -> "新条款"'
         kwargs["log_parts"].append(message)
         if callable(progress_logger):
             progress_logger(message)
@@ -1092,7 +1089,7 @@ def test_gjgk_update_word_hides_comment_progress_logs_in_verbose_edit_mode(monke
         config=None,
     )
 
-    assert any("样式回填[1/1] 成功" in message for message in progress_messages)
+    assert any("样式回填成功[1/1]" in message for message in progress_messages)
     assert not any("AI批注写入" in message for message in progress_messages)
     assert progress_errors == []
     assert result["comment_writeback_summary"] == "AI批注写入: 生成=2, 成功=1, 失败=1, 跳过=0"

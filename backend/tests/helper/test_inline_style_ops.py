@@ -170,6 +170,68 @@ def test_apply_inline_style_fragments_matches_full_container_after_renumbering(m
     assert doc.applied_ranges[0].Font.Color == 255
 
 
+def test_apply_inline_style_fragments_matches_short_title_when_target_paragraph_is_extended(monkeypatch) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 7},
+        "source_text": "二、技术需求",
+        "normalized_text": normalize_semantic_text("二、技术需求"),
+        "container_text": "二、技术需求",
+        "normalized_container_text": normalize_semantic_text("二、技术需求"),
+        "context_before": "",
+        "context_after": "",
+        "position_ratio": 0.78,
+        "local_position_ratio": 0.5,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": True,
+            "italic": False,
+        },
+        "font_color": None,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "full_container",
+    }
+    candidates = [
+        _make_candidate(
+            text="一、项目概述",
+            start=10,
+            locator={"paragraph_index": 1},
+            position_ratio=0.08,
+        ),
+        _make_candidate(
+            text="二、技术需求（一）大功率电场发生装置★1、常规单极模式：",
+            start=180,
+            locator={"paragraph_index": 8},
+            position_ratio=0.79,
+        ),
+        _make_candidate(
+            text="三、其他要求",
+            start=260,
+            locator={"paragraph_index": 9},
+            position_ratio=0.92,
+        ),
+    ]
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: candidates)
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=320,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 1
+    assert doc.applied_ranges[0].Start == 180
+    assert doc.applied_ranges[0].End == 180 + len("二、技术需求（一）大功率电场发生装置★1、常规单极模式：")
+    assert doc.applied_ranges[0].Font.Bold is True
+
+
 def test_apply_inline_style_fragments_matches_partial_span_in_unique_candidate(monkeypatch) -> None:
     fragment = {
         "container_type": "paragraph",
@@ -181,6 +243,7 @@ def test_apply_inline_style_fragments_matches_partial_span_in_unique_candidate(m
         "context_before": "提供",
         "context_after": "证明",
         "position_ratio": 0.25,
+        "local_position_ratio": 0.52,
         "style_flags": {
             "strikethrough": False,
             "underline": False,
@@ -215,7 +278,7 @@ def test_apply_inline_style_fragments_matches_partial_span_in_unique_candidate(m
     assert doc.applied_ranges[0].Font.HighlightColorIndex == 7
 
 
-def test_apply_inline_style_fragments_skips_when_multiple_candidates_conflict(monkeypatch) -> None:
+def test_apply_inline_style_fragments_prefers_nearest_position_when_multiple_candidates_are_close(monkeypatch) -> None:
     fragment = {
         "container_type": "paragraph",
         "container_locator": {"paragraph_index": 1},
@@ -226,6 +289,7 @@ def test_apply_inline_style_fragments_skips_when_multiple_candidates_conflict(mo
         "context_before": "",
         "context_after": "",
         "position_ratio": 0.5,
+        "local_position_ratio": 0.5,
         "style_flags": {
             "strikethrough": False,
             "underline": True,
@@ -240,25 +304,27 @@ def test_apply_inline_style_fragments_skips_when_multiple_candidates_conflict(mo
         "source_span_kind": "full_container",
     }
     candidates = [
-        _make_candidate(text="原条款内容", start=10, locator={"paragraph_index": 1}, position_ratio=0.5),
-        _make_candidate(text="原条款内容", start=80, locator={"paragraph_index": 2}, position_ratio=0.5),
+        _make_candidate(text="原条款内容", start=10, locator={"paragraph_index": 1}, position_ratio=0.49),
+        _make_candidate(text="原条款内容", start=80, locator={"paragraph_index": 2}, position_ratio=0.82),
     ]
     monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: candidates)
 
+    doc = _FakeDoc()
     result = style_ops.apply_inline_style_fragments(
-        doc=_FakeDoc(),
+        doc=doc,
         inline_style_fragments=[fragment],
         bound_start=0,
         bound_end=200,
         log_parts=[],
     )
 
-    assert result["applied"] == 0
-    assert result["skipped"] == 1
-    assert result["issues"][0]["reason"] == "multiple_candidate_conflict"
+    assert result["applied"] == 1
+    assert result["skipped"] == 0
+    assert doc.applied_ranges[0].Start == 10
+    assert doc.applied_ranges[0].Font.Underline == 1
 
 
-def test_apply_inline_style_fragments_skips_table_when_structure_changes(monkeypatch) -> None:
+def test_apply_inline_style_fragments_relocates_table_cell_within_same_table(monkeypatch) -> None:
     fragment = {
         "container_type": "table_cell",
         "container_locator": {"table_index": 1, "row": 2, "col": 1},
@@ -269,6 +335,7 @@ def test_apply_inline_style_fragments_skips_table_when_structure_changes(monkeyp
         "context_before": "",
         "context_after": "",
         "position_ratio": 0.6,
+        "local_position_ratio": 0.5,
         "style_flags": {
             "strikethrough": False,
             "underline": False,
@@ -291,17 +358,19 @@ def test_apply_inline_style_fragments_skips_table_when_structure_changes(monkeyp
     )
     monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
 
+    doc = _FakeDoc()
     result = style_ops.apply_inline_style_fragments(
-        doc=_FakeDoc(),
+        doc=doc,
         inline_style_fragments=[fragment],
         bound_start=0,
         bound_end=100,
         log_parts=[],
     )
 
-    assert result["applied"] == 0
-    assert result["skipped"] == 1
-    assert result["issues"][0]["reason"] == "table_structure_changed"
+    assert result["applied"] == 1
+    assert result["skipped"] == 0
+    assert doc.applied_ranges[0].Start == 30
+    assert doc.applied_ranges[0].Font.Bold is True
 
 
 def test_build_style_writeback_summary_payload_keeps_summary_fields() -> None:
@@ -371,6 +440,7 @@ def test_apply_inline_style_fragments_emits_success_detail_logs(monkeypatch) -> 
         "context_before": "提供",
         "context_after": "证明",
         "position_ratio": 0.25,
+        "local_position_ratio": 0.52,
         "style_flags": {
             "strikethrough": False,
             "underline": False,
@@ -390,6 +460,7 @@ def test_apply_inline_style_fragments_emits_success_detail_logs(monkeypatch) -> 
 
     doc = _FakeDoc()
     progress_messages: list[str] = []
+    diagnostic_messages: list[str] = []
     result = style_ops.apply_inline_style_fragments(
         doc=doc,
         inline_style_fragments=[fragment],
@@ -397,32 +468,83 @@ def test_apply_inline_style_fragments_emits_success_detail_logs(monkeypatch) -> 
         bound_end=200,
         log_parts=[],
         progress_logger=progress_messages.append,
+        diagnostic_logger=diagnostic_messages.append,
     )
 
     assert result["applied"] == 1
     assert any("开始回填行内样式，共 1 个片段" in message for message in progress_messages)
     assert any(
-        "样式回填[1/1] 成功" in message
-        and "加粗" in message
-        and "高亮" in message
-        and '源文本="红字"' in message
-        and '目标文本="红字"' in message
+        "样式回填成功[1/1] 加粗、高亮" in message
+        and '"红字" -> "红字"' in message
+        and "候选=" not in message
+        and "得分=" not in message
         for message in progress_messages
     )
     assert any("命中样式: 加粗=1, 高亮=1" in message for message in progress_messages)
+    assert any('样式回填命中 | 加粗、高亮 "红字" -> "红字"' in message for message in progress_messages)
+    assert any(
+        "样式回填诊断[1/1] 成功" in message
+        and "得分=" in message
+        and "候选=" in message
+        for message in diagnostic_messages
+    )
 
 
-def test_apply_inline_style_fragments_emits_skip_reason_logs(monkeypatch) -> None:
+def test_apply_inline_style_fragments_copies_font_color_for_partial_span(monkeypatch) -> None:
     fragment = {
-        "container_type": "table_cell",
-        "container_locator": {"table_index": 1, "row": 2, "col": 1},
-        "source_text": "★质保期",
-        "normalized_text": normalize_semantic_text("★质保期"),
-        "container_text": "★质保期",
-        "normalized_container_text": normalize_semantic_text("★质保期"),
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 2},
+        "source_text": "提供",
+        "normalized_text": normalize_semantic_text("提供"),
+        "container_text": "供应商需提供原件",
+        "normalized_container_text": normalize_semantic_text("供应商需提供原件"),
+        "context_before": "需",
+        "context_after": "原件",
+        "position_ratio": 0.35,
+        "local_position_ratio": 0.5,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 255,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    candidate_text = "供应商应按要求提供纸质原件"
+    candidate = _make_candidate(text=candidate_text, start=40, position_ratio=0.34)
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=120,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 1
+    assert doc.applied_ranges[0].Font.Color == 255
+    assert doc.applied_ranges[0].Start == 40 + candidate_text.index("提")
+
+
+def test_apply_inline_style_fragments_emits_short_skip_logs_and_keeps_diagnostics(monkeypatch) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 7},
+        "source_text": "二、技术需求",
+        "normalized_text": normalize_semantic_text("二、技术需求"),
+        "container_text": "二、技术需求",
+        "normalized_container_text": normalize_semantic_text("二、技术需求"),
         "context_before": "",
         "context_after": "",
-        "position_ratio": 0.6,
+        "position_ratio": 0.78,
+        "local_position_ratio": 0.5,
         "style_flags": {
             "strikethrough": False,
             "underline": False,
@@ -436,16 +558,24 @@ def test_apply_inline_style_fragments_emits_skip_reason_logs(monkeypatch) -> Non
         "underline_style": None,
         "source_span_kind": "full_container",
     }
-    candidate = _make_candidate(
-        text="★质保期",
-        start=30,
-        container_type="table_cell",
-        locator={"table_index": 1, "row": 1, "col": 1},
-        position_ratio=0.6,
-    )
-    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+    candidates = [
+        _make_candidate(
+            text="一、项目概述",
+            start=10,
+            locator={"paragraph_index": 1},
+            position_ratio=0.08,
+        ),
+        _make_candidate(
+            text="付款方式：分期付款，合同签订后支付预付款。",
+            start=60,
+            locator={"paragraph_index": 4},
+            position_ratio=0.34,
+        ),
+    ]
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: candidates)
 
     progress_messages: list[str] = []
+    diagnostic_messages: list[str] = []
     result = style_ops.apply_inline_style_fragments(
         doc=_FakeDoc(),
         inline_style_fragments=[fragment],
@@ -453,13 +583,23 @@ def test_apply_inline_style_fragments_emits_skip_reason_logs(monkeypatch) -> Non
         bound_end=100,
         log_parts=[],
         progress_logger=progress_messages.append,
+        diagnostic_logger=diagnostic_messages.append,
     )
 
     assert result["skipped"] == 1
     assert any(
-        "样式回填[1/1] 跳过" in message
-        and "原因=表格结构已变化，无法按原单元格定位" in message
+        "样式回填跳过[1/1] 加粗" in message
+        and '"二、技术需求"' in message
+        and "原因：未找到可承接标题样式的目标段落" in message
+        and "候选=" not in message
+        and "段落#1" not in message
         for message in progress_messages
+    )
+    assert any(
+        "样式回填诊断[1/1] 跳过" in message
+        and "候选=" in message
+        and "段落#1" in message
+        for message in diagnostic_messages
     )
 
 
@@ -491,6 +631,7 @@ def test_apply_inline_style_fragments_emits_failure_logs(monkeypatch) -> None:
     monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
 
     progress_messages: list[str] = []
+    diagnostic_messages: list[str] = []
     result = style_ops.apply_inline_style_fragments(
         doc=_FailingDoc(),
         inline_style_fragments=[fragment],
@@ -498,12 +639,20 @@ def test_apply_inline_style_fragments_emits_failure_logs(monkeypatch) -> None:
         bound_end=100,
         log_parts=[],
         progress_logger=progress_messages.append,
+        diagnostic_logger=diagnostic_messages.append,
     )
 
     assert result["failed"] == 1
     assert any(
-        "样式回填[1/1] 失败" in message
+        "样式回填失败[1/1] 加粗" in message
+        and '"红字"' in message
+        and "错误：RPC write failed" in message
+        and "候选=" not in message
+        for message in progress_messages
+    )
+    assert any(
+        "样式回填诊断[1/1] 失败" in message
         and "原因=写回样式失败" in message
         and "错误=RPC write failed" in message
-        for message in progress_messages
+        for message in diagnostic_messages
     )

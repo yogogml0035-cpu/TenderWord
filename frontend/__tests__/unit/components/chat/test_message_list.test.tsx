@@ -63,6 +63,38 @@ function createTaskMessages(): Message[] {
   ];
 }
 
+function createStyleWritebackTaskMessages(): Message[] {
+  const messages = createTaskMessages();
+  messages[0] = {
+    ...messages[0],
+    metadata: {
+      ...(messages[0].metadata || {}),
+      messageKind: 'task-log',
+      logs: [
+        {
+          id: 'style-log-success',
+          timestamp: Date.now(),
+          level: 'info',
+          message: '步骤6：样式回填成功[2/7] 加粗 | "二、技术需求" -> "二、技术需求"',
+        },
+        {
+          id: 'style-log-skip',
+          timestamp: Date.now() + 1,
+          level: 'warn',
+          message: '步骤6：样式回填跳过[5/7] 字体颜色 | "提供" | 原因：相似度不足',
+        },
+        {
+          id: 'style-log-failure',
+          timestamp: Date.now() + 2,
+          level: 'error',
+          message: '步骤6：样式回填失败[6/7] 删除线、字体颜色 | "标注“★”的项目" | 错误：RPC write failed',
+        },
+      ],
+    },
+  };
+  return messages;
+}
+
 function createUserMessage(content = '你好'): Message[] {
   return [
     {
@@ -114,6 +146,41 @@ describe('MessageList', () => {
     render(<MessageList messages={createTaskMessages()} />);
 
     expect(screen.getByText('开始处理')).toHaveClass('break-all', 'whitespace-pre-wrap');
+  });
+
+  it('renders style writeback logs with clear status badges and concise details', () => {
+    render(<MessageList messages={createStyleWritebackTaskMessages()} />);
+
+    expect(screen.getByText('回填成功')).toHaveClass('text-green-700', 'bg-green-50');
+    expect(screen.getByText('回填跳过')).toHaveClass('text-amber-700', 'bg-amber-50');
+    expect(screen.getByText('回填失败')).toHaveClass('text-red-700', 'bg-red-50');
+
+    expect(
+      screen.getByText('步骤6 [2/7] 加粗 | "二、技术需求" -> "二、技术需求"')
+    ).toHaveClass('text-green-800');
+    expect(
+      screen.getByText('步骤6 [5/7] 字体颜色 | "提供" | 原因：相似度不足')
+    ).toHaveClass('text-amber-800');
+    expect(
+      screen.getByText('步骤6 [6/7] 删除线、字体颜色 | "标注“★”的项目" | 错误：RPC write failed')
+    ).toHaveClass('text-red-800');
+  });
+
+  it('copies condensed style writeback logs using the user-facing text', async () => {
+    render(<MessageList messages={createStyleWritebackTaskMessages()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '复制进度日志' }));
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalled();
+    });
+
+    const clipboardCalls = (navigator.clipboard.writeText as jest.Mock).mock.calls;
+    const copiedText = clipboardCalls[clipboardCalls.length - 1]?.[0];
+    expect(copiedText).toContain('步骤6：样式回填成功[2/7] 加粗 | "二、技术需求" -> "二、技术需求"');
+    expect(copiedText).toContain('步骤6：样式回填跳过[5/7] 字体颜色 | "提供" | 原因：相似度不足');
+    expect(copiedText).not.toContain('候选=');
+    expect(copiedText).not.toContain('得分=');
   });
 
   it('triggers existing download handler from task download card', () => {
