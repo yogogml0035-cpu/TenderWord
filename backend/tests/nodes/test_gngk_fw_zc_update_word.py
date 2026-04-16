@@ -9,6 +9,7 @@ from backend.helper.word_helper.protected_fields import (
 )
 from backend.nodes.gngk_word_nodes.gngk_fw_zc_update_word import (
     _convert_lines_to_items,
+    _resolve_block4_insert_pos,
     _resolve_block4_insert_start,
     _validate_block_window,
     split_polished_text_into_blocks,
@@ -180,16 +181,31 @@ def test_is_effectively_empty_text_treats_page_break_artifacts_as_empty() -> Non
 
 
 class _FakeRange:
-    def __init__(self, start: int, end: int, text: str, *, in_table: bool = False):
+    def __init__(
+        self,
+        start: int,
+        end: int,
+        text: str,
+        *,
+        in_table: bool = False,
+        paragraph_end: int | None = None,
+    ):
         self.Start = start
         self.End = end
         self.Text = text
         self._in_table = in_table
+        self._paragraph_end = int(paragraph_end) if paragraph_end is not None else None
 
     def Information(self, code: int) -> int:
         if code == wdWithInTable:
             return -1 if self._in_table else 0
         return 0
+
+    def Paragraphs(self, index: int):
+        if index != 1 or self._paragraph_end is None:
+            raise IndexError(index)
+        paragraph_range = type("_ParagraphRange", (), {"End": int(self._paragraph_end)})()
+        return type("_Paragraph", (), {"Range": paragraph_range})()
 
 
 class _FakeParagraph:
@@ -250,3 +266,57 @@ def test_refresh_protected_fields_fails_fast_when_only_fuzzy_hits_exist() -> Non
             range_end=10_000,
             existing_fields={},
         )
+
+
+def test_resolve_block4_insert_pos_prefers_distinct_paragraph_after_payment_field() -> None:
+    calls: list[int] = []
+
+    def _fake_next(start: int, bound_end: int, *, max_lookahead: int = 0) -> int | None:
+        calls.append(int(start))
+        return 146 if int(start) == 140 else None
+
+    payment_rng = _FakeRange(
+        120,
+        128,
+        "付款方式：按季度结算",
+        paragraph_end=140,
+    )
+
+    pos, prefer_distinct_paragraph = _resolve_block4_insert_pos(
+        payment_rng,
+        bound_end=260,
+        find_next_editable_pos_bounded=_fake_next,
+        find_prev_editable_pos=lambda start, *, max_lookback=0: None,
+    )
+
+    assert pos == 146
+    assert prefer_distinct_paragraph is True
+    assert calls == [140]
+
+
+def test_resolve_block4_insert_pos_falls_back_to_after_payment_content_when_paragraph_gap_missing() -> None:
+    calls: list[int] = []
+
+    def _fake_next(start: int, bound_end: int, *, max_lookahead: int = 0) -> int | None:
+        calls.append(int(start))
+        if int(start) == 140:
+            return None
+        return 132
+
+    payment_rng = _FakeRange(
+        120,
+        128,
+        "付款方式：按季度结算",
+        paragraph_end=140,
+    )
+
+    pos, prefer_distinct_paragraph = _resolve_block4_insert_pos(
+        payment_rng,
+        bound_end=260,
+        find_next_editable_pos_bounded=_fake_next,
+        find_prev_editable_pos=lambda start, *, max_lookback=0: None,
+    )
+
+    assert pos == 132
+    assert prefer_distinct_paragraph is False
+    assert calls == [140, 129]

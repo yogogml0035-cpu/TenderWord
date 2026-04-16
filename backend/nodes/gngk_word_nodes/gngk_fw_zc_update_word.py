@@ -13,7 +13,7 @@ import shutil
 import stat
 import sys
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[3]
 BACKEND_ROOT = PROJECT_ROOT / "backend"
@@ -55,7 +55,8 @@ from backend.helper.word_helper.content_ops import (
     apply_standard_insert_format,
     insert_content_with_formatting,
     insert_table_with_formatting,
-    insert_items_inline_at_end_of_paragraph,
+    insert_items_inline_at_end_of_paragraph as helper_insert_items_inline_at_end_of_paragraph,
+    resolve_following_insert_pos,
 )
 from backend.helper.word_helper.cleanup_ops import (
     multi_pass_cleanup,
@@ -71,7 +72,6 @@ from backend.helper.word_helper.inline_style_ops import (
 from backend.states import TenderGraphStateBase
 from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
-    WORD_MANUAL_LINE_BREAK,
     close_word_application,
     create_word_application,
     normalize_word_insert_text,
@@ -147,6 +147,32 @@ def _resolve_block4_insert_start(payment_end: int, bound_end: int) -> int:
     if payment_end > bound_end:
         raise ValueError("付款方式字段位置超出插入边界，停止以避免侵入后置章节")
     return min(payment_end, bound_end)
+
+
+def _resolve_block4_insert_pos(
+    payment_method_rng,
+    *,
+    bound_end: int,
+    find_next_editable_pos_bounded: Callable[..., Optional[int]],
+    find_prev_editable_pos: Callable[..., Optional[int]],
+) -> tuple[int, bool]:
+    payment_end = _resolve_block4_insert_start(
+        int(payment_method_rng.End),
+        int(bound_end),
+    )
+    payment_para_end = payment_end
+    try:
+        payment_para_end = int(payment_method_rng.Paragraphs(1).Range.End)
+    except Exception:
+        payment_para_end = payment_end
+
+    return resolve_following_insert_pos(
+        content_end=payment_end,
+        paragraph_end=payment_para_end,
+        bound_end=int(bound_end),
+        find_next_editable_pos_bounded=find_next_editable_pos_bounded,
+        find_prev_editable_pos=find_prev_editable_pos,
+    )
 
 
 def split_polished_text_into_blocks(
@@ -886,61 +912,6 @@ def gngk_fw_zc_update_word(
                         insertion_log_parts.append(f"  警告: 无法更新 '{keyword}': {error}")
                         return False
 
-                def insert_items_inline_at_end_of_paragraph(para_rng, items) -> int:
-                    try:
-                        para_text = para_rng.Text
-                        trim = 0
-                        while para_text.endswith("\r") or para_text.endswith("\a"):
-                            para_text = para_text[:-1]
-                            trim += 1
-                        pos = int(para_rng.End) - trim
-                    except Exception:
-                        pos = int(getattr(para_rng, "End", 0))
-
-                    try:
-                        if pos < int(para_rng.Start):
-                            pos = int(para_rng.End) - 1
-                    except Exception:
-                        pass
-
-                    pos = max(0, pos)
-                    rng = doc.Range(pos, pos)
-                    rng.Collapse(wdCollapseStart)
-                    inserted_count = 0
-                    for item in items:
-                        if item["type"] == "text":
-                            insert_text = WORD_MANUAL_LINE_BREAK + normalize_word_insert_text(
-                                item["line"]
-                            )
-                            start = int(rng.Start)
-                            rng.InsertAfter(insert_text)
-                            end = int(rng.End)
-                            try:
-                                inserted_rng = doc.Range(start, end)
-                                inserted_rng.Font.Name = insert_font_name
-                                inserted_rng.Font.Size = insert_font_size
-                                inserted_rng.Font.Bold = False
-                            except Exception:
-                                pass
-                            rng.Collapse(wdCollapseEnd)
-                            inserted_count += 1
-                        elif item["type"] == "table":
-                            try:
-                                insert_table_with_formatting(rng, item["rows"])
-                                inserted_count += 1
-                            except Exception as error:
-                                insertion_log_parts.append(
-                                    f"    警告: 内联插入表格失败，改为文本: {error}"
-                                )
-                                for row in item["rows"]:
-                                    insert_text = WORD_MANUAL_LINE_BREAK + normalize_word_insert_text(
-                                        " | ".join(row)
-                                    )
-                                    rng.InsertAfter(insert_text)
-                                    rng.Collapse(wdCollapseEnd)
-                                    inserted_count += 1
-                    return inserted_count
-
                 insert_rng = selection.Range
                 insert_rng.Collapse(wdCollapseStart)
 
@@ -1070,37 +1041,37 @@ def gngk_fw_zc_update_word(
                 )
                 payment_method_rng = protected_fields[PAYMENT_METHOD_MARKER]
                 bound_end_now = int(get_insertion_bound_end())
-                start_after_payment = _resolve_block4_insert_start(
-                    int(payment_method_rng.End),
-                    bound_end_now,
-                )
                 safe_pos = None
                 use_inline = False
+                prefer_distinct_paragraph = False
                 if block4_items:
-                    safe_pos = find_next_editable_pos_bounded(
-                        start_after_payment,
-                        bound_end_now,
-                        max_lookahead=20000,
+                    safe_pos, prefer_distinct_paragraph = _resolve_block4_insert_pos(
+                        payment_method_rng,
+                        bound_end=bound_end_now,
+                        find_next_editable_pos_bounded=find_next_editable_pos_bounded,
+                        find_prev_editable_pos=find_prev_editable_pos,
                     )
-                    if safe_pos is None:
-                        use_inline = True
+                    insert_rng.Start = min(max(0, safe_pos), doc.Content.End)
+                    insert_rng.End = insert_rng.Start
+                    insert_rng.Collapse(wdCollapseStart)
+                    if prefer_distinct_paragraph:
                         insertion_log_parts.append(
-                            "    块4在付款方式字段后未找到独立可编辑插入点，改用段落末尾内联插入"
+                            f"    优先在付款方式段落后插入独立段落，位置 {insert_rng.Start}"
                         )
                     else:
-                        insert_rng.Start = min(max(0, safe_pos), doc.Content.End)
-                        insert_rng.End = insert_rng.Start
-                        insert_rng.Collapse(wdCollapseStart)
                         insertion_log_parts.append(
                             f"    在付款方式字段后插入，位置 {insert_rng.Start}"
                         )
-                        try:
-                            if is_range_locked(
-                                doc.Range(int(insert_rng.Start), int(insert_rng.Start))
-                            ):
-                                use_inline = True
-                        except Exception:
-                            pass
+                    try:
+                        if is_range_locked(
+                            doc.Range(int(insert_rng.Start), int(insert_rng.Start))
+                        ):
+                            use_inline = True
+                            insertion_log_parts.append(
+                                "    块4目标位置命中锁定，改用段落末尾内联插入"
+                            )
+                    except Exception:
+                        pass
                 else:
                     insertion_log_parts.append("    块4为空，跳过")
 
@@ -1109,10 +1080,18 @@ def gngk_fw_zc_update_word(
                     insertion_log_parts.append(
                         "    块4将以内联换行追加到付款方式段落末尾"
                     )
-                    inserted_count = insert_items_inline_at_end_of_paragraph(
-                        protected_fields[PAYMENT_METHOD_MARKER], block4_items
+                    inserted_count = helper_insert_items_inline_at_end_of_paragraph(
+                        doc,
+                        protected_fields[PAYMENT_METHOD_MARKER],
+                        block4_items,
+                        get_bound_end=get_insertion_bound_end,
+                        font_name=insert_font_name,
+                        font_size=insert_font_size,
+                        log_parts=insertion_log_parts,
                     )
+                    insertion_log_parts.append("    已记录：块4本次发生内联降级写回")
                 elif block4_items:
+                    insertion_log_parts.append("    已记录：块4本次保持独立段落写回")
                     for item in block4_items:
                         attempts = 0
                         while attempts < 80:
@@ -1617,6 +1596,7 @@ __all__ = [
     "gngk_fw_zc_update_word",
     "split_polished_text_into_blocks",
     "_convert_lines_to_items",
+    "_resolve_block4_insert_pos",
     "_resolve_block4_insert_start",
     "_validate_block_window",
 ]
