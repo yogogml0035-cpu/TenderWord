@@ -167,6 +167,16 @@ def test_convert_lines_to_items_turns_markdown_table_into_table_item() -> None:
     ]
 
 
+def test_convert_lines_to_items_keeps_blank_text_rows() -> None:
+    items = _convert_lines_to_items(["第一段", "", "第二段"])
+
+    assert items == [
+        {"type": "text", "line": "第一段"},
+        {"type": "text", "line": ""},
+        {"type": "text", "line": "第二段"},
+    ]
+
+
 def test_strict_block_helpers_reject_invalid_windows_and_after_anchor_overflow() -> None:
     with pytest.raises(ValueError, match="服务期限与付款方式之间字段区间非法"):
         _validate_block_window(20, 10, label="服务期限与付款方式之间")
@@ -320,3 +330,24 @@ def test_resolve_block4_insert_pos_falls_back_to_after_payment_content_when_para
     assert pos == 132
     assert prefer_distinct_paragraph is False
     assert calls == [140, 129]
+
+
+def test_split_polished_text_into_blocks_preserves_explicit_blank_lines_in_block4() -> None:
+    polished_text = "\n".join(
+        [
+            "一、服务概述",
+            "服务地点：上海院区",
+            "服务期限：12个月",
+            "付款方式：按季度结算",
+            "",
+            "",
+            "七、其他补充要求",
+        ]
+    )
+
+    result = split_polished_text_into_blocks(polished_text)
+
+    assert result["block1"] == ["一、服务概述"]
+    assert result["block2"] == []
+    assert result["block3"] == []
+    assert result["block4"] == ["", "", "七、其他补充要求"]

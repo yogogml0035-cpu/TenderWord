@@ -60,6 +60,14 @@ from backend.helper.word_helper.content_ops import (
     insert_items_inline_at_end_of_paragraph,
 )
 
+from backend.helper.word_helper.paragraph_boundary_ops import (
+    uses_wide_scan_window,
+    find_paragraph_containing_any,
+    find_first_visible_insert_offset,
+    insert_paragraph_break_before_paragraph,
+    ensure_paragraph_break_after_paragraph,
+)
+
 from backend.helper.word_helper.cleanup_ops import (
     normalize_cleanup_text,
     is_effectively_empty_text,
@@ -137,6 +145,12 @@ __all__ = [
     "insert_content_with_formatting",
     "insert_table_with_formatting",
     "insert_items_inline_at_end_of_paragraph",
+    # paragraph_boundary_ops
+    "uses_wide_scan_window",
+    "find_paragraph_containing_any",
+    "find_first_visible_insert_offset",
+    "insert_paragraph_break_before_paragraph",
+    "ensure_paragraph_break_after_paragraph",
     # cleanup_ops
     "normalize_cleanup_text",
     "is_effectively_empty_text",

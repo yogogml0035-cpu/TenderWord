@@ -306,6 +306,8 @@ def multi_pass_cleanup(
     log_parts: Optional[List[str]] = None,
     max_passes: int = 5,
     step_label: str = "步骤",
+    cleanup_blank_paragraphs: bool = True,
+    cleanup_paragraph_text: bool = True,
 ) -> Dict[str, int]:
     """
     多轮循环清理：删空段 → 清换行 → 再删空段 → 修剪表格。
@@ -318,22 +320,42 @@ def multi_pass_cleanup(
         log_parts: 日志列表
         max_passes: 最大轮数
         step_label: 日志前缀
+        cleanup_blank_paragraphs: 是否删除空白段落
+        cleanup_paragraph_text: 是否压平段落内换行/清理段落文本
 
     Returns:
         统计信息字典
     """
+    # 形参 cleanup_blank_paragraphs / cleanup_paragraph_text 与本模块顶层的
+    # 同名函数会互相遮蔽；一旦 caller 传入 False（例如显式保留空段场景），
+    # 下面的 cleanup_blank_paragraphs(...) 调用就会变成“调用 bool”，直接抛
+    # TypeError: 'bool' object is not callable。
+    # 这里先把两个 flag 复制到不重名的局部变量，再对顶层函数做本地别名，
+    # 彻底消除名字冲突。
+    do_blank_cleanup = bool(cleanup_blank_paragraphs)
+    do_text_cleanup = bool(cleanup_paragraph_text)
+    _cleanup_blank_paragraphs = globals()["cleanup_blank_paragraphs"]
+
     total_empty_deleted = 0
     total_cleaned = 0
     total_linebreak_deleted = 0
 
+    if not do_blank_cleanup and log_parts is not None:
+        log_parts.append(f"  {step_label}.1：跳过空段落清理，保留显式空正文段落。")
+    if not do_text_cleanup and log_parts is not None:
+        log_parts.append(f"  {step_label}.2：跳过段落内换行清理，保留正文段落语义。")
+
     for pass_num in range(1, max_passes + 1):
+        if not do_blank_cleanup:
+            break
+
         range_start, range_end = build_range_fn()
 
         if log_parts is not None:
             log_parts.append(f"  {step_label}.1 第 {pass_num} 轮：删除空段落...")
 
         # 第一轮：删除空段落
-        empty_deleted = cleanup_blank_paragraphs(
+        empty_deleted = _cleanup_blank_paragraphs(
             doc,
             range_start=range_start,
             range_end=range_end,
@@ -351,6 +373,9 @@ def multi_pass_cleanup(
                     f"  未再发现空段，第 {pass_num} 轮后停止。"
                 )
             break
+
+        if not do_text_cleanup:
+            continue
 
         # 第二轮：清理可编辑段落中的换行
         range_start, range_end = build_range_fn()
@@ -377,7 +402,7 @@ def multi_pass_cleanup(
         if log_parts is not None:
             log_parts.append(f"  {step_label}.3：最终检查剩余空段落...")
 
-        final_deleted = cleanup_blank_paragraphs(
+        final_deleted = _cleanup_blank_paragraphs(
             doc,
             range_start=range_start,
             range_end=range_end,
@@ -404,9 +429,14 @@ def multi_pass_cleanup(
     )
 
     if log_parts is not None:
-        log_parts.append(
-            f"{step_label}完成：已清理可编辑内容中的空段落与多余换行。"
-        )
+        if cleanup_blank_paragraphs and cleanup_paragraph_text:
+            log_parts.append(f"{step_label}完成：已清理可编辑内容中的空段落与多余换行。")
+        elif cleanup_blank_paragraphs:
+            log_parts.append(f"{step_label}完成：已清理多余空段落并保留正文段落语义。")
+        elif cleanup_paragraph_text:
+            log_parts.append(f"{step_label}完成：已清理段落文本噪音并保留显式空段。")
+        else:
+            log_parts.append(f"{step_label}完成：已跳过正文段落清理，仅修剪表格噪音。")
 
     return {
         "empty_deleted": total_empty_deleted,

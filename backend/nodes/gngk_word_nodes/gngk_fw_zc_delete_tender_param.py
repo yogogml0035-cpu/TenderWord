@@ -28,11 +28,15 @@ from backend.config.tender_config import (
 )
 from backend.helper.word_helper.protected_fields import (
     collect_profile_protected_fields,
+    extract_protected_field_name,
     refresh_profile_protected_fields,
     normalize_protected_field_paragraphs,
 )
 from backend.helper.word_helper.range_utils import is_protected_range, range_overlaps
 from backend.helper.word_helper.cleanup_ops import multi_pass_cleanup
+from backend.helper.word_helper.paragraph_boundary_ops import (
+    ensure_paragraph_break_after_paragraph,
+)
 from backend.states import TenderGraphStateBase
 from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
@@ -55,6 +59,36 @@ GNGK_THREE_FIELD_PROFILE = get_protected_field_profile("gngk_fw_zc")
 SERVICE_LOCATION_MARKER, SERVICE_TERM_MARKER, PAYMENT_METHOD_MARKER = (
     GNGK_THREE_FIELD_PROFILE.ordered_markers
 )
+PAYMENT_METHOD_FIELD_NAME = extract_protected_field_name(PAYMENT_METHOD_MARKER)
+
+
+def _restore_payment_tail_paragraph_boundary(
+    doc,
+    protected_fields: Dict[str, Any],
+    *,
+    get_bound_end,
+    tender_type: str,
+    log_parts: list[str],
+) -> bool:
+    """删除/cleanup 后补齐付款方式后的真实正文段落边界。"""
+    payment_range = protected_fields.get(PAYMENT_METHOD_MARKER)
+    if payment_range is None:
+        log_parts.append("  未找到付款方式字段，跳过尾部段落边界修复。")
+        return False
+
+    inserted_break, _ = ensure_paragraph_break_after_paragraph(
+        doc,
+        payment_range,
+        scan_bound_end=int(get_bound_end()),
+        tender_type=str(tender_type or "gngk_fw_zc"),
+        field_name=PAYMENT_METHOD_FIELD_NAME,
+        log=log_parts.append,
+    )
+    if inserted_break:
+        log_parts.append("  已补齐付款方式后的段落边界。")
+    else:
+        log_parts.append("  付款方式后已存在段落边界或未找到可编辑位置。")
+    return inserted_break
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +447,21 @@ def gngk_fw_zc_delete_tender_param(
                 log_parts=log_parts,
                 max_passes=5,
                 step_label="步骤3",
+            )
+
+            protected_fields = refresh_profile_protected_fields(
+                doc=doc,
+                profile=protected_profile,
+                range_start=int(insertion_bound_start),
+                range_end=int(get_bound_end()),
+                existing_fields=protected_fields,
+            )
+            _restore_payment_tail_paragraph_boundary(
+                doc,
+                protected_fields,
+                get_bound_end=get_bound_end,
+                tender_type=str(tender_type or "gngk_fw_zc"),
+                log_parts=log_parts,
             )
 
             # ==================================================================

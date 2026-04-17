@@ -7,6 +7,8 @@ gngk_fw_zc_delete_tender_param 节点的单元测试。
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 
 from backend.config.tender_config import get_protected_field_profile
@@ -23,6 +25,9 @@ from backend.helper.word_helper.range_utils import (
 )
 
 GNGK_THREE_FIELD_PROFILE = get_protected_field_profile("gngk_fw_zc")
+delete_module = importlib.import_module(
+    "backend.nodes.gngk_word_nodes.gngk_fw_zc_delete_tender_param"
+)
 
 
 def test_normalize_cleanup_text_removes_invisible_chars() -> None:
@@ -108,3 +113,39 @@ def test_require_all_protected_fields_passes_when_all_present() -> None:
         {"服务地点：": None, "服务期限：": None, "付款方式：": None},
         GNGK_THREE_FIELD_PROFILE,
     )
+
+
+def test_restore_payment_tail_paragraph_boundary_delegates_to_shared_helper(
+    monkeypatch,
+) -> None:
+    captured: list[tuple[object, str, int]] = []
+
+    def fake_shared_helper(doc, paragraph_range, **kwargs):
+        captured.append(
+            (
+                paragraph_range,
+                str(kwargs.get("field_name") or ""),
+                int(kwargs.get("scan_bound_end") or 0),
+            )
+        )
+        return True, 188
+
+    monkeypatch.setattr(
+        delete_module,
+        "ensure_paragraph_break_after_paragraph",
+        fake_shared_helper,
+    )
+
+    payment_range = object()
+    log_parts: list[str] = []
+    restored = delete_module._restore_payment_tail_paragraph_boundary(
+        doc=object(),
+        protected_fields={"付款方式：": payment_range},
+        get_bound_end=lambda: 260,
+        tender_type="gngk_fw_zc",
+        log_parts=log_parts,
+    )
+
+    assert restored is True
+    assert captured == [(payment_range, "付款方式", 260)]
+    assert any("已补齐付款方式后的段落边界。" in line for line in log_parts)

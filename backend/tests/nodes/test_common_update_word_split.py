@@ -45,3 +45,23 @@ def test_split_polished_text_into_blocks_fails_when_only_table_or_prose_contains
 
     with pytest.raises(ValueError, match="缺少关键字段: 交付日期："):
         split_polished_text_into_blocks(polished_text)
+
+
+def test_split_polished_text_into_blocks_preserves_explicit_blank_lines() -> None:
+    polished_text = "\n".join(
+        [
+            "一、补充说明",
+            "交付日期：合同签订后30天",
+            "",
+            "付款方式：按季度结算",
+            "",
+            "",
+            "二、售后服务要求",
+        ]
+    )
+
+    result = split_polished_text_into_blocks(polished_text)
+
+    assert result["block1"] == ["一、补充说明"]
+    assert result["block2"] == [""]
+    assert result["block3"] == ["", "", "二、售后服务要求"]

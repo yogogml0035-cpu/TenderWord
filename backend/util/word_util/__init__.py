@@ -73,6 +73,9 @@ from backend.util.word_util.anchor_utils import (
 
 from backend.util.word_util.word_insert_text import (
     WORD_MANUAL_LINE_BREAK,
+    WORD_PARAGRAPH_BREAK,
+    normalize_word_body_text,
+    normalize_word_cell_text,
     normalize_word_insert_text,
 )
 
@@ -126,5 +129,8 @@ __all__ = [
     "_pick_anchor",
     # word_insert_text
     "WORD_MANUAL_LINE_BREAK",
+    "WORD_PARAGRAPH_BREAK",
+    "normalize_word_body_text",
+    "normalize_word_cell_text",
     "normalize_word_insert_text",
 ]

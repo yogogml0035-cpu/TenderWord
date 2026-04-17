@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import os
 import pathlib
-import re
 import shutil
 import sys
 import time
@@ -22,7 +21,6 @@ from typing import Dict, Optional
 from backend.states import TenderGraphStateBase
 from backend.config.tender_config import (
     CONTENT_UPDATE_MODE_DIRECT_REPLACE,
-    get_tender_type_family,
     get_anchor_target_sizes,
     get_content_update_mode,
     get_default_anchor_texts,
@@ -46,9 +44,13 @@ from backend.util.word_util.anchor_utils import (
     iter_anchor_text_variants,
     resolve_anchor_content_range,
 )
-from backend.helper.word_helper.range_utils import (
-    is_range_locked,
-    find_safe_insert_position,
+from backend.helper.word_helper.range_utils import is_range_locked
+from backend.helper.word_helper.paragraph_boundary_ops import (
+    uses_wide_scan_window as helper_uses_wide_scan_window,
+    find_paragraph_containing_any as helper_find_paragraph_containing_any,
+    find_first_visible_insert_offset as helper_find_first_visible_insert_offset,
+    insert_paragraph_break_before_paragraph as helper_insert_paragraph_break_before_paragraph,
+    ensure_paragraph_break_after_paragraph as helper_ensure_paragraph_break_after_paragraph,
 )
 
 NODE_NAME = "delete_tender_param"
@@ -74,7 +76,7 @@ def _visible_log(message: str) -> None:
 
 
 def _uses_wide_scan_window(tender_type: str | None) -> bool:
-    return get_tender_type_family(tender_type) in {"gngk", "gjgk"}
+    return helper_uses_wide_scan_window(tender_type)
 
 
 def _calculate_elapsed_seconds(
@@ -137,37 +139,16 @@ def _find_paragraph_containing_any(
     min_start: int = 0,
     max_start: Optional[int] = None,
 ):
-    """在指定起点之后，查找首个包含任一文本的段落。"""
-    for para in doc.Paragraphs:
-        try:
-            rng = para.Range
-            range_start = int(rng.Start)
-            range_end = int(rng.End)
-            if range_end < int(min_start):
-                continue
-            if max_start is not None and range_start > int(max_start):
-                break
-            para_text = str(getattr(rng, "Text", "") or "")
-            if any(text in para_text for text in texts):
-                return rng
-        except Exception:
-            continue
-    return None
+    return helper_find_paragraph_containing_any(
+        doc,
+        texts,
+        min_start=min_start,
+        max_start=max_start,
+    )
 
 
 def _find_first_visible_insert_offset(paragraph_text: str) -> int:
-    """优先将换行插入到编号前，否则回退到首个可见字符前。"""
-    if not paragraph_text:
-        return 0
-
-    digit_match = re.search(r"\d", paragraph_text)
-    if digit_match:
-        return digit_match.start()
-
-    for idx, char in enumerate(paragraph_text):
-        if not char.isspace() and char not in ("\r", "\n", "\a"):
-            return idx
-    return 0
+    return helper_find_first_visible_insert_offset(paragraph_text)
 
 
 def _insert_paragraph_break_before_delivery(
@@ -179,48 +160,14 @@ def _insert_paragraph_break_before_delivery(
     log=_visible_log,
 ) -> bool:
     """在交付日期段落前补一个段落边界，失败时回退到原删除起点。"""
-    paragraph_candidates = []
-    if delivery_para_rng is not None:
-        try:
-            para_text_raw = str(getattr(delivery_para_rng, "Text", "") or "")
-            primary_offset = _find_first_visible_insert_offset(para_text_raw)
-            paragraph_start = int(delivery_para_rng.Start)
-            paragraph_candidates = [
-                paragraph_start + primary_offset,
-                paragraph_start,
-            ]
-
-            safe_insert_pos = find_safe_insert_position(
-                doc,
-                paragraph_candidates,
-                max_forward_scan_chars=24 if _uses_wide_scan_window(tender_type) else 8,
-                field_name=DELIVERY_DATE_FIELD_NAME,
-                log=log,
-            )
-            if safe_insert_pos is not None:
-                doc.Range(safe_insert_pos, safe_insert_pos).InsertBefore("\r")
-                return True
-        except Exception:
-            pass
-
-    if fallback_pos is None:
-        return False
-
-    fallback_insert_pos = find_safe_insert_position(
+    return helper_insert_paragraph_break_before_paragraph(
         doc,
-        [fallback_pos],
-        max_forward_scan_chars=24 if _uses_wide_scan_window(tender_type) else 8,
+        delivery_para_rng,
+        fallback_pos,
+        tender_type=tender_type,
         field_name=DELIVERY_DATE_FIELD_NAME,
         log=log,
     )
-    if fallback_insert_pos is None:
-        return False
-
-    try:
-        doc.Range(fallback_insert_pos, fallback_insert_pos).InsertParagraphAfter()
-        return True
-    except Exception:
-        return False
 
 
 def _ensure_paragraph_break_after_payment(
@@ -232,43 +179,15 @@ def _ensure_paragraph_break_after_payment(
     log=_visible_log,
 ) -> bool:
     """在付款方式段落后补回车，必要时跳过受保护位置向后探测。"""
-    if payment_para_rng is None:
-        return False
-
-    try:
-        payment_end = int(payment_para_rng.End)
-        doc_end = int(doc.Content.End)
-    except Exception:
-        return False
-
-    need_insert = True
-    if payment_end < doc_end:
-        try:
-            next_char = doc.Range(payment_end, min(payment_end + 1, doc_end)).Text
-            if next_char == "\r":
-                need_insert = False
-        except Exception:
-            pass
-
-    if not need_insert:
-        return False
-
-    max_pos = min(doc_end, payment_end + max_scan_chars)
-    safe_insert_pos = find_safe_insert_position(
+    inserted_break, _ = helper_ensure_paragraph_break_after_paragraph(
         doc,
-        range(payment_end, max_pos + 1),
-        max_forward_scan_chars=8 if _uses_wide_scan_window(tender_type) else 0,
+        payment_para_rng,
+        tender_type=tender_type,
         field_name=PAYMENT_METHOD_FIELD_NAME,
+        max_scan_chars=max_scan_chars,
         log=log,
     )
-    if safe_insert_pos is None:
-        return False
-
-    try:
-        doc.Range(safe_insert_pos, safe_insert_pos).InsertBefore("\r")
-        return True
-    except Exception:
-        return False
+    return inserted_break
 
 
 def _restore_protected_field_paragraph_boundaries(

@@ -52,18 +52,16 @@ from backend.helper.word_helper.text_parsing import (
     split_text_by_keywords,
 )
 from backend.helper.word_helper.content_ops import (
-    apply_standard_insert_format,
-    insert_content_with_formatting,
-    insert_table_with_formatting,
-    insert_items_inline_at_end_of_paragraph as helper_insert_items_inline_at_end_of_paragraph,
+    insert_content_with_formatting as helper_insert_content_with_formatting,
+    insert_table_with_formatting as helper_insert_table_with_formatting,
+    ensure_following_body_paragraph_insert_pos,
     resolve_following_insert_pos,
+)
+from backend.helper.word_helper.paragraph_boundary_ops import (
+    ensure_paragraph_break_after_paragraph,
 )
 from backend.helper.word_helper.cleanup_ops import (
     multi_pass_cleanup,
-    normalize_cleanup_text,
-    is_effectively_empty_text,
-    row_is_empty,
-    trim_table_trailing_empty_rows,
 )
 from backend.helper.word_helper.inline_style_ops import (
     apply_inline_style_fragments,
@@ -74,7 +72,6 @@ from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
     close_word_application,
     create_word_application,
-    normalize_word_insert_text,
     open_document_with_retry,
     unprotect_document,
     wdActiveEndPageNumber,
@@ -82,8 +79,6 @@ from backend.util.word_util import (
     wdCollapseStart,
     wdGoToAbsolute,
     wdGoToPage,
-    wdLineSpace1pt5,
-    wdOutlineLevelBodyText,
     wdWithInTable,
 )
 from backend.util.word_util.anchor_utils import (
@@ -197,7 +192,7 @@ def split_polished_text_into_blocks(
         split_data = split_text_by_keywords(
             polished_text,
             profile.ordered_markers,
-            strip_empty_lines=True,
+            strip_empty_lines=False,
             require_all=profile.require_all,
             require_order=profile.require_order,
         )
@@ -286,6 +281,9 @@ def gngk_fw_zc_update_word(
     split_result = split_polished_text_into_blocks(
         polished_text,
         profile=protected_profile,
+    )
+    has_explicit_blank_lines = any(
+        line == "" for line in split_result["content_list"]
     )
 
     insertion_log_parts: list[str] = []
@@ -553,6 +551,26 @@ def gngk_fw_zc_update_word(
                         f"  重定位受保护字段: {marker} ({int(para_rng.Start)}-{int(para_rng.End)})"
                     )
 
+                if block4 and PAYMENT_METHOD_MARKER in protected_fields:
+                    inserted_tail_boundary, _ = ensure_paragraph_break_after_paragraph(
+                        doc,
+                        protected_fields[PAYMENT_METHOD_MARKER],
+                        scan_bound_end=int(get_insertion_bound_end()),
+                        tender_type=str(tender_type or "gngk_fw_zc"),
+                        field_name="付款方式",
+                        log=insertion_log_parts.append,
+                    )
+                    if inserted_tail_boundary:
+                        insertion_log_parts.append("  删除后已预补齐付款方式后的段落边界。")
+                    else:
+                        insertion_log_parts.append(
+                            "  删除后付款方式后已存在段落边界或未找到可编辑位置。"
+                        )
+                    protected_fields[PAYMENT_METHOD_MARKER] = (
+                        refind_field(PAYMENT_METHOD_MARKER)
+                        or protected_fields[PAYMENT_METHOD_MARKER]
+                    )
+
                 def is_range_locked(rng) -> bool:
                     try:
                         if hasattr(rng, "Locked") and rng.Locked:
@@ -741,88 +759,25 @@ def gngk_fw_zc_update_word(
                 insert_font_size = 12
 
                 def insert_content_with_formatting(insert_range, line: str):
-                    ensure_editable_insert_range(insert_range)
-                    start_pos = insert_range.End
-                    insert_range.InsertAfter(normalize_word_insert_text(line) + "\r")
-                    end_pos = insert_range.End
-                    inserted_rng = doc.Range(start_pos, end_pos - 1)
-
-                    inserted_rng.Font.Name = insert_font_name
-                    inserted_rng.Font.Size = insert_font_size
-                    inserted_rng.ParagraphFormat.LineSpacingRule = wdLineSpace1pt5
-                    inserted_rng.ParagraphFormat.LeftIndent = 0
-                    inserted_rng.ParagraphFormat.FirstLineIndent = 0
-                    inserted_rng.ParagraphFormat.OutlineLevel = wdOutlineLevelBodyText
-                    inserted_rng.Font.Bold = False
-
-                    insert_range.Collapse(wdCollapseEnd)
-                    return inserted_rng
+                    return helper_insert_content_with_formatting(
+                        doc,
+                        insert_range,
+                        line,
+                        bound_start=int(insertion_bound_start),
+                        get_bound_end=get_insertion_bound_end,
+                        font_name=insert_font_name,
+                        font_size=insert_font_size,
+                    )
 
                 def insert_table_with_formatting(insert_range, rows):
-                    if not rows:
-                        return None
-
-                    try:
-                        if insert_range.Information(wdWithInTable):
-                            parent_tables = insert_range.Tables
-                            if parent_tables.Count > 0:
-                                host_table = parent_tables(1)
-                                end_pos = int(host_table.Range.End)
-                                bound_end = int(get_insertion_bound_end())
-                                if end_pos > bound_end:
-                                    end_pos = bound_end
-                                insert_range.SetRange(end_pos, end_pos)
-                                insert_range.Collapse(wdCollapseStart)
-                    except Exception:
-                        pass
-
-                    cols = max(len(row) for row in rows)
-                    start_pos = insert_range.End
-                    table_range = doc.Range(start_pos, start_pos)
-                    table = doc.Tables.Add(table_range, len(rows), cols)
-                    try:
-                        table.Borders.Enable = True
-                    except Exception:
-                        pass
-
-                    for row_index, row in enumerate(rows):
-                        for column_index, value in enumerate(row):
-                            try:
-                                cell = table.Cell(row_index + 1, column_index + 1)
-                                cell_range = cell.Range
-                                if cell_range.End > cell_range.Start + 1:
-                                    delete_range = doc.Range(
-                                        cell_range.Start,
-                                        cell_range.End - 1,
-                                    )
-                                    delete_range.Delete()
-
-                                cell_range = cell.Range
-                                cell_text = "" if value is None else str(value)
-                                cell_text = normalize_word_insert_text(
-                                    cell_text, break_char="\r"
-                                )
-                                cell_range.InsertBefore(cell_text)
-
-                                cell_range = cell.Range
-                                apply_standard_insert_format(
-                                    cell_range,
-                                    font_name=insert_font_name,
-                                    font_size=insert_font_size,
-                                )
-                                cell_range.ParagraphFormat.Alignment = 0
-                                cell.VerticalAlignment = 1
-                            except Exception:
-                                pass
-
-                    try:
-                        insert_range.SetRange(table.Range.End, table.Range.End)
-                    except Exception:
-                        insert_range.Collapse(wdCollapseEnd)
-                        insert_range.Start = table.Range.End
-                        insert_range.End = table.Range.End
-                    insert_range.Collapse(wdCollapseEnd)
-                    return table
+                    return helper_insert_table_with_formatting(
+                        doc,
+                        insert_range,
+                        rows,
+                        get_bound_end=get_insertion_bound_end,
+                        font_name=insert_font_name,
+                        font_size=insert_font_size,
+                    )
 
                 def insert_items(
                     insert_range,
@@ -1041,56 +996,26 @@ def gngk_fw_zc_update_word(
                 )
                 payment_method_rng = protected_fields[PAYMENT_METHOD_MARKER]
                 bound_end_now = int(get_insertion_bound_end())
-                safe_pos = None
-                use_inline = False
-                prefer_distinct_paragraph = False
                 if block4_items:
-                    safe_pos, prefer_distinct_paragraph = _resolve_block4_insert_pos(
+                    safe_pos, _ = ensure_following_body_paragraph_insert_pos(
+                        doc,
                         payment_method_rng,
                         bound_end=bound_end_now,
+                        get_bound_end=get_insertion_bound_end,
                         find_next_editable_pos_bounded=find_next_editable_pos_bounded,
                         find_prev_editable_pos=find_prev_editable_pos,
+                        tender_type=str(tender_type or "gngk_fw_zc"),
+                        field_label="付款方式",
+                        log_parts=insertion_log_parts,
                     )
                     insert_rng.Start = min(max(0, safe_pos), doc.Content.End)
                     insert_rng.End = insert_rng.Start
                     insert_rng.Collapse(wdCollapseStart)
-                    if prefer_distinct_paragraph:
-                        insertion_log_parts.append(
-                            f"    优先在付款方式段落后插入独立段落，位置 {insert_rng.Start}"
-                        )
-                    else:
-                        insertion_log_parts.append(
-                            f"    在付款方式字段后插入，位置 {insert_rng.Start}"
-                        )
-                    try:
-                        if is_range_locked(
-                            doc.Range(int(insert_rng.Start), int(insert_rng.Start))
-                        ):
-                            use_inline = True
-                            insertion_log_parts.append(
-                                "    块4目标位置命中锁定，改用段落末尾内联插入"
-                            )
-                    except Exception:
-                        pass
                 else:
                     insertion_log_parts.append("    块4为空，跳过")
 
                 inserted_count = 0
-                if block4_items and use_inline and PAYMENT_METHOD_MARKER in protected_fields:
-                    insertion_log_parts.append(
-                        "    块4将以内联换行追加到付款方式段落末尾"
-                    )
-                    inserted_count = helper_insert_items_inline_at_end_of_paragraph(
-                        doc,
-                        protected_fields[PAYMENT_METHOD_MARKER],
-                        block4_items,
-                        get_bound_end=get_insertion_bound_end,
-                        font_name=insert_font_name,
-                        font_size=insert_font_size,
-                        log_parts=insertion_log_parts,
-                    )
-                    insertion_log_parts.append("    已记录：块4本次发生内联降级写回")
-                elif block4_items:
+                if block4_items:
                     insertion_log_parts.append("    已记录：块4本次保持独立段落写回")
                     for item in block4_items:
                         attempts = 0
@@ -1140,238 +1065,22 @@ def gngk_fw_zc_update_word(
                     f"  块4插入完成: {inserted_count}/{len(block4_items)} 条。"
                 )
 
+                def build_cleanup_range() -> tuple[int, int]:
+                    return int(insertion_bound_start), int(get_insertion_bound_end())
+
                 insertion_log_parts.append("步骤4：清理空段落与换行...")
-
-                def build_cleanup_range():
-                    return doc.Range(
-                        int(insertion_bound_start),
-                        int(get_insertion_bound_end()),
-                    )
-
-                max_passes = 5
-                total_empty_deleted = 0
-
-                for pass_num in range(1, max_passes + 1):
+                if has_explicit_blank_lines:
                     insertion_log_parts.append(
-                        f"  步骤4.1 第 {pass_num} 轮：删除空段落..."
+                        "检测到输入包含显式空行，跳过会误删空段的 cleanup 分支。"
                     )
-
-                    empty_deleted = 0
-                    final_paragraphs = list(build_cleanup_range().Paragraphs)
-                    for index in range(len(final_paragraphs) - 1, -1, -1):
-                        try:
-                            paragraph = final_paragraphs[index]
-                            if paragraph.Range.Information(wdWithInTable):
-                                continue
-
-                            if is_protected_range(paragraph.Range):
-                                continue
-
-                            if is_effectively_empty_text(paragraph.Range.Text):
-                                paragraph.Range.Delete()
-                                empty_deleted += 1
-                                insertion_log_parts.append(f"    删除空段落，索引 {index}")
-                        except Exception as error:
-                            insertion_log_parts.append(f"    处理第 {index} 段出错: {error}")
-
-                    total_empty_deleted += empty_deleted
-                    insertion_log_parts.append(
-                        f"  第 {pass_num} 轮完成：删除空段 {empty_deleted} 个。"
-                    )
-
-                    if empty_deleted == 0:
-                        insertion_log_parts.append(
-                            f"  未再发现空段，第 {pass_num} 轮后停止。"
-                        )
-                        break
-
-                    insertion_log_parts.append("  步骤4.2：清理可编辑段落中的换行...")
-
-                    cleaned_count = 0
-                    paragraphs_to_delete = []
-
-                    for paragraph in build_cleanup_range().Paragraphs:
-                        if paragraph.Range.Information(wdWithInTable):
-                            continue
-
-                        paragraph_text = paragraph.Range.Text
-                        if is_effectively_empty_text(paragraph_text):
-                            continue
-
-                        if is_protected_range(paragraph.Range):
-                            continue
-
-                        try:
-                            paragraph_range = paragraph.Range
-                            full_text = paragraph_range.Text
-                            text_without_mark = full_text.rstrip("\r\n\a")
-                            if is_effectively_empty_text(text_without_mark):
-                                continue
-
-                            cleaned_text = (
-                                text_without_mark.replace("\r", "")
-                                .replace("\n", "")
-                                .replace("\r\n", "")
-                                .replace("\x07", "")
-                                .replace("\x0b", "")
-                                .replace("\x0c", "")
-                            )
-                            cleaned_text = re.sub(
-                                r"[\t\u00a0\u2000-\u200b\u3000]+",
-                                " ",
-                                cleaned_text,
-                            )
-                            cleaned_text = re.sub(r" {2,}", " ", cleaned_text).strip()
-
-                            if cleaned_text and cleaned_text != text_without_mark:
-                                paragraph_range.Text = cleaned_text + "\r"
-                                cleaned_count += 1
-                                insertion_log_parts.append(
-                                    f"    已清理: {cleaned_text[:50]}..."
-                                )
-                            elif not cleaned_text:
-                                paragraphs_to_delete.append(paragraph_range)
-                                insertion_log_parts.append(
-                                    f"    标记删除（清理后为空）: '{paragraph_text[:50]}...'"
-                                )
-                        except Exception as error:
-                            insertion_log_parts.append(
-                                f"    警告: 无法清理段落 '{paragraph_text[:50]}...': {error}"
-                            )
-
-                    if paragraphs_to_delete:
-                        insertion_log_parts.append(
-                            f"  删除清理后变空的段落 {len(paragraphs_to_delete)} 个..."
-                        )
-                        for paragraph_range in reversed(paragraphs_to_delete):
-                            try:
-                                paragraph_range.Delete()
-                            except Exception as error:
-                                insertion_log_parts.append(f"    警告: 无法删除段落: {error}")
-
-                    insertion_log_parts.append(
-                        f"  步骤4.2完成：清理 {cleaned_count} 段，删除 {len(paragraphs_to_delete)} 个空段。"
-                    )
-
-                    insertion_log_parts.append("  步骤4.3：最终检查剩余空段落...")
-
-                    final_empty_deleted = 0
-                    final_paragraphs = list(build_cleanup_range().Paragraphs)
-                    for paragraph in reversed(final_paragraphs):
-                        try:
-                            if paragraph.Range.Information(wdWithInTable):
-                                continue
-                            if is_protected_range(paragraph.Range):
-                                continue
-
-                            if is_effectively_empty_text(paragraph.Range.Text):
-                                paragraph.Range.Delete()
-                                final_empty_deleted += 1
-                        except Exception:
-                            pass
-
-                    if final_empty_deleted > 0:
-                        insertion_log_parts.append(
-                            f"  步骤4.3完成：删除剩余空段 {final_empty_deleted} 个。"
-                        )
-                    else:
-                        insertion_log_parts.append("  步骤4.3完成：未发现剩余空段。")
-
-                try:
-                    def visible_text(text: str) -> str:
-                        if not text:
-                            return ""
-                        return (
-                            text.replace("\r", "")
-                            .replace("\n", "")
-                            .replace("\x07", "")
-                            .replace("\x0b", "")
-                            .replace("\x0c", "")
-                            .replace("\a", "")
-                            .replace(" ", "")
-                            .replace("\t", "")
-                            .replace("\u00a0", "")
-                            .replace("\u3000", "")
-                            .replace("\u2000", "")
-                            .replace("\u2001", "")
-                            .replace("\u2002", "")
-                            .replace("\u2003", "")
-                            .replace("\u2004", "")
-                            .replace("\u2005", "")
-                            .replace("\u2006", "")
-                            .replace("\u2007", "")
-                            .replace("\u2008", "")
-                            .replace("\u2009", "")
-                            .replace("\u200a", "")
-                            .replace("\u200b", "")
-                            .replace("\ufeff", "")
-                            .strip()
-                        )
-
-                    def row_is_empty(row) -> bool:
-                        try:
-                            cells = row.Cells
-                            for cell_index in range(1, cells.Count + 1):
-                                try:
-                                    text = cells(cell_index).Range.Text
-                                except Exception:
-                                    text = ""
-                                if visible_text(text):
-                                    return False
-                            return True
-                        except Exception:
-                            return False
-
-                    def trim_table_trailing_empty_rows(table) -> int:
-                        removed = 0
-                        try:
-                            for row_index in range(table.Rows.Count, 0, -1):
-                                try:
-                                    row = table.Rows(row_index)
-                                    if row_is_empty(row):
-                                        row.Delete()
-                                        removed += 1
-                                    else:
-                                        break
-                                except Exception:
-                                    break
-                        except Exception:
-                            return removed
-                        return removed
-
-                    table_range = doc.Range(
-                        int(insertion_bound_start),
-                        int(get_insertion_bound_end()),
-                    )
-                    tables = table_range.Tables
-                    trimmed_tables = 0
-                    trimmed_rows_total = 0
-                    deleted_empty_tables = 0
-
-                    for table_index in range(tables.Count, 0, -1):
-                        try:
-                            table = tables(table_index)
-                            removed_rows = trim_table_trailing_empty_rows(table)
-                            if removed_rows > 0:
-                                trimmed_tables += 1
-                                trimmed_rows_total += removed_rows
-
-                            cleaned_text = visible_text(table.Range.Text)
-                            if not cleaned_text:
-                                table.Range.Delete()
-                                deleted_empty_tables += 1
-                        except Exception:
-                            continue
-
-                    if trimmed_tables > 0 or deleted_empty_tables > 0:
-                        insertion_log_parts.append(
-                            f"  步骤4.4完成：修剪表格 {trimmed_tables} 个，删除尾部空行 {trimmed_rows_total} 行，删除空表格 {deleted_empty_tables} 个。"
-                        )
-                except Exception:
-                    pass
-
-                insertion_log_parts.append(
-                    "步骤4完成：已清理可编辑内容中的空段落与多余换行。"
+                multi_pass_cleanup(
+                    doc,
+                    build_range_fn=build_cleanup_range,
+                    is_protected_fn=is_protected_range,
+                    log_parts=insertion_log_parts,
+                    step_label="步骤4",
+                    cleanup_blank_paragraphs=not has_explicit_blank_lines,
+                    cleanup_paragraph_text=False,
                 )
                 insertion_log_parts.append("内容处理成功。")
 

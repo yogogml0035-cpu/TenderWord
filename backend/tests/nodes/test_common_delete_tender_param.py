@@ -53,3 +53,37 @@ def test_restore_protected_field_paragraph_boundaries_uses_profile_marker_varian
             profile.ordered_markers[1].replace("：", ":"),
         ),
     ]
+
+
+def test_ensure_paragraph_break_after_payment_delegates_to_shared_helper(
+    monkeypatch,
+) -> None:
+    captured: list[tuple[object, str, int]] = []
+
+    def fake_shared_helper(doc, paragraph_range, **kwargs):
+        captured.append(
+            (
+                paragraph_range,
+                str(kwargs.get("field_name") or ""),
+                int(kwargs.get("max_scan_chars") or 0),
+            )
+        )
+        return True, 132
+
+    monkeypatch.setattr(
+        delete_module,
+        "helper_ensure_paragraph_break_after_paragraph",
+        fake_shared_helper,
+    )
+
+    paragraph_range = object()
+    restored = delete_module._ensure_paragraph_break_after_payment(
+        _FakeDoc(),
+        paragraph_range,
+        max_scan_chars=123,
+        tender_type="xjcg",
+        log=None,
+    )
+
+    assert restored is True
+    assert captured == [(paragraph_range, "付款方式", 123)]

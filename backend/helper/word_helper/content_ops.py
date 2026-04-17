@@ -9,8 +9,8 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
 from backend.util.word_util import (
-    WORD_MANUAL_LINE_BREAK,
-    normalize_word_insert_text,
+    normalize_word_body_text,
+    normalize_word_cell_text,
     wdCollapseEnd,
     wdCollapseStart,
     wdLineSpace1pt5,
@@ -20,6 +20,10 @@ from backend.util.word_util import (
 
 from backend.helper.word_helper.range_utils import (
     ensure_editable_insert_range,
+)
+from backend.helper.word_helper.paragraph_boundary_ops import (
+    ensure_paragraph_break_after_paragraph,
+    is_writable_body_paragraph_pos,
 )
 
 
@@ -86,7 +90,7 @@ def insert_content_with_formatting(
     """
     ensure_editable_insert_range(doc, insert_range, bound_start, get_bound_end)
     start_pos = insert_range.End
-    insert_range.InsertAfter(normalize_word_insert_text(line) + "\r")
+    insert_range.InsertAfter(normalize_word_body_text(line) + "\r")
     end_pos = insert_range.End
     inserted_rng = doc.Range(start_pos, end_pos - 1)
 
@@ -166,7 +170,7 @@ def insert_table_with_formatting(
 
                 cell_range = cell.Range
                 cell_text = "" if val is None else str(val)
-                cell_text = normalize_word_insert_text(cell_text, break_char="\r")
+                cell_text = normalize_word_cell_text(cell_text)
                 cell_range.InsertBefore(cell_text)
 
                 cell_range = cell.Range
@@ -249,6 +253,178 @@ def resolve_following_insert_pos(
     return int(min(max(0, safe_pos), bound_end)), False
 
 
+def create_distinct_body_paragraph_after_range(
+    doc,
+    anchor_range,
+    *,
+    creation_anchor: Optional[int] = None,
+    get_bound_end: Callable[[], int],
+    find_next_editable_pos_bounded: Callable[..., Optional[int]],
+    tender_type: Optional[str] = None,
+    field_label: str = "字段",
+    log_parts: Optional[List[str]] = None,
+    max_lookahead: int = 20000,
+) -> int:
+    """
+    在字段所在段落后确定一个可写的正文段落落点。
+
+    优先让 helper 保证“可写独立正文段”存在（可能复用已有边界、也可能拆段）；
+    若 helper 失败（例如 gngk 模板里付款方式后的标题段被 SDT 锁住、连 pilcrow
+    前都不可写），退回 **向后扫描可编辑位置** 作为兜底——这是旧代码在这类模板
+    上能跑通的唯一路径，比直接 fail-fast 更稳。
+
+    全程严禁软回车（wdLineBreak / ``\\v``）兜底。
+    """
+
+    content_end = int(getattr(anchor_range, "End", 0))
+    try:
+        paragraph_range = anchor_range.Paragraphs(1).Range
+    except Exception:
+        paragraph_range = anchor_range
+
+    paragraph_end = int(
+        getattr(paragraph_range, "End", getattr(anchor_range, "End", 0))
+    )
+    bound_end_before = int(get_bound_end())
+    if paragraph_end > bound_end_before:
+        raise ValueError(f"{field_label}段落末尾超出插入边界，无法创建独立正文段落")
+
+    del creation_anchor
+
+    def _log(message: str) -> None:
+        if log_parts is not None:
+            log_parts.append(message)
+
+    inserted_break, writable_pos = ensure_paragraph_break_after_paragraph(
+        doc,
+        paragraph_range,
+        scan_bound_end=bound_end_before,
+        tender_type=tender_type,
+        field_name=field_label,
+        max_scan_chars=max_lookahead,
+        require_writable=True,
+        log=_log,
+    )
+
+    bound_end_after = int(get_bound_end())
+    if bound_end_after <= content_end:
+        raise ValueError(f"在{field_label}后创建正文段落失败：插入边界未向后扩展")
+
+    if writable_pos is None:
+        # helper 走不通（典型：gngk 模板里付款方式后的标题段被 SDT 锁住，
+        # pilcrow 前也锁，段内拆段失败）。退回向后扫描找第一个可编辑位置，
+        # 和旧代码在这类模板上的行为对齐。
+        fallback_start = min(max(content_end + 1, 0), bound_end_after)
+        fallback_pos = find_next_editable_pos_bounded(
+            fallback_start,
+            bound_end_after,
+            max_lookahead=max_lookahead,
+        )
+        if fallback_pos is None:
+            raise ValueError(
+                f"在{field_label}后创建正文段落失败：未找到可写独立正文段"
+            )
+        writable_pos = int(fallback_pos)
+        if log_parts is not None:
+            log_parts.append(
+                f"    {field_label}后 helper 未能造段（下一段可能被 SDT 锁定），"
+                f"回退到向后扫描的可编辑位置 {writable_pos}"
+            )
+
+    created_pos = int(writable_pos)
+    if created_pos < content_end or created_pos >= bound_end_after:
+        raise ValueError(
+            f"在{field_label}后创建正文段落失败：新段落位置 {created_pos} 越界"
+            f"（content_end={content_end}, bound_end={bound_end_after}）"
+        )
+
+    if log_parts is not None and writable_pos is not None:
+        if inserted_break:
+            log_parts.append(
+                f"    {field_label}后无现成独立正文段，已主动造段，位置 {created_pos}"
+            )
+        elif created_pos == int(paragraph_end):
+            log_parts.append(
+                f"    {field_label}后复用已有可写正文段，位置 {created_pos}"
+            )
+    return created_pos
+
+
+def ensure_following_body_paragraph_insert_pos(
+    doc,
+    anchor_range,
+    *,
+    bound_end: int,
+    get_bound_end: Callable[[], int],
+    find_next_editable_pos_bounded: Callable[..., Optional[int]],
+    find_prev_editable_pos: Optional[Callable[..., Optional[int]]] = None,
+    tender_type: Optional[str] = None,
+    field_label: str = "字段",
+    log_parts: Optional[List[str]] = None,
+    max_lookahead: int = 20000,
+    max_lookback: int = 20000,
+) -> tuple[int, bool]:
+    """
+    返回字段后安全的正文段落插入位置。
+
+    优先复用现成的“可写独立正文段”（例如交付日期后本就存在的空正文段）；
+    若不存在或仅存在段落边界但紧邻段不可写（例如付款方式后紧跟标题段），
+    则走 create_distinct_body_paragraph_after_range，由 helper 在字段段内部拆段。
+
+    Returns:
+        (insert_pos, created_new_paragraph)
+    """
+
+    content_end = int(getattr(anchor_range, "End", 0))
+    if content_end > int(bound_end):
+        raise ValueError(f"{field_label}字段位置超出插入边界，停止以避免侵入后置章节")
+
+    paragraph_end = content_end
+    try:
+        paragraph_end = int(anchor_range.Paragraphs(1).Range.End)
+    except Exception:
+        paragraph_end = content_end
+
+    safe_pos, prefer_distinct_paragraph = resolve_following_insert_pos(
+        content_end=content_end,
+        paragraph_end=paragraph_end,
+        bound_end=int(bound_end),
+        find_next_editable_pos_bounded=find_next_editable_pos_bounded,
+        find_prev_editable_pos=find_prev_editable_pos,
+        max_lookahead=max_lookahead,
+        max_lookback=max_lookback,
+    )
+
+    # 只有当“现成独立段”确认是可写正文段时才复用；否则交给 helper 兜底。
+    if prefer_distinct_paragraph:
+        safe_pos = int(safe_pos)
+        if safe_pos < int(get_bound_end()) and is_writable_body_paragraph_pos(
+            doc, safe_pos
+        ):
+            if log_parts is not None:
+                log_parts.append(
+                    f"    优先在{field_label}段落后插入现成的可写正文段，位置 {safe_pos}"
+                )
+            return safe_pos, False
+        if log_parts is not None:
+            log_parts.append(
+                f"    {field_label}后存在段落边界但并非可写正文段，改走主动造段"
+            )
+
+    created_pos = create_distinct_body_paragraph_after_range(
+        doc,
+        anchor_range,
+        creation_anchor=safe_pos,
+        get_bound_end=get_bound_end,
+        find_next_editable_pos_bounded=find_next_editable_pos_bounded,
+        tender_type=tender_type,
+        field_label=field_label,
+        log_parts=log_parts,
+        max_lookahead=max_lookahead,
+    )
+    return created_pos, True
+
+
 # ---------------------------------------------------------------------------
 # 内联插入（段落末尾追加）
 # ---------------------------------------------------------------------------
@@ -264,9 +440,9 @@ def insert_items_inline_at_end_of_paragraph(
     log_parts: Optional[List[str]] = None,
 ) -> int:
     """
-    在段落 Range 的末尾（冒号后），以 ManualLineBreak 分隔逐条追加 items。
+    在段落 Range 的末尾（冒号后）逐条追加正文 item。
 
-    用于付款方式等字段后面空间被锁定时的内联降级插入。
+    正文区域禁用手动换行；调用该 helper 时也会统一改成追加正文段落。
 
     Returns:
         成功插入的 item 数量
@@ -294,7 +470,7 @@ def insert_items_inline_at_end_of_paragraph(
 
     for item in items:
         if item["type"] == "text":
-            s = WORD_MANUAL_LINE_BREAK + normalize_word_insert_text(item["line"])
+            s = "\r" + normalize_word_body_text(item["line"])
             st = int(rng.Start)
             rng.InsertAfter(s)
             ed = int(rng.End)
@@ -322,9 +498,7 @@ def insert_items_inline_at_end_of_paragraph(
                 if log_parts is not None:
                     log_parts.append(f"    警告: 内联插入表格失败，改为文本: {e}")
                 for row in item["rows"]:
-                    s = WORD_MANUAL_LINE_BREAK + normalize_word_insert_text(
-                        " | ".join(row)
-                    )
+                    s = "\r" + normalize_word_body_text(" | ".join(row))
                     rng.InsertAfter(s)
                     rng.Collapse(wdCollapseEnd)
                     inserted += 1

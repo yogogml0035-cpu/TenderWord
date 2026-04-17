@@ -37,10 +37,11 @@ from backend.util.log_util.progress_log import progress_log  # noqa: E402
 from backend.util.word_util import (  # noqa: E402
     close_word_application,
     create_word_application,
+    normalize_word_body_text,
+    normalize_word_cell_text,
     open_document_with_retry,
     save_document_with_retry,
     unprotect_document,
-    normalize_word_insert_text,
     wdActiveEndPageNumber,
     wdCollapseEnd,
     wdCollapseStart,
@@ -627,7 +628,7 @@ def _insert_text_line(
     if log_parts is not None:
         log_parts.append(_describe_range_state(doc, insert_range, label="文本插入前"))
     start_pos = int(insert_range.Start)
-    inserted_text = normalize_word_insert_text(line) + "\r"
+    inserted_text = normalize_word_body_text(line) + "\r"
     effective_start = start_pos
     live_end = start_pos
 
@@ -648,7 +649,9 @@ def _insert_text_line(
             raise
 
         fallback_inserted = False
-        for fallback_char in ("\r", "\v"):
+        # 只允许真段落边界 \r 的兜底；严禁软回车 \v / wdLineBreak，
+        # 否则后续多段内容会塌成一整段。若补 \r 也失败，直接抛出让上层 fail-fast。
+        for fallback_char in ("\r",):
             try:
                 if _is_within_table(doc.Range(start_pos, start_pos)):
                     moved = _move_insert_range_after_current_table(
@@ -767,9 +770,7 @@ def _insert_table(
                     doc.Range(cell_range.Start, cell_range.End - 1).Delete()
 
                 cell_range = cell.Range
-                cell_text = normalize_word_insert_text(
-                    str(cell_value or ""), break_char="\r"
-                )
+                cell_text = normalize_word_cell_text(str(cell_value or ""))
                 cell_range.InsertBefore(cell_text)
 
                 cell_range = cell.Range
