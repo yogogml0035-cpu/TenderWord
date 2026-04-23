@@ -14,18 +14,9 @@ from backend.nodes.common_word_nodes.get_replacements_core import (
     ReplacementFieldSpec,
     run_get_replacements,
 )
-from backend.nodes.common_word_nodes.get_replacements_shared import (
-    build_common_replacement_fields,
-    extract_public_tender_buyer_name,
-    extract_public_tender_bzj_rule,
-    extract_public_tender_contact_fields,
-    extract_public_tender_project_content,
-    extract_project_name,
-    extract_project_number_from_bid_header,
-    extract_public_tender_platform,
-    extract_service_fee,
-    extract_shell_dates,
-    extract_submit_date,
+from backend.nodes.gngk_word_nodes.gngk_get_replacements import (
+    build_gngk_common_extractors,
+    build_gngk_common_replacement_fields,
 )
 from backend.states import GngkTenderGraphState
 
@@ -133,72 +124,16 @@ def extract_similar_project_performance_date(
     return None
 
 
-GNGK_EXTRACTORS: List[ExtractorSpec] = [
-    ExtractorSpec(
-        name="project_content",
-        enabled_if=lambda state: state.get("project_content") is not None,
-        extract_callable=extract_public_tender_project_content,
-    ),
+_GNGK_COMMON_EXTRACTORS = build_gngk_common_extractors()
+GNGK_HW_ZC_EXTRACTORS: List[ExtractorSpec] = [
+    _GNGK_COMMON_EXTRACTORS[0],
     ExtractorSpec(
         name="project_content_v1",
         enabled_if=lambda state: state.get("project_content") is not None
         or state.get("project_content_v1") is not None,
         extract_callable=extract_project_content_v1,
     ),
-    ExtractorSpec(
-        name="project_number",
-        enabled_if=lambda state: state.get("project_number") is not None,
-        extract_callable=extract_project_number_from_bid_header,
-    ),
-    ExtractorSpec(
-        name="project_name",
-        enabled_if=lambda state: state.get("project_name") is not None,
-        extract_callable=extract_project_name,
-    ),
-    ExtractorSpec(
-        name="bzj_rule",
-        enabled_if=lambda state: state.get("bzj_rule") is not None,
-        extract_callable=extract_public_tender_bzj_rule,
-    ),
-    ExtractorSpec(
-        name="buyer_name",
-        enabled_if=lambda state: state.get("buyer_name") is not None,
-        extract_callable=extract_public_tender_buyer_name,
-    ),
-    ExtractorSpec(
-        name="contact_fields",
-        enabled_if=lambda state: any(
-            [
-                state.get("project_zbr_xbr"),
-                state.get("zbr_xbr_tel"),
-                state.get("zbr_pinyin"),
-            ]
-        ),
-        extract_callable=extract_public_tender_contact_fields,
-        output_field_names=["project_zbr_xbr", "zbr_xbr_tel", "zbr_pinyin"],
-    ),
-    ExtractorSpec(
-        name="shell_dates",
-        enabled_if=lambda state: state.get("shell_start_date") is not None
-        or state.get("shell_end_date") is not None,
-        extract_callable=extract_shell_dates,
-        output_field_names=["shell_start_date", "shell_end_date"],
-    ),
-    ExtractorSpec(
-        name="submit_date",
-        enabled_if=lambda state: state.get("submit_date") is not None,
-        extract_callable=extract_submit_date,
-    ),
-    ExtractorSpec(
-        name="platform",
-        enabled_if=lambda state: state.get("platform") is not None,
-        extract_callable=extract_public_tender_platform,
-    ),
-    ExtractorSpec(
-        name="service_fee",
-        enabled_if=lambda state: state.get("service_fee") is not None,
-        extract_callable=extract_service_fee,
-    ),
+    *_GNGK_COMMON_EXTRACTORS[1:],
     ExtractorSpec(
         name="similar_project_performance_date",
         enabled_if=lambda state: state.get("similar_project_performance_date")
@@ -208,17 +143,19 @@ GNGK_EXTRACTORS: List[ExtractorSpec] = [
 ]
 
 
-_GNGK_BASE_REPLACEMENT_FIELDS = build_common_replacement_fields()
-GNGK_REPLACEMENT_FIELDS: List[ReplacementFieldSpec] = [
-    _GNGK_BASE_REPLACEMENT_FIELDS[0],
+_GNGK_HW_ZC_BASE_REPLACEMENT_FIELDS = build_gngk_common_replacement_fields()
+GNGK_HW_ZC_REPLACEMENT_FIELDS: List[ReplacementFieldSpec] = [
+    _GNGK_HW_ZC_BASE_REPLACEMENT_FIELDS[0],
     ReplacementFieldSpec(
         field_name="project_content_v1",
         skip_if_equal=True,
         fallback_fields=["project_content"],
     ),
-    *_GNGK_BASE_REPLACEMENT_FIELDS[1:],
+    *_GNGK_HW_ZC_BASE_REPLACEMENT_FIELDS[1:],
     ReplacementFieldSpec(field_name="similar_project_performance_date"),
 ]
+GNGK_EXTRACTORS = GNGK_HW_ZC_EXTRACTORS
+GNGK_REPLACEMENT_FIELDS = GNGK_HW_ZC_REPLACEMENT_FIELDS
 
 
 def gngk_hw_zc_get_replacements(
