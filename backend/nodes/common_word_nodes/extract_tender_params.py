@@ -25,6 +25,7 @@ from typing import Dict, List, Tuple, Any, Optional
 
 from backend.states import TenderGraphStateBase
 from backend.config.tender_config import get_anchor_target_sizes
+from backend.helper.word_helper.inline_style_ops import extract_inline_style_fragments
 from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
     create_word_application,
@@ -112,6 +113,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
     )
 
     extracted_content = ""
+    inline_style_fragments: List[Dict[str, Any]] = []
     start_page = None
     end_page = None
     wps = None
@@ -196,6 +198,21 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
         _visible_log(f"锚点定位完成，开始提取第 {start_page} 至 {end_page} 页内容")
         between_rng = doc.Range(range_start, range_end)
         extracted_content = extract_content_with_tables(between_rng)
+        try:
+            _visible_log("开始提取模板样式")
+            inline_style_fragments = extract_inline_style_fragments(
+                doc,
+                bound_start=range_start,
+                bound_end=range_end,
+            )
+            _visible_log(f"模板样式提取完成，片段 {len(inline_style_fragments)} 个")
+        except Exception as style_error:
+            inline_style_fragments = []
+            progress_log.warning(f"[{NODE_NAME}] 模板样式抽取失败，已跳过")
+            progress_log.debug(
+                f"[{NODE_NAME}] 模板样式抽取失败: {style_error}",
+                exc_info=True,
+            )
 
         # 统计提取结果
         total_chars = len(extracted_content)
@@ -242,6 +259,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
     # 构建更新字典
     updates: Dict[str, Any] = {
         "origin_tender_params": extracted_content,
+        "inline_style_fragments": inline_style_fragments,
     }
 
     # 保存页码范围（仅在成功计算时写入）

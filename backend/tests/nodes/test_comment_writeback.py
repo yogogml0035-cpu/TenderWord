@@ -1093,6 +1093,82 @@ def test_gjgk_update_word_hides_comment_progress_logs_in_verbose_edit_mode(monke
     assert not any("AI批注写入" in message for message in progress_messages)
     assert progress_errors == []
     assert result["comment_writeback_summary"] == "AI批注写入: 生成=2, 成功=1, 失败=1, 跳过=0"
+    assert result["style_writeback_result"] == {
+        "extracted": 1,
+        "attempted": 1,
+        "applied": 1,
+        "skipped": 0,
+        "failed": 0,
+        "issues": [],
+        "applied_by_style": {"bold": 1},
+        "skipped_by_reason": {},
+    }
+    assert result["style_writeback_summary"] == (
+        "样式回填: 抽取=1, 尝试=1, 成功=1, 跳过=0, 失败=0; 命中样式: 加粗=1"
+    )
+
+
+def test_gjgk_update_word_applies_inline_styles_with_resolved_bounds_and_summary(
+    monkeypatch,
+) -> None:
+    fake_doc = _FakeDocument("x" * 120)
+    writeback_result = {
+        "total": 0,
+        "attempted": 0,
+        "added": 0,
+        "failed": 0,
+        "skipped": 0,
+        "issues": [],
+    }
+    style_result = {
+        "extracted": 1,
+        "attempted": 1,
+        "applied": 1,
+        "skipped": 0,
+        "failed": 0,
+        "issues": [],
+        "applied_by_style": {"bold": 1},
+        "skipped_by_reason": {},
+    }
+    style_calls: list[dict] = []
+    _patch_gjgk_node(monkeypatch, fake_doc, writeback_result)
+
+    def _fake_apply_inline_style_fragments(**kwargs):
+        style_calls.append(kwargs)
+        return style_result
+
+    monkeypatch.setattr(
+        gjgk_update_word_module,
+        "apply_inline_style_fragments",
+        _fake_apply_inline_style_fragments,
+    )
+    monkeypatch.setattr(
+        gjgk_update_word_module,
+        "summarize_style_writeback_result",
+        lambda _result: "样式摘要",
+    )
+
+    result = gjgk_update_word_module.gjgk_update_word(
+        {
+            "prepared_doc_path": "fake.docx",
+            "polished_text": "新的正文",
+            "polished_comments": [],
+            "generated_comment_count": 0,
+            "inline_style_fragments": [{"source_text": "原条款"}],
+            "insertion_before_text": "前锚点",
+            "insertion_after_text": "后锚点",
+        },
+        config=None,
+    )
+
+    assert len(style_calls) == 1
+    assert style_calls[0]["doc"] is fake_doc
+    assert style_calls[0]["inline_style_fragments"] == [{"source_text": "原条款"}]
+    assert style_calls[0]["bound_start"] == 20
+    assert style_calls[0]["bound_end"] == 40
+    assert style_calls[0]["step_label"] == "步骤6"
+    assert result["style_writeback_result"] == style_result
+    assert result["style_writeback_summary"] == "样式摘要"
 
 
 def test_gjgk_update_word_keeps_comment_progress_logs_outside_edit_verbose_mode(monkeypatch) -> None:

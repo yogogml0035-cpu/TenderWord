@@ -159,7 +159,7 @@ class DoneEventData(BaseModel):
     processing_time: Optional[float] = Field(default=None, description="处理时间（秒）")
     style_writeback: Optional[StyleWritebackSummaryData] = Field(
         default=None,
-        description="edit 样式回填摘要",
+        description="样式回填摘要",
     )
     timestamp: str = Field(
         default_factory=lambda: datetime.now().isoformat(), description="时间戳"

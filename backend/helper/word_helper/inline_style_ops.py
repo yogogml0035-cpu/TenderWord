@@ -1,5 +1,5 @@
 """
-edit 链路的行内样式抽取与回填 helper。
+Word 正文行内样式抽取与回填 helper。
 
 当前边界：
 - 只处理锚点区正文段落与表格单元格
@@ -37,6 +37,16 @@ CANDIDATE_DIAGNOSTIC_LIMIT = 3
 SHORT_TITLE_MAX_LEN = 8
 SHORT_FULL_CONTAINER_MAX_LEN = 16
 SHORT_PARTIAL_MAX_LEN = 6
+SHORT_PARTIAL_EXACT_ONLY_MAX_LEN = 3
+SHORT_PARTIAL_CONTEXT_MIN_SCORE = 0.72
+SHORT_PARTIAL_EXACT_CONTAINER_MIN_SCORE = 0.50
+SHORT_PARTIAL_APPROX_MIN_SCORE = 0.82
+SHORT_PARTIAL_HIGH_VISIBLE_APPROX_MIN_SCORE = 0.88
+SHORT_PARTIAL_CONTAINER_MIN_SCORE = 0.78
+TABLE_SHORT_PARTIAL_APPROX_MIN_SCORE = 0.86
+TABLE_SHORT_PARTIAL_HIGH_VISIBLE_APPROX_MIN_SCORE = 0.90
+TABLE_SHORT_PARTIAL_STRUCTURE_MIN_SCORE = 0.84
+TABLE_SHORT_PARTIAL_CONTAINER_MIN_SCORE = 0.82
 SUCCESS_EXAMPLE_LIMIT = 3
 SUCCESS_EXAMPLE_TEXT_LIMIT = 24
 HEADING_TEXT_RE = re.compile(
@@ -70,6 +80,10 @@ REASON_LABEL_MAP = {
     "no_title_candidate_container": "未找到可承接标题样式的目标段落",
     "no_local_candidate": "未找到局部文本命中位置",
     "no_number_prefix_target": "目标行未找到编号前缀",
+    "number_prefix_high_visible_style": "编号前缀包含高风险可见样式",
+    "short_fragment_prefix_conflict": "短片段命中目标编号前缀",
+    "short_fragment_semantic_mismatch": "短片段上下文不匹配",
+    "short_fragment_unanchored": "短片段缺少可靠锚点",
     "table_structure_changed": "表格结构已变化，无法按原单元格定位",
 }
 SPAN_KIND_LABEL_MAP = {
@@ -196,6 +210,8 @@ class _LocalMatch:
     score: float
     context_score: float
     local_position_score: float
+    text_score: float = 0.0
+    is_exact: bool = False
 
 
 @dataclass
@@ -306,9 +322,9 @@ def _leading_number_prefix_len(line_text: str) -> int:
         return 0
     stripped = strip_number_prefix(line)
     prefix_len = len(line) - len(stripped)
-    if prefix_len <= 0:
-        fallback_match = LEADING_DOTTED_NUMBER_RE.match(line)
-        prefix_len = 0 if fallback_match is None else fallback_match.end()
+    fallback_match = LEADING_DOTTED_NUMBER_RE.match(line)
+    if fallback_match is not None:
+        prefix_len = max(prefix_len, fallback_match.end())
     if not line[:prefix_len].strip():
         return 0
     return prefix_len
@@ -352,6 +368,61 @@ def _is_short_partial_fragment(fragment: InlineStyleFragment) -> bool:
     return (
         str(fragment.get("source_span_kind") or "partial_span") == "partial_span"
         and _normalized_length(fragment.get("normalized_text")) <= SHORT_PARTIAL_MAX_LEN
+    )
+
+
+def _is_high_visible_short_style(fragment: InlineStyleFragment) -> bool:
+    if not _is_short_partial_fragment(fragment):
+        return False
+    style_flags = fragment.get("style_flags") or {}
+    return bool(style_flags.get("strikethrough") or style_flags.get("italic"))
+
+
+def _has_high_visible_risk_style(fragment: InlineStyleFragment) -> bool:
+    style_flags = fragment.get("style_flags") or {}
+    return bool(style_flags.get("strikethrough") or style_flags.get("italic"))
+
+
+def _has_short_partial_context(fragment: InlineStyleFragment) -> bool:
+    return any(
+        _normalized_length(normalize_semantic_text(fragment.get(key))) >= 2
+        for key in ("context_before", "context_after")
+    )
+
+
+def _short_partial_context_gate_passed(
+    fragment: InlineStyleFragment,
+    candidate: _ContainerCandidate,
+    local_match: _LocalMatch,
+) -> bool:
+    if not _has_short_partial_context(fragment):
+        return False
+
+    before_context = normalize_semantic_text(fragment.get("context_before"))
+    after_context = normalize_semantic_text(fragment.get("context_after"))
+    before_slice = normalize_semantic_text(
+        candidate.visible_text[
+            max(0, local_match.visible_start - CONTEXT_CHARS) : local_match.visible_start
+        ]
+    )
+    after_slice = normalize_semantic_text(
+        candidate.visible_text[local_match.visible_end : local_match.visible_end + CONTEXT_CHARS]
+    )
+
+    before_ok = not before_context or before_slice.endswith(before_context)
+    after_ok = not after_context or after_slice.startswith(after_context)
+    raw_context_ok = (bool(before_context) or bool(after_context)) and before_ok and after_ok
+    return raw_context_ok or float(local_match.context_score) >= SHORT_PARTIAL_CONTEXT_MIN_SCORE
+
+
+def _is_target_line_leading_number_prefix_match(
+    candidate: _ContainerCandidate,
+    local_match: _LocalMatch,
+) -> bool:
+    return _is_leading_number_prefix_span(
+        container_text=candidate.visible_text,
+        visible_start=local_match.visible_start,
+        visible_end=local_match.visible_end,
     )
 
 
@@ -1410,6 +1481,8 @@ def _build_local_match_from_norm_span(
         score=final_score,
         context_score=context_score,
         local_position_score=local_position_score,
+        text_score=float(base_score),
+        is_exact=float(base_score) >= 0.999,
     )
 
 
@@ -1469,6 +1542,8 @@ def _build_local_match_from_line_norm_span(
         score=final_score,
         context_score=context_score,
         local_position_score=line_position_score,
+        text_score=float(base_score),
+        is_exact=float(base_score) >= 0.999,
     )
 
 
@@ -1649,6 +1724,72 @@ def _locate_number_prefix_span(
     return matches[0][1], None
 
 
+def _short_partial_match_gate_reason(
+    fragment: InlineStyleFragment,
+    probe: _CandidateProbe,
+    local_match: Optional[_LocalMatch],
+) -> str:
+    if not _is_short_partial_fragment(fragment) or local_match is None:
+        return ""
+
+    candidate = probe.candidate
+    if _is_target_line_leading_number_prefix_match(candidate, local_match):
+        return "short_fragment_prefix_conflict"
+
+    text_len = _normalized_length(fragment.get("normalized_text"))
+    is_exact = bool(local_match.is_exact)
+    is_high_visible = _is_high_visible_short_style(fragment)
+    context_passed = _short_partial_context_gate_passed(fragment, candidate, local_match)
+
+    if candidate.container_type == "table_cell":
+        same_cell = _container_locator_equals(
+            candidate.container_locator,
+            dict(fragment.get("container_locator") or {}),
+        )
+        if is_exact and same_cell:
+            return ""
+
+        min_local_score = (
+            TABLE_SHORT_PARTIAL_HIGH_VISIBLE_APPROX_MIN_SCORE
+            if is_high_visible
+            else TABLE_SHORT_PARTIAL_APPROX_MIN_SCORE
+        )
+        if not is_exact and float(local_match.text_score) < min_local_score:
+            return "short_fragment_unanchored"
+        if float(probe.structure_score) < TABLE_SHORT_PARTIAL_STRUCTURE_MIN_SCORE:
+            return "short_fragment_semantic_mismatch"
+        if (
+            not context_passed
+            and float(probe.container_score) < TABLE_SHORT_PARTIAL_CONTAINER_MIN_SCORE
+        ):
+            return "short_fragment_semantic_mismatch"
+        return ""
+
+    if not is_exact and text_len <= SHORT_PARTIAL_EXACT_ONLY_MAX_LEN:
+        return "short_fragment_unanchored"
+
+    if is_exact:
+        if (
+            text_len <= SHORT_PARTIAL_EXACT_ONLY_MAX_LEN
+            and is_high_visible
+            and not context_passed
+            and float(probe.container_score) < SHORT_PARTIAL_EXACT_CONTAINER_MIN_SCORE
+        ):
+            return "short_fragment_semantic_mismatch"
+        return ""
+
+    min_local_score = (
+        SHORT_PARTIAL_HIGH_VISIBLE_APPROX_MIN_SCORE
+        if is_high_visible
+        else SHORT_PARTIAL_APPROX_MIN_SCORE
+    )
+    if float(local_match.text_score) < min_local_score:
+        return "short_fragment_unanchored"
+    if not context_passed and float(probe.container_score) < SHORT_PARTIAL_CONTAINER_MIN_SCORE:
+        return "short_fragment_semantic_mismatch"
+    return ""
+
+
 def _best_short_partial_line_hint(
     candidate: _ContainerCandidate,
     fragment: InlineStyleFragment,
@@ -1660,8 +1801,11 @@ def _best_short_partial_line_hint(
     best_score = 0.0
     best_position_score = 0.0
     min_text_score = 0.54
+    exact_only = _normalized_length(normalized_text) <= SHORT_PARTIAL_EXACT_ONLY_MAX_LEN
 
     for line in candidate.logical_lines:
+        if exact_only and not _locate_exact_occurrences_in_text(line.normalized_text, normalized_text):
+            continue
         text_score = _presence_score(normalized_text, line.normalized_text)
         if text_score < min_text_score:
             continue
@@ -1694,6 +1838,7 @@ def _locate_local_span(
 
     if _is_short_partial_fragment(fragment) and candidate.logical_lines:
         min_text_score = 0.58
+        exact_only = _normalized_length(normalized_text) <= SHORT_PARTIAL_EXACT_ONLY_MAX_LEN
         line_matches: list[tuple[float, _LocalMatch]] = []
 
         for line in candidate.logical_lines:
@@ -1714,6 +1859,9 @@ def _locate_local_span(
                     )
                     if match is not None:
                         line_matches.append((round(0.72 * match.score + 0.28 * text_score, 6), match))
+                continue
+
+            if exact_only:
                 continue
 
             target_len = len(normalized_text)
@@ -1750,6 +1898,8 @@ def _locate_local_span(
                         )
 
         if not line_matches:
+            if exact_only:
+                return None, "short_fragment_unanchored"
             return None, "low_local_confidence"
 
         line_matches.sort(
@@ -1799,6 +1949,11 @@ def _locate_local_span(
     target_len = len(normalized_text)
     if not candidate_text or target_len == 0:
         return None, "no_local_candidate"
+    if (
+        _is_short_partial_fragment(fragment)
+        and target_len <= SHORT_PARTIAL_EXACT_ONLY_MAX_LEN
+    ):
+        return None, "short_fragment_unanchored"
 
     scan_window = _approx_local_scan_window(fragment)
     lower_len = max(1, target_len - min(scan_window, max(2, target_len // 3)))
@@ -2406,6 +2561,40 @@ def apply_inline_style_fragments(
 
     for index, fragment in enumerate(fragments, start=1):
         result["attempted"] += 1
+        if _is_number_prefix_fragment(fragment) and _has_high_visible_risk_style(fragment):
+            reason = "number_prefix_high_visible_style"
+            result["skipped"] += 1
+            _append_issue(
+                result,
+                index=index,
+                reason=reason,
+                fragment=fragment,
+            )
+            _emit_runtime_log(
+                log_parts,
+                _build_writeback_outcome_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="跳过",
+                    fragment=fragment,
+                    reason=reason,
+                ),
+                progress_logger,
+            )
+            _emit_diagnostic_log(
+                _build_writeback_diagnostic_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="跳过",
+                    fragment=fragment,
+                    reason=reason,
+                ),
+                diagnostic_logger,
+            )
+            continue
+
         candidate_probes, no_candidate_reason, all_probes = _select_candidate_containers(
             fragment,
             target_containers,
@@ -2501,6 +2690,11 @@ def apply_inline_style_fragments(
                 if local_error:
                     probe.local_error = local_error
                     local_failures.append(local_error)
+                    continue
+                gate_reason = _short_partial_match_gate_reason(fragment, probe, local_match)
+                if gate_reason:
+                    probe.local_error = gate_reason
+                    local_failures.append(gate_reason)
                     continue
             elif _is_short_title_fragment(fragment) and local_match is None:
                 probe.local_error = "no_local_candidate"

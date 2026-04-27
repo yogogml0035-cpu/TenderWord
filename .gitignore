@@ -46,7 +46,14 @@ ENV/
 Thumbs.db
 nul
 AGENTS.md
-asset/
+# Track long-lived knowledge packs while ignoring other local asset scratch files.
+asset/*
+!asset/
+!asset/README.md
+!asset/shared_runtime_boundary_knowledge_pack.md
+!asset/tender_type_extension_convergence_knowledge_pack.md
+!asset/frontend_conversation_scope_knowledge_pack.md
+!asset/shared_template_extraction_knowledge_pack.md
 guide/
 .omx/
 # Next.js 构建产物
@@ -77,4 +84,3 @@ backend/tests/test_*
 
 frontend/temp-e2e-results*/
 frontend/test-results*/
-

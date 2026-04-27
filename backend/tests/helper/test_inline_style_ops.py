@@ -343,6 +343,54 @@ def test_apply_inline_style_fragments_copies_font_color_to_renumbered_prefix(mon
     assert doc.applied_ranges[0].Font.Color == 255
 
 
+def test_apply_inline_style_fragments_skips_high_visible_number_prefix(monkeypatch) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 3},
+        "source_text": "五、",
+        "number_prefix_text": "五、",
+        "normalized_text": normalize_semantic_text("售后服务"),
+        "container_text": "五、售后服务",
+        "normalized_container_text": normalize_semantic_text("五、售后服务"),
+        "context_before": "",
+        "context_after": "售后服务",
+        "position_ratio": 0.62,
+        "local_position_ratio": 0.05,
+        "style_flags": {
+            "strikethrough": True,
+            "underline": False,
+            "bold": False,
+            "italic": True,
+        },
+        "font_color": None,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "number_prefix",
+    }
+    candidate = _make_candidate(
+        text="五、售后服务",
+        start=120,
+        position_ratio=0.62,
+    )
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=200,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert doc.applied_ranges == []
+    assert result["issues"][0]["reason"] == "number_prefix_high_visible_style"
+
+
 def test_apply_inline_style_fragments_skips_number_prefix_when_target_has_no_prefix(monkeypatch) -> None:
     fragment = {
         "container_type": "paragraph",
@@ -651,6 +699,162 @@ def test_apply_inline_style_fragments_relocates_table_cell_within_same_table(mon
     assert doc.applied_ranges[0].Font.Bold is True
 
 
+def test_apply_inline_style_fragments_keeps_table_same_cell_short_exact_match(monkeypatch) -> None:
+    fragment = {
+        "container_type": "table_cell",
+        "container_locator": {"table_index": 1, "row": 2, "col": 1},
+        "source_text": "质",
+        "normalized_text": normalize_semantic_text("质"),
+        "container_text": "质保期",
+        "normalized_container_text": normalize_semantic_text("质保期"),
+        "context_before": "",
+        "context_after": "保期",
+        "position_ratio": 0.6,
+        "local_position_ratio": 0.1,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": True,
+        },
+        "font_color": None,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    candidate = _make_candidate(
+        text="质保期",
+        start=70,
+        container_type="table_cell",
+        locator={"table_index": 1, "row": 2, "col": 1},
+        position_ratio=0.6,
+    )
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=120,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 1
+    assert result["skipped"] == 0
+    assert doc.applied_ranges[0].Start == 70
+    assert doc.applied_ranges[0].End == 71
+    assert doc.applied_ranges[0].Font.Italic is True
+
+
+def test_apply_inline_style_fragments_skips_table_cross_cell_short_without_structure(monkeypatch) -> None:
+    fragment = {
+        "container_type": "table_cell",
+        "container_locator": {"table_index": 1, "row": 2, "col": 1},
+        "source_text": "质",
+        "normalized_text": normalize_semantic_text("质"),
+        "container_text": "质保期",
+        "normalized_container_text": normalize_semantic_text("质保期"),
+        "context_before": "",
+        "context_after": "",
+        "position_ratio": 0.6,
+        "local_position_ratio": 0.1,
+        "style_flags": {
+            "strikethrough": True,
+            "underline": False,
+            "bold": False,
+            "italic": True,
+        },
+        "font_color": None,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    candidate = _make_candidate(
+        text="质保期",
+        start=90,
+        container_type="table_cell",
+        locator={"table_index": 1, "row": 8, "col": 4},
+        position_ratio=0.6,
+    )
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=140,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert doc.applied_ranges == []
+    assert result["issues"][0]["reason"] == "short_fragment_semantic_mismatch"
+
+
+def test_short_partial_gate_rejects_table_number_prefix_exact_match() -> None:
+    fragment = {
+        "container_type": "table_cell",
+        "container_locator": {"table_index": 1, "row": 3, "col": 1},
+        "source_text": "五",
+        "normalized_text": normalize_semantic_text("五"),
+        "container_text": "设备五套",
+        "normalized_container_text": normalize_semantic_text("设备五套"),
+        "context_before": "设备",
+        "context_after": "套",
+        "position_ratio": 0.5,
+        "local_position_ratio": 0.5,
+        "style_flags": {
+            "strikethrough": True,
+            "underline": False,
+            "bold": False,
+            "italic": True,
+        },
+        "font_color": None,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    candidate = _make_candidate(
+        text="五、售后服务",
+        start=120,
+        container_type="table_cell",
+        locator={"table_index": 1, "row": 3, "col": 1},
+        position_ratio=0.5,
+    )
+    match = style_ops._LocalMatch(
+        visible_start=0,
+        visible_end=1,
+        actual_start=120,
+        actual_end=121,
+        score=1.0,
+        context_score=1.0,
+        local_position_score=1.0,
+        text_score=1.0,
+        is_exact=True,
+    )
+    probe = style_ops._CandidateProbe(
+        candidate=candidate,
+        container_score=1.0,
+        local_hint_score=1.0,
+        position_score=1.0,
+        structure_score=1.0,
+    )
+
+    assert (
+        style_ops._short_partial_match_gate_reason(fragment, probe, match)
+        == "short_fragment_prefix_conflict"
+    )
+
+
 def test_build_style_writeback_summary_payload_keeps_summary_fields() -> None:
     payload = style_ops.build_style_writeback_summary_payload(
         {
@@ -854,6 +1058,160 @@ def test_apply_inline_style_fragments_matches_short_partial_inside_logical_line(
     assert doc.applied_ranges[0].Start == expected_start
     assert doc.applied_ranges[0].End == expected_start + len("提供")
     assert doc.applied_ranges[0].Font.Color == 255
+
+
+def test_short_partial_gate_rejects_paragraph_number_prefix_exact_match() -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 4},
+        "source_text": "五",
+        "normalized_text": normalize_semantic_text("五"),
+        "container_text": "设备五套",
+        "normalized_container_text": normalize_semantic_text("设备五套"),
+        "context_before": "设备",
+        "context_after": "套",
+        "position_ratio": 0.5,
+        "local_position_ratio": 0.5,
+        "style_flags": {
+            "strikethrough": True,
+            "underline": False,
+            "bold": False,
+            "italic": True,
+        },
+        "font_color": None,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    candidate = _make_candidate(
+        text="五、售后服务\n1. 提供电话热线服务",
+        start=300,
+        position_ratio=0.5,
+    )
+    match = style_ops._LocalMatch(
+        visible_start=0,
+        visible_end=1,
+        actual_start=300,
+        actual_end=301,
+        score=1.0,
+        context_score=1.0,
+        local_position_score=1.0,
+        text_score=1.0,
+        is_exact=True,
+    )
+    probe = style_ops._CandidateProbe(
+        candidate=candidate,
+        container_score=1.0,
+        local_hint_score=1.0,
+        position_score=1.0,
+    )
+
+    assert (
+        style_ops._short_partial_match_gate_reason(fragment, probe, match)
+        == "short_fragment_prefix_conflict"
+    )
+
+
+def test_short_partial_gate_rejects_dotted_number_prefix_exact_match() -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 5},
+        "source_text": "2.6.1",
+        "normalized_text": normalize_semantic_text("2.6.1"),
+        "container_text": "2.6.1 培训要求",
+        "normalized_container_text": normalize_semantic_text("2.6.1 培训要求"),
+        "context_before": "",
+        "context_after": "培训",
+        "position_ratio": 0.5,
+        "local_position_ratio": 0.1,
+        "style_flags": {
+            "strikethrough": True,
+            "underline": False,
+            "bold": False,
+            "italic": True,
+        },
+        "font_color": None,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    candidate = _make_candidate(
+        text="2.6.1 售后服务",
+        start=360,
+        position_ratio=0.5,
+    )
+    match = style_ops._LocalMatch(
+        visible_start=0,
+        visible_end=len("2.6.1"),
+        actual_start=360,
+        actual_end=360 + len("2.6.1"),
+        score=1.0,
+        context_score=1.0,
+        local_position_score=1.0,
+        text_score=1.0,
+        is_exact=True,
+    )
+    probe = style_ops._CandidateProbe(
+        candidate=candidate,
+        container_score=1.0,
+        local_hint_score=1.0,
+        position_score=1.0,
+    )
+
+    assert (
+        style_ops._short_partial_match_gate_reason(fragment, probe, match)
+        == "short_fragment_prefix_conflict"
+    )
+
+
+def test_apply_inline_style_fragments_keeps_short_exact_non_prefix_match(monkeypatch) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 8},
+        "source_text": "五",
+        "normalized_text": normalize_semantic_text("五"),
+        "container_text": "设备五套",
+        "normalized_container_text": normalize_semantic_text("设备五套"),
+        "context_before": "设备",
+        "context_after": "套",
+        "position_ratio": 0.45,
+        "local_position_ratio": 0.5,
+        "style_flags": {
+            "strikethrough": True,
+            "underline": False,
+            "bold": False,
+            "italic": True,
+        },
+        "font_color": None,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    candidate_text = "投标人需提供设备五套用于现场部署"
+    candidate = _make_candidate(text=candidate_text, start=420, position_ratio=0.45)
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=520,
+        log_parts=[],
+    )
+
+    expected_start = 420 + candidate_text.index("五")
+    assert result["applied"] == 1
+    assert doc.applied_ranges[0].Start == expected_start
+    assert doc.applied_ranges[0].End == expected_start + len("五")
+    assert doc.applied_ranges[0].Font.StrikeThrough is True
+    assert doc.applied_ranges[0].Font.Italic is True
 
 
 def test_apply_inline_style_fragments_skips_ambiguous_short_partial_across_logical_lines(monkeypatch) -> None:

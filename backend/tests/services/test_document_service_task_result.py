@@ -6,7 +6,7 @@ from backend.services.document_service import DocumentService
 
 
 def test_build_task_result_payload_includes_style_writeback(tmp_path: Path) -> None:
-    output_path = tmp_path / "styled-edit.docx"
+    output_path = tmp_path / "styled-output.docx"
     output_path.write_bytes(b"word")
 
     service = DocumentService.__new__(DocumentService)
@@ -31,7 +31,7 @@ def test_build_task_result_payload_includes_style_writeback(tmp_path: Path) -> N
     )
 
     assert payload["output_file"] == str(output_path)
-    assert payload["file_name"] == "styled-edit.docx"
+    assert payload["file_name"] == "styled-output.docx"
     assert payload["file_size"] == 4
     assert payload["model_used"] == "deepseek"
     assert payload["total_time_seconds"] == 12.346

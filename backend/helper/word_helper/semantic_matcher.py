@@ -2,7 +2,7 @@
 共享语义匹配工具。
 
 从批注复制等场景抽取出统一的文本规范化与近似匹配逻辑，
-供 edit 样式回填、comment copy 等共享复用。
+供样式回填、comment copy 等共享复用。
 """
 
 from __future__ import annotations
