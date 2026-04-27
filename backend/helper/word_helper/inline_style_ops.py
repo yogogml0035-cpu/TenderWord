@@ -22,7 +22,7 @@ from backend.helper.word_helper.semantic_matcher import (
 from backend.util.word_util import wdWithInTable
 
 ContainerType = Literal["paragraph", "table_cell"]
-SourceSpanKind = Literal["full_container", "partial_span"]
+SourceSpanKind = Literal["full_container", "partial_span", "number_prefix"]
 
 CONTROL_CHAR_TEXT = {"\a": "", "\x07": "", "\f": "", "\r": "\n", "\n": "\n", "\v": "\n"}
 BLACK_COLOR = 0
@@ -45,6 +45,7 @@ HEADING_TEXT_RE = re.compile(
     r"|[（(][一二三四五六七八九十]+[)）]"
     r"|[一二三四五六七八九十]+[、.．])"
 )
+LEADING_DOTTED_NUMBER_RE = re.compile(r"^\s*\d+(?:\.\d+)+\s+(?=\S)")
 
 STYLE_LABEL_MAP = {
     "bold": "加粗",
@@ -68,11 +69,13 @@ REASON_LABEL_MAP = {
     "no_same_table_candidate": "同表内未找到可回填的目标单元格",
     "no_title_candidate_container": "未找到可承接标题样式的目标段落",
     "no_local_candidate": "未找到局部文本命中位置",
+    "no_number_prefix_target": "目标行未找到编号前缀",
     "table_structure_changed": "表格结构已变化，无法按原单元格定位",
 }
 SPAN_KIND_LABEL_MAP = {
     "full_container": "整容器",
     "partial_span": "局部片段",
+    "number_prefix": "编号前缀",
 }
 
 
@@ -108,6 +111,7 @@ class InlineStyleFragment(TypedDict, total=False):
     font_size: Optional[float]
     underline_style: Optional[int]
     source_span_kind: SourceSpanKind
+    number_prefix_text: str
 
 
 class InlineStyleWritebackIssue(TypedDict, total=False):
@@ -286,6 +290,55 @@ def _looks_like_heading_text(value: Any) -> bool:
     return bool(HEADING_TEXT_RE.match(first_line))
 
 
+def _is_number_prefix_fragment(fragment: InlineStyleFragment) -> bool:
+    return str(fragment.get("source_span_kind") or "") == "number_prefix"
+
+
+def _line_start_offset(text: str, offset: int) -> int:
+    safe_offset = max(0, min(len(text), int(offset)))
+    line_break = str(text or "").rfind("\n", 0, safe_offset)
+    return 0 if line_break < 0 else line_break + 1
+
+
+def _leading_number_prefix_len(line_text: str) -> int:
+    line = str(line_text or "")
+    if not line.strip():
+        return 0
+    stripped = strip_number_prefix(line)
+    prefix_len = len(line) - len(stripped)
+    if prefix_len <= 0:
+        fallback_match = LEADING_DOTTED_NUMBER_RE.match(line)
+        prefix_len = 0 if fallback_match is None else fallback_match.end()
+    if not line[:prefix_len].strip():
+        return 0
+    return prefix_len
+
+
+def _is_leading_number_prefix_span(
+    *,
+    container_text: str,
+    visible_start: int,
+    visible_end: int,
+) -> bool:
+    if int(visible_end) <= int(visible_start):
+        return False
+
+    text = str(container_text or "")
+    line_start = _line_start_offset(text, int(visible_start))
+    line_text = text[line_start:]
+    prefix_len = _leading_number_prefix_len(line_text)
+    if prefix_len <= 0:
+        return False
+
+    line_relative_start = int(visible_start) - line_start
+    line_relative_end = int(visible_end) - line_start
+    return (
+        line_relative_start >= 0
+        and line_relative_end <= prefix_len
+        and bool(text[int(visible_start) : int(visible_end)].strip())
+    )
+
+
 def _is_short_title_fragment(fragment: InlineStyleFragment) -> bool:
     return (
         str(fragment.get("container_type") or "paragraph") == "paragraph"
@@ -303,6 +356,8 @@ def _is_short_partial_fragment(fragment: InlineStyleFragment) -> bool:
 
 
 def _candidate_limit(fragment: InlineStyleFragment) -> int:
+    if _is_number_prefix_fragment(fragment):
+        return max(CONTAINER_CANDIDATE_LIMIT, 6)
     if str(fragment.get("container_type") or "paragraph") == "table_cell":
         return max(CONTAINER_CANDIDATE_LIMIT, 6)
     if _is_short_partial_fragment(fragment):
@@ -313,6 +368,8 @@ def _candidate_limit(fragment: InlineStyleFragment) -> int:
 
 
 def _approx_local_scan_window(fragment: InlineStyleFragment) -> int:
+    if _is_number_prefix_fragment(fragment):
+        return max(APPROX_LOCAL_SCAN_WINDOW, 24)
     if str(fragment.get("container_type") or "paragraph") == "table_cell":
         return max(APPROX_LOCAL_SCAN_WINDOW, 24)
     if _is_short_partial_fragment(fragment):
@@ -431,6 +488,16 @@ def _read_font_property(char_range, attr_name: str, default: Any = None) -> Any:
         return default
 
 
+def _read_direct_font_property(font, attr_name: str, default: Any = None) -> Any:
+    try:
+        if font is None:
+            return default
+        value = getattr(font, attr_name)
+        return default if value is None else value
+    except Exception:
+        return default
+
+
 def _normalize_font_color(value: Any) -> Optional[int]:
     color = _safe_int(value, default=BLACK_COLOR)
     if color in {BLACK_COLOR, AUTOMATIC_COLOR, WINDOWS_AUTO_COLOR}:
@@ -445,28 +512,32 @@ def _normalize_highlight_color(value: Any) -> Optional[int]:
     return color
 
 
-def _build_character_signature(char_range) -> CharacterStyleSignature:
-    underline_style = _safe_int(_read_font_property(char_range, "Underline", 0), default=0)
+def _build_font_signature(font) -> CharacterStyleSignature:
+    underline_style = _safe_int(_read_direct_font_property(font, "Underline", 0), default=0)
     signature: CharacterStyleSignature = {
         "style_flags": {
-            "strikethrough": bool(_read_font_property(char_range, "StrikeThrough", False)),
+            "strikethrough": bool(_read_direct_font_property(font, "StrikeThrough", False)),
             "underline": bool(underline_style),
-            "bold": bool(_read_font_property(char_range, "Bold", False)),
-            "italic": bool(_read_font_property(char_range, "Italic", False)),
+            "bold": bool(_read_direct_font_property(font, "Bold", False)),
+            "italic": bool(_read_direct_font_property(font, "Italic", False)),
         },
-        "font_color": _normalize_font_color(_read_font_property(char_range, "Color", BLACK_COLOR)),
+        "font_color": _normalize_font_color(_read_direct_font_property(font, "Color", BLACK_COLOR)),
         "highlight_color": _normalize_highlight_color(
-            _read_font_property(char_range, "HighlightColorIndex", NO_HIGHLIGHT)
+            _read_direct_font_property(font, "HighlightColorIndex", NO_HIGHLIGHT)
         ),
-        "font_name": str(_read_font_property(char_range, "Name", "") or "").strip() or None,
+        "font_name": str(_read_direct_font_property(font, "Name", "") or "").strip() or None,
         "font_size": None,
         "underline_style": underline_style or None,
     }
 
-    font_size = _safe_float(_read_font_property(char_range, "Size", 0))
+    font_size = _safe_float(_read_direct_font_property(font, "Size", 0))
     if font_size > 0:
         signature["font_size"] = font_size
     return signature
+
+
+def _build_character_signature(char_range) -> CharacterStyleSignature:
+    return _build_font_signature(getattr(char_range, "Font", None))
 
 
 def _signature_has_supported_style(signature: CharacterStyleSignature) -> bool:
@@ -736,6 +807,16 @@ def build_inline_style_fragments_from_text_runs(
 
         source_text = "".join(current_text_parts).strip()
         normalized_text = normalize_semantic_text(source_text)
+        is_number_prefix = False
+        if source_text and not normalized_text:
+            is_number_prefix = _is_leading_number_prefix_span(
+                container_text=container_visible_text,
+                visible_start=current_start,
+                visible_end=current_end,
+            )
+            if is_number_prefix:
+                normalized_text = normalized_container_text
+
         if not source_text or not normalized_text:
             current_signature = None
             current_text_parts = []
@@ -752,33 +833,37 @@ def build_inline_style_fragments_from_text_runs(
                 ((current_start + current_end) / 2.0) / max(1.0, float(len(container_visible_text))),
             ),
         )
-        source_span_kind: SourceSpanKind = (
-            "full_container"
-            if normalized_text == normalized_container_text
-            else "partial_span"
-        )
-
-        fragments.append(
-            InlineStyleFragment(
-                container_type=container_type,
-                container_locator=dict(container_locator),
-                source_text=source_text,
-                normalized_text=normalized_text,
-                container_text=container_visible_text,
-                normalized_container_text=normalized_container_text,
-                context_before=context_before,
-                context_after=context_after,
-                position_ratio=float(position_ratio),
-                local_position_ratio=float(local_position_ratio),
-                style_flags=dict(current_signature.get("style_flags") or {}),
-                font_color=current_signature.get("font_color"),
-                highlight_color=current_signature.get("highlight_color"),
-                font_name=current_signature.get("font_name"),
-                font_size=current_signature.get("font_size"),
-                underline_style=current_signature.get("underline_style"),
-                source_span_kind=source_span_kind,
+        if is_number_prefix:
+            source_span_kind: SourceSpanKind = "number_prefix"
+        else:
+            source_span_kind = (
+                "full_container"
+                if normalized_text == normalized_container_text
+                else "partial_span"
             )
+
+        fragment = InlineStyleFragment(
+            container_type=container_type,
+            container_locator=dict(container_locator),
+            source_text=source_text,
+            normalized_text=normalized_text,
+            container_text=container_visible_text,
+            normalized_container_text=normalized_container_text,
+            context_before=context_before,
+            context_after=context_after,
+            position_ratio=float(position_ratio),
+            local_position_ratio=float(local_position_ratio),
+            style_flags=dict(current_signature.get("style_flags") or {}),
+            font_color=current_signature.get("font_color"),
+            highlight_color=current_signature.get("highlight_color"),
+            font_name=current_signature.get("font_name"),
+            font_size=current_signature.get("font_size"),
+            underline_style=current_signature.get("underline_style"),
+            source_span_kind=source_span_kind,
         )
+        if is_number_prefix:
+            fragment["number_prefix_text"] = source_text
+        fragments.append(fragment)
 
         current_signature = None
         current_text_parts = []
@@ -859,6 +944,113 @@ def _build_fragments_from_container(
     )
 
 
+def _collection_item(collection, index: int):
+    if collection is None:
+        return None
+    try:
+        return collection(index)
+    except Exception:
+        try:
+            return collection.Item(index)
+        except Exception:
+            return None
+
+
+def _read_list_level_font(list_format) -> Any:
+    try:
+        level_number = _safe_int(getattr(list_format, "ListLevelNumber", 1), default=1)
+    except Exception:
+        level_number = 1
+    if level_number <= 0:
+        level_number = 1
+
+    try:
+        list_template = getattr(list_format, "ListTemplate", None)
+        list_levels = getattr(list_template, "ListLevels", None)
+        list_level = _collection_item(list_levels, level_number)
+        return getattr(list_level, "Font", None) if list_level is not None else None
+    except Exception:
+        return None
+
+
+def _read_list_string(list_format) -> str:
+    try:
+        return str(getattr(list_format, "ListString", "") or "").strip()
+    except Exception:
+        return ""
+
+
+def _range_has_list_label(range_obj) -> bool:
+    try:
+        list_format = getattr(range_obj, "ListFormat", None)
+    except Exception:
+        return False
+    if list_format is None:
+        return False
+
+    try:
+        if _safe_int(getattr(list_format, "ListType", 0), default=0) <= 0:
+            return False
+    except Exception:
+        pass
+
+    return bool(_read_list_string(list_format))
+
+
+def _build_number_prefix_fragment_from_paragraph_list(
+    *,
+    container_locator: InlineStyleContainerLocator,
+    paragraph_range,
+    candidate: _ContainerCandidate,
+) -> Optional[InlineStyleFragment]:
+    try:
+        list_format = getattr(paragraph_range, "ListFormat", None)
+    except Exception:
+        return None
+    if list_format is None:
+        return None
+
+    list_string = ""
+    try:
+        if _safe_int(getattr(list_format, "ListType", 0), default=0) <= 0:
+            return None
+    except Exception:
+        pass
+
+    list_string = _read_list_string(list_format)
+    if not list_string:
+        return None
+
+    signature = _build_font_signature(_read_list_level_font(list_format))
+    if not _signature_has_supported_style(signature):
+        return None
+
+    normalized_container_text = candidate.normalized_text
+    if not normalized_container_text:
+        return None
+
+    return InlineStyleFragment(
+        container_type="paragraph",
+        container_locator=dict(container_locator),
+        source_text=list_string,
+        normalized_text=normalized_container_text,
+        container_text=f"{list_string} {candidate.visible_text}".strip(),
+        normalized_container_text=normalized_container_text,
+        context_before="",
+        context_after=candidate.visible_text[:CONTEXT_CHARS],
+        position_ratio=float(candidate.position_ratio),
+        local_position_ratio=0.0,
+        style_flags=dict(signature.get("style_flags") or {}),
+        font_color=signature.get("font_color"),
+        highlight_color=signature.get("highlight_color"),
+        font_name=signature.get("font_name"),
+        font_size=signature.get("font_size"),
+        underline_style=signature.get("underline_style"),
+        source_span_kind="number_prefix",
+        number_prefix_text=list_string,
+    )
+
+
 def _collect_paragraph_fragments(doc, *, bound_start: int, bound_end: int) -> list[InlineStyleFragment]:
     fragments: list[InlineStyleFragment] = []
     paragraph_index = 0
@@ -883,13 +1075,42 @@ def _collect_paragraph_fragments(doc, *, bound_start: int, bound_end: int) -> li
             pass
 
         paragraph_index += 1
+        container_locator: InlineStyleContainerLocator = {"paragraph_index": paragraph_index}
+        candidate = _build_container_candidate(
+            container_type="paragraph",
+            container_locator=container_locator,
+            range_obj=paragraph_range,
+            bound_start=bound_start,
+            bound_end=bound_end,
+        )
+        if candidate is None:
+            continue
+
+        list_fragment = _build_number_prefix_fragment_from_paragraph_list(
+            container_locator=container_locator,
+            paragraph_range=paragraph_range,
+            candidate=candidate,
+        )
+        if list_fragment is not None:
+            fragments.append(list_fragment)
+
+        runs: list[StyledVisibleChar] = []
+        for char in candidate.visible_chars:
+            runs.append(
+                StyledVisibleChar(
+                    text=char.text,
+                    start=char.visible_start,
+                    end=char.visible_end,
+                    signature=char.signature,
+                )
+            )
         fragments.extend(
-            _build_fragments_from_container(
+            build_inline_style_fragments_from_text_runs(
                 container_type="paragraph",
-                container_locator={"paragraph_index": paragraph_index},
-                range_obj=paragraph_range,
-                bound_start=bound_start,
-                bound_end=bound_end,
+                container_locator=container_locator,
+                container_text=candidate.visible_text,
+                position_ratio=candidate.position_ratio,
+                runs=runs,
             )
         )
 
@@ -1299,6 +1520,135 @@ def _match_short_title_line(
     return best_score, best_position_score, best_match
 
 
+def _locate_number_prefix_span(
+    candidate: _ContainerCandidate,
+    fragment: InlineStyleFragment,
+    *,
+    doc=None,
+) -> tuple[Optional[_LocalMatch], Optional[str]]:
+    normalized_container_text = str(fragment.get("normalized_container_text") or "")
+
+    def build_list_label_match() -> tuple[Optional[_LocalMatch], Optional[str]]:
+        if doc is None:
+            return None, "no_number_prefix_target"
+        try:
+            target_range = doc.Range(int(candidate.range_start), int(candidate.range_end))
+        except Exception:
+            return None, "no_number_prefix_target"
+        if not _range_has_list_label(target_range):
+            return None, "no_number_prefix_target"
+
+        text_score = semantic_similarity_norm(
+            normalized_container_text,
+            candidate.normalized_text,
+        )
+        context_score = semantic_similarity(
+            str(fragment.get("context_after") or ""),
+            candidate.visible_text,
+        )
+        position_score = _position_score(
+            float(fragment.get("position_ratio") or 0.0),
+            candidate.position_ratio,
+        )
+        final_score = 0.64 * text_score + 0.18 * context_score + 0.18 * position_score
+        return (
+            _LocalMatch(
+                visible_start=0,
+                visible_end=0,
+                actual_start=int(candidate.range_start),
+                actual_end=int(candidate.range_start),
+                score=final_score,
+                context_score=context_score,
+                local_position_score=position_score,
+            ),
+            None,
+        )
+
+    if not candidate.logical_lines:
+        return build_list_label_match()
+
+    matches: list[tuple[float, _LocalMatch]] = []
+
+    for line in candidate.logical_lines:
+        prefix_len = _leading_number_prefix_len(line.text)
+        if prefix_len <= 0:
+            continue
+
+        prefix_text = line.text[:prefix_len]
+        prefix_start_offset = len(prefix_text) - len(prefix_text.lstrip())
+        prefix_end_offset = len(prefix_text.rstrip())
+        if prefix_end_offset <= prefix_start_offset:
+            continue
+
+        visible_start = line.visible_start + prefix_start_offset
+        visible_end = line.visible_start + prefix_end_offset
+        actual_span = _resolve_actual_span(candidate, visible_start, visible_end)
+        if actual_span is None:
+            continue
+
+        line_text_score = semantic_similarity_norm(
+            normalized_container_text,
+            line.normalized_text,
+        )
+        context_score = _context_score(
+            context_before=str(fragment.get("context_before") or ""),
+            context_after=str(fragment.get("context_after") or ""),
+            candidate_text=candidate.visible_text,
+            visible_start=visible_start,
+            visible_end=visible_end,
+        )
+        line_position_score = _position_score(
+            float(fragment.get("position_ratio") or 0.0),
+            line.position_ratio,
+        )
+        local_position_score = _local_position_score(
+            fragment,
+            candidate,
+            visible_start,
+            visible_end,
+        )
+        final_score = (
+            0.62 * line_text_score
+            + 0.18 * context_score
+            + 0.12 * line_position_score
+            + 0.08 * local_position_score
+        )
+        matches.append(
+            (
+                round(final_score, 6),
+                _LocalMatch(
+                    visible_start=visible_start,
+                    visible_end=visible_end,
+                    actual_start=actual_span[0],
+                    actual_end=actual_span[1],
+                    score=final_score,
+                    context_score=context_score,
+                    local_position_score=max(line_position_score, local_position_score),
+                ),
+            )
+        )
+
+    if not matches:
+        return build_list_label_match()
+
+    matches.sort(
+        key=lambda item: (
+            item[0],
+            item[1].context_score,
+            item[1].local_position_score,
+        ),
+        reverse=True,
+    )
+    if (
+        len(matches) > 1
+        and abs(matches[0][0] - matches[1][0]) < 0.02
+        and abs(matches[0][1].local_position_score - matches[1][1].local_position_score) < 0.05
+    ):
+        return None, "multiple_local_candidates"
+
+    return matches[0][1], None
+
+
 def _best_short_partial_line_hint(
     candidate: _ContainerCandidate,
     fragment: InlineStyleFragment,
@@ -1498,6 +1848,9 @@ def _adaptive_threshold(fragment: InlineStyleFragment) -> float:
     container_type = str(fragment.get("container_type") or "paragraph")
     span_kind = str(fragment.get("source_span_kind") or "partial_span")
 
+    if _is_number_prefix_fragment(fragment):
+        return 0.70
+
     if container_type == "table_cell":
         threshold = 0.68
         if _is_short_partial_fragment(fragment):
@@ -1544,6 +1897,15 @@ def _final_candidate_score(
             0.18 * container_score
             + 0.22 * position_score
             + 0.25 * probe.structure_score
+            + 0.35 * local_score,
+            6,
+        )
+
+    if _is_number_prefix_fragment(fragment):
+        local_score = local_match.score if local_match is not None else 0.0
+        return round(
+            0.45 * max(container_score, local_hint_score)
+            + 0.20 * position_score
             + 0.35 * local_score,
             6,
         )
@@ -1661,8 +2023,11 @@ def _select_candidate_containers(
     probes = []
     is_title_fragment = _is_short_title_fragment(fragment)
     is_short_partial = _is_short_partial_fragment(fragment)
+    is_number_prefix = _is_number_prefix_fragment(fragment)
     coarse_threshold = 0.35
-    if is_title_fragment:
+    if is_number_prefix:
+        coarse_threshold = 0.34
+    elif is_title_fragment:
         coarse_threshold = 0.40
     elif is_short_partial:
         coarse_threshold = 0.34
@@ -1674,7 +2039,9 @@ def _select_candidate_containers(
         title_score = 0.0
         title_match: Optional[_LocalMatch] = None
 
-        if is_title_fragment:
+        if is_number_prefix:
+            local_hint = _presence_score(fragment_container_text, candidate.normalized_text)
+        elif is_title_fragment:
             title_score, position_score, title_match = _match_short_title_line(
                 candidate,
                 fragment,
@@ -1682,7 +2049,17 @@ def _select_candidate_containers(
         elif is_short_partial and candidate.logical_lines:
             local_hint, position_score = _best_short_partial_line_hint(candidate, fragment)
 
-        if is_title_fragment:
+        if is_number_prefix:
+            coarse_score = round(
+                0.55 * max(container_score, local_hint)
+                + 0.25 * position_score
+                + 0.20 * semantic_similarity(
+                    str(fragment.get("context_after") or ""),
+                    candidate.visible_text,
+                ),
+                6,
+            )
+        elif is_title_fragment:
             coarse_score = round(
                 0.70 * title_score + 0.30 * position_score,
                 6,
@@ -1769,8 +2146,7 @@ def _build_candidate_diagnostics(probes: Sequence[_CandidateProbe]) -> str:
     return "； ".join(summaries)
 
 
-def _apply_fragment_style(target_range, fragment: InlineStyleFragment) -> None:
-    font = getattr(target_range, "Font", None)
+def _apply_fragment_style_to_font(font, fragment: InlineStyleFragment) -> None:
     if font is None:
         return
 
@@ -1793,6 +2169,26 @@ def _apply_fragment_style(target_range, fragment: InlineStyleFragment) -> None:
     highlight_color = fragment.get("highlight_color")
     if highlight_color is not None:
         font.HighlightColorIndex = int(highlight_color)
+
+
+def _apply_fragment_style(target_range, fragment: InlineStyleFragment) -> None:
+    _apply_fragment_style_to_font(getattr(target_range, "Font", None), fragment)
+
+
+def _apply_fragment_style_to_list_label(target_range, fragment: InlineStyleFragment) -> bool:
+    try:
+        list_format = getattr(target_range, "ListFormat", None)
+    except Exception:
+        return False
+    if list_format is None or not _read_list_string(list_format):
+        return False
+
+    font = _read_list_level_font(list_format)
+    if font is None:
+        return False
+
+    _apply_fragment_style_to_font(font, fragment)
+    return True
 
 
 def _increment_applied_style_counters(
@@ -1819,6 +2215,11 @@ def _resolve_target_text(
 ) -> str:
     if candidate is None:
         return ""
+
+    if _is_number_prefix_fragment(fragment) and local_match is not None:
+        if int(local_match.actual_end) <= int(local_match.actual_start):
+            return str(fragment.get("number_prefix_text") or fragment.get("source_text") or "")
+        return candidate.visible_text[local_match.visible_start : local_match.visible_end]
 
     if str(fragment.get("source_span_kind") or "partial_span") == "full_container":
         if _is_short_title_fragment(fragment) and local_match is not None:
@@ -2085,7 +2486,17 @@ def apply_inline_style_fragments(
             candidate = probe.candidate
             local_match: Optional[_LocalMatch] = probe.local_match
             local_error = None
-            if str(fragment.get("source_span_kind") or "partial_span") == "partial_span":
+            if _is_number_prefix_fragment(fragment):
+                local_match, local_error = _locate_number_prefix_span(
+                    candidate,
+                    fragment,
+                    doc=doc,
+                )
+                if local_error:
+                    probe.local_error = local_error
+                    local_failures.append(local_error)
+                    continue
+            elif str(fragment.get("source_span_kind") or "partial_span") == "partial_span":
                 local_match, local_error = _locate_local_span(candidate, fragment)
                 if local_error:
                     probe.local_error = local_error
@@ -2238,7 +2649,48 @@ def apply_inline_style_fragments(
             )
             continue
 
-        if str(fragment.get("source_span_kind") or "partial_span") == "full_container":
+        apply_to_list_label = False
+        if _is_number_prefix_fragment(fragment):
+            if best_local_match is None:
+                result["skipped"] += 1
+                _append_issue(
+                    result,
+                    index=index,
+                    reason="no_number_prefix_target",
+                    fragment=fragment,
+                    score=best_score,
+                )
+                _emit_runtime_log(
+                    log_parts,
+                    _build_writeback_outcome_log(
+                        step_label=step_label,
+                        index=index,
+                        total=len(fragments),
+                        status="跳过",
+                        fragment=fragment,
+                        reason="no_number_prefix_target",
+                    ),
+                    progress_logger,
+                )
+                _emit_diagnostic_log(
+                    _build_writeback_diagnostic_log(
+                        step_label=step_label,
+                        index=index,
+                        total=len(fragments),
+                        status="跳过",
+                        fragment=fragment,
+                        reason="no_number_prefix_target",
+                        score=best_score,
+                        threshold=threshold,
+                        candidate_details=candidate_details,
+                    ),
+                    diagnostic_logger,
+                )
+                continue
+            actual_start = best_local_match.actual_start
+            actual_end = best_local_match.actual_end
+            apply_to_list_label = int(actual_end) <= int(actual_start)
+        elif str(fragment.get("source_span_kind") or "partial_span") == "full_container":
             if _is_short_title_fragment(fragment) and best_local_match is not None:
                 actual_start = best_local_match.actual_start
                 actual_end = best_local_match.actual_end
@@ -2325,7 +2777,7 @@ def apply_inline_style_fragments(
             actual_start = best_local_match.actual_start
             actual_end = best_local_match.actual_end
 
-        if int(actual_end) <= int(actual_start):
+        if int(actual_end) <= int(actual_start) and not apply_to_list_label:
             result["skipped"] += 1
             _append_issue(
                 result,
@@ -2363,8 +2815,16 @@ def apply_inline_style_fragments(
             continue
 
         try:
-            target_range = doc.Range(int(actual_start), int(actual_end))
-            _apply_fragment_style(target_range, fragment)
+            if apply_to_list_label:
+                target_range = doc.Range(
+                    int(best_candidate.range_start),
+                    int(best_candidate.range_end),
+                )
+                if not _apply_fragment_style_to_list_label(target_range, fragment):
+                    raise RuntimeError("目标自动编号标签不可写")
+            else:
+                target_range = doc.Range(int(actual_start), int(actual_end))
+                _apply_fragment_style(target_range, fragment)
             result["applied"] += 1
             _increment_applied_style_counters(result["applied_by_style"], fragment)
             resolved_target_text = _resolve_target_text(

@@ -48,6 +48,59 @@ class _FailingDoc(_FakeDoc):
         raise RuntimeError("RPC write failed")
 
 
+class _FakeListLevel:
+    def __init__(self, font: _FakeFont) -> None:
+        self.Font = font
+
+
+class _FakeListLevels:
+    def __init__(self, level: _FakeListLevel) -> None:
+        self.level = level
+
+    def __call__(self, index: int) -> _FakeListLevel:
+        del index
+        return self.level
+
+    def Item(self, index: int) -> _FakeListLevel:
+        del index
+        return self.level
+
+
+class _FakeListTemplate:
+    def __init__(self, font: _FakeFont) -> None:
+        self.ListLevels = _FakeListLevels(_FakeListLevel(font))
+
+
+class _FakeListFormat:
+    def __init__(self, *, list_string: str, font: _FakeFont) -> None:
+        self.ListType = 3
+        self.ListString = list_string
+        self.ListLevelNumber = 2
+        self.ListTemplate = _FakeListTemplate(font)
+
+
+class _FakeParagraphRange:
+    def __init__(self, list_format: _FakeListFormat) -> None:
+        self.ListFormat = list_format
+
+
+class _FakeListRange(_FakeAppliedRange):
+    def __init__(self, start: int, end: int, list_format: _FakeListFormat) -> None:
+        super().__init__(start, end)
+        self.ListFormat = list_format
+
+
+class _FakeListLabelDoc:
+    def __init__(self, list_format: _FakeListFormat) -> None:
+        self.list_format = list_format
+        self.ranges: list[_FakeListRange] = []
+
+    def Range(self, start: int, end: int) -> _FakeListRange:
+        resolved = _FakeListRange(start, end, self.list_format)
+        self.ranges.append(resolved)
+        return resolved
+
+
 def _make_candidate(
     *,
     text: str,
@@ -137,6 +190,68 @@ def test_build_inline_style_fragments_from_text_runs_merges_adjacent_same_signat
     assert fragments[0]["style_flags"]["bold"] is True
 
 
+def test_build_inline_style_fragments_preserves_styled_number_prefix_only_run() -> None:
+    red_signature = {
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 255,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+    }
+
+    fragments = style_ops.build_inline_style_fragments_from_text_runs(
+        container_type="paragraph",
+        container_locator={"paragraph_index": 1},
+        container_text="16.1、配置专用外置连接电阻网络盒",
+        position_ratio=0.1,
+        runs=[
+            {"text": "1", "start": 0, "end": 1, "signature": red_signature},
+            {"text": "6", "start": 1, "end": 2, "signature": red_signature},
+            {"text": ".", "start": 2, "end": 3, "signature": red_signature},
+            {"text": "1", "start": 3, "end": 4, "signature": red_signature},
+            {"text": "、", "start": 4, "end": 5, "signature": red_signature},
+        ],
+    )
+
+    assert len(fragments) == 1
+    assert fragments[0]["source_span_kind"] == "number_prefix"
+    assert fragments[0]["source_text"] == "16.1、"
+    assert fragments[0]["number_prefix_text"] == "16.1、"
+    assert fragments[0]["normalized_text"] == normalize_semantic_text("配置专用外置连接电阻网络盒")
+    assert fragments[0]["font_color"] == 255
+
+
+def test_build_number_prefix_fragment_from_word_list_level_font() -> None:
+    list_font = _FakeFont()
+    list_font.Color = 255
+    candidate = _make_candidate(
+        text="配置专用外置连接电阻网络盒",
+        start=20,
+        locator={"paragraph_index": 9},
+        position_ratio=0.3,
+    )
+
+    fragment = style_ops._build_number_prefix_fragment_from_paragraph_list(
+        container_locator={"paragraph_index": 9},
+        paragraph_range=_FakeParagraphRange(
+            _FakeListFormat(list_string="16.1、", font=list_font)
+        ),
+        candidate=candidate,
+    )
+
+    assert fragment is not None
+    assert fragment["source_span_kind"] == "number_prefix"
+    assert fragment["source_text"] == "16.1、"
+    assert fragment["font_color"] == 255
+    assert fragment["normalized_text"] == normalize_semantic_text("配置专用外置连接电阻网络盒")
+
+
 def test_apply_inline_style_fragments_matches_full_container_after_renumbering(monkeypatch) -> None:
     fragment = {
         "container_type": "paragraph",
@@ -180,6 +295,149 @@ def test_apply_inline_style_fragments_matches_full_container_after_renumbering(m
     assert doc.applied_ranges[0].End == 100 + len("2、原条款内容")
     assert doc.applied_ranges[0].Font.StrikeThrough is True
     assert doc.applied_ranges[0].Font.Color == 255
+
+
+def test_apply_inline_style_fragments_copies_font_color_to_renumbered_prefix(monkeypatch) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 3},
+        "source_text": "16.1、",
+        "number_prefix_text": "16.1、",
+        "normalized_text": normalize_semantic_text("配置专用外置连接电阻网络盒"),
+        "container_text": "16.1、配置专用外置连接电阻网络盒",
+        "normalized_container_text": normalize_semantic_text("16.1、配置专用外置连接电阻网络盒"),
+        "context_before": "",
+        "context_after": "配置专用外置连接电阻网络盒",
+        "position_ratio": 0.25,
+        "local_position_ratio": 0.05,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 255,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "number_prefix",
+    }
+    candidate_text = "16.2、配置专用外置连接电阻网络盒"
+    candidate = _make_candidate(text=candidate_text, start=100, position_ratio=0.25)
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=200,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 1
+    assert result["skipped"] == 0
+    assert doc.applied_ranges[0].Start == 100
+    assert doc.applied_ranges[0].End == 100 + len("16.2、")
+    assert doc.applied_ranges[0].Font.Color == 255
+
+
+def test_apply_inline_style_fragments_skips_number_prefix_when_target_has_no_prefix(monkeypatch) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 3},
+        "source_text": "16.1、",
+        "number_prefix_text": "16.1、",
+        "normalized_text": normalize_semantic_text("配置专用外置连接电阻网络盒"),
+        "container_text": "16.1、配置专用外置连接电阻网络盒",
+        "normalized_container_text": normalize_semantic_text("16.1、配置专用外置连接电阻网络盒"),
+        "context_before": "",
+        "context_after": "配置专用外置连接电阻网络盒",
+        "position_ratio": 0.25,
+        "local_position_ratio": 0.05,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 255,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "number_prefix",
+    }
+    candidate = _make_candidate(
+        text="配置专用外置连接电阻网络盒",
+        start=100,
+        position_ratio=0.25,
+    )
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    result = style_ops.apply_inline_style_fragments(
+        doc=_FakeDoc(),
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=200,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert result["issues"][0]["reason"] == "no_number_prefix_target"
+
+
+def test_apply_inline_style_fragments_copies_font_color_to_word_list_label(monkeypatch) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 3},
+        "source_text": "16.1、",
+        "number_prefix_text": "16.1、",
+        "normalized_text": normalize_semantic_text("配置专用外置连接电阻网络盒"),
+        "container_text": "16.1、配置专用外置连接电阻网络盒",
+        "normalized_container_text": normalize_semantic_text("16.1、配置专用外置连接电阻网络盒"),
+        "context_before": "",
+        "context_after": "配置专用外置连接电阻网络盒",
+        "position_ratio": 0.25,
+        "local_position_ratio": 0.05,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 255,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "number_prefix",
+    }
+    candidate = _make_candidate(
+        text="配置专用外置连接电阻网络盒",
+        start=100,
+        position_ratio=0.25,
+    )
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    list_font = _FakeFont()
+    list_font.Color = 0
+    doc = _FakeListLabelDoc(_FakeListFormat(list_string="16.2、", font=list_font))
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=200,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 1
+    assert result["skipped"] == 0
+    assert list_font.Color == 255
+    assert doc.ranges[-1].Start == 100
+    assert doc.ranges[-1].End == 100 + len("配置专用外置连接电阻网络盒")
 
 
 def test_apply_inline_style_fragments_matches_short_title_when_target_paragraph_is_extended(monkeypatch) -> None:
