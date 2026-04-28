@@ -150,6 +150,52 @@ def _make_candidate(
     )
 
 
+def _make_style_flags(
+    *,
+    strikethrough: bool = False,
+    underline: bool = False,
+    bold: bool = False,
+    italic: bool = False,
+) -> dict[str, bool]:
+    return {
+        "strikethrough": strikethrough,
+        "underline": underline,
+        "bold": bold,
+        "italic": italic,
+    }
+
+
+def _make_full_container_fragment(
+    *,
+    text: str,
+    flags: dict[str, bool] | None = None,
+    font_color: int | None = 255,
+    highlight_color: int | None = None,
+    underline_style: int | None = None,
+    locator: dict[str, int] | None = None,
+    position_ratio: float = 0.15,
+) -> dict[str, Any]:
+    return {
+        "container_type": "paragraph",
+        "container_locator": locator or {"paragraph_index": 1},
+        "source_text": text,
+        "normalized_text": normalize_semantic_text(text),
+        "container_text": text,
+        "normalized_container_text": normalize_semantic_text(text),
+        "context_before": "",
+        "context_after": "",
+        "position_ratio": position_ratio,
+        "local_position_ratio": 0.5,
+        "style_flags": flags or _make_style_flags(),
+        "font_color": font_color,
+        "highlight_color": highlight_color,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": underline_style,
+        "source_span_kind": "full_container",
+    }
+
+
 def test_normalize_semantic_text_ignores_numbering_spacing_and_punctuation() -> None:
     assert normalize_semantic_text("1、 服务内容： 测试。") == normalize_semantic_text(
         "2.服务内容 测试"
@@ -311,29 +357,10 @@ def test_build_number_prefix_fragment_from_word_list_level_font() -> None:
 
 
 def test_apply_inline_style_fragments_matches_full_container_after_renumbering(monkeypatch) -> None:
-    fragment = {
-        "container_type": "paragraph",
-        "container_locator": {"paragraph_index": 1},
-        "source_text": "1、原条款内容",
-        "normalized_text": normalize_semantic_text("1、原条款内容"),
-        "container_text": "1、原条款内容",
-        "normalized_container_text": normalize_semantic_text("1、原条款内容"),
-        "context_before": "",
-        "context_after": "",
-        "position_ratio": 0.15,
-        "style_flags": {
-            "strikethrough": True,
-            "underline": False,
-            "bold": False,
-            "italic": False,
-        },
-        "font_color": 255,
-        "highlight_color": None,
-        "font_name": None,
-        "font_size": None,
-        "underline_style": None,
-        "source_span_kind": "full_container",
-    }
+    fragment = _make_full_container_fragment(
+        text="1、原条款内容",
+        flags=_make_style_flags(strikethrough=True),
+    )
     candidate = _make_candidate(text="2、原条款内容", start=100, position_ratio=0.15)
     monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
 
@@ -358,38 +385,299 @@ def test_apply_inline_style_fragments_matches_full_container_after_renumbering(m
     assert result["skipped_by_reason"] == {"font_color_full_container_blocked": 1}
 
 
-def test_apply_inline_style_fragments_skips_color_only_full_container_without_target_lookup(
+def test_apply_inline_style_fragments_copies_color_for_short_unique_full_container(
+    monkeypatch,
+) -> None:
+    source_text = "1、标注“★”的项目为关键技术参数。"
+    fragment = _make_full_container_fragment(text=source_text)
+    candidate = _make_candidate(text=source_text, start=100, position_ratio=0.15)
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=200,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 1
+    assert result["skipped"] == 0
+    assert result["failed"] == 0
+    assert result["applied_by_style"] == {"font_color": 1}
+    assert result["skipped_by_reason"] == {}
+    assert doc.applied_ranges[0].Start == 100
+    assert doc.applied_ranges[0].End == 100 + len(source_text)
+    assert doc.applied_ranges[0].Font.Color == 255
+
+
+def test_apply_inline_style_fragments_copies_color_and_underline_for_short_unique_full_container(
+    monkeypatch,
+) -> None:
+    source_text = "1、标注“★”的项目为关键技术参数。"
+    fragment = _make_full_container_fragment(
+        text=source_text,
+        flags=_make_style_flags(underline=True),
+        underline_style=1,
+    )
+    candidate = _make_candidate(text=source_text, start=100, position_ratio=0.15)
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=200,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 1
+    assert result["skipped"] == 0
+    assert result["applied_by_style"] == {"underline": 1, "font_color": 1}
+    assert result["skipped_by_reason"] == {}
+    assert doc.applied_ranges[0].Font.Color == 255
+    assert doc.applied_ranges[0].Font.Underline == 1
+
+
+def test_apply_inline_style_fragments_copies_color_and_highlight_for_short_unique_full_container(
+    monkeypatch,
+) -> None:
+    source_text = "1、标注“★”的项目为关键技术参数。"
+    fragment = _make_full_container_fragment(
+        text=source_text,
+        highlight_color=7,
+    )
+    candidate = _make_candidate(text=source_text, start=100, position_ratio=0.15)
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=200,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 1
+    assert result["skipped"] == 0
+    assert result["applied_by_style"] == {"font_color": 1, "highlight_color": 1}
+    assert result["skipped_by_reason"] == {}
+    assert doc.applied_ranges[0].Font.Color == 255
+    assert doc.applied_ranges[0].Font.HighlightColorIndex == 7
+
+
+def test_apply_inline_style_fragments_blocks_short_full_container_color_when_renumbered(
+    monkeypatch,
+) -> None:
+    source_text = "1、标注“★”的项目为关键技术参数。"
+    target_text = "2、标注“★”的项目为关键技术参数。"
+    fragment = _make_full_container_fragment(text=source_text)
+    candidate = _make_candidate(text=target_text, start=100, position_ratio=0.15)
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    result = style_ops.apply_inline_style_fragments(
+        doc=_FakeDoc(),
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=200,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert result["failed"] == 0
+    assert result["applied_by_style"] == {}
+    assert result["issues"][0]["reason"] == "font_color_full_container_blocked"
+    assert result["skipped_by_reason"] == {"font_color_full_container_blocked": 1}
+
+
+def test_apply_inline_style_fragments_blocks_color_but_keeps_underline_when_short_full_container_renumbered(
+    monkeypatch,
+) -> None:
+    source_text = "1、标注“★”的项目为关键技术参数。"
+    target_text = "2、标注“★”的项目为关键技术参数。"
+    fragment = _make_full_container_fragment(
+        text=source_text,
+        flags=_make_style_flags(underline=True),
+        underline_style=1,
+    )
+    candidate = _make_candidate(text=target_text, start=100, position_ratio=0.15)
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=200,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 1
+    assert result["skipped"] == 0
+    assert result["issues"] == []
+    assert result["applied_by_style"] == {"underline": 1}
+    assert result["skipped_by_reason"] == {"font_color_full_container_blocked": 1}
+    assert doc.applied_ranges[0].Start == 100
+    assert doc.applied_ranges[0].End == 100 + len(target_text)
+    assert doc.applied_ranges[0].Font.Underline == 1
+    assert doc.applied_ranges[0].Font.Color is None
+
+
+def test_apply_inline_style_fragments_blocks_short_full_container_color_when_repeated(
+    monkeypatch,
+) -> None:
+    source_text = "1、标注“★”的项目为关键技术参数。"
+    fragment = _make_full_container_fragment(text=source_text)
+    first = _make_candidate(
+        text=source_text,
+        start=100,
+        locator={"paragraph_index": 1},
+        position_ratio=0.15,
+    )
+    duplicate = _make_candidate(
+        text=source_text,
+        start=200,
+        locator={"paragraph_index": 2},
+        position_ratio=0.16,
+    )
+    monkeypatch.setattr(
+        style_ops,
+        "_build_target_containers",
+        lambda *args, **kwargs: [first, duplicate],
+    )
+
+    result = style_ops.apply_inline_style_fragments(
+        doc=_FakeDoc(),
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=280,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert result["failed"] == 0
+    assert result["applied_by_style"] == {}
+    assert result["issues"][0]["reason"] == "font_color_full_container_blocked"
+    assert result["skipped_by_reason"] == {"font_color_full_container_blocked": 1}
+
+
+def test_apply_inline_style_fragments_blocks_color_but_keeps_highlight_when_short_full_container_repeated(
+    monkeypatch,
+) -> None:
+    source_text = "1、标注“★”的项目为关键技术参数。"
+    fragment = _make_full_container_fragment(
+        text=source_text,
+        highlight_color=7,
+    )
+    first = _make_candidate(
+        text=source_text,
+        start=100,
+        locator={"paragraph_index": 1},
+        position_ratio=0.15,
+    )
+    duplicate = _make_candidate(
+        text=source_text,
+        start=200,
+        locator={"paragraph_index": 2},
+        position_ratio=0.16,
+    )
+    monkeypatch.setattr(
+        style_ops,
+        "_build_target_containers",
+        lambda *args, **kwargs: [first, duplicate],
+    )
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=280,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 1
+    assert result["skipped"] == 0
+    assert result["issues"] == []
+    assert result["applied_by_style"] == {"highlight_color": 1}
+    assert result["skipped_by_reason"] == {"font_color_full_container_blocked": 1}
+    assert doc.applied_ranges[0].Start == 100
+    assert doc.applied_ranges[0].Font.Color is None
+    assert doc.applied_ranges[0].Font.HighlightColorIndex == 7
+
+
+def test_apply_inline_style_fragments_blocks_color_on_cross_container_duplicate(
+    monkeypatch,
+) -> None:
+    source_text = "1、标注“★”的项目为关键技术参数。"
+    fragment = _make_full_container_fragment(
+        text=source_text,
+        flags=_make_style_flags(underline=True),
+        underline_style=1,
+    )
+    paragraph = _make_candidate(
+        text=source_text,
+        start=100,
+        locator={"paragraph_index": 1},
+        position_ratio=0.15,
+    )
+    table_cell = _make_candidate(
+        text=source_text,
+        start=200,
+        container_type="table_cell",
+        locator={"table_index": 1, "row": 1, "col": 1},
+        position_ratio=0.16,
+    )
+    monkeypatch.setattr(
+        style_ops,
+        "_build_target_containers",
+        lambda *args, **kwargs: [paragraph, table_cell],
+    )
+
+    doc = _FakeDoc()
+    diagnostic_messages: list[str] = []
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=280,
+        log_parts=[],
+        diagnostic_logger=diagnostic_messages.append,
+    )
+
+    assert result["applied"] == 1
+    assert result["skipped"] == 0
+    assert result["issues"] == []
+    assert result["applied_by_style"] == {"underline": 1}
+    assert result["skipped_by_reason"] == {"font_color_full_container_blocked": 1}
+    assert doc.applied_ranges[0].Start == 100
+    assert doc.applied_ranges[0].Font.Color is None
+    assert doc.applied_ranges[0].Font.Underline == 1
+    assert any(
+        "full_container_global_exact_matches=2" in message
+        for message in diagnostic_messages
+    )
+
+
+def test_apply_inline_style_fragments_blocks_long_color_only_full_container_without_target_lookup(
     monkeypatch,
 ) -> None:
     def fail_build_target_containers(*args: Any, **kwargs: Any) -> list[Any]:
         del args, kwargs
-        raise AssertionError("color-only full_container should skip before target lookup")
+        raise AssertionError("long color-only full_container should skip before target lookup")
 
     monkeypatch.setattr(style_ops, "_build_target_containers", fail_build_target_containers)
     for explicit_color in (255, 16711680, 65280):
-        fragment = {
-            "container_type": "paragraph",
-            "container_locator": {"paragraph_index": 1},
-            "source_text": "1、原条款内容",
-            "normalized_text": normalize_semantic_text("1、原条款内容"),
-            "container_text": "1、原条款内容",
-            "normalized_container_text": normalize_semantic_text("1、原条款内容"),
-            "context_before": "",
-            "context_after": "",
-            "position_ratio": 0.15,
-            "style_flags": {
-                "strikethrough": False,
-                "underline": False,
-                "bold": False,
-                "italic": False,
-            },
-            "font_color": explicit_color,
-            "highlight_color": None,
-            "font_name": None,
-            "font_size": None,
-            "underline_style": None,
-            "source_span_kind": "full_container",
-        }
+        source_text = (
+            "1、技术证明文件：文件中需提供制造厂商公开发布的印刷资料"
+            "（DATA SHEET/样本）、产品说明书。"
+        )
+        fragment = _make_full_container_fragment(text=source_text, font_color=explicit_color)
         doc = _FakeDoc()
         result = style_ops.apply_inline_style_fragments(
             doc=doc,
@@ -406,6 +694,41 @@ def test_apply_inline_style_fragments_skips_color_only_full_container_without_ta
         assert result["skipped_by_reason"] == {"font_color_full_container_blocked": 1}
         assert result["issues"][0]["reason"] == "font_color_full_container_blocked"
         assert doc.applied_ranges == []
+
+
+def test_apply_inline_style_fragments_blocks_long_full_container_color_but_keeps_underline(
+    monkeypatch,
+) -> None:
+    source_text = (
+        "1、技术证明文件：文件中需提供制造厂商公开发布的印刷资料"
+        "（DATA SHEET/样本）、产品说明书。"
+    )
+    fragment = _make_full_container_fragment(
+        text=source_text,
+        flags=_make_style_flags(underline=True),
+        underline_style=1,
+    )
+    candidate = _make_candidate(text=source_text, start=100, position_ratio=0.15)
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=260,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 1
+    assert result["skipped"] == 0
+    assert result["issues"] == []
+    assert result["applied_by_style"] == {"underline": 1}
+    assert result["skipped_by_reason"] == {"font_color_full_container_blocked": 1}
+    assert doc.applied_ranges[0].Start == 100
+    assert doc.applied_ranges[0].End == 100 + len(source_text)
+    assert doc.applied_ranges[0].Font.Underline == 1
+    assert doc.applied_ranges[0].Font.Color is None
 
 
 def test_apply_inline_style_fragments_blocks_font_color_on_renumbered_prefix(monkeypatch) -> None:
@@ -1620,10 +1943,10 @@ def test_apply_inline_style_fragments_emits_color_gate_diagnostics_only_to_debug
     )
 
     assert result["applied"] == 0
-    assert any("font_color_gate_version=fail_closed_v1" in message for message in diagnostic_messages)
+    assert any("font_color_gate_version=fail_closed_v3" in message for message in diagnostic_messages)
     assert any("global_occurrences=" in message for message in diagnostic_messages)
     assert any("raw_before=" in message and "raw_after=" in message for message in diagnostic_messages)
-    assert not any("font_color_gate_version=fail_closed_v1" in message for message in progress_messages)
+    assert not any("font_color_gate_version=fail_closed_v3" in message for message in progress_messages)
 
 
 def test_short_partial_gate_rejects_paragraph_number_prefix_exact_match() -> None:

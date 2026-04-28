@@ -29,7 +29,7 @@ BLACK_COLOR = 0
 AUTOMATIC_COLOR = 0
 WINDOWS_AUTO_COLOR = -16777216
 NO_HIGHLIGHT = 0
-FONT_COLOR_GATE_VERSION = "fail_closed_v1"
+FONT_COLOR_GATE_VERSION = "fail_closed_v3"
 CONTEXT_CHARS = 24
 CONTAINER_CANDIDATE_LIMIT = 5
 APPROX_LOCAL_SCAN_WINDOW = 18
@@ -434,12 +434,31 @@ def _is_font_color_only_partial_fragment(fragment: InlineStyleFragment) -> bool:
     )
 
 
+def _is_full_container_font_color_fragment(fragment: InlineStyleFragment) -> bool:
+    return (
+        fragment.get("font_color") is not None
+        and str(fragment.get("source_span_kind") or "partial_span") == "full_container"
+    )
+
+
+def _is_short_full_container_font_color_fragment(fragment: InlineStyleFragment) -> bool:
+    if not _is_full_container_font_color_fragment(fragment):
+        return False
+
+    normalized_text = str(
+        fragment.get("normalized_container_text") or fragment.get("normalized_text") or ""
+    )
+    return _normalized_length(normalized_text) <= SHORT_FULL_CONTAINER_MAX_LEN
+
+
 def _static_font_color_block_reason(fragment: InlineStyleFragment) -> str:
     if fragment.get("font_color") is None:
         return ""
     if _is_number_prefix_fragment(fragment):
         return "font_color_number_prefix_blocked"
     if str(fragment.get("source_span_kind") or "partial_span") == "full_container":
+        if _is_short_full_container_font_color_fragment(fragment):
+            return ""
         return "font_color_full_container_blocked"
     return ""
 
@@ -619,6 +638,77 @@ def _font_color_uniqueness_gate_passed(
     )
 
 
+def _normalize_full_container_color_gate_text(value: Any) -> str:
+    return (
+        str(value or "")
+        .replace("\a", "")
+        .replace("\x07", "")
+        .replace("\f", "")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("\v", "\n")
+        .replace("\u00a0", " ")
+        .strip()
+    )
+
+
+def _full_container_color_gate_source_text(fragment: InlineStyleFragment) -> str:
+    return _normalize_full_container_color_gate_text(
+        fragment.get("container_text") or fragment.get("source_text")
+    )
+
+
+def _full_container_color_gate_normalized_text(fragment: InlineStyleFragment) -> str:
+    return str(fragment.get("normalized_container_text") or fragment.get("normalized_text") or "")
+
+
+def _count_full_container_color_gate_matches(
+    fragment: InlineStyleFragment,
+    target_containers: Sequence[_ContainerCandidate],
+) -> int:
+    normalized_text = _full_container_color_gate_normalized_text(fragment)
+    source_visible_text = _full_container_color_gate_source_text(fragment)
+    if not normalized_text or not source_visible_text:
+        return 0
+
+    return sum(
+        1
+        for item in target_containers
+        if item.normalized_text == normalized_text
+        and _normalize_full_container_color_gate_text(item.visible_text) == source_visible_text
+    )
+
+
+def _font_color_full_container_gate_passed(
+    fragment: InlineStyleFragment,
+    candidate: _ContainerCandidate,
+    target_containers: Sequence[_ContainerCandidate],
+) -> bool:
+    if not _is_short_full_container_font_color_fragment(fragment):
+        return False
+
+    normalized_text = _full_container_color_gate_normalized_text(fragment)
+    if not normalized_text or candidate.normalized_text != normalized_text:
+        return False
+
+    source_visible_text = _full_container_color_gate_source_text(fragment)
+    if not source_visible_text:
+        return False
+    if _normalize_full_container_color_gate_text(candidate.visible_text) != source_visible_text:
+        return False
+
+    if _count_full_container_color_gate_matches(fragment, target_containers) != 1:
+        return False
+
+    if candidate.container_type == "table_cell" and not _container_locator_equals(
+        candidate.container_locator,
+        dict(fragment.get("container_locator") or {}),
+    ):
+        return False
+
+    return True
+
+
 def _font_color_partial_gate_passed(
     fragment: InlineStyleFragment,
     candidate: _ContainerCandidate,
@@ -710,14 +800,23 @@ def _build_font_color_gate_diagnostic(
             candidate,
             local_match,
         )
-    return (
-        f"font_color_gate_version={FONT_COLOR_GATE_VERSION}; "
-        f"reason={reason}; exact={exact}; prefix={prefix}; "
-        f"raw_before={before_ok}; raw_after={after_ok}; "
-        f"container_occurrences={container_occurrences}; "
-        f"global_occurrences={global_occurrences}; "
-        f"container_score={container_score:.4f}"
-    )
+    parts = [
+        f"font_color_gate_version={FONT_COLOR_GATE_VERSION}",
+        f"reason={reason}",
+        f"exact={exact}",
+        f"prefix={prefix}",
+        f"raw_before={before_ok}",
+        f"raw_after={after_ok}",
+        f"container_occurrences={container_occurrences}",
+        f"global_occurrences={global_occurrences}",
+    ]
+    if str(fragment.get("source_span_kind") or "partial_span") == "full_container":
+        parts.append(
+            "full_container_global_exact_matches="
+            f"{_count_full_container_color_gate_matches(fragment, target_containers)}"
+        )
+    parts.append(f"container_score={container_score:.4f}")
+    return "; ".join(parts)
 
 
 def _resolve_effective_fragment_for_writeback(
@@ -738,6 +837,11 @@ def _resolve_effective_fragment_for_writeback(
         if _font_color_partial_gate_passed(fragment, candidate, local_match, target_containers):
             return fragment, ""
         return _fragment_without_font_color(fragment), "font_color_unanchored_partial"
+
+    if str(fragment.get("source_span_kind") or "partial_span") == "full_container":
+        if _font_color_full_container_gate_passed(fragment, candidate, target_containers):
+            return fragment, ""
+        return _fragment_without_font_color(fragment), "font_color_full_container_blocked"
 
     return fragment, ""
 
