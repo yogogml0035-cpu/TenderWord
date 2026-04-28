@@ -6,11 +6,13 @@ from backend.config.tender_config import get_protected_field_profile
 from backend.helper.word_helper.protected_fields import (
     collect_protected_fields,
     collect_profile_protected_fields,
+    insert_prefix_before_keyword,
     match_protected_field_line,
     normalize_protected_field_paragraphs,
     normalize_protected_field_text,
     refind_protected_paragraph,
     refresh_protected_fields,
+    update_protected_field,
 )
 from backend.util.word_util import wdCollapseEnd, wdWithInTable
 
@@ -67,6 +69,22 @@ class _FakeParagraphCollection:
         return self._paragraphs[index - 1]
 
 
+class _FakeFont:
+    def __init__(self):
+        self.Name = "旧字体"
+        self.Size = 9
+        self.Bold = True
+        self.Italic = True
+        self.Underline = 1
+        self.StrikeThrough = True
+        self.Color = 255
+
+    def __setattr__(self, name: str, value):
+        if name == "HighlightColorIndex":
+            raise AttributeError("Font has no HighlightColorIndex in this fake")
+        object.__setattr__(self, name, value)
+
+
 class _FakeFind:
     def __init__(self, range_view: "_FakeRangeView"):
         self._range_view = range_view
@@ -98,6 +116,8 @@ class _FakeRangeView:
         self.Start = int(start)
         self.End = int(end)
         self.Find = _FakeFind(self)
+        self.Font = _FakeFont()
+        self.HighlightColorIndex = 7
 
     @property
     def Paragraphs(self) -> _FakeParagraphCollection:
@@ -114,6 +134,10 @@ class _FakeRangeView:
         self._doc.replace_slice(int(self.Start), int(self.End), str(value))
         self.End = int(self.Start) + len(str(value))
 
+    def InsertBefore(self, value: str) -> None:
+        self._doc.replace_slice(int(self.Start), int(self.Start), str(value))
+        self.End = int(self.Start) + len(str(value))
+
     def Collapse(self, direction: int) -> None:
         if direction == wdCollapseEnd:
             self.Start = int(self.End)
@@ -124,6 +148,7 @@ class _FakeDoc:
         self._records = [_ParagraphRecord(text=text, in_table=in_table) for text, in_table in lines]
         self._reindex()
         self.Content = type("_FakeContent", (), {"End": self._content_end()})()
+        self.created_ranges: list[_FakeRangeView] = []
 
     def _content_end(self) -> int:
         if not self._records:
@@ -174,7 +199,21 @@ class _FakeDoc:
             yield _FakeParagraph(record)
 
     def Range(self, start: int, end: int) -> _FakeRangeView:
-        return _FakeRangeView(self, start, end)
+        range_view = _FakeRangeView(self, start, end)
+        self.created_ranges.append(range_view)
+        return range_view
+
+
+def _assert_clean_generated_format(range_view: _FakeRangeView) -> None:
+    font = range_view.Font
+    assert font.Name == "宋体"
+    assert font.Size == 12
+    assert font.Bold is False
+    assert font.Italic is False
+    assert font.Underline == 0
+    assert font.StrikeThrough is False
+    assert font.Color == 0
+    assert range_view.HighlightColorIndex == 0
 
 
 def test_match_protected_field_line_accepts_canonical_marker_and_tracks_source_marker() -> None:
@@ -214,6 +253,36 @@ def test_normalize_protected_field_text_only_rewrites_legal_field_lines() -> Non
         "本项目服务期限: 12个月",
         "付款方式：按季度结算",
     ]
+
+
+def test_update_protected_field_resets_generated_value_font_only() -> None:
+    doc = _FakeDoc([("付款方式：旧值", False)])
+    protected_fields = {PAYMENT_METHOD_MARKER: doc.Range(0, doc.Content.End)}
+
+    assert update_protected_field(
+        doc,
+        PAYMENT_METHOD_MARKER,
+        "按季度结算",
+        protected_fields,
+    )
+
+    assert doc._records[0].text == "付款方式：按季度结算"
+    _assert_clean_generated_format(doc.created_ranges[-1])
+
+
+def test_insert_prefix_before_keyword_resets_generated_prefix_font_only() -> None:
+    doc = _FakeDoc([("交付日期：旧值", False)])
+    protected_fields = {DELIVERY_DATE_MARKER: doc.Range(0, doc.Content.End)}
+
+    assert insert_prefix_before_keyword(
+        doc,
+        DELIVERY_DATE_MARKER,
+        "2、",
+        protected_fields,
+    )
+
+    assert doc._records[0].text == "2、交付日期：旧值"
+    _assert_clean_generated_format(doc.created_ranges[-1])
 
 
 def test_normalize_protected_field_paragraphs_and_collect_refresh_use_canonical_markers() -> None:

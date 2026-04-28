@@ -97,7 +97,7 @@ const gngkFiscalInsertionConfigDefaults: TenderInsertionConfig = {
 };
 const gngkServiceInsertionConfigDefaults: TenderInsertionConfig = {
   before_text: '第三章 招标内容及要求',
-  after_text: '第四章 合同条款',
+  after_text: '第四章 投标文件有关格式',
 };
 function resolveDefaultGenerationStyle(tenderLx: TenderLx): GenerationStyle {
   return tenderLx === 1 ? 'param' : 'template';

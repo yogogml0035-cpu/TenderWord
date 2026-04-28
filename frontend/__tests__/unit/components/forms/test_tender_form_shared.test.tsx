@@ -985,7 +985,7 @@ describe('TenderFormShared', () => {
     await user.click(screen.getByRole('button', { name: '服务' }));
 
     await waitFor(() => expect(beforeInput).toHaveValue('第三章 招标内容及要求'));
-    expect(afterInput).toHaveValue('第四章 合同条款');
+    expect(afterInput).toHaveValue('第四章 投标文件有关格式');
   });
 
   it('uses URL tender_lx only for initial default and allows manual switching afterwards', async () => {
@@ -1049,7 +1049,7 @@ describe('TenderFormShared', () => {
     const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
 
     await waitFor(() => expect(beforeInput).toHaveValue('第三章 招标内容及要求'));
-    expect(afterInput).toHaveValue('第四章 合同条款');
+    expect(afterInput).toHaveValue('第四章 投标文件有关格式');
 
     await user.clear(beforeInput);
     await user.type(beforeInput, '服务共享前');
@@ -1096,7 +1096,7 @@ describe('TenderFormShared', () => {
     await user.type(afterInput, '货物财政后');
 
     await user.click(screen.getByRole('button', { name: '服务' }));
-    await waitFor(() => expect(afterInput).toHaveValue('第四章 合同条款'));
+    await waitFor(() => expect(afterInput).toHaveValue('第四章 投标文件有关格式'));
 
     await user.clear(beforeInput);
     await user.type(beforeInput, '服务共享前');

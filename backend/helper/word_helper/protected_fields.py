@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from backend.config.tender_config import ProtectedFieldProfile
 from backend.util.word_util import wdCollapseEnd, wdFindStop, wdWithInTable
+from backend.helper.word_helper.content_ops import reset_generated_text_font_format
 
 CANONICAL_PROTECTED_FIELD_COLON = "："
 _OPTIONAL_PREFIX_PATTERN = (
@@ -559,6 +560,8 @@ def insert_prefix_before_keyword(
     prefix: str,
     protected_fields: Dict[str, Any],
     *,
+    font_name: str = "宋体",
+    font_size: int = 12,
     log_parts: Optional[List[str]] = None,
 ) -> bool:
     """
@@ -585,6 +588,13 @@ def insert_prefix_before_keyword(
             return True
         insert_pos = int(para_rng.Start) + field_start
         doc.Range(insert_pos, insert_pos).InsertBefore(prefix_clean)
+        prefix_rng = doc.Range(insert_pos, insert_pos + len(prefix_clean))
+        reset_generated_text_font_format(
+            prefix_rng,
+            font_name=font_name,
+            font_size=font_size,
+            log_parts=log_parts,
+        )
         return True
     except Exception as e:
         if log_parts is not None:
@@ -630,8 +640,13 @@ def update_protected_field(
         value_rng = doc.Range(value_start, value_end)
         new_value_clean = new_value.replace("\r", "").replace("\n", "")
         value_rng.Text = new_value_clean
-        value_rng.Font.Name = font_name
-        value_rng.Font.Size = font_size
+        formatted_value_rng = doc.Range(value_start, value_start + len(new_value_clean))
+        reset_generated_text_font_format(
+            formatted_value_rng,
+            font_name=font_name,
+            font_size=font_size,
+            log_parts=log_parts,
+        )
         if log_parts is not None:
             log_parts.append(
                 f"  已更新受保护字段 '{canonical_marker}': {new_value_clean[:50]}..."

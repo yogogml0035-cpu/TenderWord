@@ -29,6 +29,7 @@ BLACK_COLOR = 0
 AUTOMATIC_COLOR = 0
 WINDOWS_AUTO_COLOR = -16777216
 NO_HIGHLIGHT = 0
+FONT_COLOR_GATE_VERSION = "fail_closed_v1"
 CONTEXT_CHARS = 24
 CONTAINER_CANDIDATE_LIMIT = 5
 APPROX_LOCAL_SCAN_WINDOW = 18
@@ -47,8 +48,19 @@ TABLE_SHORT_PARTIAL_APPROX_MIN_SCORE = 0.86
 TABLE_SHORT_PARTIAL_HIGH_VISIBLE_APPROX_MIN_SCORE = 0.90
 TABLE_SHORT_PARTIAL_STRUCTURE_MIN_SCORE = 0.84
 TABLE_SHORT_PARTIAL_CONTAINER_MIN_SCORE = 0.82
+FONT_COLOR_CONTAINER_MIN_SCORE = 0.78
+FONT_COLOR_SINGLE_CONTEXT_CONTAINER_MIN_SCORE = 0.90
+FONT_COLOR_SINGLE_CONTEXT_MIN_LEN = 7
 SUCCESS_EXAMPLE_LIMIT = 3
 SUCCESS_EXAMPLE_TEXT_LIMIT = 24
+SHORT_HIGH_FREQUENCY_COLOR_TOKENS = {
+    "提供",
+    "投标人",
+    "单位",
+    "要求",
+    "服务",
+    "设备",
+}
 HEADING_TEXT_RE = re.compile(
     r"^\s*(?:"
     r"第?[一二三四五六七八九十百千]+(?:章|节|部分)"
@@ -84,6 +96,9 @@ REASON_LABEL_MAP = {
     "short_fragment_prefix_conflict": "短片段命中目标编号前缀",
     "short_fragment_semantic_mismatch": "短片段上下文不匹配",
     "short_fragment_unanchored": "短片段缺少可靠锚点",
+    "font_color_full_container_blocked": "字体颜色整段回填已拦截",
+    "font_color_number_prefix_blocked": "字体颜色编号回填已拦截",
+    "font_color_unanchored_partial": "字体颜色片段缺少可靠锚点",
     "table_structure_changed": "表格结构已变化，无法按原单元格定位",
 }
 SPAN_KIND_LABEL_MAP = {
@@ -383,6 +398,61 @@ def _has_high_visible_risk_style(fragment: InlineStyleFragment) -> bool:
     return bool(style_flags.get("strikethrough") or style_flags.get("italic"))
 
 
+def _fragment_has_effective_style(fragment: InlineStyleFragment) -> bool:
+    style_flags = fragment.get("style_flags") or {}
+    return bool(
+        style_flags.get("strikethrough")
+        or style_flags.get("underline")
+        or style_flags.get("bold")
+        or style_flags.get("italic")
+        or fragment.get("font_color") is not None
+        or fragment.get("highlight_color") is not None
+    )
+
+
+def _fragment_without_font_color(fragment: InlineStyleFragment) -> InlineStyleFragment:
+    clean_fragment = InlineStyleFragment(**dict(fragment))
+    clean_fragment["font_color"] = None
+    return clean_fragment
+
+
+def _normalize_fragment_font_color(fragment: InlineStyleFragment) -> InlineStyleFragment:
+    normalized_color = _normalize_font_color(fragment.get("font_color"))
+    if normalized_color == fragment.get("font_color"):
+        return fragment
+
+    clean_fragment = InlineStyleFragment(**dict(fragment))
+    clean_fragment["font_color"] = normalized_color
+    return clean_fragment
+
+
+def _is_font_color_only_partial_fragment(fragment: InlineStyleFragment) -> bool:
+    return (
+        fragment.get("font_color") is not None
+        and str(fragment.get("source_span_kind") or "partial_span") == "partial_span"
+        and not _fragment_has_effective_style(_fragment_without_font_color(fragment))
+    )
+
+
+def _static_font_color_block_reason(fragment: InlineStyleFragment) -> str:
+    if fragment.get("font_color") is None:
+        return ""
+    if _is_number_prefix_fragment(fragment):
+        return "font_color_number_prefix_blocked"
+    if str(fragment.get("source_span_kind") or "partial_span") == "full_container":
+        return "font_color_full_container_blocked"
+    return ""
+
+
+def _record_skipped_style_reason(
+    result: InlineStyleWritebackResult,
+    reason: str,
+) -> None:
+    if not reason:
+        return
+    result["skipped_by_reason"][reason] = result["skipped_by_reason"].get(reason, 0) + 1
+
+
 def _has_short_partial_context(fragment: InlineStyleFragment) -> bool:
     return any(
         _normalized_length(normalize_semantic_text(fragment.get(key))) >= 2
@@ -413,6 +483,263 @@ def _short_partial_context_gate_passed(
     after_ok = not after_context or after_slice.startswith(after_context)
     raw_context_ok = (bool(before_context) or bool(after_context)) and before_ok and after_ok
     return raw_context_ok or float(local_match.context_score) >= SHORT_PARTIAL_CONTEXT_MIN_SCORE
+
+
+def _normalized_raw_context(value: Any) -> str:
+    return normalize_semantic_text(
+        str(value or "")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("\v", "\n")
+        .replace("\u00a0", " ")
+    )
+
+
+def _font_color_context_state(
+    fragment: InlineStyleFragment,
+    candidate: _ContainerCandidate,
+    local_match: _LocalMatch,
+) -> tuple[bool, bool, bool, bool]:
+    before_context = _normalized_raw_context(fragment.get("context_before"))
+    after_context = _normalized_raw_context(fragment.get("context_after"))
+    before_slice = _normalized_raw_context(
+        candidate.visible_text[
+            max(0, local_match.visible_start - CONTEXT_CHARS) : local_match.visible_start
+        ]
+    )
+    after_slice = _normalized_raw_context(
+        candidate.visible_text[local_match.visible_end : local_match.visible_end + CONTEXT_CHARS]
+    )
+
+    before_has = bool(before_context)
+    after_has = bool(after_context)
+    before_ok = before_has and before_slice.endswith(before_context)
+    after_ok = after_has and after_slice.startswith(after_context)
+    return before_has, before_ok, after_has, after_ok
+
+
+def _is_short_high_frequency_color_fragment(fragment: InlineStyleFragment) -> bool:
+    normalized_text = str(fragment.get("normalized_text") or "")
+    return (
+        len(normalized_text) <= SHORT_PARTIAL_EXACT_ONLY_MAX_LEN
+        or normalized_text in SHORT_HIGH_FREQUENCY_COLOR_TOKENS
+    )
+
+
+def _font_color_raw_context_gate_passed(
+    fragment: InlineStyleFragment,
+    candidate: _ContainerCandidate,
+    local_match: _LocalMatch,
+    *,
+    container_score: float,
+) -> bool:
+    before_has, before_ok, after_has, after_ok = _font_color_context_state(
+        fragment,
+        candidate,
+        local_match,
+    )
+    has_both_contexts = before_has and after_has
+    both_contexts_match = before_ok and after_ok
+    same_locator = _container_locator_equals(
+        candidate.container_locator,
+        dict(fragment.get("container_locator") or {}),
+    )
+
+    if _is_short_high_frequency_color_fragment(fragment):
+        return has_both_contexts and both_contexts_match and same_locator
+
+    if has_both_contexts:
+        return both_contexts_match
+
+    single_context_matches = before_ok or after_ok
+    return (
+        single_context_matches
+        and _normalized_length(fragment.get("normalized_text")) >= FONT_COLOR_SINGLE_CONTEXT_MIN_LEN
+        and float(container_score) >= FONT_COLOR_SINGLE_CONTEXT_CONTAINER_MIN_SCORE
+    )
+
+
+def _count_exact_occurrences_in_candidates(
+    candidates: Sequence[_ContainerCandidate],
+    normalized_text: str,
+    *,
+    locator_filter: Optional[Callable[[_ContainerCandidate], bool]] = None,
+) -> int:
+    if not normalized_text:
+        return 0
+
+    count = 0
+    for candidate in candidates:
+        if locator_filter is not None and not locator_filter(candidate):
+            continue
+        count += len(_locate_exact_occurrences(candidate, normalized_text))
+    return count
+
+
+def _font_color_structure_unique_gate_passed(
+    fragment: InlineStyleFragment,
+    candidate: _ContainerCandidate,
+    candidates: Sequence[_ContainerCandidate],
+    normalized_text: str,
+) -> bool:
+    if candidate.container_type != "table_cell":
+        return False
+
+    source_locator = dict(fragment.get("container_locator") or {})
+    if not _container_locator_equals(candidate.container_locator, source_locator):
+        return False
+
+    same_locator_count = _count_exact_occurrences_in_candidates(
+        candidates,
+        normalized_text,
+        locator_filter=lambda item: item.container_type == "table_cell"
+        and _container_locator_equals(item.container_locator, source_locator),
+    )
+    return same_locator_count == 1
+
+
+def _font_color_uniqueness_gate_passed(
+    fragment: InlineStyleFragment,
+    candidate: _ContainerCandidate,
+    candidates: Sequence[_ContainerCandidate],
+    normalized_text: str,
+) -> bool:
+    if len(_locate_exact_occurrences(candidate, normalized_text)) != 1:
+        return False
+
+    global_count = _count_exact_occurrences_in_candidates(candidates, normalized_text)
+    if global_count == 1:
+        return True
+
+    return _font_color_structure_unique_gate_passed(
+        fragment,
+        candidate,
+        candidates,
+        normalized_text,
+    )
+
+
+def _font_color_partial_gate_passed(
+    fragment: InlineStyleFragment,
+    candidate: _ContainerCandidate,
+    local_match: Optional[_LocalMatch],
+    target_containers: Sequence[_ContainerCandidate],
+) -> bool:
+    if (
+        fragment.get("font_color") is None
+        or str(fragment.get("source_span_kind") or "partial_span") != "partial_span"
+        or local_match is None
+    ):
+        return False
+
+    if not bool(getattr(local_match, "is_exact", False)):
+        return False
+    if _is_target_line_leading_number_prefix_match(candidate, local_match):
+        return False
+    source_is_table = str(fragment.get("container_type") or "paragraph") == "table_cell"
+    target_is_table = candidate.container_type == "table_cell"
+    if source_is_table or target_is_table:
+        if not source_is_table or not target_is_table:
+            return False
+        if not _container_locator_equals(
+            candidate.container_locator,
+            dict(fragment.get("container_locator") or {}),
+        ):
+            return False
+
+    normalized_text = str(fragment.get("normalized_text") or "")
+    if not normalized_text:
+        return False
+
+    container_score = semantic_similarity_norm(
+        str(fragment.get("normalized_container_text") or ""),
+        candidate.normalized_text,
+    )
+    if container_score < FONT_COLOR_CONTAINER_MIN_SCORE:
+        return False
+
+    if not _font_color_raw_context_gate_passed(
+        fragment,
+        candidate,
+        local_match,
+        container_score=container_score,
+    ):
+        return False
+
+    return _font_color_uniqueness_gate_passed(
+        fragment,
+        candidate,
+        target_containers,
+        normalized_text,
+    )
+
+
+def _build_font_color_gate_diagnostic(
+    fragment: InlineStyleFragment,
+    *,
+    candidate: _ContainerCandidate,
+    local_match: Optional[_LocalMatch],
+    target_containers: Sequence[_ContainerCandidate],
+    reason: str,
+) -> str:
+    normalized_text = str(fragment.get("normalized_text") or "")
+    container_occurrences = (
+        len(_locate_exact_occurrences(candidate, normalized_text))
+        if normalized_text
+        else 0
+    )
+    global_occurrences = _count_exact_occurrences_in_candidates(
+        target_containers,
+        normalized_text,
+    )
+    container_score = semantic_similarity_norm(
+        str(fragment.get("normalized_container_text") or ""),
+        candidate.normalized_text,
+    )
+    exact = bool(getattr(local_match, "is_exact", False)) if local_match is not None else False
+    prefix = (
+        _is_target_line_leading_number_prefix_match(candidate, local_match)
+        if local_match is not None
+        else False
+    )
+    before_ok = False
+    after_ok = False
+    if local_match is not None:
+        _, before_ok, _, after_ok = _font_color_context_state(
+            fragment,
+            candidate,
+            local_match,
+        )
+    return (
+        f"font_color_gate_version={FONT_COLOR_GATE_VERSION}; "
+        f"reason={reason}; exact={exact}; prefix={prefix}; "
+        f"raw_before={before_ok}; raw_after={after_ok}; "
+        f"container_occurrences={container_occurrences}; "
+        f"global_occurrences={global_occurrences}; "
+        f"container_score={container_score:.4f}"
+    )
+
+
+def _resolve_effective_fragment_for_writeback(
+    fragment: InlineStyleFragment,
+    *,
+    candidate: _ContainerCandidate,
+    local_match: Optional[_LocalMatch],
+    target_containers: Sequence[_ContainerCandidate],
+) -> tuple[InlineStyleFragment, str]:
+    if fragment.get("font_color") is None:
+        return fragment, ""
+
+    static_reason = _static_font_color_block_reason(fragment)
+    if static_reason:
+        return _fragment_without_font_color(fragment), static_reason
+
+    if str(fragment.get("source_span_kind") or "partial_span") == "partial_span":
+        if _font_color_partial_gate_passed(fragment, candidate, local_match, target_containers):
+            return fragment, ""
+        return _fragment_without_font_color(fragment), "font_color_unanchored_partial"
+
+    return fragment, ""
 
 
 def _is_target_line_leading_number_prefix_match(
@@ -483,7 +810,10 @@ def build_inline_style_extraction_logs(
     step_label: str = "样式提取",
     max_text_chars: int = LOG_TEXT_LIMIT,
 ) -> list[str]:
-    fragments = [InlineStyleFragment(**dict(item)) for item in list(inline_style_fragments or [])]
+    fragments = [
+        _normalize_fragment_font_color(InlineStyleFragment(**dict(item)))
+        for item in list(inline_style_fragments or [])
+    ]
     logs: list[str] = []
     total = len(fragments)
 
@@ -2500,7 +2830,10 @@ def apply_inline_style_fragments(
     diagnostic_logger: Optional[Callable[[str], Any]] = None,
 ) -> InlineStyleWritebackResult:
     """将抽取的行内样式按高召回 + 最低安全线策略回填到新正文中。"""
-    fragments = [InlineStyleFragment(**dict(item)) for item in list(inline_style_fragments or [])]
+    fragments = [
+        _normalize_fragment_font_color(InlineStyleFragment(**dict(item)))
+        for item in list(inline_style_fragments or [])
+    ]
     result: InlineStyleWritebackResult = {
         "extracted": len(fragments),
         "attempted": 0,
@@ -2551,16 +2884,54 @@ def apply_inline_style_fragments(
         _emit_runtime_log(log_parts, f"{step_label}：未提取到可回填的行内样式。", progress_logger)
         return result
 
-    target_containers = _build_target_containers(doc, bound_start=bound_start, bound_end=bound_end)
+    target_containers: Optional[list[_ContainerCandidate]] = None
     success_examples: list[str] = []
     _emit_runtime_log(
         log_parts,
         f"{step_label}：开始回填行内样式，共 {len(fragments)} 个片段。",
         progress_logger,
     )
+    _emit_diagnostic_log(
+        f"{step_label}：font_color_gate_version={FONT_COLOR_GATE_VERSION}",
+        diagnostic_logger,
+    )
 
     for index, fragment in enumerate(fragments, start=1):
         result["attempted"] += 1
+        if not _fragment_has_effective_style(fragment):
+            reason = "empty_fragment"
+            result["skipped"] += 1
+            _append_issue(
+                result,
+                index=index,
+                reason=reason,
+                fragment=fragment,
+            )
+            _emit_runtime_log(
+                log_parts,
+                _build_writeback_outcome_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="跳过",
+                    fragment=fragment,
+                    reason=reason,
+                ),
+                progress_logger,
+            )
+            _emit_diagnostic_log(
+                _build_writeback_diagnostic_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="跳过",
+                    fragment=fragment,
+                    reason=reason,
+                ),
+                diagnostic_logger,
+            )
+            continue
+
         if _is_number_prefix_fragment(fragment) and _has_high_visible_risk_style(fragment):
             reason = "number_prefix_high_visible_style"
             result["skipped"] += 1
@@ -2595,8 +2966,65 @@ def apply_inline_style_fragments(
             )
             continue
 
+        active_fragment = fragment
+        static_color_reason = _static_font_color_block_reason(fragment)
+        if static_color_reason:
+            active_fragment = _fragment_without_font_color(fragment)
+            if not _fragment_has_effective_style(active_fragment):
+                result["skipped"] += 1
+                _append_issue(
+                    result,
+                    index=index,
+                    reason=static_color_reason,
+                    fragment=fragment,
+                )
+                _emit_runtime_log(
+                    log_parts,
+                    _build_writeback_outcome_log(
+                        step_label=step_label,
+                        index=index,
+                        total=len(fragments),
+                        status="跳过",
+                        fragment=fragment,
+                        reason=static_color_reason,
+                    ),
+                    progress_logger,
+                )
+                _emit_diagnostic_log(
+                    _build_writeback_diagnostic_log(
+                        step_label=step_label,
+                        index=index,
+                        total=len(fragments),
+                        status="跳过",
+                        fragment=fragment,
+                        reason=static_color_reason,
+                    ),
+                    diagnostic_logger,
+                )
+                continue
+
+            _record_skipped_style_reason(result, static_color_reason)
+            _emit_diagnostic_log(
+                _build_writeback_diagnostic_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="跳过",
+                    fragment=fragment,
+                    reason=static_color_reason,
+                ),
+                diagnostic_logger,
+            )
+
+        if target_containers is None:
+            target_containers = _build_target_containers(
+                doc,
+                bound_start=bound_start,
+                bound_end=bound_end,
+            )
+
         candidate_probes, no_candidate_reason, all_probes = _select_candidate_containers(
-            fragment,
+            active_fragment,
             target_containers,
         )
         candidate_details = _build_candidate_diagnostics(all_probes)
@@ -2606,7 +3034,7 @@ def apply_inline_style_fragments(
                 result,
                 index=index,
                 reason=no_candidate_reason,
-                fragment=fragment,
+                fragment=active_fragment,
             )
             _emit_runtime_log(
                 log_parts,
@@ -2615,7 +3043,7 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="跳过",
-                    fragment=fragment,
+                    fragment=active_fragment,
                     reason=no_candidate_reason,
                 ),
                 progress_logger,
@@ -2626,7 +3054,7 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="跳过",
-                    fragment=fragment,
+                    fragment=active_fragment,
                     reason=no_candidate_reason,
                     candidate_details=candidate_details,
                 ),
@@ -2636,12 +3064,12 @@ def apply_inline_style_fragments(
 
         if not candidate_probes:
             result["skipped"] += 1
-            reason = _default_no_candidate_reason(fragment)
+            reason = _default_no_candidate_reason(active_fragment)
             _append_issue(
                 result,
                 index=index,
                 reason=reason,
-                fragment=fragment,
+                fragment=active_fragment,
             )
             _emit_runtime_log(
                 log_parts,
@@ -2650,7 +3078,7 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="跳过",
-                    fragment=fragment,
+                    fragment=active_fragment,
                     reason=reason,
                 ),
                 progress_logger,
@@ -2661,7 +3089,7 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="跳过",
-                    fragment=fragment,
+                    fragment=active_fragment,
                     reason=reason,
                     candidate_details=candidate_details,
                 ),
@@ -2675,34 +3103,34 @@ def apply_inline_style_fragments(
             candidate = probe.candidate
             local_match: Optional[_LocalMatch] = probe.local_match
             local_error = None
-            if _is_number_prefix_fragment(fragment):
+            if _is_number_prefix_fragment(active_fragment):
                 local_match, local_error = _locate_number_prefix_span(
                     candidate,
-                    fragment,
+                    active_fragment,
                     doc=doc,
                 )
                 if local_error:
                     probe.local_error = local_error
                     local_failures.append(local_error)
                     continue
-            elif str(fragment.get("source_span_kind") or "partial_span") == "partial_span":
-                local_match, local_error = _locate_local_span(candidate, fragment)
+            elif str(active_fragment.get("source_span_kind") or "partial_span") == "partial_span":
+                local_match, local_error = _locate_local_span(candidate, active_fragment)
                 if local_error:
                     probe.local_error = local_error
                     local_failures.append(local_error)
                     continue
-                gate_reason = _short_partial_match_gate_reason(fragment, probe, local_match)
+                gate_reason = _short_partial_match_gate_reason(active_fragment, probe, local_match)
                 if gate_reason:
                     probe.local_error = gate_reason
                     local_failures.append(gate_reason)
                     continue
-            elif _is_short_title_fragment(fragment) and local_match is None:
+            elif _is_short_title_fragment(active_fragment) and local_match is None:
                 probe.local_error = "no_local_candidate"
                 local_failures.append("no_local_candidate")
                 continue
 
             final_score = _final_candidate_score(
-                fragment=fragment,
+                fragment=active_fragment,
                 probe=probe,
                 local_match=local_match,
             )
@@ -2716,12 +3144,14 @@ def apply_inline_style_fragments(
             reason = "low_confidence"
             if local_failures and len(set(local_failures)) == 1:
                 reason = local_failures[0]
+            if _is_font_color_only_partial_fragment(active_fragment):
+                reason = "font_color_unanchored_partial"
             result["skipped"] += 1
             _append_issue(
                 result,
                 index=index,
                 reason=reason,
-                fragment=fragment,
+                fragment=active_fragment,
             )
             _emit_runtime_log(
                 log_parts,
@@ -2730,7 +3160,7 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="跳过",
-                    fragment=fragment,
+                    fragment=active_fragment,
                     reason=reason,
                 ),
                 progress_logger,
@@ -2741,7 +3171,7 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="跳过",
-                    fragment=fragment,
+                    fragment=active_fragment,
                     reason=reason,
                     candidate_details=candidate_details,
                 ),
@@ -2760,16 +3190,21 @@ def apply_inline_style_fragments(
         )
         best_score, best_probe, best_local_match = matches[0]
         best_candidate = best_probe.candidate
-        threshold = _adaptive_threshold(fragment)
+        threshold = _adaptive_threshold(active_fragment)
         if best_score < threshold:
             best_probe.rejection_reason = "终分低于阈值"
             candidate_details = _build_candidate_diagnostics(all_probes)
+            reason = (
+                "font_color_unanchored_partial"
+                if _is_font_color_only_partial_fragment(active_fragment)
+                else "low_confidence"
+            )
             result["skipped"] += 1
             _append_issue(
                 result,
                 index=index,
-                reason="low_confidence",
-                fragment=fragment,
+                reason=reason,
+                fragment=active_fragment,
                 score=best_score,
             )
             _emit_runtime_log(
@@ -2779,8 +3214,8 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="跳过",
-                    fragment=fragment,
-                    reason="low_confidence",
+                    fragment=active_fragment,
+                    reason=reason,
                 ),
                 progress_logger,
             )
@@ -2790,8 +3225,8 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="跳过",
-                    fragment=fragment,
-                    reason="low_confidence",
+                    fragment=active_fragment,
+                    reason=reason,
                     score=best_score,
                     threshold=threshold,
                     candidate_details=candidate_details,
@@ -2807,12 +3242,17 @@ def apply_inline_style_fragments(
         ):
             best_probe.rejection_reason = "候选位置区分度不足"
             candidate_details = _build_candidate_diagnostics(all_probes)
+            reason = (
+                "font_color_unanchored_partial"
+                if _is_font_color_only_partial_fragment(active_fragment)
+                else "multiple_candidate_conflict"
+            )
             result["skipped"] += 1
             _append_issue(
                 result,
                 index=index,
-                reason="multiple_candidate_conflict",
-                fragment=fragment,
+                reason=reason,
+                fragment=active_fragment,
                 score=best_score,
             )
             _emit_runtime_log(
@@ -2822,8 +3262,8 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="跳过",
-                    fragment=fragment,
-                    reason="multiple_candidate_conflict",
+                    fragment=active_fragment,
+                    reason=reason,
                 ),
                 progress_logger,
             )
@@ -2833,8 +3273,8 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="跳过",
-                    fragment=fragment,
-                    reason="multiple_candidate_conflict",
+                    fragment=active_fragment,
+                    reason=reason,
                     score=best_score,
                     threshold=threshold,
                     candidate_details=candidate_details,
@@ -2844,14 +3284,14 @@ def apply_inline_style_fragments(
             continue
 
         apply_to_list_label = False
-        if _is_number_prefix_fragment(fragment):
+        if _is_number_prefix_fragment(active_fragment):
             if best_local_match is None:
                 result["skipped"] += 1
                 _append_issue(
                     result,
                     index=index,
                     reason="no_number_prefix_target",
-                    fragment=fragment,
+                    fragment=active_fragment,
                     score=best_score,
                 )
                 _emit_runtime_log(
@@ -2861,7 +3301,7 @@ def apply_inline_style_fragments(
                         index=index,
                         total=len(fragments),
                         status="跳过",
-                        fragment=fragment,
+                        fragment=active_fragment,
                         reason="no_number_prefix_target",
                     ),
                     progress_logger,
@@ -2872,7 +3312,7 @@ def apply_inline_style_fragments(
                         index=index,
                         total=len(fragments),
                         status="跳过",
-                        fragment=fragment,
+                        fragment=active_fragment,
                         reason="no_number_prefix_target",
                         score=best_score,
                         threshold=threshold,
@@ -2884,8 +3324,8 @@ def apply_inline_style_fragments(
             actual_start = best_local_match.actual_start
             actual_end = best_local_match.actual_end
             apply_to_list_label = int(actual_end) <= int(actual_start)
-        elif str(fragment.get("source_span_kind") or "partial_span") == "full_container":
-            if _is_short_title_fragment(fragment) and best_local_match is not None:
+        elif str(active_fragment.get("source_span_kind") or "partial_span") == "full_container":
+            if _is_short_title_fragment(active_fragment) and best_local_match is not None:
                 actual_start = best_local_match.actual_start
                 actual_end = best_local_match.actual_end
             else:
@@ -2900,7 +3340,7 @@ def apply_inline_style_fragments(
                         result,
                         index=index,
                         reason="empty_target_span",
-                        fragment=fragment,
+                        fragment=active_fragment,
                         score=best_score,
                     )
                     _emit_runtime_log(
@@ -2910,7 +3350,7 @@ def apply_inline_style_fragments(
                             index=index,
                             total=len(fragments),
                             status="跳过",
-                            fragment=fragment,
+                            fragment=active_fragment,
                             reason="empty_target_span",
                         ),
                         progress_logger,
@@ -2921,7 +3361,7 @@ def apply_inline_style_fragments(
                             index=index,
                             total=len(fragments),
                             status="跳过",
-                            fragment=fragment,
+                            fragment=active_fragment,
                             reason="empty_target_span",
                             score=best_score,
                             threshold=threshold,
@@ -2938,7 +3378,7 @@ def apply_inline_style_fragments(
                     result,
                     index=index,
                     reason="low_local_confidence",
-                    fragment=fragment,
+                    fragment=active_fragment,
                     score=best_score,
                 )
                 _emit_runtime_log(
@@ -2948,7 +3388,7 @@ def apply_inline_style_fragments(
                         index=index,
                         total=len(fragments),
                         status="跳过",
-                        fragment=fragment,
+                        fragment=active_fragment,
                         reason="low_local_confidence",
                     ),
                     progress_logger,
@@ -2959,7 +3399,7 @@ def apply_inline_style_fragments(
                         index=index,
                         total=len(fragments),
                         status="跳过",
-                        fragment=fragment,
+                        fragment=active_fragment,
                         reason="low_local_confidence",
                         score=best_score,
                         threshold=threshold,
@@ -2977,7 +3417,7 @@ def apply_inline_style_fragments(
                 result,
                 index=index,
                 reason="empty_target_span",
-                fragment=fragment,
+                fragment=active_fragment,
                 score=best_score,
             )
             _emit_runtime_log(
@@ -2987,7 +3427,7 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="跳过",
-                    fragment=fragment,
+                    fragment=active_fragment,
                     reason="empty_target_span",
                 ),
                 progress_logger,
@@ -2998,7 +3438,7 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="跳过",
-                    fragment=fragment,
+                    fragment=active_fragment,
                     reason="empty_target_span",
                     score=best_score,
                     threshold=threshold,
@@ -3008,25 +3448,100 @@ def apply_inline_style_fragments(
             )
             continue
 
+        effective_fragment, color_block_reason = _resolve_effective_fragment_for_writeback(
+            active_fragment,
+            candidate=best_candidate,
+            local_match=best_local_match,
+            target_containers=target_containers or [],
+        )
+        if color_block_reason:
+            color_gate_diagnostic = _build_font_color_gate_diagnostic(
+                active_fragment,
+                candidate=best_candidate,
+                local_match=best_local_match,
+                target_containers=target_containers or [],
+                reason=color_block_reason,
+            )
+            if not _fragment_has_effective_style(effective_fragment):
+                result["skipped"] += 1
+                _append_issue(
+                    result,
+                    index=index,
+                    reason=color_block_reason,
+                    fragment=active_fragment,
+                    score=best_score,
+                )
+                _emit_runtime_log(
+                    log_parts,
+                    _build_writeback_outcome_log(
+                        step_label=step_label,
+                        index=index,
+                        total=len(fragments),
+                        status="跳过",
+                        fragment=active_fragment,
+                        reason=color_block_reason,
+                    ),
+                    progress_logger,
+                )
+                _emit_diagnostic_log(
+                    _build_writeback_diagnostic_log(
+                        step_label=step_label,
+                        index=index,
+                        total=len(fragments),
+                        status="跳过",
+                        fragment=active_fragment,
+                        reason=color_block_reason,
+                        score=best_score,
+                        threshold=threshold,
+                        candidate_details=(
+                            f"{candidate_details}； {color_gate_diagnostic}"
+                            if candidate_details
+                            else color_gate_diagnostic
+                        ),
+                    ),
+                    diagnostic_logger,
+                )
+                continue
+
+            _record_skipped_style_reason(result, color_block_reason)
+            _emit_diagnostic_log(
+                _build_writeback_diagnostic_log(
+                    step_label=step_label,
+                    index=index,
+                    total=len(fragments),
+                    status="跳过",
+                    fragment=active_fragment,
+                    reason=color_block_reason,
+                    score=best_score,
+                    threshold=threshold,
+                    candidate_details=(
+                        f"{candidate_details}； {color_gate_diagnostic}"
+                        if candidate_details
+                        else color_gate_diagnostic
+                    ),
+                ),
+                diagnostic_logger,
+            )
+
         try:
             if apply_to_list_label:
                 target_range = doc.Range(
                     int(best_candidate.range_start),
                     int(best_candidate.range_end),
                 )
-                if not _apply_fragment_style_to_list_label(target_range, fragment):
+                if not _apply_fragment_style_to_list_label(target_range, effective_fragment):
                     raise RuntimeError("目标自动编号标签不可写")
             else:
                 target_range = doc.Range(int(actual_start), int(actual_end))
-                _apply_fragment_style(target_range, fragment)
+                _apply_fragment_style(target_range, effective_fragment)
             result["applied"] += 1
-            _increment_applied_style_counters(result["applied_by_style"], fragment)
+            _increment_applied_style_counters(result["applied_by_style"], effective_fragment)
             resolved_target_text = _resolve_target_text(
-                fragment,
+                effective_fragment,
                 best_candidate,
                 best_local_match,
             )
-            success_examples.append(_build_success_example(fragment, resolved_target_text))
+            success_examples.append(_build_success_example(effective_fragment, resolved_target_text))
             _emit_runtime_log(
                 log_parts,
                 _build_writeback_outcome_log(
@@ -3034,7 +3549,7 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="成功",
-                    fragment=fragment,
+                    fragment=effective_fragment,
                     target_text=resolved_target_text,
                 ),
                 progress_logger,
@@ -3045,7 +3560,7 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="成功",
-                    fragment=fragment,
+                    fragment=effective_fragment,
                     target_text=resolved_target_text,
                     score=best_score,
                     threshold=threshold,
@@ -3058,9 +3573,9 @@ def apply_inline_style_fragments(
             issue: InlineStyleWritebackIssue = {
                 "index": int(index),
                 "reason": "apply_failed",
-                "source_text": str(fragment.get("source_text") or "")[:120],
-                "container_type": str(fragment.get("container_type") or "paragraph"),
-                "container_locator": dict(fragment.get("container_locator") or {}),
+                "source_text": str(effective_fragment.get("source_text") or "")[:120],
+                "container_type": str(effective_fragment.get("container_type") or "paragraph"),
+                "container_locator": dict(effective_fragment.get("container_locator") or {}),
                 "score": round(float(best_score), 4),
                 "error": str(exc),
             }
@@ -3072,8 +3587,8 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="失败",
-                    fragment=fragment,
-                    target_text=_resolve_target_text(fragment, best_candidate, best_local_match),
+                    fragment=effective_fragment,
+                    target_text=_resolve_target_text(effective_fragment, best_candidate, best_local_match),
                     reason="apply_failed",
                     error=str(exc),
                 ),
@@ -3085,8 +3600,8 @@ def apply_inline_style_fragments(
                     index=index,
                     total=len(fragments),
                     status="失败",
-                    fragment=fragment,
-                    target_text=_resolve_target_text(fragment, best_candidate, best_local_match),
+                    fragment=effective_fragment,
+                    target_text=_resolve_target_text(effective_fragment, best_candidate, best_local_match),
                     reason="apply_failed",
                     score=best_score,
                     threshold=threshold,

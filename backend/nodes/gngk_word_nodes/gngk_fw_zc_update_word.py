@@ -52,6 +52,7 @@ from backend.helper.word_helper.text_parsing import (
     split_text_by_keywords,
 )
 from backend.helper.word_helper.content_ops import (
+    reset_generated_text_font_format,
     insert_content_with_formatting as helper_insert_content_with_formatting,
     insert_table_with_formatting as helper_insert_table_with_formatting,
     ensure_following_body_paragraph_insert_pos,
@@ -767,6 +768,7 @@ def gngk_fw_zc_update_word(
                         get_bound_end=get_insertion_bound_end,
                         font_name=insert_font_name,
                         font_size=insert_font_size,
+                        log_parts=insertion_log_parts,
                     )
 
                 def insert_table_with_formatting(insert_range, rows):
@@ -777,6 +779,7 @@ def gngk_fw_zc_update_word(
                         get_bound_end=get_insertion_bound_end,
                         font_name=insert_font_name,
                         font_size=insert_font_size,
+                        log_parts=insertion_log_parts,
                     )
 
                 def insert_items(
@@ -811,12 +814,21 @@ def gngk_fw_zc_update_word(
                         keyword_index = para_text.find(keyword)
                         if keyword_index < 0:
                             return False
-                        before_keyword = para_text[:keyword_index].replace("\r", "").replace("\a", "")
+                        before_keyword = (
+                            para_text[:keyword_index].replace("\r", "").replace("\a", "")
+                        )
                         prefix_clean = prefix.replace("\r", "").replace("\n", "")
                         if before_keyword.endswith(prefix_clean):
                             return True
                         insert_pos = para_rng.Start + keyword_index
                         doc.Range(insert_pos, insert_pos).InsertBefore(prefix_clean)
+                        prefix_rng = doc.Range(insert_pos, insert_pos + len(prefix_clean))
+                        reset_generated_text_font_format(
+                            prefix_rng,
+                            font_name=insert_font_name,
+                            font_size=insert_font_size,
+                            log_parts=insertion_log_parts,
+                        )
                         return True
                     except Exception as error:
                         insertion_log_parts.append(
@@ -857,8 +869,16 @@ def gngk_fw_zc_update_word(
                         value_rng = doc.Range(value_start, value_end)
                         new_value_clean = new_value.replace("\r", "").replace("\n", "")
                         value_rng.Text = new_value_clean
-                        value_rng.Font.Name = insert_font_name
-                        value_rng.Font.Size = insert_font_size
+                        formatted_value_rng = doc.Range(
+                            value_start,
+                            value_start + len(new_value_clean),
+                        )
+                        reset_generated_text_font_format(
+                            formatted_value_rng,
+                            font_name=insert_font_name,
+                            font_size=insert_font_size,
+                            log_parts=insertion_log_parts,
+                        )
                         insertion_log_parts.append(
                             f"  已更新受保护字段 '{keyword}': {new_value_clean[:50]}..."
                         )

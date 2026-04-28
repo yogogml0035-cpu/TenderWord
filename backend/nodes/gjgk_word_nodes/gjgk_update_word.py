@@ -691,7 +691,7 @@ def _insert_text_line(
 
     end_pos = max(int(live_end), int(effective_start) + len(inserted_text))
     inserted_rng = doc.Range(effective_start, max(effective_start, end_pos - 1))
-    apply_standard_insert_format(inserted_rng)
+    apply_standard_insert_format(inserted_rng, log_parts=log_parts)
     _set_collapsed_range(insert_range, end_pos)
     _ensure_insert_range(
         doc,
@@ -774,10 +774,14 @@ def _insert_table(
                 cell_range.InsertBefore(cell_text)
 
                 cell_range = cell.Range
-                apply_standard_insert_format(cell_range)
+                apply_standard_insert_format(cell_range, log_parts=log_parts)
                 cell_range.ParagraphFormat.Alignment = 0
                 cell.VerticalAlignment = 1
-            except Exception:
+            except Exception as exc:
+                if log_parts is not None:
+                    log_parts.append(
+                        f"表格单元格格式化失败 r={row_idx + 1}, c={col_idx + 1}: {exc}"
+                    )
                 continue
 
     try:

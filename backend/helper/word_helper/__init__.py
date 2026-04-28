@@ -54,6 +54,8 @@ from backend.helper.word_helper.protected_fields import (
 )
 
 from backend.helper.word_helper.content_ops import (
+    GENERATED_TEXT_FONT_RESET_VERSION,
+    reset_generated_text_font_format,
     apply_standard_insert_format,
     insert_content_with_formatting,
     insert_table_with_formatting,
@@ -141,6 +143,8 @@ __all__ = [
     "insert_prefix_before_keyword",
     "update_protected_field",
     # content_ops
+    "GENERATED_TEXT_FONT_RESET_VERSION",
+    "reset_generated_text_font_format",
     "apply_standard_insert_format",
     "insert_content_with_formatting",
     "insert_table_with_formatting",

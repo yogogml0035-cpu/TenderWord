@@ -11,6 +11,7 @@ common_update_module = importlib.import_module("backend.nodes.common_word_nodes.
 gngk_fw_zc_update_module = importlib.import_module(
     "backend.nodes.gngk_word_nodes.gngk_fw_zc_update_word"
 )
+gjgk_update_module = importlib.import_module("backend.nodes.gjgk_word_nodes.gjgk_update_word")
 
 
 class _EmptyCollection:
@@ -201,6 +202,93 @@ def _patch_update_runtime(
     monkeypatch.setattr(module, "close_word_application", lambda **_kwargs: None)
 
 
+def _patch_gjgk_update_runtime(
+    monkeypatch,
+    fake_doc: _FakeDoc,
+) -> None:
+    fake_word = _FakeWord(fake_doc)
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "create_word_application",
+        lambda **_kwargs: (fake_word, False),
+    )
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "open_document_with_retry",
+        lambda **_kwargs: fake_doc,
+    )
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "unprotect_document",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(gjgk_update_module, "get_anchor_target_sizes", lambda *_args: (0, 0))
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "find_anchor_range",
+        lambda *_args, **_kwargs: (
+            {"start": 10, "end": 20, "page": 1, "font": "宋体", "size": 12},
+            {"start": 90, "end": 95, "page": 1, "font": "宋体", "size": 12},
+        ),
+    )
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "_resolve_gjgk_content_range",
+        lambda **_kwargs: {
+            "range_start": 20,
+            "range_end": 80,
+            "start_page": 1,
+            "end_page": 1,
+        },
+    )
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "_build_insert_items",
+        lambda _text: [{"type": "text", "line": "国际需求正文"}],
+    )
+    monkeypatch.setattr(gjgk_update_module, "_delete_original_content", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "_trim_leading_layout_controls",
+        lambda *args, **kwargs: 20,
+    )
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "_find_first_insert_position_on_anchor_page",
+        lambda *args, **kwargs: 20,
+    )
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "_describe_range_state",
+        lambda *args, **kwargs: "range-state",
+    )
+    monkeypatch.setattr(gjgk_update_module, "_set_collapsed_range", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gjgk_update_module, "_ensure_insert_range", lambda *args, **kwargs: None)
+
+    def _fake_insert_text_line(_doc, insert_range, *_args, **_kwargs):
+        insert_range.Start = 40
+        insert_range.End = 40
+
+    monkeypatch.setattr(gjgk_update_module, "_insert_text_line", _fake_insert_text_line)
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "_reposition_insert_range_if_locked",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(gjgk_update_module, "cleanup_blank_paragraphs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "write_polished_comments",
+        lambda **_kwargs: {"added": 0, "failed": 0, "skipped": 0, "issues": []},
+    )
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "save_document_with_retry",
+        lambda doc, **_kwargs: doc.Save(),
+    )
+    monkeypatch.setattr(gjgk_update_module, "close_word_application", lambda **_kwargs: None)
+
+
 @pytest.mark.parametrize(
     ("module", "function_name", "polished_text", "marker_ranges", "expected_step"),
     [
@@ -279,6 +367,54 @@ def test_update_word_applies_inline_styles_with_anchor_bounds_and_summary(
     assert style_call["bound_start"] == 20
     assert style_call["bound_end"] == 90
     assert style_call["step_label"] == expected_step
+    assert result["style_writeback_result"] == _style_result()
+    assert result["style_writeback_summary"] == "样式摘要"
+    assert fake_doc.saved is True
+
+
+def test_gjgk_update_word_applies_inline_styles_with_anchor_bounds_and_summary(
+    monkeypatch,
+) -> None:
+    fake_doc = _FakeDoc()
+    style_calls: list[dict[str, Any]] = []
+    _patch_gjgk_update_runtime(monkeypatch, fake_doc)
+
+    def _fake_apply_inline_style_fragments(**kwargs):
+        style_calls.append(kwargs)
+        return _style_result()
+
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "apply_inline_style_fragments",
+        _fake_apply_inline_style_fragments,
+    )
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "summarize_style_writeback_result",
+        lambda _result: "样式摘要",
+    )
+
+    result = gjgk_update_module.gjgk_update_word(
+        {
+            "prepared_doc_path": "fake.docx",
+            "polished_text": "国际需求正文",
+            "insertion_before_text": "前锚点",
+            "insertion_after_text": "后锚点",
+            "inline_style_fragments": [{"source_text": "模板样式"}],
+            "generated_comment_count": 0,
+            "polished_comments": [],
+            "suppress_comment_progress_logs": True,
+        },
+        config=None,
+    )
+
+    assert len(style_calls) == 1
+    style_call = style_calls[0]
+    assert style_call["doc"] is fake_doc
+    assert style_call["inline_style_fragments"] == [{"source_text": "模板样式"}]
+    assert style_call["bound_start"] == 20
+    assert style_call["bound_end"] == 90
+    assert style_call["step_label"] == "步骤6"
     assert result["style_writeback_result"] == _style_result()
     assert result["style_writeback_summary"] == "样式摘要"
     assert fake_doc.saved is True

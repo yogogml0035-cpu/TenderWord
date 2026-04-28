@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from backend.helper.word_helper import inline_style_ops as style_ops
 from backend.helper.word_helper.semantic_matcher import normalize_semantic_text
 
@@ -154,6 +156,62 @@ def test_normalize_semantic_text_ignores_numbering_spacing_and_punctuation() -> 
     )
 
 
+def test_normalize_font_color_ignores_default_and_auto_values() -> None:
+    assert style_ops._normalize_font_color(None) is None
+    assert style_ops._normalize_font_color(0) is None
+    assert style_ops._normalize_font_color(-16777216) is None
+    assert style_ops._normalize_font_color(255) == 255
+
+
+@pytest.mark.parametrize("font_color", [0, -16777216])
+def test_apply_inline_style_fragments_ignores_default_or_auto_font_color(
+    monkeypatch,
+    font_color: int,
+) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 1},
+        "source_text": "默认颜色",
+        "normalized_text": normalize_semantic_text("默认颜色"),
+        "container_text": "默认颜色",
+        "normalized_container_text": normalize_semantic_text("默认颜色"),
+        "context_before": "",
+        "context_after": "",
+        "position_ratio": 0.1,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": font_color,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+
+    def fail_build_target_containers(*args: Any, **kwargs: Any) -> list[Any]:
+        del args, kwargs
+        raise AssertionError("default/auto font color should not reach target lookup")
+
+    monkeypatch.setattr(style_ops, "_build_target_containers", fail_build_target_containers)
+
+    result = style_ops.apply_inline_style_fragments(
+        doc=_FakeDoc(),
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=120,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert result["issues"][0]["reason"] == "empty_fragment"
+    assert result["applied_by_style"] == {}
+
+
 def test_build_inline_style_fragments_from_text_runs_merges_adjacent_same_signature() -> None:
     bold_signature = {
         "style_flags": {
@@ -294,10 +352,63 @@ def test_apply_inline_style_fragments_matches_full_container_after_renumbering(m
     assert doc.applied_ranges[0].Start == 100
     assert doc.applied_ranges[0].End == 100 + len("2、原条款内容")
     assert doc.applied_ranges[0].Font.StrikeThrough is True
-    assert doc.applied_ranges[0].Font.Color == 255
+    assert doc.applied_ranges[0].Font.Color is None
+    assert result["skipped"] == 0
+    assert result["applied_by_style"] == {"strikethrough": 1}
+    assert result["skipped_by_reason"] == {"font_color_full_container_blocked": 1}
 
 
-def test_apply_inline_style_fragments_copies_font_color_to_renumbered_prefix(monkeypatch) -> None:
+def test_apply_inline_style_fragments_skips_color_only_full_container_without_target_lookup(
+    monkeypatch,
+) -> None:
+    def fail_build_target_containers(*args: Any, **kwargs: Any) -> list[Any]:
+        del args, kwargs
+        raise AssertionError("color-only full_container should skip before target lookup")
+
+    monkeypatch.setattr(style_ops, "_build_target_containers", fail_build_target_containers)
+    for explicit_color in (255, 16711680, 65280):
+        fragment = {
+            "container_type": "paragraph",
+            "container_locator": {"paragraph_index": 1},
+            "source_text": "1、原条款内容",
+            "normalized_text": normalize_semantic_text("1、原条款内容"),
+            "container_text": "1、原条款内容",
+            "normalized_container_text": normalize_semantic_text("1、原条款内容"),
+            "context_before": "",
+            "context_after": "",
+            "position_ratio": 0.15,
+            "style_flags": {
+                "strikethrough": False,
+                "underline": False,
+                "bold": False,
+                "italic": False,
+            },
+            "font_color": explicit_color,
+            "highlight_color": None,
+            "font_name": None,
+            "font_size": None,
+            "underline_style": None,
+            "source_span_kind": "full_container",
+        }
+        doc = _FakeDoc()
+        result = style_ops.apply_inline_style_fragments(
+            doc=doc,
+            inline_style_fragments=[fragment],
+            bound_start=0,
+            bound_end=200,
+            log_parts=[],
+        )
+
+        assert result["applied"] == 0
+        assert result["skipped"] == 1
+        assert result["failed"] == 0
+        assert result["applied_by_style"] == {}
+        assert result["skipped_by_reason"] == {"font_color_full_container_blocked": 1}
+        assert result["issues"][0]["reason"] == "font_color_full_container_blocked"
+        assert doc.applied_ranges == []
+
+
+def test_apply_inline_style_fragments_blocks_font_color_on_renumbered_prefix(monkeypatch) -> None:
     fragment = {
         "container_type": "paragraph",
         "container_locator": {"paragraph_index": 3},
@@ -336,11 +447,13 @@ def test_apply_inline_style_fragments_copies_font_color_to_renumbered_prefix(mon
         log_parts=[],
     )
 
-    assert result["applied"] == 1
-    assert result["skipped"] == 0
-    assert doc.applied_ranges[0].Start == 100
-    assert doc.applied_ranges[0].End == 100 + len("16.2、")
-    assert doc.applied_ranges[0].Font.Color == 255
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert result["failed"] == 0
+    assert result["applied_by_style"] == {}
+    assert result["skipped_by_reason"] == {"font_color_number_prefix_blocked": 1}
+    assert result["issues"][0]["reason"] == "font_color_number_prefix_blocked"
+    assert doc.applied_ranges == []
 
 
 def test_apply_inline_style_fragments_skips_high_visible_number_prefix(monkeypatch) -> None:
@@ -434,10 +547,10 @@ def test_apply_inline_style_fragments_skips_number_prefix_when_target_has_no_pre
 
     assert result["applied"] == 0
     assert result["skipped"] == 1
-    assert result["issues"][0]["reason"] == "no_number_prefix_target"
+    assert result["issues"][0]["reason"] == "font_color_number_prefix_blocked"
 
 
-def test_apply_inline_style_fragments_copies_font_color_to_word_list_label(monkeypatch) -> None:
+def test_apply_inline_style_fragments_blocks_font_color_on_word_list_label(monkeypatch) -> None:
     fragment = {
         "container_type": "paragraph",
         "container_locator": {"paragraph_index": 3},
@@ -481,11 +594,14 @@ def test_apply_inline_style_fragments_copies_font_color_to_word_list_label(monke
         log_parts=[],
     )
 
-    assert result["applied"] == 1
-    assert result["skipped"] == 0
-    assert list_font.Color == 255
-    assert doc.ranges[-1].Start == 100
-    assert doc.ranges[-1].End == 100 + len("配置专用外置连接电阻网络盒")
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert result["failed"] == 0
+    assert result["applied_by_style"] == {}
+    assert result["skipped_by_reason"] == {"font_color_number_prefix_blocked": 1}
+    assert result["issues"][0]["reason"] == "font_color_number_prefix_blocked"
+    assert list_font.Color == 0
+    assert doc.ranges == []
 
 
 def test_apply_inline_style_fragments_matches_short_title_when_target_paragraph_is_extended(monkeypatch) -> None:
@@ -972,16 +1088,17 @@ def test_apply_inline_style_fragments_emits_success_detail_logs(monkeypatch) -> 
     )
 
 
-def test_apply_inline_style_fragments_copies_font_color_for_partial_span(monkeypatch) -> None:
+def test_apply_inline_style_fragments_copies_font_color_for_anchored_partial_span(monkeypatch) -> None:
+    source_text = "原件材料清单"
     fragment = {
         "container_type": "paragraph",
-        "container_locator": {"paragraph_index": 2},
-        "source_text": "提供",
-        "normalized_text": normalize_semantic_text("提供"),
-        "container_text": "供应商需提供原件",
-        "normalized_container_text": normalize_semantic_text("供应商需提供原件"),
-        "context_before": "需",
-        "context_after": "原件",
+        "container_locator": {"paragraph_index": 1},
+        "source_text": source_text,
+        "normalized_text": normalize_semantic_text(source_text),
+        "container_text": "供应商需提供原件材料清单用于核查",
+        "normalized_container_text": normalize_semantic_text("供应商需提供原件材料清单用于核查"),
+        "context_before": "需提供",
+        "context_after": "用于核查",
         "position_ratio": 0.35,
         "local_position_ratio": 0.5,
         "style_flags": {
@@ -997,8 +1114,13 @@ def test_apply_inline_style_fragments_copies_font_color_for_partial_span(monkeyp
         "underline_style": None,
         "source_span_kind": "partial_span",
     }
-    candidate_text = "供应商应按要求提供纸质原件"
-    candidate = _make_candidate(text=candidate_text, start=40, position_ratio=0.34)
+    candidate_text = "供应商需提供原件材料清单用于核查补充材料"
+    candidate = _make_candidate(
+        text=candidate_text,
+        start=40,
+        locator={"paragraph_index": 1},
+        position_ratio=0.34,
+    )
     monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
 
     doc = _FakeDoc()
@@ -1012,10 +1134,11 @@ def test_apply_inline_style_fragments_copies_font_color_for_partial_span(monkeyp
 
     assert result["applied"] == 1
     assert doc.applied_ranges[0].Font.Color == 255
-    assert doc.applied_ranges[0].Start == 40 + candidate_text.index("提")
+    assert doc.applied_ranges[0].Start == 40 + candidate_text.index("原")
+    assert result["applied_by_style"] == {"font_color": 1}
 
 
-def test_apply_inline_style_fragments_matches_short_partial_inside_logical_line(monkeypatch) -> None:
+def test_apply_inline_style_fragments_skips_short_color_inside_logical_line(monkeypatch) -> None:
     fragment = {
         "container_type": "paragraph",
         "container_locator": {"paragraph_index": 62},
@@ -1053,11 +1176,454 @@ def test_apply_inline_style_fragments_matches_short_partial_inside_logical_line(
         log_parts=[],
     )
 
-    expected_start = 120 + candidate_text.index("提")
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert doc.applied_ranges == []
+    assert result["issues"][0]["reason"] == "font_color_unanchored_partial"
+
+
+def test_apply_inline_style_fragments_blocks_color_when_global_occurrence_repeats(
+    monkeypatch,
+) -> None:
+    source_text = "原件材料清单"
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 1},
+        "source_text": source_text,
+        "normalized_text": normalize_semantic_text(source_text),
+        "container_text": "供应商需提供原件材料清单用于核查",
+        "normalized_container_text": normalize_semantic_text("供应商需提供原件材料清单用于核查"),
+        "context_before": "需提供",
+        "context_after": "用于核查",
+        "position_ratio": 0.35,
+        "local_position_ratio": 0.5,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 255,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    paragraph = _make_candidate(
+        text="供应商需提供原件材料清单用于核查补充材料",
+        start=120,
+        locator={"paragraph_index": 1},
+        position_ratio=0.35,
+    )
+    table_cell = _make_candidate(
+        text="归档原件材料清单",
+        start=220,
+        container_type="table_cell",
+        locator={"table_index": 1, "row": 1, "col": 1},
+        position_ratio=0.8,
+    )
+    monkeypatch.setattr(
+        style_ops,
+        "_build_target_containers",
+        lambda *args, **kwargs: [paragraph, table_cell],
+    )
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=260,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert doc.applied_ranges == []
+    assert result["issues"][0]["reason"] == "font_color_unanchored_partial"
+
+
+def test_apply_inline_style_fragments_blocks_color_when_raw_context_mismatches(
+    monkeypatch,
+) -> None:
+    source_text = "原件材料清单"
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 1},
+        "source_text": source_text,
+        "normalized_text": normalize_semantic_text(source_text),
+        "container_text": "供应商需提供原件材料清单用于核查",
+        "normalized_container_text": normalize_semantic_text("供应商需提供原件材料清单用于核查"),
+        "context_before": "需提供",
+        "context_after": "用于核查",
+        "position_ratio": 0.35,
+        "local_position_ratio": 0.5,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 255,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    candidate = _make_candidate(
+        text="供应商必须提交原件材料清单作为附件",
+        start=260,
+        locator={"paragraph_index": 1},
+        position_ratio=0.35,
+    )
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=360,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert doc.applied_ranges == []
+    assert result["issues"][0]["reason"] == "font_color_unanchored_partial"
+
+
+def test_apply_inline_style_fragments_allows_table_same_cell_color_when_global_repeats(
+    monkeypatch,
+) -> None:
+    source_text = "校准证书"
+    fragment = {
+        "container_type": "table_cell",
+        "container_locator": {"table_index": 1, "row": 2, "col": 1},
+        "source_text": source_text,
+        "normalized_text": normalize_semantic_text(source_text),
+        "container_text": "提供校准证书复印件",
+        "normalized_container_text": normalize_semantic_text("提供校准证书复印件"),
+        "context_before": "提供",
+        "context_after": "复印件",
+        "position_ratio": 0.6,
+        "local_position_ratio": 0.4,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 65280,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    same_cell = _make_candidate(
+        text="提供校准证书复印件",
+        start=320,
+        container_type="table_cell",
+        locator={"table_index": 1, "row": 2, "col": 1},
+        position_ratio=0.6,
+    )
+    other_cell = _make_candidate(
+        text="另需校准证书",
+        start=420,
+        container_type="table_cell",
+        locator={"table_index": 1, "row": 3, "col": 1},
+        position_ratio=0.7,
+    )
+    monkeypatch.setattr(
+        style_ops,
+        "_build_target_containers",
+        lambda *args, **kwargs: [same_cell, other_cell],
+    )
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=480,
+        log_parts=[],
+    )
+
     assert result["applied"] == 1
-    assert doc.applied_ranges[0].Start == expected_start
-    assert doc.applied_ranges[0].End == expected_start + len("提供")
-    assert doc.applied_ranges[0].Font.Color == 255
+    assert result["skipped"] == 0
+    assert doc.applied_ranges[0].Start == 320 + "提供校准证书复印件".index("校")
+    assert doc.applied_ranges[0].Font.Color == 65280
+
+
+def test_apply_inline_style_fragments_blocks_table_color_when_locator_changes(
+    monkeypatch,
+) -> None:
+    source_text = "校准证书"
+    fragment = {
+        "container_type": "table_cell",
+        "container_locator": {"table_index": 1, "row": 2, "col": 1},
+        "source_text": source_text,
+        "normalized_text": normalize_semantic_text(source_text),
+        "container_text": "提供校准证书复印件",
+        "normalized_container_text": normalize_semantic_text("提供校准证书复印件"),
+        "context_before": "提供",
+        "context_after": "复印件",
+        "position_ratio": 0.6,
+        "local_position_ratio": 0.4,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 65280,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    moved_cell = _make_candidate(
+        text="提供校准证书复印件",
+        start=500,
+        container_type="table_cell",
+        locator={"table_index": 1, "row": 3, "col": 1},
+        position_ratio=0.6,
+    )
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [moved_cell])
+
+    result = style_ops.apply_inline_style_fragments(
+        doc=_FakeDoc(),
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=560,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert result["issues"][0]["reason"] == "font_color_unanchored_partial"
+
+
+def test_font_color_partial_gate_rejects_table_source_to_paragraph_target() -> None:
+    source_text = "校准证书"
+    fragment = {
+        "container_type": "table_cell",
+        "container_locator": {"table_index": 1, "row": 2, "col": 1},
+        "source_text": source_text,
+        "normalized_text": normalize_semantic_text(source_text),
+        "container_text": "提供校准证书复印件",
+        "normalized_container_text": normalize_semantic_text("提供校准证书复印件"),
+        "context_before": "提供",
+        "context_after": "复印件",
+        "position_ratio": 0.6,
+        "local_position_ratio": 0.4,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 65280,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    paragraph = _make_candidate(
+        text="提供校准证书复印件",
+        start=640,
+        container_type="paragraph",
+        locator={"paragraph_index": 12},
+        position_ratio=0.6,
+    )
+    match = style_ops._LocalMatch(
+        visible_start=len("提供"),
+        visible_end=len("提供校准证书"),
+        actual_start=640 + len("提供"),
+        actual_end=640 + len("提供校准证书"),
+        score=1.0,
+        context_score=1.0,
+        local_position_score=1.0,
+        text_score=1.0,
+        is_exact=True,
+    )
+
+    assert not style_ops._font_color_partial_gate_passed(
+        fragment,
+        paragraph,
+        match,
+        [paragraph],
+    )
+
+
+def test_apply_inline_style_fragments_blocks_table_color_when_target_becomes_paragraph(
+    monkeypatch,
+) -> None:
+    source_text = "校准证书"
+    fragment = {
+        "container_type": "table_cell",
+        "container_locator": {"table_index": 1, "row": 2, "col": 1},
+        "source_text": source_text,
+        "normalized_text": normalize_semantic_text(source_text),
+        "container_text": "提供校准证书复印件",
+        "normalized_container_text": normalize_semantic_text("提供校准证书复印件"),
+        "context_before": "提供",
+        "context_after": "复印件",
+        "position_ratio": 0.6,
+        "local_position_ratio": 0.4,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 65280,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    paragraph = _make_candidate(
+        text="提供校准证书复印件",
+        start=560,
+        container_type="paragraph",
+        locator={"paragraph_index": 12},
+        position_ratio=0.6,
+    )
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [paragraph])
+
+    result = style_ops.apply_inline_style_fragments(
+        doc=_FakeDoc(),
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=620,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert result["issues"][0]["reason"] == "table_structure_changed"
+
+
+def test_apply_inline_style_fragments_blocks_table_color_when_same_locator_repeats(
+    monkeypatch,
+) -> None:
+    source_text = "校准证书"
+    fragment = {
+        "container_type": "table_cell",
+        "container_locator": {"table_index": 1, "row": 2, "col": 1},
+        "source_text": source_text,
+        "normalized_text": normalize_semantic_text(source_text),
+        "container_text": "提供校准证书复印件",
+        "normalized_container_text": normalize_semantic_text("提供校准证书复印件"),
+        "context_before": "提供",
+        "context_after": "复印件",
+        "position_ratio": 0.6,
+        "local_position_ratio": 0.4,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 65280,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    first_cell = _make_candidate(
+        text="提供校准证书复印件",
+        start=600,
+        container_type="table_cell",
+        locator={"table_index": 1, "row": 2, "col": 1},
+        position_ratio=0.6,
+    )
+    duplicate_cell = _make_candidate(
+        text="提供校准证书复印件",
+        start=700,
+        container_type="table_cell",
+        locator={"table_index": 1, "row": 2, "col": 1},
+        position_ratio=0.6,
+    )
+    monkeypatch.setattr(
+        style_ops,
+        "_build_target_containers",
+        lambda *args, **kwargs: [first_cell, duplicate_cell],
+    )
+
+    result = style_ops.apply_inline_style_fragments(
+        doc=_FakeDoc(),
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=760,
+        log_parts=[],
+    )
+
+    assert result["applied"] == 0
+    assert result["skipped"] == 1
+    assert result["issues"][0]["reason"] == "font_color_unanchored_partial"
+
+
+def test_apply_inline_style_fragments_emits_color_gate_diagnostics_only_to_debug(
+    monkeypatch,
+) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 1},
+        "source_text": "提供",
+        "normalized_text": normalize_semantic_text("提供"),
+        "container_text": "供应商提供材料",
+        "normalized_container_text": normalize_semantic_text("供应商提供材料"),
+        "context_before": "",
+        "context_after": "",
+        "position_ratio": 0.42,
+        "local_position_ratio": 0.5,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 255,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    candidate = _make_candidate(
+        text="投标人应提供材料",
+        start=520,
+        locator={"paragraph_index": 1},
+        position_ratio=0.42,
+    )
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    progress_messages: list[str] = []
+    diagnostic_messages: list[str] = []
+    result = style_ops.apply_inline_style_fragments(
+        doc=_FakeDoc(),
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=620,
+        log_parts=[],
+        progress_logger=progress_messages.append,
+        diagnostic_logger=diagnostic_messages.append,
+    )
+
+    assert result["applied"] == 0
+    assert any("font_color_gate_version=fail_closed_v1" in message for message in diagnostic_messages)
+    assert any("global_occurrences=" in message for message in diagnostic_messages)
+    assert any("raw_before=" in message and "raw_after=" in message for message in diagnostic_messages)
+    assert not any("font_color_gate_version=fail_closed_v1" in message for message in progress_messages)
 
 
 def test_short_partial_gate_rejects_paragraph_number_prefix_exact_match() -> None:
@@ -1257,7 +1823,61 @@ def test_apply_inline_style_fragments_skips_ambiguous_short_partial_across_logic
 
     assert result["applied"] == 0
     assert result["skipped"] == 1
-    assert result["issues"][0]["reason"] == "multiple_local_candidates"
+    assert result["issues"][0]["reason"] == "font_color_unanchored_partial"
+    assert result["skipped_by_reason"] == {"font_color_unanchored_partial": 1}
+
+
+def test_apply_inline_style_fragments_applies_safe_partial_style_when_color_unanchored(
+    monkeypatch,
+) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 9},
+        "source_text": "提供",
+        "normalized_text": normalize_semantic_text("提供"),
+        "container_text": "供应商提供材料",
+        "normalized_container_text": normalize_semantic_text("供应商提供材料"),
+        "context_before": "",
+        "context_after": "",
+        "position_ratio": 0.42,
+        "local_position_ratio": 0.5,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": True,
+            "bold": False,
+            "italic": False,
+        },
+        "font_color": 255,
+        "highlight_color": None,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": 1,
+        "source_span_kind": "partial_span",
+    }
+    candidate_text = "投标人应提供材料"
+    candidate = _make_candidate(text=candidate_text, start=520, position_ratio=0.42)
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        bound_start=0,
+        bound_end=620,
+        log_parts=[],
+    )
+
+    expected_start = 520 + candidate_text.index("提")
+    assert result["applied"] == 1
+    assert result["skipped"] == 0
+    assert result["failed"] == 0
+    assert result["issues"] == []
+    assert result["applied_by_style"] == {"underline": 1}
+    assert result["skipped_by_reason"] == {"font_color_unanchored_partial": 1}
+    assert doc.applied_ranges[0].Start == expected_start
+    assert doc.applied_ranges[0].End == expected_start + len("提供")
+    assert doc.applied_ranges[0].Font.Underline == 1
+    assert doc.applied_ranges[0].Font.Color is None
 
 
 def test_apply_inline_style_fragments_emits_short_skip_logs_and_keeps_diagnostics(monkeypatch) -> None:

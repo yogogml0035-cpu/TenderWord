@@ -69,6 +69,7 @@ from backend.helper.word_helper.protected_fields import (
 )
 from backend.helper.word_helper.content_ops import (
     apply_standard_insert_format,
+    reset_generated_text_font_format,
     insert_content_with_formatting as helper_insert_content_with_formatting,
     insert_table_with_formatting as helper_insert_table_with_formatting,
     insert_items_inline_at_end_of_paragraph as helper_insert_items_inline_at_end_of_paragraph,
@@ -800,6 +801,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         get_bound_end=get_insertion_bound_end,
                         font_name=insert_font_name,
                         font_size=insert_font_size,
+                        log_parts=insertion_log_parts,
                     )
 
                 def insert_table_with_formatting(insert_range, rows):
@@ -810,6 +812,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         get_bound_end=get_insertion_bound_end,
                         font_name=insert_font_name,
                         font_size=insert_font_size,
+                        log_parts=insertion_log_parts,
                     )
 
                 def insert_prefix_before_keyword(keyword: str, prefix: str):
@@ -829,6 +832,13 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                             return True
                         insert_pos = para_rng.Start + idx
                         doc.Range(insert_pos, insert_pos).InsertBefore(prefix_clean)
+                        prefix_rng = doc.Range(insert_pos, insert_pos + len(prefix_clean))
+                        reset_generated_text_font_format(
+                            prefix_rng,
+                            font_name=insert_font_name,
+                            font_size=insert_font_size,
+                            log_parts=insertion_log_parts,
+                        )
                         return True
                     except Exception as e:
                         insertion_log_parts.append(
@@ -868,8 +878,16 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         value_rng = doc.Range(value_start, value_end)
                         new_value_clean = new_value.replace("\r", "").replace("\n", "")
                         value_rng.Text = new_value_clean
-                        value_rng.Font.Name = insert_font_name
-                        value_rng.Font.Size = insert_font_size
+                        formatted_value_rng = doc.Range(
+                            value_start,
+                            value_start + len(new_value_clean),
+                        )
+                        reset_generated_text_font_format(
+                            formatted_value_rng,
+                            font_name=insert_font_name,
+                            font_size=insert_font_size,
+                            log_parts=insertion_log_parts,
+                        )
                         insertion_log_parts.append(
                             f"  已更新受保护字段 '{keyword}': {new_value_clean[:50]}..."
                         )

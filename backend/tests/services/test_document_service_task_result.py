@@ -22,7 +22,7 @@ def test_build_task_result_payload_includes_style_writeback(tmp_path: Path) -> N
                 "failed": 0,
                 "issues": [],
                 "applied_by_style": {"bold": 1},
-                "skipped_by_reason": {"low_confidence": 1},
+                "skipped_by_reason": {"font_color_full_container_blocked": 1},
             },
         },
         initial_state={},
@@ -43,5 +43,5 @@ def test_build_task_result_payload_includes_style_writeback(tmp_path: Path) -> N
         "skipped": 1,
         "failed": 0,
         "applied_by_style": {"bold": 1},
-        "skipped_by_reason": {"low_confidence": 1},
+        "skipped_by_reason": {"font_color_full_container_blocked": 1},
     }

@@ -100,8 +100,8 @@ def test_build_initial_state_carries_generation_style() -> None:
 @pytest.mark.parametrize(
     ("tender_type", "expected_before", "expected_after"),
     [
-        ("gngk_fw_zc", "第三章 招标内容及要求", "第四章 合同条款"),
-        ("gngk_fw_cz", "第三章 招标内容及要求", "第四章 合同条款"),
+        ("gngk_fw_zc", "第三章 招标内容及要求", "第四章 投标文件有关格式"),
+        ("gngk_fw_cz", "第三章 招标内容及要求", "第四章 投标文件有关格式"),
         ("gngk_hw_zc", "第三章 招标内容及要求", "第四章 投标文件有关格式"),
         ("gngk_hw_cz", "第四章  招标需求", "第五章  评标方法与程序"),
     ],
@@ -115,8 +115,8 @@ def test_gngk_anchor_config_defaults_follow_goods_and_service_rules(
 @pytest.mark.parametrize(
     ("tender_type", "expected_before", "expected_after"),
     [
-        ("gngk_fw_zc", "第三章 招标内容及要求", "第四章 合同条款"),
-        ("gngk_fw_cz", "第三章 招标内容及要求", "第四章 合同条款"),
+        ("gngk_fw_zc", "第三章 招标内容及要求", "第四章 投标文件有关格式"),
+        ("gngk_fw_cz", "第三章 招标内容及要求", "第四章 投标文件有关格式"),
         ("gngk_hw_zc", "第三章 招标内容及要求", "第四章 投标文件有关格式"),
         ("gngk_hw_cz", "第四章  招标需求", "第五章  评标方法与程序"),
     ],
@@ -135,14 +135,14 @@ def test_rewrite_default_anchors_follow_gngk_goods_and_service_rules(
             1,
             0,
             "第三章 招标内容及要求",
-            "第四章 合同条款",
+            "第四章 投标文件有关格式",
         ),
         (
             FormType.GNGK_FW_CZ_TENDER,
             1,
             1,
             "第三章 招标内容及要求",
-            "第四章 合同条款",
+            "第四章 投标文件有关格式",
         ),
         (
             FormType.GNGK_HW_ZC_TENDER,

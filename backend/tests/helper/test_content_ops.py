@@ -4,7 +4,11 @@ import pytest
 import backend.helper.word_helper.content_ops as content_ops_module
 
 from backend.helper.word_helper.content_ops import (
+    apply_standard_insert_format,
     ensure_following_body_paragraph_insert_pos,
+    insert_content_with_formatting,
+    insert_items_inline_at_end_of_paragraph,
+    reset_generated_text_font_format,
     resolve_following_insert_pos,
 )
 
@@ -99,6 +103,210 @@ class _FakeAnchorRange:
         self.Start = int(start)
         self.End = int(end)
         self.Paragraphs = _FakeParagraphAccessor(paragraph_range)
+
+
+class _FakeFont:
+    def __init__(self, *, fail_attrs: set[str] | None = None):
+        object.__setattr__(self, "_fail_attrs", set(fail_attrs or set()))
+        object.__setattr__(self, "Name", "旧字体")
+        object.__setattr__(self, "Size", 9)
+        object.__setattr__(self, "Bold", True)
+        object.__setattr__(self, "Italic", True)
+        object.__setattr__(self, "Underline", 1)
+        object.__setattr__(self, "StrikeThrough", True)
+        object.__setattr__(self, "Color", 255)
+
+    def __setattr__(self, name: str, value):
+        if name == "HighlightColorIndex":
+            raise AttributeError("Font has no HighlightColorIndex in this fake")
+        if name in getattr(self, "_fail_attrs", set()):
+            raise RuntimeError(f"{name} write failed")
+        object.__setattr__(self, name, value)
+
+
+class _FakeParagraphFormat:
+    def __init__(self):
+        self.LineSpacingRule = None
+        self.LeftIndent = None
+        self.FirstLineIndent = None
+        self.OutlineLevel = None
+        self.SpaceBeforeAuto = None
+        self.SpaceAfterAuto = None
+        self.SpaceBefore = None
+        self.SpaceAfter = None
+        self.PageBreakBefore = None
+        self.KeepWithNext = None
+        self.KeepTogether = None
+        self.WidowControl = None
+
+
+class _EmptyCollection:
+    Count = 0
+
+    def __call__(self, index: int):
+        raise IndexError(index)
+
+
+class _FakeFormatRange:
+    def __init__(
+        self,
+        doc: "_FakeFormatDoc",
+        start: int,
+        end: int,
+        *,
+        text: str = "",
+        fail_font_attrs: set[str] | None = None,
+    ):
+        self.doc = doc
+        self.Start = int(start)
+        self.End = int(end)
+        self.Text = text
+        self.Font = _FakeFont(fail_attrs=fail_font_attrs)
+        self.HighlightColorIndex = 7
+        self.ParagraphFormat = _FakeParagraphFormat()
+        self.Tables = _EmptyCollection()
+
+    def InsertAfter(self, value: str) -> None:
+        self.doc.inserted.append((int(self.End), str(value)))
+        self.End = int(self.End) + len(str(value))
+
+    def Collapse(self, *_args) -> None:
+        self.Start = int(self.End)
+
+    def SetRange(self, start: int, end: int) -> None:
+        self.Start = int(start)
+        self.End = int(end)
+
+    def Information(self, *_args) -> int:
+        return 0
+
+
+class _FakeFormatDoc:
+    def __init__(self, *, fail_font_attrs: set[str] | None = None):
+        self.fail_font_attrs = set(fail_font_attrs or set())
+        self.created_ranges: list[_FakeFormatRange] = []
+        self.inserted: list[tuple[int, str]] = []
+
+    def Range(self, start: int, end: int) -> _FakeFormatRange:
+        range_obj = _FakeFormatRange(
+            self,
+            start,
+            end,
+            fail_font_attrs=self.fail_font_attrs,
+        )
+        self.created_ranges.append(range_obj)
+        return range_obj
+
+
+def assert_clean_generated_font(font: _FakeFont, *, name: str = "宋体", size: int = 12) -> None:
+    assert font.Name == name
+    assert font.Size == size
+    assert font.Bold is False
+    assert font.Italic is False
+    assert font.Underline == 0
+    assert font.StrikeThrough is False
+    assert font.Color == 0
+
+
+def assert_clean_generated_format(
+    range_obj: _FakeFormatRange,
+    *,
+    name: str = "宋体",
+    size: int = 12,
+) -> None:
+    assert_clean_generated_font(range_obj.Font, name=name, size=size)
+    assert range_obj.HighlightColorIndex == 0
+
+
+def test_reset_generated_text_font_format_clears_inherited_visible_styles() -> None:
+    doc = _FakeFormatDoc()
+    range_obj = doc.Range(10, 20)
+
+    reset_generated_text_font_format(range_obj, font_name="黑体", font_size=14)
+
+    assert_clean_generated_format(range_obj, name="黑体", size=14)
+
+
+def test_reset_generated_text_font_format_reports_critical_failures() -> None:
+    doc = _FakeFormatDoc(fail_font_attrs={"Color"})
+    range_obj = doc.Range(10, 20)
+    log_parts: list[str] = []
+
+    with pytest.raises(
+        RuntimeError,
+        match="generated_insert_format_reset_version=font_sanitize_v1",
+    ):
+        reset_generated_text_font_format(range_obj, log_parts=log_parts)
+
+    assert any("Color:Color write failed" in item for item in log_parts)
+
+
+def test_apply_standard_insert_format_resets_font_and_keeps_paragraph_contract() -> None:
+    doc = _FakeFormatDoc()
+    range_obj = doc.Range(10, 20)
+
+    apply_standard_insert_format(range_obj)
+
+    assert_clean_generated_format(range_obj)
+    assert range_obj.ParagraphFormat.LeftIndent == 0
+    assert range_obj.ParagraphFormat.FirstLineIndent == 0
+    assert range_obj.ParagraphFormat.KeepWithNext is False
+
+
+def test_insert_content_with_formatting_sanitizes_inserted_range() -> None:
+    doc = _FakeFormatDoc()
+    insert_range = doc.Range(10, 10)
+
+    inserted_range = insert_content_with_formatting(
+        doc,
+        insert_range,
+        "红色宿主后的正文",
+        bound_start=0,
+        get_bound_end=lambda: 100,
+    )
+
+    assert_clean_generated_format(inserted_range)
+    assert doc.inserted[-1] == (10, "红色宿主后的正文\r")
+
+
+def test_insert_items_inline_at_end_of_paragraph_sanitizes_inline_text() -> None:
+    doc = _FakeFormatDoc()
+    paragraph = _FakeParagraphRange(20, "付款方式：旧值\r")
+
+    inserted = insert_items_inline_at_end_of_paragraph(
+        doc,
+        paragraph,
+        [{"type": "text", "line": "新增正文"}],
+        get_bound_end=lambda: 100,
+    )
+
+    assert inserted == 1
+    assert_clean_generated_format(doc.created_ranges[-1])
+
+
+def test_insert_items_inline_table_fallback_sanitizes_text_rows(monkeypatch) -> None:
+    doc = _FakeFormatDoc()
+    paragraph = _FakeParagraphRange(20, "付款方式：旧值\r")
+    seen: dict[str, object] = {}
+
+    def _raise_table_error(*_args, **kwargs):
+        seen["log_parts"] = kwargs.get("log_parts")
+        raise RuntimeError("table insert failed")
+
+    monkeypatch.setattr(content_ops_module, "insert_table_with_formatting", _raise_table_error)
+    log_parts: list[str] = []
+
+    inserted = insert_items_inline_at_end_of_paragraph(
+        doc,
+        paragraph,
+        [{"type": "table", "rows": [["A", "B"]]}],
+        get_bound_end=lambda: 100,
+        log_parts=log_parts,
+    )
+
+    assert inserted == 1
+    assert seen["log_parts"] is log_parts
+    assert_clean_generated_format(doc.created_ranges[-1])
 
 
 def test_ensure_following_body_paragraph_insert_pos_creates_new_paragraph_when_gap_missing(

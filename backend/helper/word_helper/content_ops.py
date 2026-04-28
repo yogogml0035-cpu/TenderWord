@@ -26,25 +26,99 @@ from backend.helper.word_helper.paragraph_boundary_ops import (
     is_writable_body_paragraph_pos,
 )
 
+GENERATED_TEXT_FONT_RESET_VERSION = "font_sanitize_v1"
+GENERATED_TEXT_DEFAULT_COLOR = 0
+GENERATED_TEXT_DEFAULT_HIGHLIGHT = 0
+GENERATED_TEXT_DEFAULT_UNDERLINE = 0
+
 
 # ---------------------------------------------------------------------------
 # 格式化
 # ---------------------------------------------------------------------------
+
+def _format_range_label(range_obj) -> str:
+    try:
+        start = int(getattr(range_obj, "Start"))
+        end = int(getattr(range_obj, "End"))
+    except Exception:
+        return "unknown"
+    return f"{start}-{end}"
+
+
+def reset_generated_text_font_format(
+    range_obj,
+    *,
+    font_name: str = "宋体",
+    font_size: int = 12,
+    log_parts: Optional[List[str]] = None,
+    raise_on_failure: bool = True,
+) -> None:
+    """
+    Reset generated text to a clean character-format baseline before optional style writeback.
+
+    This helper intentionally avoids ParagraphFormat; layout remains the
+    caller's responsibility.
+    """
+    failures: list[str] = []
+    try:
+        font = getattr(range_obj, "Font", None)
+    except Exception as exc:
+        font = None
+        failures.append(f"Font:{exc}")
+
+    if font is None:
+        failures.append("Font:missing")
+    else:
+        for attr, value in (
+            ("Name", font_name),
+            ("Size", font_size),
+            ("Bold", False),
+            ("Italic", False),
+            ("Underline", GENERATED_TEXT_DEFAULT_UNDERLINE),
+            ("StrikeThrough", False),
+            ("Color", GENERATED_TEXT_DEFAULT_COLOR),
+        ):
+            try:
+                setattr(font, attr, value)
+            except Exception as exc:
+                failures.append(f"{attr}:{exc}")
+
+    try:
+        setattr(range_obj, "HighlightColorIndex", GENERATED_TEXT_DEFAULT_HIGHLIGHT)
+    except Exception as exc:
+        failures.append(f"HighlightColorIndex:{exc}")
+
+    if not failures:
+        return
+
+    message = (
+        f"generated_insert_format_reset_version={GENERATED_TEXT_FONT_RESET_VERSION}; "
+        f"range={_format_range_label(range_obj)}; failures={';'.join(failures)}"
+    )
+    if log_parts is not None:
+        log_parts.append(f"  警告: 生成文本字体清洗失败: {message}")
+    if raise_on_failure:
+        raise RuntimeError(message)
+
 
 def apply_standard_insert_format(
     inserted_rng,
     *,
     font_name: str = "宋体",
     font_size: int = 12,
+    log_parts: Optional[List[str]] = None,
 ) -> None:
     """
     对插入的 Range 应用标准格式（宋体、指定字号、1.5 倍行距、无缩进等）。
 
     采用 gjgk_update_word 中的超集版本（含 PageBreakBefore 等额外属性）。
     """
-    inserted_rng.Font.Name = font_name
-    inserted_rng.Font.Size = font_size
-    inserted_rng.Font.Bold = False
+    reset_generated_text_font_format(
+        inserted_rng,
+        font_name=font_name,
+        font_size=font_size,
+        log_parts=log_parts,
+    )
 
     paragraph_format = inserted_rng.ParagraphFormat
     paragraph_format.LineSpacingRule = wdLineSpace1pt5
@@ -81,6 +155,7 @@ def insert_content_with_formatting(
     get_bound_end: Callable[[], int],
     font_name: str = "宋体",
     font_size: int = 12,
+    log_parts: Optional[List[str]] = None,
 ):
     """
     向 insert_range 处插入一行文本并应用标准格式。
@@ -95,7 +170,10 @@ def insert_content_with_formatting(
     inserted_rng = doc.Range(start_pos, end_pos - 1)
 
     apply_standard_insert_format(
-        inserted_rng, font_name=font_name, font_size=font_size
+        inserted_rng,
+        font_name=font_name,
+        font_size=font_size,
+        log_parts=log_parts,
     )
 
     insert_range.Collapse(wdCollapseEnd)
@@ -114,6 +192,7 @@ def insert_table_with_formatting(
     get_bound_end: Optional[Callable[[], int]] = None,
     font_name: str = "宋体",
     font_size: int = 12,
+    log_parts: Optional[List[str]] = None,
 ):
     """
     在 insert_range 处插入 Markdown 表格，填充内容并应用标准格式。
@@ -175,12 +254,19 @@ def insert_table_with_formatting(
 
                 cell_range = cell.Range
                 apply_standard_insert_format(
-                    cell_range, font_name=font_name, font_size=font_size
+                    cell_range,
+                    font_name=font_name,
+                    font_size=font_size,
+                    log_parts=log_parts,
                 )
                 cell_range.ParagraphFormat.Alignment = 0
                 cell.VerticalAlignment = 1
-            except Exception:
-                pass
+            except Exception as exc:
+                if log_parts is not None:
+                    log_parts.append(
+                        f"    警告: 表格单元格格式化失败 "
+                        f"r={r_idx + 1}, c={c_idx + 1}: {exc}"
+                    )
 
     try:
         insert_range.SetRange(table.Range.End, table.Range.End)
@@ -474,13 +560,13 @@ def insert_items_inline_at_end_of_paragraph(
             st = int(rng.Start)
             rng.InsertAfter(s)
             ed = int(rng.End)
-            try:
-                ins = doc.Range(st, ed)
-                ins.Font.Name = font_name
-                ins.Font.Size = font_size
-                ins.Font.Bold = False
-            except Exception:
-                pass
+            ins = doc.Range(st, ed)
+            reset_generated_text_font_format(
+                ins,
+                font_name=font_name,
+                font_size=font_size,
+                log_parts=log_parts,
+            )
             rng.Collapse(wdCollapseEnd)
             inserted += 1
         elif item["type"] == "table":
@@ -492,6 +578,7 @@ def insert_items_inline_at_end_of_paragraph(
                     get_bound_end=get_bound_end,
                     font_name=font_name,
                     font_size=font_size,
+                    log_parts=log_parts,
                 )
                 inserted += 1
             except Exception as e:
@@ -499,7 +586,16 @@ def insert_items_inline_at_end_of_paragraph(
                     log_parts.append(f"    警告: 内联插入表格失败，改为文本: {e}")
                 for row in item["rows"]:
                     s = "\r" + normalize_word_body_text(" | ".join(row))
+                    st = int(rng.Start)
                     rng.InsertAfter(s)
+                    ed = int(rng.End)
+                    ins = doc.Range(st, ed)
+                    reset_generated_text_font_format(
+                        ins,
+                        font_name=font_name,
+                        font_size=font_size,
+                        log_parts=log_parts,
+                    )
                     rng.Collapse(wdCollapseEnd)
                     inserted += 1
     return inserted

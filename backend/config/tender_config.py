@@ -83,7 +83,7 @@ ANCHOR_CONFIGS: Dict[str, TenderAnchorConfig] = {
     ),
     "gngk_fw_zc": TenderAnchorConfig(
         before_text="第三章 招标内容及要求",
-        after_text="第四章 合同条款",
+        after_text="第四章 投标文件有关格式",
         before_size=22.0,
         after_size=22.0,
     ),
@@ -95,7 +95,7 @@ ANCHOR_CONFIGS: Dict[str, TenderAnchorConfig] = {
     ),
     "gngk_fw_cz": TenderAnchorConfig(
         before_text="第三章 招标内容及要求",
-        after_text="第四章 合同条款",
+        after_text="第四章 投标文件有关格式",
         before_size=22.0,
         after_size=22.0,
     ),
