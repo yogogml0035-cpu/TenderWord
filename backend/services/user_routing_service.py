@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Sequence
 
@@ -29,6 +30,53 @@ logger = logging.getLogger(__name__)
 
 NO_DOCUMENT_HINT_TEXT = "当前会话没有可用文档，请先完成一次生成。"
 NON_REWRITE_HINT_TEXT = "我这边暂时没收到有效回复，请重试一次。"
+_REWRITE_INTENT_KEYWORDS = (
+    "修改",
+    "改写",
+    "重写",
+    "调整",
+    "更改",
+    "变更",
+    "替换",
+    "删除",
+    "删掉",
+    "删去",
+    "新增",
+    "增加",
+    "补充",
+    "润色",
+    "优化",
+    "标注",
+    "批注",
+)
+_REWRITE_CONCRETE_ACTION_KEYWORDS = (
+    "改成",
+    "改为",
+    "调整为",
+    "替换为",
+    "删除",
+    "删掉",
+    "删去",
+    "新增",
+    "增加",
+    "补充",
+    "润色",
+    "优化",
+    "标注",
+    "批注",
+    "重写",
+)
+_CAPABILITY_QUESTION_KEYWORDS = (
+    "能不能",
+    "能否",
+    "可不可以",
+    "是否可以",
+    "可以吗",
+    "可以",
+    "会不会",
+    "怎么",
+    "如何",
+)
 
 
 @dataclass(frozen=True)
@@ -52,6 +100,30 @@ def _to_route_history_messages(
         )
         for item in messages
     ]
+
+
+def _normalize_intent_text(text: str) -> str:
+    return re.sub(r"\s+", "", str(text or "").strip())
+
+
+def _looks_like_rewrite_request(latest_user_message: str) -> bool:
+    normalized = _normalize_intent_text(latest_user_message)
+    if not normalized:
+        return False
+
+    if not any(keyword in normalized for keyword in _REWRITE_INTENT_KEYWORDS):
+        return False
+
+    asks_about_capability = any(
+        keyword in normalized for keyword in _CAPABILITY_QUESTION_KEYWORDS
+    )
+    has_concrete_action = any(
+        keyword in normalized for keyword in _REWRITE_CONCRETE_ACTION_KEYWORDS
+    )
+    if asks_about_capability and not has_concrete_action:
+        return False
+
+    return True
 
 
 class UserRoutingService:
@@ -79,6 +151,28 @@ class UserRoutingService:
         route_skill_summaries = self._skill_registry.list_skill_summaries()
         skill_ids = self._skill_registry.list_skill_ids()
         request_messages: list[dict[str, Any]] = []
+
+        if (
+            has_rewrite_history
+            and REWRITE_ROUTE_LITERAL in skill_ids
+            and _looks_like_rewrite_request(normalized_message)
+        ):
+            rewrite_log_path = self._write_skill_directory_route_audit(
+                conversation_id=conversation_id,
+                request_messages=[],
+                rendered_system_prompt=(
+                    "deterministic rewrite route: has_rewrite_history=yes and "
+                    "latest user message contains rewrite intent."
+                ),
+                rendered_user_prompt=normalized_message,
+            )
+            return UserRouteDecision(
+                route=REWRITE_ROUTE_LITERAL,
+                skill_id=REWRITE_ROUTE_LITERAL,
+                latest_rewrite_state=latest_rewrite_state,
+                used_llm=False,
+                rewrite_log_path=rewrite_log_path,
+            )
 
         prefix_buffer = ""
         reply_parts: list[str] = []

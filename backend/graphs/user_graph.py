@@ -86,7 +86,9 @@ class UserGraph:
             }
         )
 
-        if decision.route != REWRITE_ROUTE_LITERAL:
+        if decision.route == REWRITE_ROUTE_LITERAL:
+            self._emit_event(stream_writer, "route", {"route": REWRITE_ROUTE_LITERAL})
+        else:
             if not reply_route_emitted:
                 self._emit_event(stream_writer, "route", {"route": REPLY_ROUTE_LITERAL})
             if decision.reply_text and not decision.reply_streamed:

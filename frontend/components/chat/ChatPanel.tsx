@@ -28,25 +28,30 @@ interface ChatPanelProps {
 const missingInsertionAnchorMessage = '请先补全当前页面的插入锚点';
 
 function collectNormalChatContext(messages: Message[]): UserStreamMessage[] {
-  const candidates = messages.filter((message) => {
+  const candidates: Array<{ message: Message; content: string }> = [];
+
+  for (const message of messages) {
     if (message.metadata?.messageKind) {
-      return false;
+      continue;
     }
     if (message.metadata?.chatKind && message.metadata.chatKind !== 'normal') {
-      return false;
+      continue;
     }
-    if (message.type === 'user') {
-      return true;
+    if (message.type !== 'user' && (message.type !== 'ai' || message.status !== 'completed')) {
+      continue;
     }
-    if (message.type === 'ai') {
-      return message.status === 'completed';
-    }
-    return false;
-  });
 
-  return candidates.slice(-6).map<UserStreamMessage>((message) => ({
+    const content = typeof message.content === 'string' ? message.content.trim() : '';
+    if (!content) {
+      continue;
+    }
+
+    candidates.push({ message, content });
+  }
+
+  return candidates.slice(-6).map<UserStreamMessage>(({ message, content }) => ({
     role: message.type === 'user' ? 'user' : 'assistant',
-    content: typeof message.content === 'string' ? message.content : '',
+    content,
   }));
 }
 

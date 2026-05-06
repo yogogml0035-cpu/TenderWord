@@ -859,6 +859,55 @@ describe('ChatPanel', () => {
     ]);
   });
 
+  it('excludes empty completed ai bubbles from the next user stream context', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+          messages: [
+            {
+              id: 'msg-ai-empty',
+              conversationId: 'conv-1',
+              type: 'ai',
+              content: '',
+              timestamp: Date.now(),
+              status: 'completed',
+              metadata: {
+                chatKind: 'normal',
+              },
+            },
+          ],
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '继续修改第二包技术参数',
+        },
+      },
+    }));
+
+    mockUserStream([
+      { event: 'route', data: { route: 'reply' } },
+      { event: 'done', data: { content: '好的，我继续处理。' } },
+    ]);
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      expect(mockStreamUserMessage).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockStreamUserMessage.mock.calls[0]?.[0].messages).toEqual([
+      { role: 'user', content: '继续修改第二包技术参数' },
+    ]);
+  });
+
   it('removes the rewrite placeholder bubble when the rewrite stream fails before task acceptance', async () => {
     useChatStore.setState((state) => ({
       ...state,
