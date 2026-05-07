@@ -77,7 +77,24 @@ PROJECT_NAME_FIRST_HIT_COMMENT = "此次文件由AI生成，请业务员不要�
 
 
 def _ranges_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
-    return not (int(a_end) <= int(b_start) or int(b_end) <= int(a_start))
+    a_start = int(a_start)
+    a_end = int(a_end)
+    b_start = int(b_start)
+    b_end = int(b_end)
+
+    # Word 里的批注锚点有时会退化成零宽范围；判重时需要把这类贴边锚点
+    # 视为与正文命中处相同的落点，避免重复插入同文案批注。
+    a_is_collapsed = a_start == a_end
+    b_is_collapsed = b_start == b_end
+
+    if a_is_collapsed and b_is_collapsed:
+        return a_start == b_start
+    if a_is_collapsed:
+        return b_start <= a_start <= b_end
+    if b_is_collapsed:
+        return a_start <= b_start <= a_end
+
+    return not (a_end <= b_start or b_end <= a_start)
 
 
 def _get_comment_range(comment: Any) -> Any | None:

@@ -293,6 +293,31 @@ def test_project_name_first_hit_dedupes_existing_ai_comment_on_nearby_anchor(mon
     assert "首个候选处理方式: 已存在同文案，跳过重复新增" in result["replacement_log"]
 
 
+def test_project_name_first_hit_dedupes_existing_ai_comment_on_collapsed_anchor(monkeypatch, tmp_path) -> None:
+    body_text = "X <PN> Y"
+    body = _FakeStory(story_type=1, text=body_text, page_number=6, offset=0)
+    doc = _FakeDocument([body])
+    first_start = body_text.find("<PN>")
+    ai_comment_anchor = first_start + len("<PN>")
+    doc.Comments.append_existing_comment(
+        start=first_start,
+        end=first_start + len("<PN>"),
+        text="人工批注",
+    )
+    doc.Comments.append_existing_comment(
+        start=ai_comment_anchor,
+        end=ai_comment_anchor,
+        text=replace_content_module.PROJECT_NAME_FIRST_HIT_COMMENT,
+    )
+
+    result = _run_replace_content(monkeypatch, tmp_path=tmp_path, doc=doc)
+
+    assert doc.Comments.Count == 2
+    assert doc.Comments(1).Text == "人工批注"
+    assert doc.Comments(2).Text == replace_content_module.PROJECT_NAME_FIRST_HIT_COMMENT
+    assert "首个候选处理方式: 已存在同文案，跳过重复新增" in result["replacement_log"]
+
+
 def test_project_name_first_hit_retries_on_nearby_anchor(monkeypatch, tmp_path) -> None:
     body_text = "Head <PN> Tail"
     body = _FakeStory(story_type=1, text=body_text, page_number=7, offset=0)
