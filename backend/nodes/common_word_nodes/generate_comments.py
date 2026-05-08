@@ -21,6 +21,7 @@ from typing import Callable, Optional
 from backend.prompts.comment_prompt import (
     COMMENT_PROMPT_REGISTRY,
     render_comment_prompt,
+    render_comment_json_repair_prompt,
 )
 from backend.prompts.types import CommentPromptInput
 from backend.states import TenderGraphStateBase
@@ -34,6 +35,8 @@ from backend.util.log_util.progress_log import progress_log
 
 # 模块级常量
 CHECK_INTERVAL = 3.0  # 心跳检查间隔（秒）
+JSON_REPAIR_RETRY_LIMIT = 1
+JSON_REPAIR_TEMPERATURE = 0.1
 
 # Prompt 注册表：根据 tender_type 选择对应的 prompt
 PROMPT_REGISTRY = COMMENT_PROMPT_REGISTRY
@@ -41,6 +44,171 @@ PROMPT_REGISTRY = COMMENT_PROMPT_REGISTRY
 
 def _sanitize_filename(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', "_", name).strip()
+
+
+def _strip_code_fence_wrappers(text: str) -> str:
+    stripped = str(text or "").strip()
+    match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", stripped, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return stripped
+    return match.group(1).strip()
+
+
+def _extract_first_json_array(text: str) -> Optional[str]:
+    raw = str(text or "")
+    start = raw.find("[")
+    if start < 0:
+        return None
+
+    in_string = False
+    escape = False
+    depth = 0
+    array_start = -1
+
+    for index in range(start, len(raw)):
+        char = raw[index]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            continue
+        if char == "[":
+            if depth == 0:
+                array_start = index
+            depth += 1
+            continue
+        if char == "]" and depth > 0:
+            depth -= 1
+            if depth == 0 and array_start >= 0:
+                return raw[array_start : index + 1].strip()
+
+    return None
+
+
+def _escape_invalid_json_backslashes(text: str) -> str:
+    valid_escapes = {'"', "\\", "/", "b", "f", "n", "r", "t"}
+    raw = str(text or "")
+    chars: list[str] = []
+    in_string = False
+    index = 0
+
+    while index < len(raw):
+        char = raw[index]
+        if not in_string:
+            chars.append(char)
+            if char == '"':
+                in_string = True
+            index += 1
+            continue
+
+        if char == "\\":
+            next_char = raw[index + 1] if index + 1 < len(raw) else ""
+            if next_char in valid_escapes:
+                chars.append("\\")
+                chars.append(next_char)
+                index += 2
+                continue
+            if next_char == "u" and index + 5 < len(raw):
+                unicode_candidate = raw[index + 2 : index + 6]
+                if re.fullmatch(r"[0-9a-fA-F]{4}", unicode_candidate):
+                    chars.append(raw[index : index + 6])
+                    index += 6
+                    continue
+                else:
+                    chars.append("\\\\")
+            else:
+                chars.append("\\\\")
+            index += 1
+            continue
+
+        chars.append(char)
+        if char == '"':
+            in_string = False
+        index += 1
+
+    return "".join(chars)
+
+
+def _repair_common_json_issues(text: str) -> str:
+    repaired = _strip_code_fence_wrappers(str(text or "").lstrip("\ufeff"))
+    if repaired.lower().startswith("json\n"):
+        repaired = repaired[5:].strip()
+    repaired = _escape_invalid_json_backslashes(repaired)
+    repaired = re.sub(r",(\s*[\]}])", r"\1", repaired)
+    return repaired.strip()
+
+
+def _build_json_candidates(raw_content: str) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def _add(value: Optional[str]) -> None:
+        normalized = str(value or "").strip()
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        candidates.append(normalized)
+
+    initial = str(raw_content or "").strip()
+    stripped_fence = _strip_code_fence_wrappers(initial)
+    _add(initial)
+    _add(stripped_fence)
+
+    for base in tuple(candidates):
+        _add(_extract_first_json_array(base))
+        first_bracket = base.find("[")
+        last_bracket = base.rfind("]")
+        if 0 <= first_bracket < last_bracket:
+            _add(base[first_bracket : last_bracket + 1])
+
+    for base in tuple(candidates):
+        _add(_repair_common_json_issues(base))
+
+    return candidates
+
+
+def _normalize_comment_items(comments: object) -> list[dict[str, str]]:
+    if not isinstance(comments, list):
+        raise ValueError(f"LLM 输出不是列表，而是 {type(comments).__name__}")
+
+    return [
+        {
+            "reference_text": str(item.get("reference_text", "") or ""),
+            "comment_text": str(item.get("comment_text", "") or ""),
+        }
+        for item in comments
+        if isinstance(item, dict)
+    ]
+
+
+def _parse_comment_output(raw_content: str) -> list[dict[str, str]]:
+    last_error: Optional[Exception] = None
+
+    for candidate in _build_json_candidates(raw_content):
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            continue
+        return _normalize_comment_items(parsed)
+
+    if last_error:
+        raise last_error
+    raise ValueError("未找到可解析的 JSON 数组")
+
+
+def _write_text_if_possible(path, content: str) -> None:
+    if not path:
+        return
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(str(content or ""))
 
 
 def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
@@ -105,6 +273,8 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
     # 准备 prompts_log/generate_log 输出路径：保存大模型生成的批注内容，使用 new_comments 后缀区分
     new_comments_file = None
     comments_prompt_file = None
+    raw_comments_file = None
+    repaired_comments_file = None
     try:
         prompts_log_dir = get_generate_prompt_log_dir(__file__)
 
@@ -117,6 +287,13 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
         prompt_base = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
         comments_prompt_file = (
             prompts_log_dir / f"prompt_{prompt_base}_comments_prompt_{timestamp}.txt"
+        )
+        raw_comments_file = (
+            prompts_log_dir / f"prompt_{prompt_base}_comments_raw_output_{timestamp}.txt"
+        )
+        repaired_comments_file = (
+            prompts_log_dir
+            / f"prompt_{prompt_base}_comments_repaired_output_{timestamp}.txt"
         )
         new_comments_file = (
             prompts_log_dir / f"prompt_{prompt_base}_new_comments_{timestamp}.txt"
@@ -217,49 +394,92 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
         progress_log.exception(f"[generate_comments] 发生意外错误: {e}")
         return TenderGraphStateBase(polished_comments=[], generated_comment_count=0)
 
+    try:
+        _write_text_if_possible(raw_comments_file, content)
+    except Exception as e:
+        progress_log.warning(f"[generate_comments] 警告: 保存原始批注输出失败: {e}")
+
     # 实现带错误处理的 JSON 解析
 
     # 确保输出后有换行
     if not suppress_llm_stdout:
         progress_log.debug("")
 
+    polished_comments: list[dict[str, str]] = []
     try:
-        # 使用 json.loads 解析 LLM 输出
-        comments = json.loads(content)
+        polished_comments = _parse_comment_output(content)
+        progress_log.info(
+            f"[generate_comments] 生成了 {len(polished_comments)} 条批注指令"
+        )
+    except (json.JSONDecodeError, ValueError) as first_error:
+        progress_log.warning("[generate_comments] 批注输出格式无效，尝试自动修复")
 
-        # 验证结果是一个列表
-        if not isinstance(comments, list):
-            progress_log.warning(
-                f"[generate_comments] 警告: LLM 输出不是列表，而是 {type(comments).__name__}"
-            )
-            polished_comments = []
-        else:
-            # 将每个字典转换为包含 reference_text 和 comment_text 字段的 CommentInstruction
-            # 对缺失字段使用 .get() 和空字符串默认值
-            # 过滤掉非字典项
-            polished_comments = [
-                {
-                    "reference_text": c.get("reference_text", ""),
-                    "comment_text": c.get("comment_text", ""),
-                }
-                for c in comments
-                if isinstance(c, dict)
-            ]
+        repaired_comments: Optional[list[dict[str, str]]] = None
+        repair_error: Optional[Exception] = None
 
-            # 成功时记录生成的批注数量
+        for _ in range(JSON_REPAIR_RETRY_LIMIT):
+            repair_prompt = render_comment_json_repair_prompt(content)
+            try:
+                repaired_content = loop.run_until_complete(
+                    stream_llm_completion(
+                        model_provider=model_provider,
+                        system_prompt=repair_prompt.system_prompt,
+                        user_prompt=repair_prompt.user_prompt,
+                        callbacks=callbacks,
+                        model_override=llm_model_override,
+                        extra_params_override={
+                            "temperature": JSON_REPAIR_TEMPERATURE
+                        },
+                        check_interval=CHECK_INTERVAL,
+                    )
+                )
+            except LLMTimeoutError as e:
+                progress_log.error(f"\n[generate_comments] JSON 修复重试超时: {e}")
+                repair_error = e
+                break
+            except Exception as e:
+                progress_log.exception(
+                    f"[generate_comments] JSON 修复重试发生意外错误: {e}"
+                )
+                repair_error = e
+                break
+
+            try:
+                _write_text_if_possible(repaired_comments_file, repaired_content)
+            except Exception as e:
+                progress_log.warning(
+                    f"[generate_comments] 警告: 保存修复后批注输出失败: {e}"
+                )
+
+            if not suppress_llm_stdout:
+                progress_log.debug("")
+
+            try:
+                repaired_comments = _parse_comment_output(repaired_content)
+                break
+            except (json.JSONDecodeError, ValueError) as e:
+                repair_error = e
+
+        if repaired_comments is not None:
+            polished_comments = repaired_comments
             progress_log.info(
-                f"[generate_comments] 生成了 {len(polished_comments)} 条批注指令"
+                f"[generate_comments] JSON 自动修复成功，生成了 {len(polished_comments)} 条批注指令"
             )
-
-    except json.JSONDecodeError as e:
-        # 捕获 JSONDecodeError 并记录错误
-        progress_log.error(f"[generate_comments] JSON 解析失败 (JSONDecodeError): {e}")
-        polished_comments = []
-
-    except ValueError as e:
-        # 捕获 ValueError 并记录错误
-        progress_log.error(f"[generate_comments] JSON 解析失败 (ValueError): {e}")
-        polished_comments = []
+        else:
+            error_to_log = repair_error or first_error
+            if isinstance(error_to_log, json.JSONDecodeError):
+                progress_log.error(
+                    f"[generate_comments] JSON 解析失败 (JSONDecodeError): {error_to_log}"
+                )
+            elif isinstance(error_to_log, ValueError):
+                progress_log.error(
+                    f"[generate_comments] JSON 解析失败 (ValueError): {error_to_log}"
+                )
+            else:
+                progress_log.error(
+                    f"[generate_comments] JSON 解析时发生意外错误: {error_to_log}"
+                )
+            polished_comments = []
 
     except KeyError as e:
         # 捕获 KeyError 并记录错误

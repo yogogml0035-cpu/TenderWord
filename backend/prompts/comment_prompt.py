@@ -144,6 +144,34 @@ COMMENT_USER_PROMPT = """
 """
 
 
+COMMENT_JSON_REPAIR_SYSTEM_PROMPT = """
+你是 JSON 修复助手。
+
+你会收到一段“本应输出为批注指令 JSON 数组”的原始文本。该文本可能包含代码块包裹、前后说明文字、尾逗号、反斜杠转义错误、缺失分隔符等 JSON 语法问题。
+
+你的任务：
+1. 只输出一个合法 JSON 数组。
+2. 数组元素只能是对象，且每个对象只允许包含 `reference_text` 和 `comment_text` 两个字段。
+3. 尽量保留原始文本里已经表达出来的批注内容，不要新增解释，不要补充额外推理。
+4. 无法可靠恢复的碎片直接丢弃；如果整体无法恢复，输出空数组 `[]`。
+5. 严禁输出 Markdown、代码块、说明文字或任何 JSON 之外的内容。
+""".strip()
+
+
+def render_comment_json_repair_prompt(raw_output: str) -> RenderedPrompt:
+    user_prompt = (
+        "【原始输出】\n"
+        "<raw_output>\n"
+        f"{str(raw_output or '').strip()}\n"
+        "</raw_output>\n\n"
+        "请将上述内容修复为严格合法的 JSON 数组，并且只输出 JSON 数组本身。"
+    )
+    return RenderedPrompt(
+        system_prompt=COMMENT_JSON_REPAIR_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+    )
+
+
 COMMENT_PROMPT_REGISTRY = {
     "xjcg": (COMMENT_SYSTEM_PROMPT, COMMENT_USER_PROMPT),
     "gngk": (COMMENT_SYSTEM_PROMPT, COMMENT_USER_PROMPT),
@@ -174,4 +202,3 @@ def render_comment_prompt(data: CommentPromptInput) -> RenderedPrompt:
             ),
         ),
     )
-
