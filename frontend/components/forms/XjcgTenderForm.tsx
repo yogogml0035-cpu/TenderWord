@@ -12,6 +12,7 @@ export interface XjcgTenderFormData {
   tender_lx: BaseTenderFormData['tender_lx'];
   fund_lx: BaseTenderFormData['fund_lx'];
   generation_style: BaseTenderFormData['generation_style'];
+  style_writeback_mode: BaseTenderFormData['style_writeback_mode'];
   tender_data: BaseTenderFormData['tender_data'];
   model: BaseTenderFormData['model'];
   files: BaseTenderFormData['files'];

@@ -128,6 +128,7 @@ export function convertXjcgFormToApiRequest(formData: XjcgTenderFormData): Gener
     file_paths: filesConfig,
     insertion_config: formData.insertion_config,
     generation_style: formData.generation_style,
+    style_writeback_mode: formData.style_writeback_mode,
     model: formData.model,
   };
 }
@@ -204,6 +205,7 @@ export function convertGngkFormToApiRequest(
     file_paths: filesConfig,
     insertion_config: formData.insertion_config,
     generation_style: formData.generation_style,
+    style_writeback_mode: formData.style_writeback_mode,
     model: formData.model,
   };
   // No longer processing qualification files - removed from GNGK form
@@ -230,6 +232,7 @@ export function convertGjgkFormToApiRequest(
     file_paths: filesConfig,
     insertion_config: formData.insertion_config,
     generation_style: formData.generation_style,
+    style_writeback_mode: formData.style_writeback_mode,
     model: formData.model,
   };
 }

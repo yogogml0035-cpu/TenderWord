@@ -103,20 +103,26 @@ describe('chatStore conversation scoped selectors', () => {
     act(() => {
       useChatStore.getState().updateConversationDraft(convA, {
         generation_style: 'template',
+        style_writeback_mode: 'full',
         tender_no: 'TN-001',
         model: 'deepseek',
       });
       useChatStore.getState().updateConversationDraft(convB, {
         generation_style: 'param',
+        style_writeback_mode: 'bold_only',
         tender_no: 'TN-002',
         model: 'qwen',
       });
     });
 
     expect(useChatStore.getState().getConversationDraft(convA)?.generation_style).toBe('template');
+    expect(useChatStore.getState().getConversationDraft(convA)?.style_writeback_mode).toBe('full');
     expect(useChatStore.getState().getConversationDraft(convA)?.tender_no).toBe('TN-001');
     expect(useChatStore.getState().getConversationDraft(convA)?.model).toBe('deepseek');
     expect(useChatStore.getState().getConversationDraft(convB)?.generation_style).toBe('param');
+    expect(useChatStore.getState().getConversationDraft(convB)?.style_writeback_mode).toBe(
+      'bold_only'
+    );
     expect(useChatStore.getState().getConversationDraft(convB)?.tender_no).toBe('TN-002');
     expect(useChatStore.getState().getConversationDraft(convB)?.model).toBe('qwen');
   });
@@ -144,6 +150,9 @@ describe('chatStore conversation scoped selectors', () => {
 
     expect(useChatStore.getState().getConversationDraft(conversationId)?.generation_style).toBe(
       'template'
+    );
+    expect(useChatStore.getState().getConversationDraft(conversationId)?.style_writeback_mode).toBe(
+      'full'
     );
     expect(useChatStore.getState().getConversationDraft(conversationId)?.model).toBe('deepseek');
   });

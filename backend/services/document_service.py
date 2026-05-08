@@ -728,6 +728,9 @@ class DocumentService:
         generation_style = getattr(request, "generation_style", "template")
         if hasattr(generation_style, "value"):
             generation_style = generation_style.value
+        style_writeback_mode = getattr(request, "style_writeback_mode", "full")
+        if hasattr(style_writeback_mode, "value"):
+            style_writeback_mode = style_writeback_mode.value
         project_number = tender_data.project_number or ""
         if tender_type == "gjgk":
             project_number = normalize_gjgk_project_number(project_number)
@@ -738,6 +741,7 @@ class DocumentService:
             "user_session_id": conversation_id,
             "tender_type": tender_type,
             "generation_style": str(generation_style or "template"),
+            "style_writeback_mode": str(style_writeback_mode or "full"),
             # 项目信息
             "project_name": tender_data.project_name or "",
             "project_number": project_number,

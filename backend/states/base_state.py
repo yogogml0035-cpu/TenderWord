@@ -44,6 +44,7 @@ class TenderGraphStateBase(BaseState, total=False):
     clean_draft_path: Optional[str]
     prepared_doc_path: str
     generation_style: str
+    style_writeback_mode: str
 
     origin_tender_params: str
     tender_params: str

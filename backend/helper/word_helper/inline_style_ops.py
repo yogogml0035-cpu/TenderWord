@@ -53,6 +53,8 @@ FONT_COLOR_SINGLE_CONTEXT_CONTAINER_MIN_SCORE = 0.90
 FONT_COLOR_SINGLE_CONTEXT_MIN_LEN = 7
 SUCCESS_EXAMPLE_LIMIT = 3
 SUCCESS_EXAMPLE_TEXT_LIMIT = 24
+STYLE_WRITEBACK_MODE_FULL = "full"
+STYLE_WRITEBACK_MODE_BOLD_ONLY = "bold_only"
 SHORT_HIGH_FREQUENCY_COLOR_TOKENS = {
     "提供",
     "投标人",
@@ -414,6 +416,38 @@ def _fragment_without_font_color(fragment: InlineStyleFragment) -> InlineStyleFr
     clean_fragment = InlineStyleFragment(**dict(fragment))
     clean_fragment["font_color"] = None
     return clean_fragment
+
+
+def _normalize_style_writeback_mode(value: Any) -> str:
+    normalized = str(value or STYLE_WRITEBACK_MODE_FULL).strip().lower()
+    if normalized == STYLE_WRITEBACK_MODE_BOLD_ONLY:
+        return STYLE_WRITEBACK_MODE_BOLD_ONLY
+    return STYLE_WRITEBACK_MODE_FULL
+
+
+def _filter_fragment_for_style_writeback_mode(
+    fragment: InlineStyleFragment,
+    *,
+    style_writeback_mode: str,
+) -> Optional[InlineStyleFragment]:
+    if style_writeback_mode != STYLE_WRITEBACK_MODE_BOLD_ONLY:
+        return fragment
+
+    style_flags = dict(fragment.get("style_flags") or {})
+    if not bool(style_flags.get("bold")):
+        return None
+
+    filtered_fragment = InlineStyleFragment(**dict(fragment))
+    filtered_fragment["style_flags"] = {
+        "strikethrough": False,
+        "underline": False,
+        "bold": True,
+        "italic": False,
+    }
+    filtered_fragment["font_color"] = None
+    filtered_fragment["highlight_color"] = None
+    filtered_fragment["underline_style"] = None
+    return filtered_fragment
 
 
 def _normalize_fragment_font_color(fragment: InlineStyleFragment) -> InlineStyleFragment:
@@ -2926,6 +2960,7 @@ def apply_inline_style_fragments(
     *,
     doc,
     inline_style_fragments: Iterable[Dict[str, Any]] | None,
+    style_writeback_mode: str = STYLE_WRITEBACK_MODE_FULL,
     bound_start: int,
     bound_end: int,
     log_parts: list[str],
@@ -2934,10 +2969,16 @@ def apply_inline_style_fragments(
     diagnostic_logger: Optional[Callable[[str], Any]] = None,
 ) -> InlineStyleWritebackResult:
     """将抽取的行内样式按高召回 + 最低安全线策略回填到新正文中。"""
-    fragments = [
-        _normalize_fragment_font_color(InlineStyleFragment(**dict(item)))
-        for item in list(inline_style_fragments or [])
-    ]
+    normalized_mode = _normalize_style_writeback_mode(style_writeback_mode)
+    fragments: list[InlineStyleFragment] = []
+    for item in list(inline_style_fragments or []):
+        fragment = _normalize_fragment_font_color(InlineStyleFragment(**dict(item)))
+        filtered_fragment = _filter_fragment_for_style_writeback_mode(
+            fragment,
+            style_writeback_mode=normalized_mode,
+        )
+        if filtered_fragment is not None:
+            fragments.append(filtered_fragment)
     result: InlineStyleWritebackResult = {
         "extracted": len(fragments),
         "attempted": 0,

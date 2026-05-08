@@ -92,6 +92,7 @@ const validGenerateRequest: GenerateRequest = {
   file_paths: {
     tender_params: ['/uploads/params.xlsx'],
   },
+  style_writeback_mode: 'full',
   model: 'deepseek',
 };
 

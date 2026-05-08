@@ -9,6 +9,7 @@ from backend.models.generate import (
     GenerateRequest,
     GenerationStyle,
     LLMModel,
+    StyleWritebackMode,
 )
 from backend.models.tender import TenderData
 from backend.services.document_service import DocumentService, REWRITE_DEFAULT_ANCHORS
@@ -22,6 +23,7 @@ def build_request(
     tender_lx: int = 0,
     fund_source_lx: int = 1,
     generation_style: GenerationStyle = GenerationStyle.TEMPLATE,
+    style_writeback_mode: StyleWritebackMode = StyleWritebackMode.FULL,
 ) -> GenerateRequest:
     file_paths: dict[str, object] = {"tender_params": ["D:/UploadFiles/params.docx"]}
     if origin_tender is not None:
@@ -50,6 +52,7 @@ def build_request(
         ),
         file_paths=file_paths,
         generation_style=generation_style,
+        style_writeback_mode=style_writeback_mode,
         model=LLMModel.DEEPSEEK,
     )
 
@@ -95,6 +98,19 @@ def test_build_initial_state_carries_generation_style() -> None:
     state = service._build_initial_state(request, task_id="task-3")
 
     assert state["generation_style"] == "param"
+
+
+def test_build_initial_state_carries_style_writeback_mode() -> None:
+    service = object.__new__(DocumentService)
+    request = build_request(
+        origin_tender="D:/UploadFiles/review.docx",
+        template="D:/UploadFiles/template.docx",
+        style_writeback_mode=StyleWritebackMode.BOLD_ONLY,
+    )
+
+    state = service._build_initial_state(request, task_id="task-3b")
+
+    assert state["style_writeback_mode"] == "bold_only"
 
 
 @pytest.mark.parametrize(

@@ -57,6 +57,7 @@ describe('formDataConverter', () => {
         tender_lx: 1,
         fund_lx: 0,
         generation_style: 'param',
+        style_writeback_mode: 'bold_only',
         tender_data: baseTenderData,
         model: 'deepseek',
         files: baseFiles,
@@ -71,6 +72,7 @@ describe('formDataConverter', () => {
         tender_lx: 1,
         fund_lx: 1,
         generation_style: 'param',
+        style_writeback_mode: 'bold_only',
         tender_data: baseTenderData,
         model: 'deepseek',
         files: baseFiles,
@@ -85,6 +87,7 @@ describe('formDataConverter', () => {
         tender_lx: 1,
         fund_lx: 1,
         generation_style: 'param',
+        style_writeback_mode: 'bold_only',
         tender_data: baseTenderData,
         model: 'deepseek',
         files: baseFiles,
@@ -93,9 +96,13 @@ describe('formDataConverter', () => {
           after_text: '附件1：投标文件封面（格式）',
         },
       })],
-  ] as const)('forwards generation_style for %s converters', (_tenderType, buildRequest) => {
-    expect(buildRequest().generation_style).toBe('param');
-  });
+  ] as const)(
+    'forwards generation_style and style_writeback_mode for %s converters',
+    (_tenderType, buildRequest) => {
+      expect(buildRequest().generation_style).toBe('param');
+      expect(buildRequest().style_writeback_mode).toBe('bold_only');
+    }
+  );
 
   it.each([
     { tender_lx: 0 as const, fund_lx: 0 as const, expected: 'gngk_hw_zc_tender' },
@@ -108,6 +115,7 @@ describe('formDataConverter', () => {
       tender_lx,
       fund_lx,
       generation_style: 'template',
+      style_writeback_mode: 'full',
       tender_data: baseTenderData,
       model: 'deepseek',
       files: baseFiles,
@@ -128,6 +136,7 @@ describe('formDataConverter', () => {
       tender_lx: 1,
       fund_lx: 0,
       generation_style: 'template',
+      style_writeback_mode: 'full',
       tender_data: baseTenderData,
       model: 'deepseek',
       files: baseFiles,
@@ -147,6 +156,7 @@ describe('formDataConverter', () => {
       tender_lx: 1,
       fund_lx: 1,
       generation_style: 'template',
+      style_writeback_mode: 'full',
       tender_data: baseTenderData,
       model: 'deepseek',
       files: baseFiles,

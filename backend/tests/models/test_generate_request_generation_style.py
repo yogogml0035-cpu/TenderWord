@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend.models.generate import GenerateRequest, GenerationStyle
+from backend.models.generate import GenerateRequest, GenerationStyle, StyleWritebackMode
 from backend.models.tender import TenderData
 
 
@@ -39,3 +39,15 @@ def test_generate_request_accepts_param_generation_style() -> None:
     request = GenerateRequest(**{**build_payload(), "generation_style": "param"})
 
     assert request.generation_style == GenerationStyle.PARAM
+
+
+def test_generate_request_defaults_style_writeback_mode_to_full() -> None:
+    request = GenerateRequest(**build_payload())
+
+    assert request.style_writeback_mode == StyleWritebackMode.FULL
+
+
+def test_generate_request_accepts_bold_only_style_writeback_mode() -> None:
+    request = GenerateRequest(**{**build_payload(), "style_writeback_mode": "bold_only"})
+
+    assert request.style_writeback_mode == StyleWritebackMode.BOLD_ONLY

@@ -1159,6 +1159,7 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     style_writeback_result = apply_inline_style_fragments(
                         doc=doc,
                         inline_style_fragments=state.get("inline_style_fragments"),
+                        style_writeback_mode=str(state.get("style_writeback_mode") or "full"),
                         bound_start=int(insertion_bound_start),
                         bound_end=int(get_insertion_bound_end()),
                         log_parts=insertion_log_parts,

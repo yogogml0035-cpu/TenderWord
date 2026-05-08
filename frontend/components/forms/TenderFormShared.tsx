@@ -23,6 +23,7 @@ import {
 } from '@/lib/api';
 import type {
   GenerationStyle,
+  StyleWritebackMode,
   TemplateCandidate,
   TemplateCandidateRanking,
   TemplateSelectedFile,
@@ -49,6 +50,7 @@ export interface BaseTenderFormData {
   tender_lx: TenderLx;
   fund_lx: FundLx;
   generation_style: GenerationStyle;
+  style_writeback_mode: StyleWritebackMode;
   tender_data: TenderData;
   model: ModelType;
   files: {
@@ -91,6 +93,7 @@ const segmentedControlClassName =
   'inline-flex items-center rounded-2xl border border-slate-200 bg-slate-100/85 p-1 shadow-sm';
 const segmentedToggleButtonClassName =
   'relative min-w-[72px] rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50';
+const defaultStyleWritebackMode: StyleWritebackMode = 'full';
 const gngkFiscalInsertionConfigDefaults: TenderInsertionConfig = {
   before_text: '第四章  招标需求',
   after_text: '第五章  评标方法与程序',
@@ -418,6 +421,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       ? initialDraft.generation_style
       : resolveDefaultGenerationStyle(initialTenderLx)
   );
+  const [localStyleWritebackMode, setLocalStyleWritebackMode] = useState<StyleWritebackMode>(
+    initialDraft?.style_writeback_mode || defaultStyleWritebackMode
+  );
   const [insertionConfig, setInsertionConfig] = useState<TenderInsertionConfig>(() => {
     return resolveVisibleInsertionConfig(
       tenderType,
@@ -463,6 +469,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     onDraftChange && initialDraft?.generation_style
       ? initialDraft.generation_style
       : localGenerationStyle;
+  const styleWritebackMode: StyleWritebackMode = onDraftChange
+    ? initialDraft?.style_writeback_mode || defaultStyleWritebackMode
+    : localStyleWritebackMode;
   const tenderData = onDraftChange
     ? initialDraft?.tender_data || initialTenderData || null
     : localTenderData;
@@ -541,6 +550,16 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     onDraftChange,
     tenderType,
   ]);
+
+  useEffect(() => {
+    if (!onDraftChange || initialDraft?.style_writeback_mode) {
+      return;
+    }
+
+    onDraftChange({
+      style_writeback_mode: defaultStyleWritebackMode,
+    });
+  }, [initialDraft?.style_writeback_mode, onDraftChange]);
 
   const applyTenderDraftUpdates = useCallback(
     (updates: TenderDraftUpdates) => {
@@ -772,6 +791,20 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       });
     },
     [generationStyle, onDraftChange]
+  );
+
+  const handleStyleWritebackModeChange = useCallback(
+    (nextStyleWritebackMode: StyleWritebackMode) => {
+      if (styleWritebackMode === nextStyleWritebackMode) {
+        return;
+      }
+
+      setLocalStyleWritebackMode(nextStyleWritebackMode);
+      onDraftChange?.({
+        style_writeback_mode: nextStyleWritebackMode,
+      });
+    },
+    [onDraftChange, styleWritebackMode]
   );
 
   const handleBeforeTextChange = useCallback(
@@ -1027,6 +1060,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         tender_lx: tenderLx,
         fund_lx: fundLx,
         generation_style: generationStyle,
+        style_writeback_mode: styleWritebackMode,
         tender_data: {
           ...tenderData,
           tender_lx: tenderLx,
@@ -1050,6 +1084,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       tenderData,
       selectedModel,
       generationStyle,
+      styleWritebackMode,
       originFile,
       cleanDraftFile,
       paramFiles,
@@ -1210,58 +1245,95 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
 
         <FormSection title="高级设置（可选）" index={3}>
           <div className="space-y-4">
-            <FormField
-              label="插入位置前文本"
-              name="before_text"
-              variant="text"
-              value={insertionConfig.before_text}
-              onChange={handleBeforeTextChange}
-              disabled={isSubmitting}
-              placeholder="插入位置前的章节标题"
-              helperText="系统将在该文本位置之后插入生成的内容"
-            />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField
+                label="插入位置前文本"
+                name="before_text"
+                variant="text"
+                value={insertionConfig.before_text}
+                onChange={handleBeforeTextChange}
+                disabled={isSubmitting}
+                placeholder="插入位置前的章节标题"
+                helperText="系统将在该文本位置之后插入生成的内容"
+              />
 
-            <FormField
-              label="插入位置后文本"
-              name="after_text"
-              variant="text"
-              value={insertionConfig.after_text}
-              onChange={handleAfterTextChange}
-              disabled={isSubmitting}
-              placeholder="插入位置后的章节标题"
-              helperText="系统将在该文本位置之前插入生成的内容"
-            />
+              <FormField
+                label="插入位置后文本"
+                name="after_text"
+                variant="text"
+                value={insertionConfig.after_text}
+                onChange={handleAfterTextChange}
+                disabled={isSubmitting}
+                placeholder="插入位置后的章节标题"
+                helperText="系统将在该文本位置之前插入生成的内容"
+              />
+            </div>
 
-            <div className="space-y-1.5">
-              <p className="block text-sm font-semibold text-[var(--foreground)]">生成风格</p>
-              <div role="group" aria-label="生成风格" className={segmentedControlClassName}>
-                <button
-                  type="button"
-                  onClick={() => handleGenerationStyleChange('template')}
-                  disabled={isSubmitting}
-                  className={cn(
-                    segmentedToggleButtonClassName,
-                    generationStyle === 'template'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-transparent text-slate-700 hover:bg-white/80'
-                  )}
-                >
-                  按模板优先
-                </button>
-                <span aria-hidden className="h-6 w-px bg-slate-200" />
-                <button
-                  type="button"
-                  onClick={() => handleGenerationStyleChange('param')}
-                  disabled={isSubmitting}
-                  className={cn(
-                    segmentedToggleButtonClassName,
-                    generationStyle === 'param'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-transparent text-slate-700 hover:bg-white/80'
-                  )}
-                >
-                  按参数优先
-                </button>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <p className="block text-sm font-semibold text-[var(--foreground)]">生成风格</p>
+                <div role="group" aria-label="生成风格" className={segmentedControlClassName}>
+                  <button
+                    type="button"
+                    onClick={() => handleGenerationStyleChange('template')}
+                    disabled={isSubmitting}
+                    className={cn(
+                      segmentedToggleButtonClassName,
+                      generationStyle === 'template'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-transparent text-slate-700 hover:bg-white/80'
+                    )}
+                  >
+                    按模板优先
+                  </button>
+                  <span aria-hidden className="h-6 w-px bg-slate-200" />
+                  <button
+                    type="button"
+                    onClick={() => handleGenerationStyleChange('param')}
+                    disabled={isSubmitting}
+                    className={cn(
+                      segmentedToggleButtonClassName,
+                      generationStyle === 'param'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-transparent text-slate-700 hover:bg-white/80'
+                    )}
+                  >
+                    按参数优先
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <p className="block text-sm font-semibold text-[var(--foreground)]">样式修订</p>
+                <div role="group" aria-label="样式修订" className={segmentedControlClassName}>
+                  <button
+                    type="button"
+                    onClick={() => handleStyleWritebackModeChange('full')}
+                    disabled={isSubmitting}
+                    className={cn(
+                      segmentedToggleButtonClassName,
+                      styleWritebackMode === 'full'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-transparent text-slate-700 hover:bg-white/80'
+                    )}
+                  >
+                    开
+                  </button>
+                  <span aria-hidden className="h-6 w-px bg-slate-200" />
+                  <button
+                    type="button"
+                    onClick={() => handleStyleWritebackModeChange('bold_only')}
+                    disabled={isSubmitting}
+                    className={cn(
+                      segmentedToggleButtonClassName,
+                      styleWritebackMode === 'bold_only'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-transparent text-slate-700 hover:bg-white/80'
+                    )}
+                  >
+                    关
+                  </button>
+                </div>
               </div>
             </div>
           </div>

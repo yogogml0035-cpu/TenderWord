@@ -3,6 +3,7 @@ import { createJSONStorage, devtools, persist } from 'zustand/middleware';
 import type { TenderType, FundLx, TenderLx } from '@/types';
 import type {
   GenerationStyle,
+  StyleWritebackMode,
   StyleWritebackSummary,
   TaskKind,
   TaskStatus,
@@ -80,6 +81,7 @@ export interface ConversationFormDraft {
   fund_lx?: FundLx;
   model?: 'deepseek' | 'qwen' | 'doubao';
   generation_style?: GenerationStyle;
+  style_writeback_mode?: StyleWritebackMode;
   input_mode?: 'normal' | 'edit';
   edit_file?: ConversationDraftFile | null;
   insertion_config?: {
@@ -670,6 +672,7 @@ export const useChatStore = create<ChatStore>()(
               ...state.conversationDrafts,
               [conversation.id]: {
                 generation_style: 'template',
+                style_writeback_mode: 'full',
                 model: 'deepseek',
               },
             },

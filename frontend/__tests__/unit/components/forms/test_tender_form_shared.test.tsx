@@ -421,6 +421,51 @@ describe('TenderFormShared', () => {
     expect(screen.getByRole('button', { name: '按模板优先' })).not.toHaveClass('bg-blue-600');
   });
 
+  it('renders style writeback mode inside advanced settings with full default and restores bold-only draft', () => {
+    const firstRender = renderSharedForm();
+
+    expect(screen.getByText('样式修订')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: '样式修订' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '开' })).toHaveClass('bg-blue-600');
+    expect(screen.getByRole('button', { name: '关' })).not.toHaveClass('bg-blue-600');
+
+    firstRender.unmount();
+    renderSharedForm({
+      initialDraft: { style_writeback_mode: 'bold_only' },
+    });
+
+    expect(screen.getByRole('button', { name: '关' })).toHaveClass('bg-blue-600');
+    expect(screen.getByRole('button', { name: '开' })).not.toHaveClass('bg-blue-600');
+  });
+
+  it('groups advanced settings into two responsive rows', () => {
+    renderSharedForm();
+
+    const beforeTextField = screen
+      .getByLabelText('插入位置前文本')
+      .closest('div.space-y-1\\.5');
+    const afterTextField = screen
+      .getByLabelText('插入位置后文本')
+      .closest('div.space-y-1\\.5');
+    const generationStyleField = screen
+      .getByRole('group', { name: '生成风格' })
+      .closest('div.space-y-1\\.5');
+    const styleWritebackField = screen
+      .getByRole('group', { name: '样式修订' })
+      .closest('div.space-y-1\\.5');
+
+    const anchorRow = beforeTextField?.parentElement;
+    const optionRow = generationStyleField?.parentElement;
+
+    expect(anchorRow).not.toBeNull();
+    expect(anchorRow).toHaveClass('grid', 'gap-4', 'sm:grid-cols-2');
+    expect(afterTextField?.parentElement).toBe(anchorRow);
+
+    expect(optionRow).not.toBeNull();
+    expect(optionRow).toHaveClass('grid', 'gap-4', 'sm:grid-cols-2');
+    expect(styleWritebackField?.parentElement).toBe(optionRow);
+  });
+
   it.each([
     ['xjcg', '询价采购'],
     ['gngk', '国内公开'],
@@ -617,6 +662,7 @@ describe('TenderFormShared', () => {
       tender_no: 'TEST-001',
       tender_lx: 0,
       generation_style: 'template',
+      style_writeback_mode: 'full',
       tender_data: {
         ...mockTenderData,
         tender_lx: 0,
@@ -674,6 +720,57 @@ describe('TenderFormShared', () => {
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
         generation_style: 'param',
+      })
+    );
+  });
+
+  it('persists style writeback mode through draft updates and submit payload', async () => {
+    const user = userEvent.setup();
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <>
+          <TenderFormShared
+            tenderType="xjcg"
+            onSubmit={onSubmit}
+            initialDraft={draft}
+            onDraftChange={(updates) => {
+              setDraft((previous) => mergeDraftState(previous, updates));
+            }}
+          />
+          <pre data-testid="draft-state">{JSON.stringify(draft)}</pre>
+        </>
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('draft-state')).toHaveTextContent('"style_writeback_mode":"full"')
+    );
+
+    await user.click(screen.getByRole('button', { name: '关' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('draft-state')).toHaveTextContent(
+        '"style_writeback_mode":"bold_only"'
+      )
+    );
+    expect(screen.getByRole('button', { name: '关' })).toHaveClass('bg-blue-600');
+
+    await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+    await user.click(screen.getByLabelText('上传模板文件（可选）'));
+    await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
+    await user.click(screen.getByRole('button', { name: '开始生成' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        style_writeback_mode: 'bold_only',
       })
     );
   });

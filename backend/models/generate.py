@@ -32,6 +32,13 @@ class GenerationStyle(str, Enum):
     PARAM = "param"
 
 
+class StyleWritebackMode(str, Enum):
+    """样式回填模式枚举，仅影响初次 generate 的 Word 样式回填。"""
+
+    FULL = "full"
+    BOLD_ONLY = "bold_only"
+
+
 class FormType(str, Enum):
     """
     表单类型枚举
@@ -86,6 +93,10 @@ class GenerateRequest(BaseModel):
         default=GenerationStyle.TEMPLATE,
         description="生成风格（仅初次 generate 生效）",
     )
+    style_writeback_mode: StyleWritebackMode = Field(
+        default=StyleWritebackMode.FULL,
+        description="样式回填模式（仅初次 generate 生效）",
+    )
     conversation_id: Optional[str] = Field(
         default=None, description="会话ID，用于会话级 rewrite 历史与状态管理"
     )
@@ -124,6 +135,7 @@ class GenerateRequest(BaseModel):
                     "after_text": "第四章 响应文件有关格式",
                 },
                 "generation_style": "template",
+                "style_writeback_mode": "full",
                 "model": "deepseek",
             }
         }

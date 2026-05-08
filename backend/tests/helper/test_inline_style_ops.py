@@ -1043,6 +1043,141 @@ def test_apply_inline_style_fragments_matches_partial_span_in_unique_candidate(m
     assert doc.applied_ranges[0].Font.HighlightColorIndex == 7
 
 
+def test_apply_inline_style_fragments_keeps_only_bold_when_bold_only_mode(monkeypatch) -> None:
+    fragment = {
+        "container_type": "paragraph",
+        "container_locator": {"paragraph_index": 1},
+        "source_text": "红字",
+        "normalized_text": normalize_semantic_text("红字"),
+        "container_text": "投标人需提供红字证明材料",
+        "normalized_container_text": normalize_semantic_text("投标人需提供红字证明材料"),
+        "context_before": "提供",
+        "context_after": "证明",
+        "position_ratio": 0.25,
+        "local_position_ratio": 0.52,
+        "style_flags": {
+            "strikethrough": False,
+            "underline": False,
+            "bold": True,
+            "italic": False,
+        },
+        "font_color": None,
+        "highlight_color": 7,
+        "font_name": None,
+        "font_size": None,
+        "underline_style": None,
+        "source_span_kind": "partial_span",
+    }
+    candidate_text = "投标人应继续提供新增红字证明材料"
+    candidate = _make_candidate(text=candidate_text, start=50, position_ratio=0.25)
+    monkeypatch.setattr(style_ops, "_build_target_containers", lambda *args, **kwargs: [candidate])
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=[fragment],
+        style_writeback_mode="bold_only",
+        bound_start=0,
+        bound_end=200,
+        log_parts=[],
+    )
+
+    assert result["extracted"] == 1
+    assert result["attempted"] == 1
+    assert result["applied"] == 1
+    assert result["applied_by_style"] == {"bold": 1}
+    assert doc.applied_ranges[0].Font.Bold is True
+    assert doc.applied_ranges[0].Font.HighlightColorIndex is None
+    assert (
+        style_ops.summarize_style_writeback_result(result)
+        == "样式回填: 抽取=1, 尝试=1, 成功=1, 跳过=0, 失败=0; 命中样式: 加粗=1"
+    )
+
+
+def test_apply_inline_style_fragments_drops_non_bold_fragments_in_bold_only_mode() -> None:
+    fragments = [
+        {
+            "container_type": "paragraph",
+            "container_locator": {"paragraph_index": 1},
+            "source_text": "高亮文本",
+            "normalized_text": normalize_semantic_text("高亮文本"),
+            "container_text": "高亮文本",
+            "normalized_container_text": normalize_semantic_text("高亮文本"),
+            "context_before": "",
+            "context_after": "",
+            "position_ratio": 0.1,
+            "local_position_ratio": 0.5,
+            "style_flags": _make_style_flags(),
+            "font_color": None,
+            "highlight_color": 7,
+            "font_name": None,
+            "font_size": None,
+            "underline_style": None,
+            "source_span_kind": "partial_span",
+        },
+        {
+            "container_type": "paragraph",
+            "container_locator": {"paragraph_index": 2},
+            "source_text": "红色文本",
+            "normalized_text": normalize_semantic_text("红色文本"),
+            "container_text": "红色文本",
+            "normalized_container_text": normalize_semantic_text("红色文本"),
+            "context_before": "",
+            "context_after": "",
+            "position_ratio": 0.2,
+            "local_position_ratio": 0.5,
+            "style_flags": _make_style_flags(),
+            "font_color": 255,
+            "highlight_color": None,
+            "font_name": None,
+            "font_size": None,
+            "underline_style": None,
+            "source_span_kind": "partial_span",
+        },
+        {
+            "container_type": "paragraph",
+            "container_locator": {"paragraph_index": 3},
+            "source_text": "下划线文本",
+            "normalized_text": normalize_semantic_text("下划线文本"),
+            "container_text": "下划线文本",
+            "normalized_container_text": normalize_semantic_text("下划线文本"),
+            "context_before": "",
+            "context_after": "",
+            "position_ratio": 0.3,
+            "local_position_ratio": 0.5,
+            "style_flags": _make_style_flags(underline=True),
+            "font_color": None,
+            "highlight_color": None,
+            "font_name": None,
+            "font_size": None,
+            "underline_style": 1,
+            "source_span_kind": "partial_span",
+        },
+    ]
+
+    doc = _FakeDoc()
+    result = style_ops.apply_inline_style_fragments(
+        doc=doc,
+        inline_style_fragments=fragments,
+        style_writeback_mode="bold_only",
+        bound_start=0,
+        bound_end=200,
+        log_parts=[],
+    )
+
+    assert result == {
+        "extracted": 0,
+        "attempted": 0,
+        "applied": 0,
+        "skipped": 0,
+        "failed": 0,
+        "issues": [],
+        "applied_by_style": {},
+        "skipped_by_reason": {},
+    }
+    assert doc.applied_ranges == []
+
+
 def test_apply_inline_style_fragments_prefers_nearest_position_when_multiple_candidates_are_close(monkeypatch) -> None:
     fragment = {
         "container_type": "paragraph",

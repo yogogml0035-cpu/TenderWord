@@ -353,6 +353,7 @@ def test_update_word_applies_inline_styles_with_anchor_bounds_and_summary(
             "insertion_before_text": "前锚点",
             "insertion_after_text": "后锚点",
             "inline_style_fragments": [{"source_text": "模板样式"}],
+            "style_writeback_mode": "bold_only",
             "generated_comment_count": 0,
             "polished_comments": [],
             "suppress_comment_progress_logs": True,
@@ -364,6 +365,7 @@ def test_update_word_applies_inline_styles_with_anchor_bounds_and_summary(
     style_call = style_calls[0]
     assert style_call["doc"] is fake_doc
     assert style_call["inline_style_fragments"] == [{"source_text": "模板样式"}]
+    assert style_call["style_writeback_mode"] == "bold_only"
     assert style_call["bound_start"] == 20
     assert style_call["bound_end"] == 90
     assert style_call["step_label"] == expected_step
@@ -401,6 +403,7 @@ def test_gjgk_update_word_applies_inline_styles_with_anchor_bounds_and_summary(
             "insertion_before_text": "前锚点",
             "insertion_after_text": "后锚点",
             "inline_style_fragments": [{"source_text": "模板样式"}],
+            "style_writeback_mode": "bold_only",
             "generated_comment_count": 0,
             "polished_comments": [],
             "suppress_comment_progress_logs": True,
@@ -412,6 +415,7 @@ def test_gjgk_update_word_applies_inline_styles_with_anchor_bounds_and_summary(
     style_call = style_calls[0]
     assert style_call["doc"] is fake_doc
     assert style_call["inline_style_fragments"] == [{"source_text": "模板样式"}]
+    assert style_call["style_writeback_mode"] == "bold_only"
     assert style_call["bound_start"] == 20
     assert style_call["bound_end"] == 90
     assert style_call["step_label"] == "步骤6"
