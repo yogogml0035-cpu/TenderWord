@@ -45,4 +45,3 @@ def normalize_gjgk_project_number(
             return normalized
 
     return _compact_project_number(project_number)
-

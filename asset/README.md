@@ -5,7 +5,7 @@
 ## 当前有效知识包
 
 - `shared_runtime_word_skill_knowledge_pack.md`
-  - 适用范围：generate / rewrite / edit 运行时、用户流式 rewrite 路由、Prompt Layer、task skill runtime、task skill 输出范围契约、Word COM、共享 Word helper、批注/样式回写、样式颜色门禁、任务结果与 SSE 透传。
+  - 适用范围：generate / rewrite / edit 运行时、用户流式 rewrite 路由、Prompt Layer、generate prompt 路由模式契约、task skill runtime、task skill 输出范围契约、Word COM、共享 Word helper、批注/样式回写、样式颜色门禁、任务结果与 SSE 透传。
 - `tender_type_identity_session_knowledge_pack.md`
   - 适用范围：招标类型 identity、`form_type` / `tender_type` / family、`gngk` 子类型分派、anchor 默认值、graph/node 特化、canonical URL、当前页面会话与草稿恢复。
 - `template_candidate_pipeline_knowledge_pack.md`
