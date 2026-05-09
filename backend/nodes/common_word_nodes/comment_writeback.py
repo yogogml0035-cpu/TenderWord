@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Iterable, Mapping, TypedDict
 
@@ -10,6 +11,9 @@ from backend.util.word_util import (
 )
 
 MAX_COMMENT_ADD_RETRIES = 3
+_FALLBACK_IGNORED_TEXT_RE = re.compile(
+    r"""[\s\u00a0\u3000,，.。:：;；、!?！？"'“”‘’`~\-—_·•/\\|()（）\[\]【】<>《》\r\n\v\f\x07]+"""
+)
 
 
 class CommentWritebackIssue(TypedDict, total=False):
@@ -103,6 +107,161 @@ def _build_search_texts(reference_text: str) -> list[str]:
     return search_texts
 
 
+def _normalized_text_with_positions(text: str) -> tuple[str, list[int]]:
+    normalized_parts: list[str] = []
+    positions: list[int] = []
+
+    for pos, char in enumerate(str(text or "")):
+        if _FALLBACK_IGNORED_TEXT_RE.fullmatch(char):
+            continue
+        lowered = char.lower()
+        if not lowered:
+            continue
+        for normalized_char in lowered:
+            normalized_parts.append(normalized_char)
+            positions.append(pos)
+
+    return "".join(normalized_parts), positions
+
+
+def _get_doc_end(doc, fallback: int) -> int:
+    try:
+        return max(0, int(doc.Content.End))
+    except Exception:
+        return max(0, int(fallback))
+
+
+def _read_range_text(doc, start: int, end: int) -> str:
+    try:
+        return str(getattr(doc.Range(int(start), int(end)), "Text", "") or "")
+    except Exception:
+        return ""
+
+
+def _find_normalized_ranges(
+    doc,
+    *,
+    reference_text: str,
+    search_start: int,
+    search_end: int,
+) -> list[Any]:
+    if int(search_end) <= int(search_start):
+        return []
+
+    normalized_reference, _ = _normalized_text_with_positions(reference_text)
+    if not normalized_reference:
+        return []
+
+    raw_text = _read_range_text(doc, int(search_start), int(search_end))
+    if not raw_text:
+        return []
+
+    normalized_text, positions = _normalized_text_with_positions(raw_text)
+    if not normalized_text or not positions:
+        return []
+
+    matches: list[Any] = []
+    offset = 0
+    while True:
+        match_start = normalized_text.find(normalized_reference, offset)
+        if match_start < 0:
+            break
+        match_end = match_start + len(normalized_reference)
+        try:
+            absolute_start = int(search_start) + int(positions[match_start])
+            absolute_end = int(search_start) + int(positions[match_end - 1]) + 1
+            if absolute_end > absolute_start:
+                matches.append(doc.Range(absolute_start, absolute_end))
+        except Exception:
+            pass
+        offset = match_start + 1
+
+    return matches
+
+
+def _add_comment_with_retries(doc, target_range, comment_text: str) -> Exception | None:
+    add_exc: Exception | None = None
+    for attempt in range(MAX_COMMENT_ADD_RETRIES):
+        try:
+            doc.Comments.Add(Range=target_range.Duplicate, Text=comment_text)
+            return None
+        except Exception as exc:
+            add_exc = exc
+            if is_rpc_error(exc) and attempt < MAX_COMMENT_ADD_RETRIES - 1:
+                delay = calculate_retry_delay(attempt)
+                time.sleep(delay)
+                continue
+    return add_exc
+
+
+def _try_normalized_comment_insert(
+    *,
+    doc,
+    reference_text: str,
+    comment_text: str,
+    current_start: int,
+    search_start: int,
+    search_end: int,
+    log_parts: list[str],
+    idx: int,
+) -> tuple[str, int]:
+    bounded_matches = _find_normalized_ranges(
+        doc,
+        reference_text=reference_text,
+        search_start=int(current_start),
+        search_end=int(search_end),
+    )
+    expanded_to_document = False
+    matches = bounded_matches
+
+    if not matches:
+        doc_end = _get_doc_end(doc, search_end)
+        if doc_end > search_end or search_start > 0:
+            matches = _find_normalized_ranges(
+                doc,
+                reference_text=reference_text,
+                search_start=0,
+                search_end=doc_end,
+            )
+            expanded_to_document = bool(matches)
+
+    if not matches:
+        return "not_found", int(current_start)
+
+    if len(matches) > 1:
+        reason = "全文" if expanded_to_document else "锚点范围"
+        log_parts.append(
+            f"  批注 [{idx}] 规范化匹配在{reason}命中多处，跳过以避免错插: {reference_text[:50]}..."
+        )
+        return "normalized_reference_not_unique", int(current_start)
+
+    target_range = matches[0]
+    try:
+        match_start = int(target_range.Start)
+        match_end = int(target_range.End)
+    except Exception:
+        return "not_found", int(current_start)
+
+    if _has_comment_on_range(doc, target_range):
+        log_parts.append(
+            f"  批注 [{idx}] 规范化匹配位置已存在批注，按保守去重策略跳过: {reference_text[:50]}..."
+        )
+        return "overlapping_comment_exists", max(match_end, int(current_start) + 1)
+
+    add_exc = _add_comment_with_retries(doc, target_range, comment_text)
+    if add_exc is not None:
+        log_parts.append(
+            f"  批注 [{idx}] 规范化匹配后添加失败 (重试 {MAX_COMMENT_ADD_RETRIES} 次后仍失败, reference_text={reference_text[:40]}...): {add_exc}"
+        )
+        return f"comment_add_failed:{add_exc}", max(match_end, int(current_start) + 1)
+
+    scope = "全文唯一" if expanded_to_document else "规范化"
+    log_parts.append(
+        f"  批注 [{idx}] 已通过{scope}匹配添加: reference_text={reference_text[:40]}... -> comment_text={comment_text[:40]}..."
+    )
+    return "added", match_end
+
+
 def _append_issue(
     issues: list[CommentWritebackIssue],
     *,
@@ -168,8 +327,9 @@ def write_polished_comments(
 
     log_parts.append(f"{step_label}：根据 polished_comments 插入批注...")
 
-    search_start = int(bound_start)
-    search_end = int(bound_end)
+    doc_end = _get_doc_end(doc, int(bound_end))
+    search_start = min(max(0, int(bound_start)), doc_end)
+    search_end = min(max(search_start, int(bound_end)), doc_end)
     if search_end <= search_start:
         for idx, instruction in enumerate(comments, start=1):
             reference_text = str(instruction.get("reference_text") or "").strip()
@@ -255,18 +415,7 @@ def write_polished_comments(
                     current_start = max(match_end, current_start + 1)
                     continue
 
-                add_exc: Exception | None = None
-                for attempt in range(MAX_COMMENT_ADD_RETRIES):
-                    try:
-                        doc.Comments.Add(Range=find_range.Duplicate, Text=comment_text)
-                        add_exc = None
-                        break
-                    except Exception as exc:
-                        add_exc = exc
-                        if is_rpc_error(exc) and attempt < MAX_COMMENT_ADD_RETRIES - 1:
-                            delay = calculate_retry_delay(attempt)
-                            time.sleep(delay)
-                            continue
+                add_exc = _add_comment_with_retries(doc, find_range, comment_text)
                 if add_exc is not None:
                     result["failed"] += 1
                     _append_issue(
@@ -295,6 +444,44 @@ def write_polished_comments(
 
         if inserted_here:
             continue
+
+        normalized_status, normalized_end = _try_normalized_comment_insert(
+            doc=doc,
+            reference_text=reference_text,
+            comment_text=comment_text,
+            current_start=int(last_used_end_by_ref.get(reference_text, search_start)),
+            search_start=search_start,
+            search_end=search_end,
+            log_parts=log_parts,
+            idx=idx,
+        )
+        if normalized_status == "added":
+            result["added"] += 1
+            last_used_end_by_ref[reference_text] = int(normalized_end)
+            continue
+        if normalized_status.startswith("comment_add_failed:"):
+            result["failed"] += 1
+            _append_issue(
+                result["issues"],
+                index=idx,
+                reason="comment_add_failed",
+                reference_text=reference_text,
+                comment_text=comment_text,
+                error=normalized_status.split(":", 1)[1],
+            )
+            continue
+        if normalized_status == "normalized_reference_not_unique":
+            result["failed"] += 1
+            _append_issue(
+                result["issues"],
+                index=idx,
+                reason="normalized_reference_not_unique",
+                reference_text=reference_text,
+                comment_text=comment_text,
+            )
+            continue
+        if normalized_status == "overlapping_comment_exists":
+            overlapped_existing_comment = True
 
         if overlapped_existing_comment:
             result["skipped"] += 1

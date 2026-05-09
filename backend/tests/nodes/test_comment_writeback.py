@@ -48,6 +48,10 @@ class _FakeRange:
         self.Find = _FakeFind(self)
 
     @property
+    def Text(self) -> str:
+        return self.doc.text[int(self.Start) : int(self.End)]
+
+    @property
     def Duplicate(self) -> "_FakeRange":
         return _FakeRange(self.doc, self.Start, self.End)
 
@@ -319,6 +323,84 @@ class TestCommentWritebackTableMatching:
         # Should find the exact match first
         assert result["added"] == 1
         assert doc.Comments.Count == 1
+
+    def test_write_polished_comments_normalized_match_handles_punctuation_and_newline(
+        self,
+    ) -> None:
+        doc = _FakeDocument("功能：安全\r便捷、智能，运行稳定。")
+
+        log_parts: list[str] = []
+
+        result = write_polished_comments(
+            doc=doc,
+            polished_comments=[
+                {
+                    "reference_text": "安全、便捷、智能",
+                    "comment_text": "建议删除：主观表述。",
+                },
+            ],
+            bound_start=0,
+            bound_end=len(doc.text),
+            log_parts=log_parts,
+        )
+
+        assert result["added"] == 1
+        assert result["failed"] == 0
+        assert doc.Comments.Count == 1
+        assert doc.Comments(1).Range.Start == doc.text.find("安全")
+        assert any("已通过规范化匹配添加" in part for part in log_parts)
+
+    def test_write_polished_comments_uses_full_document_unique_normalized_fallback(
+        self,
+    ) -> None:
+        doc = _FakeDocument("前置锚点\r目标正文：最\r优配置。\r后置锚点")
+
+        log_parts: list[str] = []
+
+        result = write_polished_comments(
+            doc=doc,
+            polished_comments=[
+                {
+                    "reference_text": "最优",
+                    "comment_text": "建议删除：广告法风险表述。",
+                },
+            ],
+            bound_start=0,
+            bound_end=len("前置锚点\r"),
+            log_parts=log_parts,
+        )
+
+        assert result["added"] == 1
+        assert result["failed"] == 0
+        assert doc.Comments.Count == 1
+        assert doc.Comments(1).Range.Start == doc.text.find("最")
+        assert any("已通过全文唯一匹配添加" in part for part in log_parts)
+
+    def test_write_polished_comments_does_not_use_ambiguous_normalized_match(
+        self,
+    ) -> None:
+        doc = _FakeDocument("稳 定 性要求，另有稳 定 性说明。")
+
+        log_parts: list[str] = []
+
+        result = write_polished_comments(
+            doc=doc,
+            polished_comments=[
+                {
+                    "reference_text": "稳定性",
+                    "comment_text": "建议删除：主观表述。",
+                },
+            ],
+            bound_start=0,
+            bound_end=len(doc.text),
+            log_parts=log_parts,
+        )
+
+        assert result["added"] == 0
+        assert result["failed"] == 1
+        assert doc.Comments.Count == 0
+        assert result["issues"][0]["reason"] == "normalized_reference_not_unique"
+        assert any("规范化匹配在锚点范围命中多处" in part for part in log_parts)
 
 
 class TestBuildSearchTexts:
