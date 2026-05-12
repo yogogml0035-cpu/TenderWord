@@ -756,9 +756,9 @@ if __name__ == "__main__":
     print("开始测试 delete_tender_param 节点 (common)")
     print("=" * 80)
 
-    tender_type = "gjgk"
+    tender_type = "xjcg"
     source_doc_path = (
-        BACKEND_ROOT / "test_doc" / "254DSITC2512-招标文件-发售稿-财政模板.doc"
+        BACKEND_ROOT / "test_doc" / "261084-微量移液器等设备-修订稿.docx"
     )
     before_text, after_text = get_default_anchor_texts(tender_type)
     test_doc_path = source_doc_path.with_name(
