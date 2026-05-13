@@ -335,8 +335,19 @@ guide/       可选目录；若存在，仅放本地 Git / worktree 操作说明
 
 - 前端改动：至少跑 `npm run lint`、`npm run type-check` 和相关 `npm run test`
 - 后端改动：至少跑 `python -m pytest tests -v`
-- 涉及关键链路时：补任务创建、SSE、完成、下载的验证；必要时跑 `npm run test:e2e`
+- 涉及关键链路时：补任务创建、SSE、完成、下载的验证；涉及真实浏览器交互、页面跳转、会话恢复、模板弹窗或任务进度展示时，必须补或更新 Playwright E2E，并跑 `npm run test:e2e`
 - 文档改动：至少校对文档中提到的文件、脚本、命令、端口和目录真实存在
+
+### E2E 探路与固化流程
+
+- 开发或排障时，可以先用 Chrome DevTools MCP 打开本地页面做探索性检查：确认页面状态、交互路径、console error、network 请求、接口响应、截图和性能线索。当前前端本地入口以 `frontend/playwright.config.ts` 的 `baseURL` 为准，默认为 `http://localhost:8502`。
+- DevTools MCP 检查只算探路和诊断，不算可回归验证；不得把一次性的 live 页面观察当成最终测试结论，也不得只在交付说明里写“DevTools 看过没问题”。
+- 流程稳定后，必须把用户可感知契约固化成 Playwright spec：跳转目标、可见按钮或角色入口、表单默认值、URL canonical 化、`sessionStorage` 会话身份、接口返回后的 UI 变化、SSE 进度 / 完成 / 失败展示、下载入口状态等。
+- Playwright E2E 统一放在 `frontend/e2e/test_*.spec.ts`，通过 `frontend/package.json` 的 `npm run test:e2e` 执行；本地调试可用 `npm run test:e2e:ui` 或 `npm run test:e2e:debug`，但 CI 和交付验收只以 `npm run test:e2e` 结果为准。
+- CI 只信 Playwright，不信 DevTools MCP 的一次性检查。需要 CI 覆盖的行为必须进入 Playwright；DevTools MCP 只用于找路、复现和解释失败原因。
+- Playwright 失败时，先看 Playwright report、trace、screenshot、video 和失败 locator；若仍无法定位，再用 Chrome DevTools MCP 连到 live 页面深挖 console、network、DOM 状态、performance 与截图差异。
+- 当前项目完整运行依赖 Windows + Word COM；能脱离后端和 COM 的前端流程优先用 Playwright `page.route` / mock 固化。真实任务创建、SSE、完成和下载链路需要后端或 COM 时，必须在验证说明中写清运行环境、服务启动方式和哪些外部能力被 mock。
+- 当前仓库没有稳定登录入口时，不要照搬“登录流程”样例；新增登录或权限能力后，才把登录成功跳转、角色按钮、权限态接口响应和退出状态纳入 Playwright E2E。
 
 ### 新增类型的最低测试矩阵
 
