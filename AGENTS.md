@@ -378,7 +378,7 @@ guide/       可选目录；若存在，仅放本地 Git / worktree 操作说明
 
 - 如果检测到 `WSL_DISTRO_NAME` 非空，或 `/proc/version` / `uname -a` 包含 `Microsoft` / `WSL`，默认视为当前在 WSL。
 - 在 WSL 中，前端命令必须优先使用 Linux `node` / `npm`；不要把 Windows `node.exe`、`npm.cmd`、`/mnt/d/...` 下的包装器当成默认运行时。
-- 在 WSL 中执行前端验证前，先确认 `command -v node`、`command -v npm` 指向 Linux 可执行文件；若缺失，先安装 Linux Node.js 18+（可装到用户目录，例如 `~/.local/bin`），再运行 `npm run type-check`、`npm run test`。
+- 在 WSL 中执行前端验证前，先确认 `command -v node`、`command -v npm` 指向 Linux 可执行文件；若缺失，先安装 Linux Node.js 20.9+（推荐 Node 20 LTS，可装到用户目录，例如 `~/.local/bin`），再运行 `npm run type-check`、`npm run test`。
 - 在 WSL 中运行前端测试前，必须确保临时目录走 Linux 路径；优先使用 `TMPDIR=/tmp TMP=/tmp TEMP=/tmp`，不要继承 `/mnt/c/.../Temp` 这类 Windows 临时目录，否则 Jest / Playwright 可能在创建缓存目录时直接失败。
 - 在 WSL 中，后端测试禁止复用 Windows 创建的 `backend/.venv`；应单独创建并使用 Linux 虚拟环境 `backend/.venv-linux`。
 - 在 WSL 中运行 `pytest` 前，必须确保临时目录走 Linux 路径；优先使用 `TMPDIR=/tmp`，不要继承 `/mnt/c/.../Temp` 这类 Windows 临时目录，否则 `pytest` 捕获可能异常。
