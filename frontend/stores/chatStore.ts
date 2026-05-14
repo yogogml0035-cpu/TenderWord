@@ -1491,11 +1491,26 @@ export const useChatStore = create<ChatStore>()(
               : state.unreadConversationResults;
 
             return {
-              conversations: state.conversations.map((conversation) =>
-                conversation.currentTaskId === taskId
-                  ? { ...conversation, currentTaskId: undefined, updatedAt: Date.now() }
-                  : conversation
-              ),
+              conversations: state.conversations.map((conversation) => ({
+                ...conversation,
+                currentTaskId:
+                  conversation.currentTaskId === taskId ? undefined : conversation.currentTaskId,
+                updatedAt:
+                  conversation.currentTaskId === taskId ? Date.now() : conversation.updatedAt,
+                messages: conversation.messages.map((message) =>
+                  message.taskId === taskId && message.status === 'generating'
+                    ? {
+                        ...message,
+                        status: 'error',
+                        error: BACKEND_RESTART_TASK_MESSAGE,
+                        metadata: {
+                          ...message.metadata,
+                          localTaskReason: BACKEND_RESTART_LOCAL_REASON,
+                        },
+                      }
+                    : message
+                ),
+              })),
               activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
               taskMessageMap: nextTaskMessageMap,
               taskSummaries: Object.fromEntries(

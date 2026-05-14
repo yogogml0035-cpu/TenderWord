@@ -149,6 +149,9 @@
 - rewrite 只有在 `/api/user/stream` 返回 `task_accepted` 后写入 pending rewrite 字段。
 - edit 在 `createEditTask()` 成功后写入 pending edit 字段；成功完成时把最新输出文件回写到 `edit_file`。
 - `frontend/app/tender/page.tsx` 的后端重启恢复继续以 pending 字段和任务摘要为依据。
+- 后端重启或 `TASK_NOT_FOUND` 触发 stale task 恢复时，不能只新增错误日志；同一 `taskId` 下仍处于 `generating` 的历史消息也必须转为 `error` 并写入 `localTaskReason=backend_restart`，避免 UI 同时显示“已中断”和旧生成中状态。
+- 从 `sessionStorage` 恢复出的 `running` task 只是本地快照，SSE 连接前必须先用任务状态接口确认任务仍存在；若状态接口返回 `TASK_NOT_FOUND` / 404，应走 stale task 恢复而不是先连 `/api/stream/{taskId}`。
+- 任务恢复测试 fixture 需要同时覆盖 `conversation.currentTaskId`、`activeTaskIds`、`taskSummaries` 与消息 `taskId`，这四者共同组成当前前端恢复链路的可观察任务身份。
 
 ## 新增或修改类型的同步清单
 
@@ -164,6 +167,7 @@
 - 后端运行时分发：`backend/tests/nodes/test_tender_aware_word_dispatch.py`
 - 前端映射与注册：`frontend/__tests__/unit/utils/test_tender_type_mapper.test.ts`、`frontend/__tests__/unit/lib/test_form_data_converter.test.ts`、`frontend/__tests__/unit/components/chat/test_tender_form_registry.test.tsx`
 - 前端会话与表单：`frontend/__tests__/unit/stores/test_chat_store_conversation_scope.test.ts`、`frontend/__tests__/unit/components/forms/test_tender_form_shared.test.tsx`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
+- 前端任务消息恢复：`frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`
 - URL E2E：`frontend/e2e/test_url_conversation.spec.ts`
 
 ## 回归风险
