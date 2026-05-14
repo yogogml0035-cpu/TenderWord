@@ -3,7 +3,7 @@
 backend/logs/*
 backend/prompts_log/*
 
-
+audits/
 # Python 缓存文件
 __pycache__/
 *.py[cod]
