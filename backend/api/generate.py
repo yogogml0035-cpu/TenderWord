@@ -104,7 +104,7 @@ async def get_generate_task(
     Returns:
         GenerateResponse: 任务状态响应
     """
-    from services.task_service import get_task_service
+    from backend.services.task_service import get_task_service
 
     task_service = get_task_service()
     task_response = task_service.get_task(task_id)
