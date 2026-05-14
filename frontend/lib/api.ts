@@ -1,6 +1,7 @@
 /**
  * API Client for TenderWord Backend
- * Based on docs/api-contract.md
+ * Client-side request contracts live in this module and frontend/types/api.ts;
+ * backend routes and Pydantic models are the source of truth.
  *
  * 使用 fetch API 实现的 API 客户端
  */

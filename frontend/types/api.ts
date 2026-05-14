@@ -1,6 +1,7 @@
 /**
- * API Types - Based on docs/api-contract.md
- * API 类型定义 - 基于 API 契约文档
+ * API Types for the frontend client.
+ * Frontend request/response types mirror backend routes and Pydantic models;
+ * standalone API contract documents are not a source of truth.
  */
 
 // ============================================
