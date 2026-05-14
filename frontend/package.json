@@ -23,7 +23,7 @@
   "dependencies": {
     "clsx": "^2.1.1",
     "lucide-react": "^0.575.0",
-    "next": "^16.2.2",
+    "next": "^16.2.6",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "react": "19.2.3",
@@ -53,5 +53,8 @@
     "typescript": "^5",
     "und": "^2.13.0",
     "undici": "^7.22.0"
+  },
+  "overrides": {
+    "postcss": "8.5.14"
   }
 }
