@@ -61,6 +61,7 @@
 
 - 外部文件下载必须经过后端代理，下载源主机受 `settings.TEMPLATE_CANDIDATE_ALLOWED_HOSTS` 白名单限制。
 - download 路由会校验 URL 协议与主机，代理拉取文件，尽量根据响应头和文件名修正 MIME，并返回 `Content-Disposition`。
+- 下载代理禁用 `requests` 自动重定向；每一跳 `Location` 都要解析成绝对 URL 并重新校验协议与白名单主机，且最多允许 `MAX_TEMPLATE_DOWNLOAD_REDIRECTS` 次跳转，避免白名单源 30x 到非授权地址。
 - 外部模板响应必须在读取阶段执行大小上限：先拒绝超过 `settings.TEMPLATE_CANDIDATE_MAX_DOWNLOAD_SIZE` 的 `Content-Length`，再通过 `read_template_response_content()` 按 chunk 累计校验；禁止在 API 层直接读取 `upstream_response.content`。
 - select 路由当前只使用 `candidate.shener` 作为推荐模板源。
 - 当前同一份下载结果会分别落到两个上传槽位：`clean_draft` 与 `origin_tender`。
@@ -89,7 +90,7 @@
 ## 回归风险
 
 - 改排序时，不要把 prompt 组装或 `row_index` 校验重新散落回 API 层。
-- 改下载代理时，不能绕过白名单校验，否则会把模板代理变成 SSRF 入口。
+- 改下载代理时，不能绕过初始 URL 或重定向目标的白名单校验，否则会把模板代理变成 SSRF 入口。
 - 改下载代理时，不能绕过流式大小上限，否则会把异常大响应变成后端内存耗尽风险。
 - 改前端缓存键时，必须保留 `project_name` 维度，避免无项目名排序和有项目名 AI 排序互相污染。
 - 若后续恢复 `fsg` 参与回填，必须同时修改后端 select 逻辑、前端回填流程、API 类型和本知识包。
