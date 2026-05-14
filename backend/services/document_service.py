@@ -859,6 +859,55 @@ class DocumentService:
         stderr_writer = _DiscardingWriter()
         rewrite_cleanup_holder: Dict[str, str] = {}
 
+        def handle_task_error(e: BaseException) -> None:
+            stdout_writer.flush()
+            stderr_writer.flush()
+            error_msg = str(e) or "任务已取消"
+            tb = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+            logger.error(f"任务 {task_id} 执行失败: {error_msg}\n{tb}")
+
+            # 取消属于非致命错误：前端应展示为 cancelled，而非 failed
+            is_cancelled = isinstance(e, asyncio.CancelledError)
+            try:
+                from backend.graphs.base_graph import TaskCancelledException
+
+                is_cancelled = is_cancelled or isinstance(e, TaskCancelledException)
+            except Exception:
+                pass
+
+            callback.push_error(
+                ErrorEventData(
+                    task_id=task_id,
+                    task_kind=task_kind,
+                    error=error_msg,
+                    is_fatal=not is_cancelled,
+                )
+            )
+            if is_cancelled:
+                progress_log.warning(f"[Task] 任务已取消: {task_id}")
+            else:
+                progress_log.error(f"[Task] 任务执行失败: {task_id} - {error_msg}")
+
+            try:
+                from backend.core.sse_manager import sse_manager
+
+                sse_manager.send_error_threadsafe(
+                    task_id=task_id,
+                    task_kind=task_kind,
+                    error=error_msg,
+                    is_fatal=not is_cancelled,
+                )
+            except Exception:
+                pass
+
+            if task_kind in {"rewrite", "edit"}:
+                self._cleanup_temporary_output(rewrite_cleanup_holder.get("path"))
+
+            if is_cancelled:
+                self._task_queue.mark_task_cancelled(task_id, reason=error_msg)
+            else:
+                self._task_queue.complete_task(task_id, result=None, error=error_msg)
+
         try:
             # 创建 Graph 实例
             graph_instance: BaseGraph = graph_class()
@@ -1005,55 +1054,10 @@ class DocumentService:
                     asyncio.set_event_loop(None)
                 loop.close()
 
+        except asyncio.CancelledError as e:
+            handle_task_error(e)
         except Exception as e:
-            stdout_writer.flush()
-            stderr_writer.flush()
-            error_msg = str(e)
-            tb = traceback.format_exc()
-            logger.error(f"任务 {task_id} 执行失败: {error_msg}\n{tb}")
-
-            # 取消属于非致命错误：前端应展示为 cancelled，而非 failed
-            is_cancelled = False
-            try:
-                from backend.graphs.base_graph import TaskCancelledException
-
-                is_cancelled = isinstance(e, TaskCancelledException)
-            except Exception:
-                is_cancelled = False
-
-            if isinstance(e, asyncio.CancelledError):
-                is_cancelled = True
-
-            callback.push_error(
-                ErrorEventData(
-                    task_id=task_id,
-                    task_kind=task_kind,
-                    error=error_msg,
-                    is_fatal=not is_cancelled,
-                )
-            )
-            if is_cancelled:
-                progress_log.warning(f"[Task] 任务已取消: {task_id}")
-            else:
-                progress_log.error(f"[Task] 任务执行失败: {task_id} - {error_msg}")
-
-            try:
-                from backend.core.sse_manager import sse_manager
-
-                sse_manager.send_error_threadsafe(
-                    task_id=task_id,
-                    task_kind=task_kind,
-                    error=error_msg,
-                    is_fatal=not is_cancelled,
-                )
-            except Exception:
-                pass
-
-            if task_kind in {"rewrite", "edit"}:
-                self._cleanup_temporary_output(rewrite_cleanup_holder.get("path"))
-
-            # 更新任务队列状态
-            self._task_queue.complete_task(task_id, result=None, error=error_msg)
+            handle_task_error(e)
 
     def _build_rewrite_state_snapshot(
         self, *, result_state: Dict[str, Any], initial_state: Dict[str, Any]

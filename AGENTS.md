@@ -92,6 +92,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - 任务排队与取消由 `backend/task/task_queue_manager.py` 管理。
 - Graph 执行锁、节点包装、取消检查、进度追踪由 `backend/graphs/base_graph.py` 统一控制。
 - 任何新增 graph、node、tool、script 都不得绕开既有锁、取消检查和进度包装。
+- 运行中任务取消必须按 `BaseException` 级异常边界收敛；`asyncio.CancelledError` 不得被 `except Exception` 漏掉，也不得被误标为成功，必须产生非致命 SSE 终态事件并保持任务 `cancelled` 状态。
 - 只要 graph 存在并发汇合屏障，排障时必须先检查其他并发分支和资源争用；日志“停在某节点”不等价于该节点本身有问题。
 - 并发 Word 节点默认遵守“读源文件、写工作副本”；提取类节点优先读取 `clean_draft_path` 或其他源路径，写操作统一落在 `prepared_doc_path`。
 

@@ -50,6 +50,7 @@
 
 - Word COM 任务统一经过 `backend/task/task_queue_manager.py` 排队，不能绕开。
 - Graph 节点必须复用 `backend/graphs/base_graph.py` 的锁、取消检查、进度包装和异常汇总。
+- 运行中任务取消会触发 `asyncio.CancelledError`；在 Python 3.11 中它继承自 `BaseException`，因此 `base_graph` 和 `DocumentService` 的运行时收敛必须显式捕获，发送 `is_fatal=false` 的 SSE `error` 终态，并保持队列 `cancelled` 状态，不能被成功或失败收尾覆盖。
 - edit 当前会复制工作副本，再把 `origin_tender_path`、`prepared_doc_path`、`clean_draft_path` 指向副本；源文件不直接改写。
 
 ### Helper 分层
@@ -107,7 +108,7 @@
 
 ## 关联测试与验证入口
 
-- 运行时与任务结果：`backend/tests/services/test_document_service_initial_state.py`、`backend/tests/services/test_document_service_task_result.py`
+- 运行时与任务结果：`backend/tests/services/test_document_service_initial_state.py`、`backend/tests/services/test_document_service_task_result.py`、`backend/tests/services/test_document_service_cancellation.py`
 - 生成任务 API：`backend/tests/api/test_generate_api.py`
 - 用户流式 rewrite 路由：`backend/tests/services/test_user_routing_service.py`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
 - skill 与 edit/rewrite：`backend/tests/nodes/test_tender_aware_word_dispatch.py`、`backend/tests/nodes/test_edit_audit_logging.py`、`backend/tests/progress/test_edit_progress_tracking.py`

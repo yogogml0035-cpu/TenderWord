@@ -678,6 +678,32 @@ class TaskQueueManager:
                 result=result,
                 error=error,
             )
+
+    def mark_task_cancelled(
+        self,
+        task_id: str,
+        *,
+        reason: str = "user_cancelled",
+        result: Any = None,
+    ) -> bool:
+        """将任务收敛到 cancelled 终态，不重新触发运行中 async task.cancel()。"""
+        with self._execution_condition:
+            task = self._tasks.get(task_id)
+            if not task:
+                return False
+
+            cancel_event = self._cancel_events.get(task_id)
+            if cancel_event:
+                cancel_event.set()
+
+            should_set_error = not (task.status == TaskStatus.CANCELLED and task.error)
+            return self._finalize_task_locked(
+                task_id,
+                status=TaskStatus.CANCELLED,
+                result=result,
+                error=reason,
+                set_error=should_set_error,
+            )
     
     def cancel_task(
         self,
@@ -719,11 +745,10 @@ class TaskQueueManager:
             if task.status == TaskStatus.QUEUED:
                 if worker_future and not worker_future.running():
                     worker_future.cancel()
-                return self._finalize_task_locked(
+                return self.mark_task_cancelled(
                     task_id,
-                    status=TaskStatus.CANCELLED,
+                    reason=cancellation_error,
                     result=None,
-                    error=cancellation_error,
                 )
             
             # 如果任务正在运行，标记为取消并主动请求中断
@@ -740,11 +765,10 @@ class TaskQueueManager:
                         pass
                 if worker_future and not worker_future.running():
                     worker_future.cancel()
-                return self._finalize_task_locked(
+                return self.mark_task_cancelled(
                     task_id,
-                    status=TaskStatus.CANCELLED,
+                    reason=cancellation_error,
                     result=None,
-                    error=cancellation_error,
                 )
             
             return False

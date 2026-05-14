@@ -773,8 +773,13 @@ async def invoke_with_timing_async(
             
             begin_ts = time.time()
             error_msg = None
+            was_cancelled = False
             try:
                 result = await graph_instance.ainvoke(initial_state, config=config)
+            except asyncio.CancelledError as e:
+                error_msg = str(e) or "任务已取消"
+                was_cancelled = True
+                raise
             except Exception as e:
                 error_msg = str(e)
                 raise
@@ -795,11 +800,14 @@ async def invoke_with_timing_async(
                         except Exception:
                             task_result = None
 
-                    queue.complete_task(
-                        task_id,
-                        result=(task_result or "success") if error_msg is None else None,
-                        error=error_msg,
-                    )
+                    if was_cancelled:
+                        queue.mark_task_cancelled(task_id, reason=error_msg or "任务已取消")
+                    else:
+                        queue.complete_task(
+                            task_id,
+                            result=(task_result or "success") if error_msg is None else None,
+                            error=error_msg,
+                        )
             
             if verbose:
                 progress_log.info("=" * 60)
