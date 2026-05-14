@@ -118,6 +118,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - `TenderFormShared` 的初始化优先级固定为 `draft > URL > default`；如需让深链 URL 参数生效，必须先由上层把参数写入 draft，不能通过反转优先级兜底。
 - `gngk` 会话身份按 `tenderType + tenderno + tender_lx + fund_lx` 精确匹配；同一 `tenderno` 下不同 `货物/服务` 或不同资金性质必须视为不同会话。
 - `chat_input` 必须在“消息已受理”时立即清空；`pending_rewrite_prompt`、`pending_edit_prompt` 只用于任务中断后的恢复回填，不得当成正常发送后的延迟清空机制。
+- 从 `sessionStorage` 恢复的 running task 是本地快照；前端恢复 SSE 前必须先用任务状态接口确认任务仍存在，404 / `TASK_NOT_FOUND` 要收敛为本地中断态，不能先连 `/api/stream/{task_id}`。
 
 ### 模板候选与下载代理约束
 
@@ -344,6 +345,7 @@ guide/       可选目录；若存在，仅放本地 Git / worktree 操作说明
 - 开发或排障时，可以先用 Chrome DevTools MCP 打开本地页面做探索性检查：确认页面状态、交互路径、console error、network 请求、接口响应、截图和性能线索。当前前端本地入口以 `frontend/playwright.config.ts` 的 `baseURL` 为准，默认为 `http://localhost:8502`。
 - DevTools MCP 检查只算探路和诊断，不算可回归验证；不得把一次性的 live 页面观察当成最终测试结论，也不得只在交付说明里写“DevTools 看过没问题”。
 - 流程稳定后，必须把用户可感知契约固化成 Playwright spec：跳转目标、可见按钮或角色入口、表单默认值、URL canonical 化、`sessionStorage` 会话身份、接口返回后的 UI 变化、SSE 进度 / 完成 / 失败展示、下载入口状态等。
+- Playwright locator 必须锚定稳定契约：可见重复文案优先用 `data-testid`、role + accessible name 或限定容器；禁止用宽泛 `getByText()` / 全局 CSS 动画类断言会命中多个元素的 UI。
 - Playwright E2E 统一放在 `frontend/e2e/test_*.spec.ts`，通过 `frontend/package.json` 的 `npm run test:e2e` 执行；本地调试可用 `npm run test:e2e:ui` 或 `npm run test:e2e:debug`，但 CI 和交付验收只以 `npm run test:e2e` 结果为准。
 - CI 只信 Playwright，不信 DevTools MCP 的一次性检查。需要 CI 覆盖的行为必须进入 Playwright；DevTools MCP 只用于找路、复现和解释失败原因。
 - Playwright 失败时，先看 Playwright report、trace、screenshot、video 和失败 locator；若仍无法定位，再用 Chrome DevTools MCP 连到 live 页面深挖 console、network、DOM 状态、performance 与截图差异。
@@ -355,6 +357,7 @@ guide/       可选目录；若存在，仅放本地 Git / worktree 操作说明
 - 后端：graph 流程测试、服务接入测试
 - 前端：表单测试、转换器测试、URL 映射测试、注册表测试
 - 如果变更影响会话、任务恢复或取消，还要补对应 store、heartbeat 或 SSE 测试
+- 任务恢复测试 fixture 必须按当前 store 契约同时包含 `conversation.currentTaskId`、`activeTaskIds`、`taskSummaries` 和对应消息 `taskId`；只在旧消息上挂 `taskId` 不能覆盖当前页面恢复链路。
 
 ### 测试文件命名与归类约束
 

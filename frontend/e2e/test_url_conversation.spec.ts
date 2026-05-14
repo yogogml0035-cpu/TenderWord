@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 /**
  * E2E Tests for URL-driven Conversation Flow
@@ -10,20 +10,30 @@ import { test, expect } from '@playwright/test';
  * Tests requiring backend API are mocked or skipped.
  */
 
+async function expectTenderTypeButtons(page: Page) {
+  await expect(page.getByTestId('tender-type-button-xjcg')).toBeVisible();
+  await expect(page.getByTestId('tender-type-button-gngk')).toBeVisible();
+}
+
+async function expectNoVisibleSpinner(page: Page) {
+  await expect(page.locator('.animate-spin').filter({ visible: true })).toHaveCount(0, {
+    timeout: 15000,
+  });
+}
+
 test.describe('URL-driven Conversation Flow', () => {
   test('Tender page loads with sidebar', async ({ page }) => {
     await page.goto('/tender');
     await page.waitForLoadState('networkidle');
 
     await expect(page.getByText('类型', { exact: true })).toBeVisible();
-    await expect(page.getByText('询价采购')).toBeVisible();
-    await expect(page.getByText('国内公开')).toBeVisible();
+    await expectTenderTypeButtons(page);
   });
 
   test('URL params with xjcg fund_lx=1 still triggers processing', async ({ page }) => {
     await page.goto('/tender?tenderno=TEST001&purchase_method=5&tender_lx=0&fund_lx=1');
 
-    await expect(page.locator('.animate-spin')).not.toBeVisible({ timeout: 15000 });
+    await expectNoVisibleSpinner(page);
     await expect(page).toHaveURL(/\/tender/);
     await expect(page.getByText('类型', { exact: true })).toBeVisible();
   });
@@ -31,13 +41,13 @@ test.describe('URL-driven Conversation Flow', () => {
   test('URL params with gngk fund_lx=1 loads page', async ({ page }) => {
     await page.goto('/tender?tenderno=GNGK001&purchase_method=2&tender_lx=0&fund_lx=1');
 
-    await expect(page.locator('.animate-spin')).not.toBeVisible({ timeout: 15000 });
-    await expect(page.getByText('国内公开')).toBeVisible();
+    await expectNoVisibleSpinner(page);
+    await expect(page.getByTestId('tender-type-button-gngk')).toBeVisible();
   });
 
   test('URL params with manual gjgk alias route create a gjgk conversation', async ({ page }) => {
     await page.goto('/tender?tenderno=GJGK001&purchase_method=0&tender_lx=0&fund_lx=0');
-    await expect(page.locator('.animate-spin')).not.toBeVisible({ timeout: 15000 });
+    await expectNoVisibleSpinner(page);
 
     await expect
       .poll(async () =>
@@ -164,8 +174,7 @@ test.describe('URL-driven Conversation Flow', () => {
     await page.goto('/tender');
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByText('询价采购')).toBeVisible();
-    await expect(page.getByText('国内公开')).toBeVisible();
+    await expectTenderTypeButtons(page);
   });
 
   test('Sidebar navigation works', async ({ page }) => {
@@ -175,7 +184,7 @@ test.describe('URL-driven Conversation Flow', () => {
     await expect(page.getByRole('heading', { name: '选择招标类型' })).toBeVisible();
 
     await page.goto('/tender?tenderno=SB-TEST-001&purchase_method=2&tender_lx=0&fund_lx=0');
-    await expect(page.locator('.animate-spin')).not.toBeVisible({ timeout: 15000 });
+    await expectNoVisibleSpinner(page);
     await expect(page.getByText('类型', { exact: true })).toBeVisible();
   });
 
@@ -199,7 +208,7 @@ test.describe('URL-driven Conversation Flow', () => {
   test('Error handling when tender data fetch fails', async ({ page }) => {
     await page.goto('/tender?tenderno=NONEXISTENT-999&purchase_method=2&tender_lx=0&fund_lx=0');
 
-    await expect(page.locator('.animate-spin')).not.toBeVisible({ timeout: 15000 });
+    await expectNoVisibleSpinner(page);
     await expect(page.getByText('类型', { exact: true })).toBeVisible();
   });
 
@@ -207,7 +216,7 @@ test.describe('URL-driven Conversation Flow', () => {
     await page.goto('/tender');
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByText('询价采购')).toBeVisible();
+    await expect(page.getByTestId('tender-type-button-xjcg')).toBeVisible();
   });
 
   test('Current-page conversations stay scoped to the current page session', async ({
@@ -240,8 +249,8 @@ test.describe('URL-driven Conversation Flow', () => {
     await page.goto('/tender');
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByText('当前页面会话')).toBeVisible();
-    await expect(page.getByText('HISTORY-TEST-001')).toBeVisible();
+    await expect(page.getByText('当前页面会话', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('conversation-item-conv-history')).toBeVisible();
 
     await page.close();
 
@@ -249,8 +258,8 @@ test.describe('URL-driven Conversation Flow', () => {
     await freshPage.goto('/tender');
     await freshPage.waitForLoadState('networkidle');
 
-    await expect(freshPage.getByText('当前页面会话')).toHaveCount(0);
-    await expect(freshPage.getByText('HISTORY-TEST-001')).toHaveCount(0);
+    await expect(freshPage.getByText('当前页面会话', { exact: true })).toHaveCount(0);
+    await expect(freshPage.getByTestId('conversation-item-conv-history')).toHaveCount(0);
   });
 
   test('Expanded sidebar shows all type conversations, scrolls, and auto-creates a new conversation for an empty type', async ({
@@ -281,7 +290,7 @@ test.describe('URL-driven Conversation Flow', () => {
     await page.goto('/tender');
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByText('当前页面会话')).toBeVisible();
+    await expect(page.getByText('当前页面会话', { exact: true })).toBeVisible();
     await expect(page.locator('[data-testid^="conversation-item-conv-xjcg-"]')).toHaveCount(12);
 
     const sidebarIsScrollable = await page
@@ -296,7 +305,7 @@ test.describe('URL-driven Conversation Flow', () => {
     await gngkButton.click();
 
     await expect(page.locator('[data-testid^="conversation-item-conv-xjcg-"]')).toHaveCount(0);
-    await expect(page.getByText('新对话')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '新对话' })).toBeVisible();
 
     const afterClickY = await gngkButton.evaluate((element) => element.getBoundingClientRect().top);
     expect(beforeClickY).toBeGreaterThan(afterClickY);
@@ -354,6 +363,7 @@ test.describe('URL-driven Conversation Flow', () => {
                 tenderType: 'xjcg',
                 createdAt: 1,
                 updatedAt: 1,
+                currentTaskId: 'task-stale',
                 messages: [
                   {
                     id: 'msg-stale',
@@ -376,6 +386,14 @@ test.describe('URL-driven Conversation Flow', () => {
             ],
             currentConversationId: 'conv-stale',
             selectedTenderType: 'xjcg',
+            activeTaskIds: ['task-stale'],
+            taskSummaries: {
+              'task-stale': {
+                task_id: 'task-stale',
+                status: 'running',
+                updated_at: 1,
+              },
+            },
           },
           version: 0,
         })
@@ -457,7 +475,7 @@ test.describe('URL-driven Conversation Flow', () => {
       )
       .toEqual({
         generatingCount: 0,
-        staleTaskCount: 2,
+        staleTaskCount: 1,
         interruptedCount: 1,
       });
 
@@ -501,7 +519,7 @@ test.describe('Form Panel Tests', () => {
     await expect(page.getByRole('heading', { name: '选择招标类型' })).toBeVisible();
 
     await page.goto('/tender?tenderno=FORM-TEST-001&purchase_method=2&tender_lx=0&fund_lx=0');
-    await expect(page.locator('.animate-spin')).not.toBeVisible({ timeout: 15000 });
+    await expectNoVisibleSpinner(page);
 
     const tenderInfoVisible = await page.getByText('招标信息').isVisible().catch(() => false);
     const formTypeVisible = (await page.getByText('询价采购').count()) > 0;

@@ -541,11 +541,6 @@ export function useChatSSE({
         return;
       }
 
-      if (taskStatus === 'running') {
-        connectRunningTask();
-        return;
-      }
-
       try {
         const task = await getTaskStatus(taskId);
         if (!isActive) {

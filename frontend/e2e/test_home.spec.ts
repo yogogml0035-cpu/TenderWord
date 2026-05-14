@@ -16,16 +16,12 @@ test.describe('Homepage', () => {
     await expect(heading).toBeVisible();
   });
 
-  test('main navigation elements exist', async ({ page }) => {
+  test('main content elements exist', async ({ page }) => {
     await page.goto('/');
 
-    // Check for navigation or menu elements
-    const nav = page.locator('nav, header').first();
-    await expect(nav).toBeVisible();
-
-    // Check for main content area
-    const main = page.locator('main').first();
-    await expect(main).toBeVisible();
+    await expect(page.locator('main').first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: '功能特性' })).toBeVisible();
+    await expect(page.getByRole('link', { name: /进入使用/ })).toBeVisible();
   });
 
   test('tender type selection is available', async ({ page }) => {

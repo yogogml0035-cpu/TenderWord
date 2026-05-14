@@ -297,9 +297,11 @@ describe('useChatSSE', () => {
     expect(latestOptions?.endpoint).toBe('');
     expect(getTaskGroup()).toBeNull();
 
+    mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
     rerender({ status: 'running' as const });
 
     await waitFor(() => {
+      expect(mockGetTaskStatus).toHaveBeenCalledWith('task-1');
       expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
     });
     expect(getTaskGroup()?.logMessage?.metadata?.messageKind).toBe('task-log');

@@ -305,4 +305,54 @@ describe('chatStore task message grouping', () => {
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
     expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
   });
+
+  it('marks legacy generating task messages as interrupted when discarding stale tasks', () => {
+    act(() => {
+      useChatStore.setState((state) => ({
+        conversations: state.conversations.map((conversation) => ({
+          ...conversation,
+          currentTaskId: 'task-1',
+          messages: [
+            {
+              id: 'msg-legacy',
+              conversationId: conversation.id,
+              type: 'ai',
+              content: {
+                logs: [],
+                aiContent: {
+                  text: '',
+                  timestamp: 1,
+                  isComplete: false,
+                },
+              },
+              timestamp: 1,
+              status: 'generating',
+              taskId: 'task-1',
+            },
+          ],
+        })),
+        activeTaskIds: ['task-1'],
+        taskSummaries: {
+          'task-1': {
+            task_id: 'task-1',
+            status: 'running',
+            updated_at: 1,
+          },
+        },
+      }));
+
+      useChatStore.getState().discardStaleTask('task-1');
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const messages = conversation?.messages ?? [];
+    const legacyMessage = messages.find((message) => message.id === 'msg-legacy');
+
+    expect(conversation?.currentTaskId).toBeUndefined();
+    expect(useChatStore.getState().activeTaskIds).toHaveLength(0);
+    expect(messages.filter((message) => message.status === 'generating')).toHaveLength(0);
+    expect(legacyMessage?.status).toBe('error');
+    expect(legacyMessage?.error).toBe('服务已重启，任务已中断，可重试');
+    expect(legacyMessage?.metadata?.localTaskReason).toBe('backend_restart');
+  });
 });
