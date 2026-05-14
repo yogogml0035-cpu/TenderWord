@@ -3,18 +3,11 @@ from __future__ import annotations
 import os
 import shutil
 import time
-import pathlib
-import sys
-
-# 添加项目根目录到 sys.path
-ROOT = pathlib.Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 from backend.util.log_util.progress_log import progress_log
 
 from backend.states import TenderGraphStateBase
-from util.word_util import (
+from backend.util.word_util import (
     create_word_application,
     close_word_application,
 )

@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { getDownloadUrl } from '@/lib/api';
 import { cn, formatDate } from '@/lib/utils';
 import { useHistoryStore, type HistoryItem } from '@/stores/historyStore';
 import { useAppStore } from '@/stores/useAppStore';
@@ -230,7 +231,7 @@ function HistoryItemCard({ item, onRemove }: { item: HistoryItem; onRemove: () =
           </div>
           {item.outputFile && (
             <a
-              href={`/api/download/${encodeURIComponent(item.outputFile)}`}
+              href={getDownloadUrl(item.outputFile, item.outputFileName)}
               className="mt-1 flex items-center gap-1 text-xs text-[var(--primary)] hover:underline"
               onClick={(e) => e.stopPropagation()}
             >

@@ -265,7 +265,7 @@ if __name__ == "__main__":
     from backend.states import TenderGraphStateBase
     # xjcg 的提取节点已更名为 xjcg_extract_tender_params.py，并在包 __init__ 中对外导出
     from backend.nodes.xjcg_word_nodes import extract_tender_params
-    from util.word_util import extract_text_from_word_file
+    from backend.util.word_util import extract_text_from_word_file
     
     # 测试配置：参考文档路径和技术参数路径
     # 可以根据需要修改这两个路径

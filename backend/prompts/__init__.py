@@ -6,6 +6,13 @@ from backend.prompts.comment_prompt import (
     COMMENT_USER_PROMPT,
     render_comment_prompt,
 )
+from backend.prompts.chat_prompt import (
+    PLAIN_CHAT_HISTORY_LIMIT,
+    PLAIN_CHAT_SYSTEM_PROMPT,
+    extract_latest_plain_chat_user_message,
+    normalize_plain_chat_messages,
+    render_plain_chat_messages,
+)
 from backend.prompts.generate_by_param_prompt import (
     GENERATE_BY_PARAM_PROMPT_REGISTRY,
     PARAM_POLISH_SYSTEM_PROMPT,
@@ -45,6 +52,7 @@ from backend.prompts.template_candidate_ranking_prompt import (
 from backend.prompts.types import (
     CommentPromptInput,
     GeneratePromptInput,
+    PlainChatMessage,
     RenderedPrompt,
     RewriteAssistantCandidate,
     RewriteHistoryMessage,
@@ -73,6 +81,9 @@ __all__ = [
     "PARAM_POLISH_USER_PROMPT",
     "POLISH_SYSTEM_PROMPT",
     "POLISH_USER_PROMPT",
+    "PLAIN_CHAT_HISTORY_LIMIT",
+    "PLAIN_CHAT_SYSTEM_PROMPT",
+    "PlainChatMessage",
     "REPLY_ROUTE_LITERAL",
     "REWRITE_ROUTE_LITERAL",
     "ROUTE_OR_REPLY_SYSTEM_PROMPT",
@@ -94,7 +105,9 @@ __all__ = [
     "RouteOrReplyPromptInput",
     "build_route_or_reply_system_prompt",
     "build_rewrite_target_selection_bundle",
+    "extract_latest_plain_chat_user_message",
     "normalize_generation_style",
+    "normalize_plain_chat_messages",
     "parse_rewrite_target_selection",
     "render_comment_prompt",
     "render_generate_by_param_prompt",
@@ -103,5 +116,6 @@ __all__ = [
     "render_task_skill_prompt",
     "render_template_candidate_ranking_prompt",
     "render_route_or_reply_prompt",
+    "render_plain_chat_messages",
     "parse_template_candidate_ranking_output",
 ]

@@ -66,6 +66,12 @@ class RouteHistoryMessage:
 
 
 @dataclass(frozen=True)
+class PlainChatMessage:
+    role: str
+    content: str
+
+
+@dataclass(frozen=True)
 class TaskSkillPromptSection:
     title: str
     content: str

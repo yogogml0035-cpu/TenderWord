@@ -13,6 +13,11 @@ import httpx
 from openai import AsyncOpenAI
 
 from backend.config.settings import settings
+from backend.prompts import (
+    extract_latest_plain_chat_user_message,
+    normalize_plain_chat_messages,
+    render_plain_chat_messages,
+)
 from backend.util.common_util.llm_stream_utils import (
     MODEL_CONFIGS,
     ensure_llm_env,
@@ -20,11 +25,6 @@ from backend.util.common_util.llm_stream_utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-MINIMAL_CHAT_SYSTEM_PROMPT = (
-    "你是东松招标文件智能生成助手。"
-    "请用简洁、专业、诚实的中文回复。"
-)
 
 
 def build_error_detail(code: str, message: str) -> dict[str, Any]:
@@ -39,30 +39,18 @@ def to_ndjson_line(event: str, data: dict[str, Any]) -> str:
     return json.dumps({"event": event, "data": data}, ensure_ascii=False) + "\n"
 
 
-def normalize_chat_messages(messages: Sequence[Any], limit: int = 6) -> list[dict[str, str]]:
-    normalized_messages: list[dict[str, str]] = []
-    for message in messages[-limit:]:
-        role = (
-            str(getattr(message, "role", "") or "")
-            if not isinstance(message, dict)
-            else str(message.get("role") or "")
+def normalize_chat_messages(messages: Sequence[Any], limit: int | None = None) -> list[dict[str, str]]:
+    return [
+        {"role": item.role, "content": item.content}
+        for item in normalize_plain_chat_messages(
+            messages,
+            **({} if limit is None else {"limit": limit}),
         )
-        content = (
-            str(getattr(message, "content", "") or "").strip()
-            if not isinstance(message, dict)
-            else str(message.get("content") or "").strip()
-        )
-        if role not in {"user", "assistant"} or not content:
-            continue
-        normalized_messages.append({"role": role, "content": content})
-    return normalized_messages
+    ]
 
 
 def extract_latest_user_message(messages: Sequence[dict[str, str]]) -> str:
-    for item in reversed(messages):
-        if item.get("role") == "user":
-            return str(item.get("content") or "")
-    return ""
+    return extract_latest_plain_chat_user_message(messages)
 
 
 async def stream_chat_response(
@@ -89,8 +77,7 @@ async def stream_chat_response(
         )
         return
 
-    request_messages = [{"role": "system", "content": MINIMAL_CHAT_SYSTEM_PROMPT}]
-    request_messages.extend(normalized_messages)
+    request_messages = render_plain_chat_messages(normalized_messages)
 
     client = AsyncOpenAI(
         api_key=api_key,
