@@ -16,8 +16,19 @@ OLD_TEMPLATE_MESSAGE = "该模板过旧不能选择，仅供下载参考"
 INVALID_TEMPLATE_YEAR_MESSAGE = "模板年份缺失或无效，不能自动选择"
 
 
+class TemplateDownloadTooLargeError(ValueError):
+    """Raised when a proxied template response exceeds the configured byte limit."""
+
+
 def _request_timeout_seconds() -> float:
     return float(settings.EXTERNAL_REQUEST_TIMEOUT_SECONDS)
+
+
+def _max_template_download_size() -> int:
+    configured_limit = int(settings.TEMPLATE_CANDIDATE_MAX_DOWNLOAD_SIZE)
+    if configured_limit > 0:
+        return configured_limit
+    return int(settings.MAX_UPLOAD_SIZE)
 
 
 def build_template_candidate_params(
@@ -140,7 +151,20 @@ def fetch_template_file(url: str) -> requests.Response:
     try:
         response = requests.get(url, stream=True, timeout=_request_timeout_seconds())
         response.raise_for_status()
+        content_length = response.headers.get("Content-Length")
+        if content_length:
+            try:
+                declared_size = int(content_length)
+            except ValueError:
+                declared_size = 0
+            if declared_size > _max_template_download_size():
+                raise TemplateDownloadTooLargeError(
+                    "模板文件大小超过限制"
+                    f"（最大 {_max_template_download_size()} 字节）"
+                )
         return response
+    except TemplateDownloadTooLargeError:
+        raise
     except requests.exceptions.RequestException as exc:
         raise requests.exceptions.RequestException(f"下载模板文件失败: {exc}") from exc
 
@@ -217,3 +241,29 @@ def iter_response_content(response: requests.Response, chunk_size: int = 64 * 10
     for chunk in response.iter_content(chunk_size=chunk_size):
         if chunk:
             yield chunk
+
+
+def read_template_response_content(
+    response: requests.Response,
+    *,
+    max_bytes: int | None = None,
+    chunk_size: int = 64 * 1024,
+) -> bytes:
+    """Read a template download response while enforcing a hard byte limit."""
+
+    limit = _max_template_download_size() if max_bytes is None else int(max_bytes)
+    if limit <= 0:
+        limit = int(settings.MAX_UPLOAD_SIZE)
+
+    chunks: list[bytes] = []
+    total_size = 0
+    for chunk in iter_response_content(response, chunk_size=chunk_size):
+        total_size += len(chunk)
+        if total_size > limit:
+            raise TemplateDownloadTooLargeError(
+                "模板文件大小超过限制"
+                f"（最大 {limit} 字节）"
+            )
+        chunks.append(chunk)
+
+    return b"".join(chunks)

@@ -23,6 +23,7 @@ from backend.util.common_util.fetch_tender_data import (
 from backend.util.common_util.template_candidates import (
     OLD_TEMPLATE_MESSAGE,
     INVALID_TEMPLATE_YEAR_MESSAGE,
+    TemplateDownloadTooLargeError,
     build_template_download_name,
     derive_template_blocked_reason,
     extract_template_year,
@@ -30,6 +31,7 @@ from backend.util.common_util.template_candidates import (
     fetch_template_file,
     infer_remote_filename,
     iter_response_content,
+    read_template_response_content,
     validate_template_download_url,
 )
 from backend.util.common_util.upload_storage import (
@@ -55,6 +57,7 @@ __all__ = [
     # template_candidates
     "OLD_TEMPLATE_MESSAGE",
     "INVALID_TEMPLATE_YEAR_MESSAGE",
+    "TemplateDownloadTooLargeError",
     "build_template_download_name",
     "derive_template_blocked_reason",
     "extract_template_year",
@@ -62,6 +65,7 @@ __all__ = [
     "fetch_template_file",
     "infer_remote_filename",
     "iter_response_content",
+    "read_template_response_content",
     "validate_template_download_url",
     # upload_storage
     "ensure_upload_dir",
