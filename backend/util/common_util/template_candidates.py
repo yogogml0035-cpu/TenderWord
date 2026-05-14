@@ -14,6 +14,7 @@ from backend.config.settings import settings
 
 OLD_TEMPLATE_MESSAGE = "该模板过旧不能选择，仅供下载参考"
 INVALID_TEMPLATE_YEAR_MESSAGE = "模板年份缺失或无效，不能自动选择"
+MAX_TEMPLATE_DOWNLOAD_REDIRECTS = 5
 
 
 class TemplateDownloadTooLargeError(ValueError):
@@ -146,11 +147,30 @@ def validate_template_download_url(url: str) -> None:
 
 
 def fetch_template_file(url: str) -> requests.Response:
-    validate_template_download_url(url)
+    current_url = url
+    validate_template_download_url(current_url)
 
     try:
-        response = requests.get(url, stream=True, timeout=_request_timeout_seconds())
-        response.raise_for_status()
+        for _redirect_count in range(MAX_TEMPLATE_DOWNLOAD_REDIRECTS + 1):
+            response = requests.get(
+                current_url,
+                stream=True,
+                timeout=_request_timeout_seconds(),
+                allow_redirects=False,
+            )
+            if response.is_redirect:
+                location = response.headers.get("Location")
+                if not location:
+                    raise ValueError("模板文件重定向缺少 Location")
+                current_url = urllib.parse.urljoin(current_url, location)
+                validate_template_download_url(current_url)
+                continue
+
+            response.raise_for_status()
+            break
+        else:
+            raise ValueError("模板文件重定向次数过多")
+
         content_length = response.headers.get("Content-Length")
         if content_length:
             try:
