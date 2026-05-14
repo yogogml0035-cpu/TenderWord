@@ -29,11 +29,13 @@ from backend.services.template_candidate_ranking_service import (
 from backend.util.common_util.template_candidates import (
     INVALID_TEMPLATE_YEAR_MESSAGE,
     OLD_TEMPLATE_MESSAGE,
+    TemplateDownloadTooLargeError,
     build_template_download_name,
     derive_template_blocked_reason,
     fetch_template_candidates,
     fetch_template_file,
     infer_remote_filename,
+    read_template_response_content,
     resolve_template_media_type,
 )
 from backend.util.common_util.upload_storage import persist_file_bytes
@@ -136,6 +138,7 @@ async def get_template_candidates(
     responses={
         400: {"model": ErrorResponse, "description": "模板文件链接非法"},
         403: {"model": ErrorResponse, "description": "模板文件源不允许访问"},
+        413: {"model": ErrorResponse, "description": "模板文件过大"},
         502: {"model": ErrorResponse, "description": "模板文件下载失败"},
     },
     summary="代理下载模板文件",
@@ -147,19 +150,26 @@ async def download_template_candidate(
 ) -> Response:
     try:
         upstream_response = fetch_template_file(file_url)
+        template_content = read_template_response_content(upstream_response)
     except ValueError as exc:
         logger.warning("模板文件链接非法: %s", exc)
         message = str(exc)
-        status_code = (
-            status.HTTP_403_FORBIDDEN
-            if "主机" in message
-            else status.HTTP_400_BAD_REQUEST
-        )
-        code = "TEMPLATE_SOURCE_DENIED" if status_code == status.HTTP_403_FORBIDDEN else "TEMPLATE_URL_INVALID"
+        if isinstance(exc, TemplateDownloadTooLargeError):
+            status_code = status.HTTP_413_CONTENT_TOO_LARGE
+            code = "TEMPLATE_FILE_TOO_LARGE"
+            response_message = "模板文件过大"
+        else:
+            status_code = (
+                status.HTTP_403_FORBIDDEN
+                if "主机" in message
+                else status.HTTP_400_BAD_REQUEST
+            )
+            code = "TEMPLATE_SOURCE_DENIED" if status_code == status.HTTP_403_FORBIDDEN else "TEMPLATE_URL_INVALID"
+            response_message = "模板文件链接非法"
         raise _build_error_response(
             status_code=status_code,
             code=code,
-            message="模板文件链接非法",
+            message=response_message,
             details=message,
         ) from exc
     except requests.exceptions.RequestException as exc:
@@ -182,7 +192,7 @@ async def download_template_candidate(
     )
     headers = {"Content-Disposition": _build_content_disposition(filename)}
     return Response(
-        content=upstream_response.content,
+        content=template_content,
         media_type=media_type,
         headers=headers,
     )
@@ -238,7 +248,7 @@ async def select_template_candidate(
                 f"{candidate.tendername}-送审稿",
             )
             save_name = build_template_download_name(candidate.tendername, "送审稿", remote_filename)
-            template_content = upstream_response.content
+            template_content = read_template_response_content(upstream_response)
             template_content_type = upstream_response.headers.get(
                 "Content-Type",
                 "application/octet-stream",

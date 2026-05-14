@@ -169,6 +169,10 @@ class Settings(BaseSettings):
         default=15.0,
         description="外部 HTTP 请求超时时间（秒）",
     )
+    TEMPLATE_CANDIDATE_MAX_DOWNLOAD_SIZE: int = Field(
+        default=100 * 1024 * 1024,
+        description="模板候选代理下载最大文件大小（字节）",
+    )
     TEMPLATE_CANDIDATE_RANKING_LLM_PROVIDER: str = Field(
         default="deepseek",
         description="模板候选 AI 排序使用的模型提供商",

@@ -125,6 +125,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - 前端只调用项目内 `/api/template-candidates*`；外部 JSON 列表请求、文件下载代理、落盘与文件名清洗统一由后端处理。
 - 模板候选 AI 排序契约只能返回后端生成的 `row_index` 列表，不能返回项目名称或要求前端靠 `tendername` 反查候选。
 - 外部下载链接必须继续受配置白名单主机约束，避免把下载代理变成 SSRF 入口。
+- 外部下载代理必须在读取响应体时执行配置化大小上限；禁止在 API 层直接读取未限流的 `response.content`。
 - `year < 2025` 或 `year` 缺失/非法的模板不可选择，只允许下载参考。
 
 ### Prompt Layer 与 skill runtime 约束
