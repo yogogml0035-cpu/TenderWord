@@ -34,7 +34,7 @@ TenderWord 是一个前后端分离的招标文档生成系统。完整功能依
 ### 1. 在 WSL 中安装前端
 
 ```bash
-cd /home/<your-user>/path/to/TenderWord-WSL/frontend
+cd /home/<your-user>/path/to/TenderWord/frontend
 
 # 如果你使用 nvm/fnm，可以先切到 Node 20
 # nvm use
@@ -52,7 +52,7 @@ cp .env.local.example .env.local
 仓库虽然在 WSL 中，但后端虚拟环境必须由 Windows Python 创建，不能用 WSL 的 Python 创建。
 
 ```powershell
-cd \\wsl.localhost\<WSL发行版名>\home\<your-user>\path\to\TenderWord-WSL\backend
+cd \\wsl.localhost\<WSL发行版名>\home\<your-user>\path\to\TenderWord\backend
 py -m venv .venv
 .\.venv\Scripts\pip.exe install -r requirements.txt
 copy .env.example .env
@@ -66,7 +66,7 @@ copy .env.example .env
 ### 3. 从 WSL 启动项目
 
 ```bash
-cd /home/<your-user>/path/to/TenderWord-WSL
+cd /home/<your-user>/path/to/TenderWord
 ./scripts/start-dev-wsl.sh
 ```
 
@@ -173,7 +173,7 @@ cd <repo>
 
 ## 相关入口
 
-- 前端入口：[frontend/package.json](/home/hsikey/CompanyProject/TenderWord-WSL/frontend/package.json)
-- 后端入口：[backend/main.py](/home/hsikey/CompanyProject/TenderWord-WSL/backend/main.py)
-- Windows 启动脚本：[scripts/start-dev.ps1](/home/hsikey/CompanyProject/TenderWord-WSL/scripts/start-dev.ps1)
-- WSL 启动脚本：[scripts/start-dev-wsl.sh](/home/hsikey/CompanyProject/TenderWord-WSL/scripts/start-dev-wsl.sh)
+- 前端入口：[frontend/package.json](frontend/package.json)
+- 后端入口：[backend/main.py](backend/main.py)
+- Windows 启动脚本：[scripts/start-dev.ps1](scripts/start-dev.ps1)
+- WSL 启动脚本：[scripts/start-dev-wsl.sh](scripts/start-dev-wsl.sh)
