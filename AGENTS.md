@@ -109,6 +109,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - 前端所有网络请求统一经由 `frontend/lib/api.ts`；JSON 请求走 `request` 封装，流式 / 下载走专用 helper，不直接在组件中写裸 `fetch`。
 - 前端错误统一收敛为 `ApiError` 风格，UI 至少展示 `message`，并保留 `code` / `status` 便于排障。
 - API 形状变化时，必须同步更新前端类型、API 客户端、相关测试。
+- 后端 API、service、task、graph、node 之间的跨包导入统一使用 `backend.*` 包绝对路径；函数内延迟导入也不得写成 `from services...`、`from models...` 等脱离包根的短路径。
 
 ### 前端会话与 URL 约束
 
