@@ -10,12 +10,15 @@
   - 适用范围：招标类型 identity、`form_type` / `tender_type` / family、`gngk` 子类型分派、anchor 默认值、graph/node 特化、canonical URL、当前页面会话与草稿恢复。
 - `template_candidate_pipeline_knowledge_pack.md`
   - 适用范围：模板候选获取、同优先级 AI 重排、下载代理、文件落盘、上传槽位回填、模板弹窗缓存与刷新。
+- `frontend_dependency_toolchain_knowledge_pack.md`
+  - 适用范围：前端依赖、lockfile、Next / Jest / ESLint / Tailwind / Playwright 工具链、WSL 前端验证与依赖审计。
 
 ## 使用路由
 
 - 改 Prompt Layer、task skill、generate / rewrite / edit runtime、上传文件路径边界、Word COM、SSE、任务结果透传、批注/样式回写或 `backend/helper/word_helper/` 时，优先读取 `shared_runtime_word_skill_knowledge_pack.md`。
 - 改招标类型 identity、`form_type` 分派、anchor config、graph/state/node/replacement 收敛、URL 判型、当前页面会话、`sessionStorage` 语义、聊天草稿与排队恢复时，优先读取 `tender_type_identity_session_knowledge_pack.md`。
 - 改模板候选、AI 重排、下载代理、文件回填与模板弹窗时，优先读取 `template_candidate_pipeline_knowledge_pack.md`。
+- 改前端依赖、`package-lock.json`、Next / Jest / ESLint / Tailwind / Playwright 工具链或 WSL 前端验证入口时，优先读取 `frontend_dependency_toolchain_knowledge_pack.md`。
 
 ## 维护约定
 

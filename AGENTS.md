@@ -293,12 +293,14 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - `asset/shared_runtime_word_skill_knowledge_pack.md`
 - `asset/tender_type_identity_session_knowledge_pack.md`
 - `asset/template_candidate_pipeline_knowledge_pack.md`
+- `asset/frontend_dependency_toolchain_knowledge_pack.md`
 
 ### 需求修改后的知识回写路由
 
 - 改 Prompt Layer、task skill、generate/rewrite/edit runtime、Word COM、批注/样式回写、`backend/helper/word_helper/` 业务 helper、任务结果或 SSE 主干：更新 `asset/shared_runtime_word_skill_knowledge_pack.md`。
 - 改招标类型 identity、URL 判型、`form_type` 分派、anchor config、graph/state/node/replacement 收敛、当前页面会话范围、左侧栏展开与切换、`sessionStorage` 语义、聊天草稿或排队恢复：更新 `asset/tender_type_identity_session_knowledge_pack.md`。
 - 改模板候选、AI 重排、下载代理、文件回填与模板弹窗链路：更新 `asset/template_candidate_pipeline_knowledge_pack.md`。
+- 改前端依赖、`package-lock.json`、Next / Jest / ESLint / Tailwind / Playwright 工具链或 WSL 前端验证入口：更新 `asset/frontend_dependency_toolchain_knowledge_pack.md`。
 - 若新规则会影响未来多数需求，再把它从知识包提升写回 `AGENTS.md`。
 
 ### 本地指南约束
@@ -342,6 +344,14 @@ guide/       可选目录；若存在，仅放本地 Git / worktree 操作说明
 - 后端改动：至少跑 `python -m pytest tests -v`
 - 涉及关键链路时：补任务创建、SSE、完成、下载的验证；涉及真实浏览器交互、页面跳转、会话恢复、模板弹窗或任务进度展示时，必须补或更新 Playwright E2E，并跑 `npm run test:e2e`
 - 文档改动：至少校对文档中提到的文件、脚本、命令、端口和目录真实存在
+
+### 前端依赖与工具链约束
+
+- 前端依赖真源只允许是 `frontend/package.json` 与 `frontend/package-lock.json`；依赖变更必须同时提交 manifest 与 lockfile，禁止手改 lockfile 伪造解析结果。
+- 版本族必须同步收敛：`next` 与 `eslint-config-next` 保持同一 Next 版本线；`jest`、`jest-environment-jsdom` 与 `@types/jest` 保持同一 Jest 主版本线。升级 Next / Jest 后必须验证 `frontend/jest.config.ts` 在 `tsc` 与 `jest` 两条路径下都能加载。
+- 运行时依赖只放浏览器应用运行所需包；格式化、测试、构建、类型、E2E 工具统一放 `devDependencies`。发现未被源码或脚本引用的包时，优先删除而不是继续锁定。
+- 依赖变更的最低验证是：`npm ci`、`npm ls --depth=0`、`npm audit --json`、`npm run lint`、`npm run type-check`、`TMPDIR=/tmp TMP=/tmp TEMP=/tmp CI=1 npm test -- --runInBand`。影响构建或浏览器基建时，还要跑 `npm run build` 与 `npm run test:e2e`。
+- `npm ls` 中 platform optional / bundled 依赖可能出现环境相关噪音；必须先确认它不在 manifest、源码 import、脚本入口或 `npm prune --dry-run` 的可删除集合中，并且 `npm audit` 为 0，才能在变更说明中作为 npm 平台解析现象记录。
 
 ### E2E 探路与固化流程
 
