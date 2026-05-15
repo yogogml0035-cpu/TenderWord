@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+from backend.config.settings import settings
 from backend.models.generate import EditTaskRequest, FormType, GenerateResponse, LLMModel
 from backend.models.tender import TenderData
 from backend.services.document_service import DocumentService, SSECallback
@@ -13,13 +14,13 @@ from backend.util.log_util.skill_audit_log import (
 )
 
 
-def _build_edit_request() -> EditTaskRequest:
+def _build_edit_request(file_path: str = "D:/UploadFiles/source.docx") -> EditTaskRequest:
     return EditTaskRequest(
         conversation_id="conv-edit-1",
         form_type=FormType.XJCG_TENDER,
         model=LLMModel.DEEPSEEK,
         edit_prompt="请把交付日期改为合同签订后30天",
-        file_path="/tmp/source.docx",
+        file_path=file_path,
         tender_lx=0,
         fund_source_lx=1,
         tender_data_snapshot=TenderData(
@@ -63,8 +64,13 @@ def test_create_rewrite_audit_log_stays_under_rewrite_dir(tmp_path, monkeypatch)
     assert Path(log_path).name.startswith("rewrite_")
 
 
-def test_create_edit_task_passes_task_audit_log_path_to_submit(monkeypatch):
-    request = _build_edit_request()
+def test_create_edit_task_passes_task_audit_log_path_to_submit(tmp_path, monkeypatch):
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    source_path = upload_dir / "source.docx"
+    source_path.write_bytes(b"doc")
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_dir))
+    request = _build_edit_request(str(source_path))
     service = DocumentService.__new__(DocumentService)
     captured: dict[str, object] = {}
 

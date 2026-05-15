@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from backend.config.settings import settings
 from backend.config.tender_config import get_default_anchor_texts
 from backend.models.generate import (
     EditTaskRequest,
@@ -12,7 +13,16 @@ from backend.models.generate import (
     StyleWritebackMode,
 )
 from backend.models.tender import TenderData
+from backend.services import document_service
 from backend.services.document_service import DocumentService, REWRITE_DEFAULT_ANCHORS
+
+
+def upload_path(tmp_path, name: str) -> str:
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir(exist_ok=True)
+    document = upload_dir / name
+    document.write_bytes(b"doc")
+    return str(document)
 
 
 def build_request(
@@ -25,11 +35,12 @@ def build_request(
     generation_style: GenerationStyle = GenerationStyle.TEMPLATE,
     style_writeback_mode: StyleWritebackMode = StyleWritebackMode.FULL,
 ) -> GenerateRequest:
-    file_paths: dict[str, object] = {"tender_params": ["D:/UploadFiles/params.docx"]}
+    file_paths: dict[str, object] = {}
     if origin_tender is not None:
         file_paths["origin_tender"] = origin_tender
     if template is not None:
         file_paths["template"] = template
+    file_paths["tender_params"] = ["D:/UploadFiles/params.docx"]
 
     return GenerateRequest(
         form_type=form_type,
@@ -57,56 +68,96 @@ def build_request(
     )
 
 
-def test_build_initial_state_prefers_explicit_origin_tender() -> None:
+def test_build_initial_state_prefers_explicit_origin_tender(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    review_path = upload_path(tmp_path, "review.docx")
+    template_path = upload_path(tmp_path, "template.docx")
+    params_path = upload_path(tmp_path, "params.docx")
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_dir))
     service = object.__new__(DocumentService)
     request = build_request(
-        origin_tender=" D:/UploadFiles/review.docx ",
-        template="D:/UploadFiles/template.docx",
+        origin_tender=f" {review_path} ",
+        template=template_path,
     )
+    request.file_paths["tender_params"] = [params_path]
 
     state = service._build_initial_state(request, task_id="task-1")
 
-    assert state["origin_tender_path"] == " D:/UploadFiles/review.docx "
-    assert state["source_origin_tender_path"] == "D:/UploadFiles/review.docx"
-    assert state["template_path"] == "D:/UploadFiles/template.docx"
+    assert state["origin_tender_path"] == review_path
+    assert state["source_origin_tender_path"] == review_path
+    assert state["template_path"] == template_path
+    assert state["tender_param_paths"] == [params_path]
     assert state["project_number"] == "254DSITC2512"
     assert "254DSITC2512" in state["tender_invitation"]
 
 
-def test_build_initial_state_falls_back_to_template_without_origin_tender() -> None:
+def test_build_initial_state_falls_back_to_template_without_origin_tender(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    template_path = upload_path(tmp_path, "template.docx")
+    params_path = upload_path(tmp_path, "params.docx")
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_dir))
     service = object.__new__(DocumentService)
     request = build_request(
         origin_tender=None,
-        template="D:/UploadFiles/template.docx",
+        template=template_path,
     )
+    request.file_paths["tender_params"] = [params_path]
 
     state = service._build_initial_state(request, task_id="task-2")
 
-    assert state["origin_tender_path"] == "D:/UploadFiles/template.docx"
+    assert state["origin_tender_path"] == template_path
     assert state["source_origin_tender_path"] == ""
-    assert state["template_path"] == "D:/UploadFiles/template.docx"
+    assert state["template_path"] == template_path
 
 
-def test_build_initial_state_carries_generation_style() -> None:
+def test_build_initial_state_carries_generation_style(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    review_path = upload_path(tmp_path, "review.docx")
+    template_path = upload_path(tmp_path, "template.docx")
+    params_path = upload_path(tmp_path, "params.docx")
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_dir))
     service = object.__new__(DocumentService)
     request = build_request(
-        origin_tender="D:/UploadFiles/review.docx",
-        template="D:/UploadFiles/template.docx",
+        origin_tender=review_path,
+        template=template_path,
         generation_style=GenerationStyle.PARAM,
     )
+    request.file_paths["tender_params"] = [params_path]
 
     state = service._build_initial_state(request, task_id="task-3")
 
     assert state["generation_style"] == "param"
 
 
-def test_build_initial_state_carries_style_writeback_mode() -> None:
+def test_build_initial_state_carries_style_writeback_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    review_path = upload_path(tmp_path, "review.docx")
+    template_path = upload_path(tmp_path, "template.docx")
+    params_path = upload_path(tmp_path, "params.docx")
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_dir))
     service = object.__new__(DocumentService)
     request = build_request(
-        origin_tender="D:/UploadFiles/review.docx",
-        template="D:/UploadFiles/template.docx",
+        origin_tender=review_path,
+        template=template_path,
         style_writeback_mode=StyleWritebackMode.BOLD_ONLY,
     )
+    request.file_paths["tender_params"] = [params_path]
 
     state = service._build_initial_state(request, task_id="task-3b")
 
@@ -177,20 +228,29 @@ def test_rewrite_default_anchors_follow_gngk_goods_and_service_rules(
     ],
 )
 def test_build_initial_state_uses_gngk_mode_specific_default_anchors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
     form_type: FormType,
     tender_lx: int,
     fund_source_lx: int,
     expected_before: str,
     expected_after: str,
 ) -> None:
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    review_path = upload_path(tmp_path, "review.docx")
+    template_path = upload_path(tmp_path, "template.docx")
+    params_path = upload_path(tmp_path, "params.docx")
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_dir))
     service = object.__new__(DocumentService)
     request = build_request(
-        origin_tender="D:/UploadFiles/review.docx",
-        template="D:/UploadFiles/template.docx",
+        origin_tender=review_path,
+        template=template_path,
         form_type=form_type,
         tender_lx=tender_lx,
         fund_source_lx=fund_source_lx,
     )
+    request.file_paths["tender_params"] = [params_path]
 
     state = service._build_initial_state(request, task_id="task-gngk-defaults")
 
@@ -198,14 +258,21 @@ def test_build_initial_state_uses_gngk_mode_specific_default_anchors(
     assert state["insertion_after_text"] == expected_after
 
 
-def test_edit_and_rewrite_initial_state_do_not_receive_generation_style() -> None:
+def test_edit_and_rewrite_initial_state_do_not_receive_generation_style(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    output_path = upload_path(tmp_path, "output.docx")
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_dir))
     service = object.__new__(DocumentService)
     edit_request = EditTaskRequest(
         conversation_id="conv-1",
         form_type=FormType.XJCG_TENDER,
         model=LLMModel.DEEPSEEK,
         edit_prompt="请微调商务条款",
-        file_path="D:/UploadFiles/output.docx",
+        file_path=output_path,
         tender_lx=0,
         fund_source_lx=1,
         tender_data_snapshot=TenderData(
@@ -237,3 +304,139 @@ def test_edit_and_rewrite_initial_state_do_not_receive_generation_style() -> Non
 
     assert "generation_style" not in edit_state
     assert "generation_style" not in rewrite_state
+
+
+def test_build_initial_state_rejects_template_outside_upload_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    outside_path = tmp_path / "outside.docx"
+    outside_path.write_bytes(b"doc")
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_dir))
+    service = object.__new__(DocumentService)
+    request = build_request(
+        origin_tender=None,
+        template=str(outside_path),
+    )
+    request.file_paths["tender_params"] = []
+
+    with pytest.raises(ValueError, match="file_paths.template"):
+        service._build_initial_state(request, task_id="task-invalid-template")
+
+
+def test_build_initial_state_rejects_tender_param_outside_upload_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    template_path = upload_path(tmp_path, "template.docx")
+    outside_path = tmp_path / "outside-param.docx"
+    outside_path.write_bytes(b"doc")
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_dir))
+    service = object.__new__(DocumentService)
+    request = build_request(origin_tender=None, template=template_path)
+    request.file_paths["tender_params"] = [str(outside_path)]
+
+    with pytest.raises(ValueError, match=r"file_paths\.tender_params\[0\]"):
+        service._build_initial_state(request, task_id="task-invalid-param")
+
+
+def test_create_task_rejects_invalid_upload_path_before_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    outside_path = tmp_path / "outside.docx"
+    outside_path.write_bytes(b"doc")
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_dir))
+    monkeypatch.setitem(document_service.GRAPH_REGISTRY, "gjgk_tender", object())
+
+    service = object.__new__(DocumentService)
+    service._allocate_task_callback_pair = lambda: ("task-invalid", object())
+    service._submit_graph_task = lambda **_kwargs: pytest.fail("should not submit task")
+    request = build_request(origin_tender=None, template=str(outside_path))
+    request.file_paths["tender_params"] = []
+
+    response = service.create_task(request)
+
+    assert response.success is False
+    assert response.error == document_service.UPLOAD_PATH_ERROR_CODE
+    assert "file_paths.template" in response.message
+
+
+@pytest.mark.asyncio
+async def test_create_edit_task_rejects_invalid_request_file_path_before_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    outside_path = tmp_path / "outside-edit.docx"
+    outside_path.write_bytes(b"doc")
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_dir))
+    monkeypatch.setattr(document_service, "EDIT_SKILL_GRAPH_CLASS", object())
+
+    service = object.__new__(DocumentService)
+    service._conversation_service = object()
+    service._allocate_task_callback_pair = lambda: ("task-edit-invalid", object())
+    service._submit_graph_task = lambda **_kwargs: pytest.fail("should not submit task")
+    edit_request = EditTaskRequest(
+        conversation_id="conv-invalid-edit",
+        form_type=FormType.XJCG_TENDER,
+        model=LLMModel.DEEPSEEK,
+        edit_prompt="请修改",
+        file_path=str(outside_path),
+        tender_lx=0,
+        fund_source_lx=1,
+    )
+
+    response = await service.create_edit_task(edit_request)
+
+    assert response.success is False
+    assert response.error == document_service.UPLOAD_PATH_ERROR_CODE
+    assert "file_path" in response.message
+
+
+@pytest.mark.asyncio
+async def test_create_edit_task_rejects_invalid_conversation_prepared_doc_before_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    outside_path = tmp_path / "outside-history.docx"
+    outside_path.write_bytes(b"doc")
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_dir))
+    monkeypatch.setattr(document_service, "EDIT_SKILL_GRAPH_CLASS", object())
+
+    service = object.__new__(DocumentService)
+    service._conversation_service = type(
+        "FakeConversationService",
+        (),
+        {
+            "get_latest_rewrite_state": lambda self, conversation_id: {
+                "prepared_doc_path": str(outside_path)
+            }
+        },
+    )()
+    service._allocate_task_callback_pair = lambda: ("task-edit-history-invalid", object())
+    service._submit_graph_task = lambda **_kwargs: pytest.fail("should not submit task")
+    edit_request = EditTaskRequest(
+        conversation_id="conv-invalid-history",
+        form_type=FormType.XJCG_TENDER,
+        model=LLMModel.DEEPSEEK,
+        edit_prompt="请修改",
+        file_path=None,
+        tender_lx=0,
+        fund_source_lx=1,
+    )
+
+    response = await service.create_edit_task(edit_request)
+
+    assert response.success is False
+    assert response.error == document_service.UPLOAD_PATH_ERROR_CODE
+    assert "prepared_doc_path" in response.message

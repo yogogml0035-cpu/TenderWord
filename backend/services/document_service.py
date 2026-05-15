@@ -37,6 +37,7 @@ from backend.util.log_util.progress_log import progress_log
 from backend.util.log_util.skill_audit_log import create_edit_audit_log
 from backend.util.log_util.sse_log_handler import task_log_context
 from backend.util.common_util.tender_number import normalize_gjgk_project_number
+from backend.util.common_util.upload_storage import resolve_upload_file_path
 from backend.config.tender_config import get_default_anchor_texts
 
 if TYPE_CHECKING:
@@ -94,6 +95,9 @@ TASK_KIND_TO_LLM_NODE = {
     "rewrite": "rewrite_text",
     "edit": "edit_text",
 }
+
+UPLOAD_PATH_ERROR_CODE = "UPLOAD_PATH_OUT_OF_SCOPE"
+
 
 class _DiscardingWriter:
     """吞掉 Graph 运行期间的 stdout/stderr，避免污染 execution_log。"""
@@ -173,6 +177,44 @@ class _LLMSnapshotRelay:
         self._last_sent_at = time.monotonic()
         if is_complete:
             self._completed_content = content
+
+
+class UploadPathValidationError(ValueError):
+    """Raised when a client-supplied task file path escapes the upload directory."""
+
+    def __init__(self, field_name: str, reason: str):
+        self.field_name = field_name
+        self.reason = reason
+        super().__init__(f"{field_name}: {reason}")
+
+
+def _normalize_upload_file_path(value: Any, field_name: str) -> str:
+    raw_path = str(value or "").strip()
+    if not raw_path:
+        raise UploadPathValidationError(field_name, "文件路径不能为空")
+    try:
+        return resolve_upload_file_path(raw_path)
+    except ValueError as exc:
+        raise UploadPathValidationError(field_name, str(exc)) from exc
+
+
+def _normalize_optional_upload_file_path(value: Any, field_name: str) -> str:
+    raw_path = str(value or "").strip()
+    if not raw_path:
+        return ""
+    return _normalize_upload_file_path(raw_path, field_name)
+
+
+def _normalize_upload_file_path_list(value: Any, field_name: str) -> list[str]:
+    if value in (None, ""):
+        return []
+    values = [value] if isinstance(value, str) else value
+    if not isinstance(values, list):
+        raise UploadPathValidationError(field_name, "文件路径列表格式不正确")
+    return [
+        _normalize_upload_file_path(path_value, f"{field_name}[{index}]")
+        for index, path_value in enumerate(values)
+    ]
 
 
 # Graph 注册表：表单类型 -> Graph 类
@@ -397,7 +439,21 @@ class DocumentService:
                 error=f"Form type '{form_type}' not supported",
             )
 
-        initial_state = self._build_initial_state(request, task_id=task_id)
+        try:
+            initial_state = self._build_initial_state(request, task_id=task_id)
+        except UploadPathValidationError as exc:
+            logger.warning(
+                "生成任务文件路径校验失败: task_id=%s, field=%s, reason=%s",
+                task_id,
+                exc.field_name,
+                exc.reason,
+            )
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message=f"{exc.field_name} 文件路径无效：{exc.reason}",
+                error=UPLOAD_PATH_ERROR_CODE,
+            )
         return self._submit_graph_task(
             task_id=task_id,
             graph_class=graph_class,
@@ -526,6 +582,25 @@ class DocumentService:
                 task_id=task_id,
                 message="当前会话没有可用文档，请先上传文件或先完成一次生成/修改",
                 error="REWRITE_NO_DOCUMENT",
+            )
+
+        try:
+            normalized_file_path = _normalize_upload_file_path(
+                normalized_file_path,
+                "file_path" if request.file_path else "prepared_doc_path",
+            )
+        except UploadPathValidationError as exc:
+            logger.warning(
+                "edit 任务文件路径校验失败: task_id=%s, field=%s, reason=%s",
+                task_id,
+                exc.field_name,
+                exc.reason,
+            )
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message=f"{exc.field_name} 文件路径无效：{exc.reason}",
+                error=UPLOAD_PATH_ERROR_CODE,
             )
 
         if not EDIT_SKILL_GRAPH_CLASS:
@@ -678,6 +753,11 @@ class DocumentService:
         if not insertion_after_text or not str(insertion_after_text).strip():
             insertion_after_text = default_after_text
 
+        source_origin_tender_path = _normalize_upload_file_path(
+            request.file_path,
+            "file_path",
+        )
+
         state: Dict[str, Any] = {
             "task_id": task_id,
             "skill_id": EDIT_SKILL_ID,
@@ -700,7 +780,7 @@ class DocumentService:
             "tender_lx": int(request.tender_lx),
             "fund_source_lx": str(request.fund_source_lx),
             "edit_user_prompt": str(request.edit_prompt).strip(),
-            "source_origin_tender_path": str(request.file_path).strip(),
+            "source_origin_tender_path": source_origin_tender_path,
             "insertion_before_text": str(insertion_before_text),
             "insertion_after_text": str(insertion_after_text),
         }
@@ -786,30 +866,36 @@ class DocumentService:
 
         # 文件路径
         # origin_tender_path: 送审稿（可选）
-        explicit_origin_tender = file_paths.get("origin_tender")
-        origin_tender = explicit_origin_tender or file_paths.get("template")
-        if origin_tender and isinstance(origin_tender, str):
-            state["origin_tender_path"] = origin_tender
-        state["source_origin_tender_path"] = (
-            explicit_origin_tender.strip()
-            if isinstance(explicit_origin_tender, str)
-            else ""
+        explicit_origin_tender = _normalize_optional_upload_file_path(
+            file_paths.get("origin_tender"),
+            "file_paths.origin_tender",
         )
+        template = _normalize_optional_upload_file_path(
+            file_paths.get("template"),
+            "file_paths.template",
+        )
+        origin_tender = explicit_origin_tender or template
+        if origin_tender:
+            state["origin_tender_path"] = origin_tender
+        state["source_origin_tender_path"] = explicit_origin_tender
 
         # clean_draft_path: 清洁稿（可选）
-        clean_draft = file_paths.get("clean_draft") or file_paths.get("clean_draft_path")
-        if clean_draft and isinstance(clean_draft, str):
+        clean_draft = _normalize_optional_upload_file_path(
+            file_paths.get("clean_draft") or file_paths.get("clean_draft_path"),
+            "file_paths.clean_draft",
+        )
+        if clean_draft:
             state["clean_draft_path"] = clean_draft
 
         # tender_param_paths: 技术参数文件（支持多文件）
         params = file_paths.get("tender_params") or file_paths.get("params") or []
-        if isinstance(params, str):
-            params = [params]
-        state["tender_param_paths"] = params if isinstance(params, list) else []
+        state["tender_param_paths"] = _normalize_upload_file_path_list(
+            params,
+            "file_paths.tender_params",
+        )
 
         # template: 模板文件（必需）
-        template = file_paths.get("template")
-        if template and isinstance(template, str):
+        if template:
             # 保存模板路径，后续 prepare_template 节点会处理
             state["template_path"] = template
 
