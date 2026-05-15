@@ -111,6 +111,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - 前端错误统一收敛为 `ApiError` 风格，UI 至少展示 `message`，并保留 `code` / `status` 便于排障。
 - API 形状变化时，必须同步更新前端类型、API 客户端、相关测试。
 - 后端 API、service、task、graph、node 之间的跨包导入统一使用 `backend.*` 包绝对路径；函数内延迟导入也不得写成 `from services...`、`from models...` 等脱离包根的短路径。
+- 客户端回传的本地文件路径只允许引用 `settings.UPLOAD_DIR` 下的上传产物；generate 的 `file_paths`、显式 edit 的 `file_path`、会话恢复得到的 `prepared_doc_path`、下载接口路径都必须统一通过 `backend/util/common_util/upload_storage.py` 的上传目录边界校验，非法路径在 API / service 入口返回结构化错误，不得进入后台 graph / Word 节点。
 
 ### 前端会话与 URL 约束
 

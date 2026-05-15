@@ -38,6 +38,7 @@ from backend.util.common_util.upload_storage import (
     ensure_upload_dir,
     generate_unique_filename,
     persist_file_bytes,
+    resolve_upload_file_path,
     validate_file_extension,
     validate_file_size,
 )
@@ -71,6 +72,7 @@ __all__ = [
     "ensure_upload_dir",
     "generate_unique_filename",
     "persist_file_bytes",
+    "resolve_upload_file_path",
     "validate_file_extension",
     "validate_file_size",
 ]

@@ -4,6 +4,7 @@
 """
 
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Path, status
 
@@ -68,16 +69,17 @@ async def create_generate_task(
 
     if not response.success:
         logger.warning(f"创建任务失败: {response.message}")
-        # 对于已知错误，返回 400
-        if "未知的表单类型" in (response.error or ""):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "success": False,
-                    "error": response.error,
-                    "message": response.message,
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": response.error or "REQ_INVALID_PARAM",
+                    "message": response.message or "创建生成任务失败",
                 },
-            )
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
 
     return response
 

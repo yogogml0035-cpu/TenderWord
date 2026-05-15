@@ -12,7 +12,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from fastapi.responses import FileResponse
 
-from backend.config.settings import settings
+from backend.util.common_util.upload_storage import resolve_upload_file_path
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +37,9 @@ def validate_file_path(file_path: str) -> pathlib.Path:
     # 解码 URL 编码的路径
     decoded_path = urllib.parse.unquote(file_path)
 
-    # 解析为 Path 对象并规范化
-    target_path = pathlib.Path(decoded_path).resolve()
-    upload_dir = pathlib.Path(settings.UPLOAD_DIR).resolve()
-
-    # 安全检查：防止目录遍历攻击
     try:
-        target_path.relative_to(upload_dir)
-    except ValueError:
+        target_path = pathlib.Path(resolve_upload_file_path(decoded_path))
+    except ValueError as exc:
         logger.warning(f"非法路径访问尝试: {file_path}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -53,10 +48,10 @@ def validate_file_path(file_path: str) -> pathlib.Path:
                 "error": {
                     "code": "ACCESS_DENIED",
                     "message": "访问被拒绝",
-                    "details": "只能下载上传目录下的文件",
+                    "details": str(exc) or "只能下载上传目录下的文件",
                 },
             },
-        )
+        ) from exc
 
     return target_path
 

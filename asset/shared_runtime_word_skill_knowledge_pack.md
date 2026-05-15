@@ -27,6 +27,16 @@
 - `/api/user/stream` 在已有 rewrite history 且最新消息具备明确修改意图时，应优先走确定性 rewrite fast-path，再进入 rewrite task 创建；普通闲聊、能力询问和不确定语义仍走 LLM 路由/回复。前端构造 user stream `messages` 时必须过滤空内容气泡，避免历史空 AI 消息触发后端请求体验证失败。
 - `generation_style` 与 `style_writeback_mode` 都是 generate-only 字段：`DocumentService._build_initial_state()` 可写入 generate state，edit / rewrite 初始 state 不得注入这两个字段。
 
+### 上传文件路径边界
+
+- 客户端回传的任务文件路径是服务端本地路径引用，必须视为不可信输入；唯一允许范围是 `backend/config/settings.py` 的 `settings.UPLOAD_DIR`。
+- 上传文件落盘和路径边界统一由 `backend/util/common_util/upload_storage.py` 负责：`persist_file_bytes()` 只返回经过 `resolve_upload_file_path()` 规范化后的路径，其他入口不得各自实现上传目录判断。
+- `DocumentService._build_initial_state()` 必须校验并规范化 generate `file_paths.template`、`file_paths.origin_tender`、`file_paths.clean_draft` / `clean_draft_path`、`file_paths.tender_params` / `params`，再写入 graph state。
+- `DocumentService.create_edit_task()` 必须校验显式 edit `file_path`；若未传 `file_path` 而从会话历史恢复 `prepared_doc_path`，恢复出的路径也必须重新经过上传目录边界校验。
+- `backend/api/download.py` 的下载路径校验复用同一 helper，避免 download 与 generate / edit 的路径规则漂移。
+- 路径 helper 需要同时支持 Windows 风格 `D:/UploadFiles/...` 与 WSL / POSIX 测试路径；Windows 风格和 POSIX 风格不能混用，POSIX 请求路径必须是绝对路径，目录穿越和上传目录前缀碰撞必须拒绝。
+- 非法路径必须在 API / service 入口返回结构化 400（或 download 的 403），不能创建后台任务，不能让 graph / Word 节点再尝试打开任意本地文件。
+
 ### Skill 声明
 
 - skill loader 与 registry 负责 fail-fast 校验 frontmatter、workflow 入口、返回类型和 `workflow.skill_id`。
@@ -110,6 +120,7 @@
 
 - 运行时与任务结果：`backend/tests/services/test_document_service_initial_state.py`、`backend/tests/services/test_document_service_task_result.py`、`backend/tests/services/test_document_service_cancellation.py`
 - 生成任务 API：`backend/tests/api/test_generate_api.py`
+- 上传路径边界：`backend/tests/util/test_upload_storage.py`、`backend/tests/api/test_download_api.py`、`backend/tests/api/test_edit_api.py`、`backend/tests/api/test_generate_api.py`、`backend/tests/services/test_document_service_initial_state.py`
 - 用户流式 rewrite 路由：`backend/tests/services/test_user_routing_service.py`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
 - skill 与 edit/rewrite：`backend/tests/nodes/test_tender_aware_word_dispatch.py`、`backend/tests/nodes/test_edit_audit_logging.py`、`backend/tests/progress/test_edit_progress_tracking.py`
 - Word helper：`backend/tests/helper/test_content_ops.py`、`backend/tests/helper/test_paragraph_boundary_ops.py`、`backend/tests/helper/test_inline_style_ops.py`
@@ -122,6 +133,7 @@
 ## 回归风险
 
 - 改 skill workflow、dispatch 或 task result 时，容易出现 generate/rewrite/edit 某一条链路漏同步。
+- 改上传、下载、generate / edit 初始 state 或会话恢复路径时，容易重新引入本地文件路径越界；必须同时覆盖 Windows 风格路径、POSIX 绝对路径、目录穿越、上传目录前缀碰撞和会话历史 `prepared_doc_path`。
 - 改受保护字段规则时，必须同时检查 `tender_config.py`、`protected_fields.py`、三条 update 路径和严格匹配测试。
 - 改样式回填或 SSE 结果结构时，必须同步检查后端 `DoneEventData`、任务结果 payload、`frontend/hooks/useChatSSE.ts` 和 chat store metadata。
 - 任何新增 Word helper 都要先确认代码真实落地，再写入知识包；不要把目标设计提前写成已完成事实。
