@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TenderFormShared, type BaseTenderFormData } from '@/components/forms/TenderFormShared';
 import type { UploadedFile } from '@/components/forms/FileUploader';
-import type { ConversationFormDraft } from '@/stores/chatStore';
+import { useChatStore, type ConversationFormDraft } from '@/stores/chatStore';
 import { ApiError } from '@/lib/api';
 import type {
   TenderData,
@@ -205,6 +205,32 @@ function renderSharedForm(options?: {
   );
 }
 
+function StoreBackedSharedFormHarness() {
+  const conversation = useChatStore((state) =>
+    state.conversations.find((item) => item.id === state.currentConversationId) || null
+  );
+  const draft = useChatStore((state) =>
+    state.currentConversationId ? state.conversationDrafts[state.currentConversationId] || null : null
+  );
+
+  if (!conversation) {
+    return null;
+  }
+
+  return (
+    <TenderFormShared
+      tenderType={conversation.tenderType}
+      onSubmit={jest.fn()}
+      initialTenderNo={draft?.tender_no}
+      initialTenderData={draft?.tender_data || null}
+      initialDraft={draft}
+      onDraftChange={(updates) =>
+        useChatStore.getState().updateConversationDraft(conversation.id, updates)
+      }
+    />
+  );
+}
+
 function mergeDraftState(
   previous: ConversationFormDraft,
   updates: Partial<ConversationFormDraft>
@@ -228,6 +254,27 @@ function mergeDraftState(
     };
   }
 
+  if (updates.gngk_generation_styles) {
+    nextDraft.gngk_generation_styles = {
+      ...(previous.gngk_generation_styles || {}),
+      ...updates.gngk_generation_styles,
+    };
+  }
+
+  if (updates.gngk_engineering_insertion_configs) {
+    nextDraft.gngk_engineering_insertion_configs = {
+      ...(previous.gngk_engineering_insertion_configs || {}),
+      ...updates.gngk_engineering_insertion_configs,
+    };
+  }
+
+  if (updates.gngk_service_insertion_configs) {
+    nextDraft.gngk_service_insertion_configs = {
+      ...(previous.gngk_service_insertion_configs || {}),
+      ...updates.gngk_service_insertion_configs,
+    };
+  }
+
   if (updates.gngk_service_insertion_config) {
     nextDraft.gngk_service_insertion_config = {
       ...(previous.gngk_service_insertion_config || {}),
@@ -248,7 +295,7 @@ function mergeDraftState(
 
 function setUrlParams(options?: {
   tenderType?: 'xjcg' | 'gngk' | 'gjgk';
-  tenderLx?: 0 | 1;
+  tenderLx?: 0 | 1 | 2;
   fundLx?: 0 | 1;
   hasParams?: boolean;
   isValid?: boolean;
@@ -335,6 +382,7 @@ function createDeferred<T>() {
 
 describe('TenderFormShared', () => {
   beforeEach(() => {
+    useChatStore.getState().resetSessionState();
     mockSyncTenderDataDraft.mockReset();
     mockUseUrlParams.mockReset();
     mockFetchTemplateCandidates.mockReset();
@@ -503,6 +551,7 @@ describe('TenderFormShared', () => {
 
       expect(within(headerSlot).getByText(headerTitle)).toBeInTheDocument();
       expect(within(tenderTypeGroup).getByRole('button', { name: '货物' })).toBeInTheDocument();
+      expect(within(tenderTypeGroup).getByRole('button', { name: '工程' })).toBeInTheDocument();
       expect(within(tenderTypeGroup).getByRole('button', { name: '服务' })).toBeInTheDocument();
       expect(within(fundTypeGroup).getByRole('button', { name: '自筹' })).toBeInTheDocument();
       expect(within(fundTypeGroup).getByRole('button', { name: '财政' })).toBeInTheDocument();
@@ -530,27 +579,30 @@ describe('TenderFormShared', () => {
   });
 
   it.each([
-    [0, '自筹资金'],
-    [1, '财政资金'],
+    [0, 0, '货物', '自筹资金'],
+    [1, 1, '工程', '财政资金'],
+    [2, 0, '服务', '自筹资金'],
   ] as const)(
-    'shows 资金性质 instead of 发布平台 for gjgk when type.fund_lx is %s',
-    (fundLx, expectedLabel) => {
+    'shows 标的类型和资金性质 for gjgk when tender_lx=%s and fund_lx=%s',
+    (tenderLx, fundLx, expectedTenderLabel, expectedFundLabel) => {
       renderSharedForm({
         tenderType: 'gjgk',
         initialDraft: {
           tender_data: mockTenderData,
-          tender_type_info: buildTenderTypeInfo({ fund_lx: fundLx }),
+          tender_type_info: buildTenderTypeInfo({ tender_lx: tenderLx, fund_lx: fundLx }),
         },
       });
 
+      expect(screen.getByText('标的类型')).toBeInTheDocument();
+      expect(screen.getByText('标的类型').parentElement).toHaveTextContent(expectedTenderLabel);
       expect(screen.getByText('资金性质')).toBeInTheDocument();
-      expect(screen.getByText(expectedLabel)).toBeInTheDocument();
+      expect(screen.getByText('资金性质').parentElement).toHaveTextContent(expectedFundLabel);
       expect(screen.queryByText('发布平台')).not.toBeInTheDocument();
       expect(screen.queryByText('测试平台')).not.toBeInTheDocument();
     }
   );
 
-  it('hides both 资金性质 and 发布平台 for gjgk when type info is missing', () => {
+  it('hides 标的类型、资金性质 and 发布平台 for gjgk when type info is missing', () => {
     renderSharedForm({
       tenderType: 'gjgk',
       initialDraft: {
@@ -558,6 +610,7 @@ describe('TenderFormShared', () => {
       },
     });
 
+    expect(screen.queryByText('标的类型')).not.toBeInTheDocument();
     expect(screen.queryByText('资金性质')).not.toBeInTheDocument();
     expect(screen.queryByText('发布平台')).not.toBeInTheDocument();
     expect(screen.queryByText('测试平台')).not.toBeInTheDocument();
@@ -722,6 +775,51 @@ describe('TenderFormShared', () => {
         generation_style: 'param',
       })
     );
+  });
+
+  it('restores the gngk service generation style after switching to goods and back', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk', tenderLx: 2, fundLx: 0 });
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <>
+          <TenderFormShared
+            tenderType="gngk"
+            onSubmit={jest.fn()}
+            initialDraft={draft}
+            onDraftChange={(updates) => {
+              setDraft((previous) => mergeDraftState(previous, updates));
+            }}
+          />
+          <pre data-testid="draft-state">{JSON.stringify(draft)}</pre>
+        </>
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    const templateButton = screen.getByRole('button', { name: '按模板优先' });
+    const paramButton = screen.getByRole('button', { name: '按参数优先' });
+    const goodsButton = screen.getByRole('button', { name: '货物' });
+    const serviceButton = screen.getByRole('button', { name: '服务' });
+
+    await waitFor(() => expect(serviceButton).toHaveClass('bg-blue-600'));
+    expect(templateButton).toHaveClass('bg-blue-600');
+
+    await user.click(paramButton);
+    await waitFor(() => expect(paramButton).toHaveClass('bg-blue-600'));
+
+    await user.click(goodsButton);
+    await waitFor(() => expect(goodsButton).toHaveClass('bg-blue-600'));
+    expect(templateButton).toHaveClass('bg-blue-600');
+
+    await user.click(serviceButton);
+    await waitFor(() => expect(serviceButton).toHaveClass('bg-blue-600'));
+    expect(paramButton).toHaveClass('bg-blue-600');
+    expect(screen.getByTestId('draft-state')).toHaveTextContent('"gngk_generation_styles"');
   });
 
   it('persists style writeback mode through draft updates and submit payload', async () => {
@@ -1083,9 +1181,11 @@ describe('TenderFormShared', () => {
 
     await waitFor(() => expect(beforeInput).toHaveValue('第三章 招标内容及要求'));
     expect(afterInput).toHaveValue('第四章 投标文件有关格式');
+    expect(screen.getByRole('button', { name: '按模板优先' })).toHaveClass('bg-blue-600');
+    expect(screen.getByRole('button', { name: '按参数优先' })).not.toHaveClass('bg-blue-600');
   });
 
-  it('uses URL tender_lx only for initial default and allows manual switching afterwards', async () => {
+  it('uses URL tender_lx only for initial engineering default and allows manual switching afterwards', async () => {
     const user = userEvent.setup();
     setUrlParams({ tenderType: 'gngk', tenderLx: 1 });
 
@@ -1107,20 +1207,20 @@ describe('TenderFormShared', () => {
     render(<StatefulDraftHarness />);
 
     const goodsButton = screen.getByRole('button', { name: '货物' });
-    const serviceButton = screen.getByRole('button', { name: '服务' });
+    const engineeringButton = screen.getByRole('button', { name: '工程' });
 
-    await waitFor(() => expect(serviceButton).toHaveClass('bg-blue-600'));
+    await waitFor(() => expect(engineeringButton).toHaveClass('bg-blue-600'));
     expect(goodsButton).not.toHaveClass('bg-blue-600');
 
     await user.click(goodsButton);
 
     await waitFor(() => expect(goodsButton).toHaveClass('bg-blue-600'));
-    expect(serviceButton).not.toHaveClass('bg-blue-600');
+    expect(engineeringButton).not.toHaveClass('bg-blue-600');
   });
 
-  it('shares one service anchor cache across gngk fund switches', async () => {
+  it('uses per-fund service defaults first, then restores each fund scoped service cache', async () => {
     const user = userEvent.setup();
-    setUrlParams({ tenderType: 'gngk', tenderLx: 1, fundLx: 0 });
+    setUrlParams({ tenderType: 'gngk', tenderLx: 2, fundLx: 0 });
 
     function StatefulDraftHarness() {
       const [draft, setDraft] = React.useState<ConversationFormDraft>({});
@@ -1149,15 +1249,32 @@ describe('TenderFormShared', () => {
     expect(afterInput).toHaveValue('第四章 投标文件有关格式');
 
     await user.clear(beforeInput);
-    await user.type(beforeInput, '服务共享前');
+    await user.type(beforeInput, '服务自筹前');
     await user.clear(afterInput);
-    await user.type(afterInput, '服务共享后');
+    await user.type(afterInput, '服务自筹后');
 
     await user.click(screen.getByRole('button', { name: '财政' }));
 
-    await waitFor(() => expect(beforeInput).toHaveValue('服务共享前'));
-    expect(afterInput).toHaveValue('服务共享后');
-    expect(screen.getByTestId('draft-state')).toHaveTextContent('"gngk_service_insertion_config"');
+    await waitFor(() => expect(beforeInput).toHaveValue('第三章 招标内容及要求'));
+    expect(afterInput).toHaveValue('第四章 投标文件有关格式');
+
+    await user.clear(beforeInput);
+    await user.type(beforeInput, '服务财政前');
+    await user.clear(afterInput);
+    await user.type(afterInput, '服务财政后');
+
+    await user.click(screen.getByRole('button', { name: '自筹' }));
+
+    await waitFor(() => expect(beforeInput).toHaveValue('服务自筹前'));
+    expect(afterInput).toHaveValue('服务自筹后');
+
+    await user.click(screen.getByRole('button', { name: '财政' }));
+
+    await waitFor(() => expect(beforeInput).toHaveValue('服务财政前'));
+    expect(afterInput).toHaveValue('服务财政后');
+    expect(screen.getByTestId('draft-state')).toHaveTextContent(
+      '"gngk_service_insertion_configs"'
+    );
   });
 
   it('restores goods anchors for the active fund after leaving gngk service mode', async () => {
@@ -1206,7 +1323,7 @@ describe('TenderFormShared', () => {
     expect(afterInput).toHaveValue('货物财政后');
   });
 
-  it('keeps legacy service drafts on their saved insertion_config until a shared cache is created', async () => {
+  it('keeps legacy service drafts on their saved insertion_config until a fund scoped cache is created', async () => {
     const onDraftChange = jest.fn();
     setUrlParams({ hasParams: false });
 
@@ -1214,7 +1331,7 @@ describe('TenderFormShared', () => {
       tenderType: 'gngk',
       onDraftChange,
       initialDraft: {
-        tender_lx: 1,
+        tender_lx: 2,
         fund_lx: 0,
         insertion_config: {
           before_text: '旧服务前',
@@ -1228,27 +1345,260 @@ describe('TenderFormShared', () => {
 
     await waitFor(() =>
       expect(onDraftChange).toHaveBeenCalledWith({
-        gngk_service_insertion_config: {
-          before_text: '旧服务前',
-          after_text: '旧服务后',
+        gngk_service_insertion_configs: {
+          0: {
+            before_text: '旧服务前',
+            after_text: '旧服务后',
+          },
         },
       })
     );
   });
 
-  it('does not overwrite the tender_lx button from fetched type info', async () => {
+  it('applies fetched engineering type info to buttons and info card without enabling contract terms', async () => {
     const user = userEvent.setup();
-    setUrlParams({ tenderType: 'gngk', tenderLx: 1 });
-    renderSharedForm();
+    setUrlParams({ tenderType: 'gngk', tenderLx: 0, fundLx: 1 });
+    mockSyncTenderDataDraft.mockImplementationOnce(
+      async ({
+        tenderNo,
+        updateDraft,
+      }: {
+        tenderNo: string;
+        updateDraft: (updates: Partial<ConversationFormDraft>) => void;
+      }) => {
+        updateDraft({
+          tender_fetch: { status: 'loading' },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        updateDraft({
+          tender_no: tenderNo,
+          tender_data: {
+            ...mockTenderData,
+            ifdzpt2: 2,
+          },
+          tender_type_info: buildTenderTypeInfo({
+            tender_lx: 1,
+            purchase_method: 2,
+            fund_lx: 0,
+          }),
+          tender_fetch: { status: 'success' },
+        });
+        return {
+          ...mockTenderData,
+          ifdzpt2: 2,
+        };
+      }
+    );
+    renderSharedForm({ tenderType: 'gngk' });
+
+    const engineeringButton = screen.getByRole('button', { name: '工程' });
+    const selfFundedButton = screen.getByRole('button', { name: '自筹' });
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
+
+    await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-002');
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+
+    await waitFor(() => expect(engineeringButton).toHaveClass('bg-blue-600'));
+    expect(selfFundedButton).toHaveClass('bg-blue-600');
+    await waitFor(() => expect(afterInput).toHaveValue('第四章 投标文件有关格式'));
+    expect(screen.getByText('标的类型').parentElement).toHaveTextContent('工程');
+  });
+
+  it('applies fetched gngk type info to buttons and self-funded contract-terms anchor', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk', tenderLx: 0, fundLx: 1 });
+    mockSyncTenderDataDraft.mockImplementationOnce(
+      async ({
+        tenderNo,
+        updateDraft,
+      }: {
+        tenderNo: string;
+        updateDraft: (updates: Partial<ConversationFormDraft>) => void;
+      }) => {
+        updateDraft({
+          tender_fetch: { status: 'loading' },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        updateDraft({
+          tender_no: tenderNo,
+          tender_data: {
+            ...mockTenderData,
+            ifdzpt2: 2,
+          },
+          tender_type_info: buildTenderTypeInfo({
+            tender_lx: 2,
+            purchase_method: 2,
+            fund_lx: 0,
+          }),
+          tender_fetch: { status: 'success' },
+        });
+        return {
+          ...mockTenderData,
+          ifdzpt2: 2,
+        };
+      }
+    );
+    renderSharedForm({ tenderType: 'gngk' });
 
     const serviceButton = screen.getByRole('button', { name: '服务' });
+    const goodsButton = screen.getByRole('button', { name: '货物' });
+    const selfFundedButton = screen.getByRole('button', { name: '自筹' });
+    const fiscalButton = screen.getByRole('button', { name: '财政' });
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
 
-    await waitFor(() => expect(serviceButton).toHaveClass('bg-blue-600'));
+    expect(serviceButton).not.toHaveClass('bg-blue-600');
+    expect(selfFundedButton).not.toHaveClass('bg-blue-600');
+    expect(afterInput).toHaveValue('第五章  评标方法与程序');
 
     await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
     await user.click(screen.getByLabelText('模拟获取招标信息'));
 
     await waitFor(() => expect(serviceButton).toHaveClass('bg-blue-600'));
+    expect(selfFundedButton).toHaveClass('bg-blue-600');
+    await waitFor(() => expect(afterInput).toHaveValue('第四章 合同条款'));
+
+    await user.click(fiscalButton);
+    await waitFor(() => expect(fiscalButton).toHaveClass('bg-blue-600'));
+    expect(selfFundedButton).not.toHaveClass('bg-blue-600');
+    await waitFor(() => expect(afterInput).toHaveValue('第四章 投标文件有关格式'));
+
+    await user.click(selfFundedButton);
+    await waitFor(() => expect(selfFundedButton).toHaveClass('bg-blue-600'));
+    await waitFor(() => expect(afterInput).toHaveValue('第四章 合同条款'));
+
+    await user.click(goodsButton);
+    await waitFor(() => expect(goodsButton).toHaveClass('bg-blue-600'));
+    expect(serviceButton).not.toHaveClass('bg-blue-600');
+    await waitFor(() => expect(afterInput).toHaveValue('第四章 投标文件有关格式'));
+  });
+
+  it('keeps service after_text on 投标文件有关格式 when ifdzpt2 is 3', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk', tenderLx: 0, fundLx: 1 });
+    mockSyncTenderDataDraft.mockImplementationOnce(
+      async ({
+        tenderNo,
+        updateDraft,
+      }: {
+        tenderNo: string;
+        updateDraft: (updates: Partial<ConversationFormDraft>) => void;
+      }) => {
+        updateDraft({
+          tender_fetch: { status: 'loading' },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        updateDraft({
+          tender_no: tenderNo,
+          tender_data: {
+            ...mockTenderData,
+            ifdzpt2: 3,
+          },
+          tender_type_info: buildTenderTypeInfo({
+            tender_lx: 2,
+            purchase_method: 2,
+            fund_lx: 0,
+          }),
+          tender_fetch: { status: 'success' },
+        });
+        return {
+          ...mockTenderData,
+          ifdzpt2: 3,
+        };
+      }
+    );
+    renderSharedForm({ tenderType: 'gngk' });
+
+    const serviceButton = screen.getByRole('button', { name: '服务' });
+    const selfFundedButton = screen.getByRole('button', { name: '自筹' });
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
+
+    await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-003');
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+
+    await waitFor(() => expect(serviceButton).toHaveClass('bg-blue-600'));
+    expect(selfFundedButton).toHaveClass('bg-blue-600');
+    await waitFor(() => expect(afterInput).toHaveValue('第四章 投标文件有关格式'));
+  });
+
+  it('switches the current conversation to gngk and keeps goods anchor on 投标文件有关格式 when ifdzpt2 is 2', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'xjcg', tenderLx: 0, fundLx: 0 });
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          id: 'conv-1',
+          title: 'TEST-001',
+          tenderType: 'xjcg',
+          createdAt: 1,
+          updatedAt: 1,
+          messages: [],
+        },
+      ],
+      currentConversationId: 'conv-1',
+      activeTaskIds: [],
+      taskMessageMap: {},
+      conversationDrafts: {
+        'conv-1': {
+          tender_no: 'TEST-001',
+          model: 'deepseek',
+          generation_style: 'template',
+          style_writeback_mode: 'full',
+        },
+      },
+      taskSummaries: {},
+      unreadConversationResults: {},
+      isLoading: false,
+      error: null,
+      selectedTenderType: 'xjcg',
+    }));
+    mockSyncTenderDataDraft.mockImplementationOnce(
+      async ({
+        tenderNo,
+        updateDraft,
+      }: {
+        tenderNo: string;
+        updateDraft: (updates: Partial<ConversationFormDraft>) => void;
+      }) => {
+        updateDraft({
+          tender_fetch: { status: 'loading' },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        updateDraft({
+          tender_no: tenderNo,
+          tender_data: {
+            ...mockTenderData,
+            ifdzpt2: 2,
+          },
+          tender_type_info: buildTenderTypeInfo({
+            tender_lx: 0,
+            purchase_method: 2,
+            fund_lx: 0,
+          }),
+          tender_fetch: { status: 'success' },
+        });
+        return {
+          ...mockTenderData,
+          ifdzpt2: 2,
+        };
+      }
+    );
+
+    render(<StoreBackedSharedFormHarness />);
+
+    expect(screen.getByPlaceholderText('插入位置后的章节标题')).toHaveValue(
+      '第四章  响应文件有关格式'
+    );
+
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+
+    await waitFor(() =>
+      expect(useChatStore.getState().getCurrentConversation()?.tenderType).toBe('gngk')
+    );
+    expect(useChatStore.getState().selectedTenderType).toBe('gngk');
+    expect(screen.getByPlaceholderText('插入位置后的章节标题')).toHaveValue(
+      '第四章 投标文件有关格式'
+    );
   });
 
   it('switches primary action to cancel when canCancel is true', async () => {

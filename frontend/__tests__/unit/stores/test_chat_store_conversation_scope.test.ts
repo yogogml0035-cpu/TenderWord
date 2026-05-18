@@ -243,25 +243,36 @@ describe('chatStore conversation scoped selectors', () => {
             messages: [],
           },
           {
+            id: 'conv-gc-zc',
+            title: 'GNGK-GC-ZC',
+            tenderType: 'gngk',
+            createdAt: 2,
+            updatedAt: 15,
+            messages: [],
+          },
+          {
             id: 'conv-fw-zc',
             title: 'GNGK-FW-ZC',
             tenderType: 'gngk',
-            createdAt: 2,
+            createdAt: 3,
             updatedAt: 20,
             messages: [],
           },
         ],
         conversationDrafts: {
           'conv-hw-zc': { tender_no: 'TN-001', tender_lx: 0, fund_lx: 0, model: 'deepseek' },
-          'conv-fw-zc': { tender_no: 'TN-001', tender_lx: 1, fund_lx: 0, model: 'deepseek' },
+          'conv-gc-zc': { tender_no: 'TN-001', tender_lx: 1, fund_lx: 0, model: 'deepseek' },
+          'conv-fw-zc': { tender_no: 'TN-001', tender_lx: 2, fund_lx: 0, model: 'deepseek' },
         },
       }));
 
       const store = useChatStore.getState();
       // Match 货物+自筹
       expect(store.findGngkConversationByIdentity('TN-001', 0, 0)?.id).toBe('conv-hw-zc');
+      // Match 工程+自筹
+      expect(store.findGngkConversationByIdentity('TN-001', 1, 0)?.id).toBe('conv-gc-zc');
       // Match 服务+自筹
-      expect(store.findGngkConversationByIdentity('TN-001', 1, 0)?.id).toBe('conv-fw-zc');
+      expect(store.findGngkConversationByIdentity('TN-001', 2, 0)?.id).toBe('conv-fw-zc');
       // No match for 货物+财政
       expect(store.findGngkConversationByIdentity('TN-001', 0, 1)).toBeNull();
     });
@@ -312,12 +323,12 @@ describe('chatStore conversation scoped selectors', () => {
           },
         ],
         conversationDrafts: {
-          'conv-a': { tender_no: 'tn-case', tender_lx: 1, fund_lx: 1, model: 'deepseek' },
+          'conv-a': { tender_no: 'tn-case', tender_lx: 2, fund_lx: 1, model: 'deepseek' },
         },
       }));
 
       expect(
-        useChatStore.getState().findGngkConversationByIdentity('TN-CASE', 1, 1)?.id
+        useChatStore.getState().findGngkConversationByIdentity('TN-CASE', 2, 1)?.id
       ).toBe('conv-a');
     });
 
@@ -343,9 +354,9 @@ describe('chatStore conversation scoped selectors', () => {
       expect(
         useChatStore.getState().findGngkConversationByIdentity('TN-DEF', 0, 0)?.id
       ).toBe('conv-default');
-      // Should NOT match 1,0
+      // Should NOT match 2,0
       expect(
-        useChatStore.getState().findGngkConversationByIdentity('TN-DEF', 1, 0)
+        useChatStore.getState().findGngkConversationByIdentity('TN-DEF', 2, 0)
       ).toBeNull();
     });
   });

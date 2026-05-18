@@ -5,7 +5,7 @@
 // Tender types
 export type TenderType = 'xjcg' | 'gngk' | 'gjgk'; // 询价采购 | 国内公开 | 国际公开
 export type PurchaseMethod = 0 | 1 | 2 | 5;
-export type TenderLx = 0 | 1;
+export type TenderLx = 0 | 1 | 2;
 export type FundLx = 0 | 1;
 export type FundType = FundLx; // 兼容旧命名
 

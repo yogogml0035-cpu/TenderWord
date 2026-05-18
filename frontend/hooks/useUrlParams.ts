@@ -11,7 +11,7 @@ import { parseTenderUrlParams, getTenderNo } from '@/utils/tenderTypeMapper';
 export interface UseUrlParamsReturn {
   /** 招标编号 */
   tenderno: string | undefined;
-  /** 标的类型（0=货物, 1=服务） */
+  /** 标的类型（0=货物, 1=工程, 2=服务） */
   tender_lx: TenderLx | undefined;
   /** 资金类型（仅 0|1） */
   fund_lx: 0 | 1 | undefined;
@@ -89,7 +89,10 @@ export function useUrlParams(): UseUrlParamsReturn {
 
     // 解析招标类型参数
     const result = parseTenderUrlParams(searchParams);
-    const tender_lx = result.params.tender_lx === 0 || result.params.tender_lx === 1
+    const tender_lx =
+      result.params.tender_lx === 0 ||
+      result.params.tender_lx === 1 ||
+      result.params.tender_lx === 2
       ? result.params.tender_lx
       : undefined;
     const fund_lx = result.params.fund_lx === 0 || result.params.fund_lx === 1

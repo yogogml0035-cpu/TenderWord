@@ -154,8 +154,22 @@ def test_rewrite_default_anchors_follow_gngk_goods_and_service_rules(
             "第四章 投标文件有关格式",
         ),
         (
+            FormType.GNGK_FW_ZC_TENDER,
+            2,
+            0,
+            "第三章 招标内容及要求",
+            "第四章 投标文件有关格式",
+        ),
+        (
             FormType.GNGK_FW_CZ_TENDER,
             1,
+            1,
+            "第三章 招标内容及要求",
+            "第四章 投标文件有关格式",
+        ),
+        (
+            FormType.GNGK_FW_CZ_TENDER,
+            2,
             1,
             "第三章 招标内容及要求",
             "第四章 投标文件有关格式",
@@ -196,6 +210,7 @@ def test_build_initial_state_uses_gngk_mode_specific_default_anchors(
 
     assert state["insertion_before_text"] == expected_before
     assert state["insertion_after_text"] == expected_after
+    assert state["tender_lx"] == tender_lx
 
 
 def test_edit_and_rewrite_initial_state_do_not_receive_generation_style() -> None:

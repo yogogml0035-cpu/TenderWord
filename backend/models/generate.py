@@ -153,7 +153,7 @@ class EditTaskRequest(BaseModel):
     insertion_config: Optional[InsertionConfig] = Field(
         default=None, description="插入锚点配置（可选）"
     )
-    tender_lx: int = Field(..., description="标的类型编码（0=货物, 1=服务）")
+    tender_lx: int = Field(..., description="标的类型编码（0=货物, 1=工程, 2=服务）")
     fund_source_lx: int = Field(..., description="资金性质编码（0=自筹, 1=财政）")
     tender_data_snapshot: Optional[TenderData] = Field(
         default=None,
@@ -168,11 +168,18 @@ class EditTaskRequest(BaseModel):
             raise ValueError("字段不能为空")
         return normalized
 
-    @field_validator("tender_lx", "fund_source_lx")
+    @field_validator("fund_source_lx")
     @classmethod
     def _validate_binary_flag(cls, value: int) -> int:
         if value not in (0, 1):
             raise ValueError("字段必须是 0 或 1")
+        return int(value)
+
+    @field_validator("tender_lx")
+    @classmethod
+    def _validate_tender_lx(cls, value: int) -> int:
+        if value not in (0, 1, 2):
+            raise ValueError("tender_lx 必须是 0、1 或 2")
         return int(value)
 
 

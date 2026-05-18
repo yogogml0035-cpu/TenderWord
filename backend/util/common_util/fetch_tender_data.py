@@ -37,7 +37,7 @@ def _normalize_tender_type_payload(payload) -> Dict | None:
     except (TypeError, ValueError):
         return None
 
-    if tender_lx not in (0, 1):
+    if tender_lx not in (0, 1, 2):
         return None
 
     return {
@@ -45,6 +45,15 @@ def _normalize_tender_type_payload(payload) -> Dict | None:
         "purchase_method": purchase_method,
         "fund_lx": fund_lx,
     }
+
+
+def _normalize_ifdzpt2(value) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _is_gjgk_tender_type(tender_type: Dict | None) -> bool:
@@ -69,8 +78,9 @@ def fetch_tender_data(tender_no: str) -> Dict:
     - type 用于表单路由（例如 purchase_method=2 表示国内公开；
       purchase_method=5 表示询价采购；
       purchase_method=0 表示国际公开）
-    - type.tender_lx 表示标的类型（0=货物, 1=服务）
+    - type.tender_lx 表示标的类型（0=货物, 1=工程, 2=服务）
     - data.fund_lx 会透传为业务字段 fund_source_lx
+    - data.ifdzpt2 会透传给前端，用于修正默认插入锚点
 
     Args:
         tender_no: 招标编号
@@ -126,6 +136,7 @@ def fetch_tender_data(tender_no: str) -> Dict:
             "submit_date": data.get("submit_date", ""),
             "platform": data.get("platform", ""),
             "service_fee": "",  # data.get("service_fee", ""),
+            "ifdzpt2": _normalize_ifdzpt2(data.get("ifdzpt2")),
             "fund_source_lx": _normalize_fund_source_lx(data.get("fund_lx")),
         }
 

@@ -68,7 +68,8 @@ function buildFilesConfig(
 }
 
 function resolveGngkFormType(formData: GngkTenderFormData): GngkGenerateRequest['form_type'] {
-  if (formData.tender_lx === 1) {
+  // 工程类当前先复用服务链路，避免因缺少独立 graph 导致无法提交。
+  if (formData.tender_lx === 1 || formData.tender_lx === 2) {
     return formData.fund_lx === 1 ? 'gngk_fw_cz_tender' : 'gngk_fw_zc_tender';
   }
   return formData.fund_lx === 1 ? 'gngk_hw_cz_tender' : 'gngk_hw_zc_tender';

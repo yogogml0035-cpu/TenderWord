@@ -10,6 +10,7 @@ describe('tenderTypeMapper', () => {
   it.each([
     { tender_lx: 0 as const, fund_lx: 0 as const, tenderType: 'xjcg' as const },
     { tender_lx: 1 as const, fund_lx: 1 as const, tenderType: 'xjcg' as const },
+    { tender_lx: 2 as const, fund_lx: 0 as const, tenderType: 'xjcg' as const },
   ])(
     'maps 询价采购 without depending on tender_lx=$tender_lx or fund_lx=$fund_lx',
     ({ tender_lx, fund_lx, tenderType }) => {
@@ -30,6 +31,7 @@ describe('tenderTypeMapper', () => {
   it.each([
     { tender_lx: 0 as const, fund_lx: 0 as const, tenderType: 'gngk' as const },
     { tender_lx: 1 as const, fund_lx: 1 as const, tenderType: 'gngk' as const },
+    { tender_lx: 2 as const, fund_lx: 0 as const, tenderType: 'gngk' as const },
   ])(
     'maps 国内公开 without depending on tender_lx=$tender_lx or fund_lx=$fund_lx',
     ({ tender_lx, fund_lx, tenderType }) => {
@@ -47,15 +49,15 @@ describe('tenderTypeMapper', () => {
     }
   );
 
-  it('parses URL params for 询价采购 when tender_lx=1 and fund_lx=1', () => {
+  it('parses URL params for 询价采购 when tender_lx=2 and fund_lx=1', () => {
     const result = parseTenderUrlParams(
-      new URLSearchParams('tenderno=0811-DSITC260712&tender_lx=1&purchase_method=5&fund_lx=1')
+      new URLSearchParams('tenderno=0811-DSITC260712&tender_lx=2&purchase_method=5&fund_lx=1')
     );
 
     expect(result).toEqual({
       params: {
         tenderno: '0811-DSITC260712',
-        tender_lx: 1,
+        tender_lx: 2,
         purchase_method: 5,
         fund_lx: 1,
       },
@@ -114,7 +116,7 @@ describe('tenderTypeMapper', () => {
 
     expect(
       getTenderTypeFromParams({
-        tender_lx: 1,
+        tender_lx: 2,
         purchase_method: 0,
         fund_lx: 1,
       })
@@ -139,7 +141,7 @@ describe('buildCanonicalSearchParams', () => {
   it('produces xjcg canonical params ignoring tender_lx/fund_lx input', () => {
     const search = buildCanonicalSearchParams({
       tenderType: 'xjcg',
-      tender_lx: 1,
+      tender_lx: 2,
       fund_lx: 1,
       tenderno: 'TEST001',
     });
@@ -152,7 +154,7 @@ describe('buildCanonicalSearchParams', () => {
   it('produces gjgk canonical params ignoring tender_lx/fund_lx input', () => {
     const search = buildCanonicalSearchParams({
       tenderType: 'gjgk',
-      tender_lx: 1,
+      tender_lx: 2,
       fund_lx: 0,
     });
     expect(search.get('tender_lx')).toBe('0');
@@ -164,11 +166,11 @@ describe('buildCanonicalSearchParams', () => {
   it('produces gngk canonical params with tender_lx/fund_lx from input', () => {
     const search = buildCanonicalSearchParams({
       tenderType: 'gngk',
-      tender_lx: 1,
+      tender_lx: 2,
       fund_lx: 1,
       tenderno: 'GNGK001',
     });
-    expect(search.get('tender_lx')).toBe('1');
+    expect(search.get('tender_lx')).toBe('2');
     expect(search.get('purchase_method')).toBe('2');
     expect(search.get('fund_lx')).toBe('1');
     expect(search.get('tenderno')).toBe('GNGK001');

@@ -73,7 +73,8 @@ function TenderPageContent() {
 
     // Include tender_lx/fund_lx in the dedup key for gngk so that
     // different subtypes (e.g. 货物 vs 服务) produce different keys.
-    const resolvedTenderLx = tender_lx === 0 || tender_lx === 1 ? tender_lx : 0;
+    const resolvedTenderLx =
+      tender_lx === 0 || tender_lx === 1 || tender_lx === 2 ? tender_lx : 0;
     const resolvedFundLx = fund_lx === 0 || fund_lx === 1 ? fund_lx : 0;
     const subtypeSuffix = tenderType === 'gngk'
       ? `:${resolvedTenderLx}:${resolvedFundLx}`

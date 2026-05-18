@@ -55,6 +55,12 @@
   - `2 -> gngk`
   - `0 -> gjgk`
 - `tender_lx` / `fund_lx` 不参与前端大类判型，只参与 `gngk` 的会话 identity、canonical URL 和后端 `form_type` 分派。
+- `TenderFormShared` 在“获取信息”成功后，会继续用返回的 `type` 回写当前页面按钮态：
+  - `tender_lx` 决定货物 / 工程 / 服务按钮，并在信息卡显示为“标的类型”
+  - `fund_lx` 决定自筹 / 财政按钮
+  - `purchase_method` 决定是否把当前会话 / 表单切到 `xjcg`、`gngk` 或 `gjgk`
+- 这次回写只在“获取信息”成功完成的当次校正里生效一次；校正完成后，货物 / 工程 / 服务与自筹 / 财政按钮仍然允许用户继续手动切换，只有再次点击“获取信息”才会重新按接口结果校验。
+- `/api/tender` 现在还会透传 `data.ifdzpt2` 给前端；该字段不参与大类判型，只参与 `gngk` 自筹模式下的默认锚点修正。
 
 ### Canonical URL
 
@@ -62,7 +68,7 @@
 - 禁止直接 patch 单个 query 参数。
 - 当前 canonical 规则：
   - `xjcg`: `tender_lx=0&purchase_method=5&fund_lx=0`
-  - `gngk`: `purchase_method=2`，保留合法 `tender_lx` / `fund_lx`，缺省回退 `0/0`
+  - `gngk`: canonical 仍写 `purchase_method=2`，保留合法 `tender_lx` / `fund_lx`，缺省回退 `0/0`
   - `gjgk`: `tender_lx=0&purchase_method=0&fund_lx=1`
 
 ### `gngk` 会话 identity
@@ -72,7 +78,7 @@
   - `tenderno`
   - `tender_lx`
   - `fund_lx`
-- 同一 `tenderno` 下，货物/服务或资金性质不同的会话允许并存。
+- 同一 `tenderno` 下，货物/工程/服务或资金性质不同的会话允许并存。
 - URL 深链创建 `gngk` 会话时，必须先把 URL 中的 `tender_lx` / `fund_lx` 写入 draft，再设置当前会话，保证 `TenderFormShared` 的 `draft > URL > default` 优先级仍成立。
 
 ## 后端 anchor / graph / node 现实
@@ -122,6 +128,10 @@
 | `0` | `1` | `gngk_hw_cz_tender` |
 | `1` | `0` | `gngk_fw_zc_tender` |
 | `1` | `1` | `gngk_fw_cz_tender` |
+| `2` | `0` | `gngk_fw_zc_tender` |
+| `2` | `1` | `gngk_fw_cz_tender` |
+
+- 当前仓库仍没有独立 `工程` graph / `form_type`；`tender_lx=1` 的工程模式在 generate / edit 中临时复用现有 `gngk_fw_*` 服务链路。
 
 任一处改动都必须双向同步并补测试。
 
@@ -129,10 +139,15 @@
 
 - 初始化优先级固定为 `draft > URL > default`。
 - `gngk` 货物模式按 `fund_lx` 维护两套 `gngk_insertion_configs`。
-- `gngk` 服务模式跨 `fund_lx` 共享 `gngk_service_insertion_config`。
-- 服务模式默认锚点为 `第三章 招标内容及要求` -> `第四章 投标文件有关格式`。
+- `gngk` 的 `generation_style` 按 `tender_lx` 维护 `gngk_generation_styles`：货物、工程、服务首次进入都默认 `template`，用户手改后切走再切回，应恢复该标的类型上次选择；旧草稿里的单字段 `generation_style` 只作为当前标的类型的兼容回填。
+- `gngk` 工程模式按 `fund_lx` 分别维护 `gngk_engineering_insertion_configs`；每个资金组合首次进入时走工程默认锚点，手改后切回恢复用户自己的值。
+- `gngk` 服务模式按 `fund_lx` 分别维护 `gngk_service_insertion_configs`；旧草稿里的 `gngk_service_insertion_config` / `insertion_config` 只作为当前服务资金组合的兼容回填，不再跨资金类型复用。
+- `gngk` 的每个“标的类型 + 资金类型”组合首次进入时使用各自默认锚点；用户手改后，再切回该组合时恢复用户自己的值，不再重新套默认。
+- 国内公开在“服务 + 自筹 + ifdzpt2 = 2”时，服务模式默认 `after_text` 会从 `第四章 投标文件有关格式` 提升为 `第四章 合同条款`；其它 `ifdzpt2` 值以及货物模式默认仍保持 `第四章 投标文件有关格式`；只有仍停留在自动默认值时才自动替换，手改后的锚点保持不动。
+- 工程模式默认锚点为 `第三章 招标内容及要求` -> `第四章 投标文件有关格式`，即使 `ifdzpt2 = 2` 也不会切到 `第四章 合同条款`。
+- 服务模式默认锚点为 `第三章 招标内容及要求` -> `第四章 投标文件有关格式`（若命中上一条服务合同条款规则，则改为 `第四章 合同条款`）。
 - 财政货物默认锚点为 `第四章  招标需求` -> `第五章  评标方法与程序`。
-- `generation_style` 是 generate 表单态：货物默认 `template`，服务默认 `param`；后端只在 generate runtime 使用该字段。
+- `generation_style` 是 generate 表单态：货物、工程、服务默认都为 `template`；后端只在 generate runtime 使用该字段。
 
 ## 当前页面会话生命周期
 

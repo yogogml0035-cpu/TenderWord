@@ -442,7 +442,7 @@ function parseTenderTypeInfo(payload: unknown): TenderTypeInfo | null {
   const fund_lx = payload.fund_lx;
 
   if (
-    (tender_lx !== 0 && tender_lx !== 1) ||
+    (tender_lx !== 0 && tender_lx !== 1 && tender_lx !== 2) ||
     typeof purchase_method !== 'number' ||
     (fund_lx !== 0 && fund_lx !== 1)
   ) {

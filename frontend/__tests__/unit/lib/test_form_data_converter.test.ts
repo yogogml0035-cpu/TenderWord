@@ -69,7 +69,7 @@ describe('formDataConverter', () => {
     ['gngk', () =>
       convertGngkFormToApiRequest({
         tender_no: 'GNGK-001',
-        tender_lx: 1,
+        tender_lx: 2,
         fund_lx: 1,
         generation_style: 'param',
         style_writeback_mode: 'bold_only',
@@ -109,6 +109,8 @@ describe('formDataConverter', () => {
     { tender_lx: 0 as const, fund_lx: 1 as const, expected: 'gngk_hw_cz_tender' },
     { tender_lx: 1 as const, fund_lx: 0 as const, expected: 'gngk_fw_zc_tender' },
     { tender_lx: 1 as const, fund_lx: 1 as const, expected: 'gngk_fw_cz_tender' },
+    { tender_lx: 2 as const, fund_lx: 0 as const, expected: 'gngk_fw_zc_tender' },
+    { tender_lx: 2 as const, fund_lx: 1 as const, expected: 'gngk_fw_cz_tender' },
   ])('maps gngk tender_lx=$tender_lx fund_lx=$fund_lx to $expected', ({ tender_lx, fund_lx, expected }) => {
     const request = convertGngkFormToApiRequest({
       tender_no: 'GNGK-001',
@@ -133,7 +135,7 @@ describe('formDataConverter', () => {
   it('keeps xjcg graph selection stable while forwarding tender_lx', () => {
     const request = convertXjcgFormToApiRequest({
       tender_no: 'XJCG-001',
-      tender_lx: 1,
+      tender_lx: 2,
       fund_lx: 0,
       generation_style: 'template',
       style_writeback_mode: 'full',
@@ -147,7 +149,7 @@ describe('formDataConverter', () => {
     });
 
     expect(request.form_type).toBe('xjcg_tender');
-    expect(request.tender_data.tender_lx).toBe(1);
+    expect(request.tender_data.tender_lx).toBe(2);
   });
 
   it('keeps gjgk graph selection stable while forwarding tender_lx', () => {

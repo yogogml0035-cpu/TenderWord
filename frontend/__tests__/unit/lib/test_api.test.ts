@@ -294,9 +294,9 @@ describe('API Client', () => {
     it('returns tender data and type info together when requested', async () => {
       globalThis.fetch = mockFetchJson({
         success: true,
-        data: { project_name: 'Test Project' },
+        data: { project_name: 'Test Project', ifdzpt2: 2 },
         type: {
-          tender_lx: 1,
+          tender_lx: 2,
           purchase_method: 0,
           fund_lx: 1,
         },
@@ -306,8 +306,9 @@ describe('API Client', () => {
 
       const result = await fetchTenderDataWithType('ZBGG-2024-001');
       expect(result.data.project_name).toBe('Test Project');
+      expect(result.data.ifdzpt2).toBe(2);
       expect(result.type).toEqual({
-        tender_lx: 1,
+        tender_lx: 2,
         purchase_method: 0,
         fund_lx: 1,
       });

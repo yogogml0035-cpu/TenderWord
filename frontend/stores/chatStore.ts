@@ -81,6 +81,11 @@ export interface ConversationFormDraft {
   fund_lx?: FundLx;
   model?: 'deepseek' | 'qwen' | 'doubao';
   generation_style?: GenerationStyle;
+  gngk_generation_styles?: {
+    0?: GenerationStyle;
+    1?: GenerationStyle;
+    2?: GenerationStyle;
+  };
   style_writeback_mode?: StyleWritebackMode;
   input_mode?: 'normal' | 'edit';
   edit_file?: ConversationDraftFile | null;
@@ -89,6 +94,26 @@ export interface ConversationFormDraft {
     after_text: string;
   };
   gngk_insertion_configs?: {
+    0?: {
+      before_text: string;
+      after_text: string;
+    };
+    1?: {
+      before_text: string;
+      after_text: string;
+    };
+  };
+  gngk_engineering_insertion_configs?: {
+    0?: {
+      before_text: string;
+      after_text: string;
+    };
+    1?: {
+      before_text: string;
+      after_text: string;
+    };
+  };
+  gngk_service_insertion_configs?: {
     0?: {
       before_text: string;
       after_text: string;
@@ -192,6 +217,27 @@ function mergeConversationDraft(
     nextDraft.gngk_insertion_configs = {
       ...(base.gngk_insertion_configs || {}),
       ...updates.gngk_insertion_configs,
+    };
+  }
+
+  if (updates.gngk_generation_styles) {
+    nextDraft.gngk_generation_styles = {
+      ...(base.gngk_generation_styles || {}),
+      ...updates.gngk_generation_styles,
+    };
+  }
+
+  if (updates.gngk_engineering_insertion_configs) {
+    nextDraft.gngk_engineering_insertion_configs = {
+      ...(base.gngk_engineering_insertion_configs || {}),
+      ...updates.gngk_engineering_insertion_configs,
+    };
+  }
+
+  if (updates.gngk_service_insertion_configs) {
+    nextDraft.gngk_service_insertion_configs = {
+      ...(base.gngk_service_insertion_configs || {}),
+      ...updates.gngk_service_insertion_configs,
     };
   }
 
@@ -517,7 +563,9 @@ function resolveConversationUrlParams(
   const tenderno =
     getConversationTenderNo(conversation, draft);
   const tender_lx: TenderLx | undefined =
-    draft?.tender_lx === 0 || draft?.tender_lx === 1 ? draft.tender_lx : undefined;
+    draft?.tender_lx === 0 || draft?.tender_lx === 1 || draft?.tender_lx === 2
+      ? draft.tender_lx
+      : undefined;
   const fund_lx: FundLx | undefined =
     draft?.fund_lx === 0 || draft?.fund_lx === 1 ? draft.fund_lx : undefined;
   return { tenderno, tender_lx, fund_lx };
@@ -550,7 +598,9 @@ function findGngkConversationByIdentity(
         return false;
       }
       const convTenderLx: TenderLx =
-        draft?.tender_lx === 0 || draft?.tender_lx === 1 ? draft.tender_lx : 0;
+        draft?.tender_lx === 0 || draft?.tender_lx === 1 || draft?.tender_lx === 2
+          ? draft.tender_lx
+          : 0;
       const convFundLx: FundLx =
         draft?.fund_lx === 0 || draft?.fund_lx === 1 ? draft.fund_lx : 0;
       return convTenderLx === tenderLx && convFundLx === fundLx;

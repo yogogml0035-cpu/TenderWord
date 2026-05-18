@@ -44,7 +44,8 @@ export function buildCanonicalSearchParams(params: CanonicalUrlParams): URLSearc
   }
 
   const isGngk = params.tenderType === 'gngk';
-  const tenderLx = isGngk && (params.tender_lx === 0 || params.tender_lx === 1)
+  const tenderLx =
+    isGngk && (params.tender_lx === 0 || params.tender_lx === 1 || params.tender_lx === 2)
     ? params.tender_lx
     : defaults.tender_lx;
   const fundLx = isGngk && (params.fund_lx === 0 || params.fund_lx === 1)
@@ -231,7 +232,8 @@ export function parseTenderUrlParams(
   };
 
   const rawTenderLx = parseParam('tender_lx', { allowInvalid: true });
-  const tender_lx = rawTenderLx === 0 || rawTenderLx === 1 ? rawTenderLx : undefined;
+  const tender_lx =
+    rawTenderLx === 0 || rawTenderLx === 1 || rawTenderLx === 2 ? rawTenderLx : undefined;
   const purchase_method = parseParam('purchase_method');
   const rawFundLx = parseParam('fund_lx', { allowInvalid: true });
   const fund_lx = rawFundLx === 0 || rawFundLx === 1 ? rawFundLx : undefined;

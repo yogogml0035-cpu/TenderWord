@@ -761,7 +761,7 @@ class DocumentService:
         if fund_source_lx not in (None, ""):
             state["fund_source_lx"] = str(fund_source_lx)
         tender_lx = getattr(tender_data, "tender_lx", None)
-        if tender_lx in (0, 1):
+        if tender_lx in (0, 1, 2):
             state["tender_lx"] = int(tender_lx)
 
         insertion_before_text = None

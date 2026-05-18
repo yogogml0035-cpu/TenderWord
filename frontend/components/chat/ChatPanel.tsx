@@ -97,11 +97,12 @@ function resolveEditFormType(
     return 'gjgk_tender';
   }
 
-  if ((tenderLx !== 0 && tenderLx !== 1) || (fundSourceLx !== 0 && fundSourceLx !== 1)) {
+  if ((tenderLx !== 0 && tenderLx !== 1 && tenderLx !== 2) || (fundSourceLx !== 0 && fundSourceLx !== 1)) {
     return null;
   }
 
-  if (tenderLx === 1) {
+  // 工程类当前先复用服务链路，避免因缺少独立 graph 导致 edit 不可用。
+  if (tenderLx === 1 || tenderLx === 2) {
     return fundSourceLx === 1 ? 'gngk_fw_cz_tender' : 'gngk_fw_zc_tender';
   }
   return fundSourceLx === 1 ? 'gngk_hw_cz_tender' : 'gngk_hw_zc_tender';
@@ -115,8 +116,8 @@ function getEditContextMessage(
     return '请先上传一个 Word 文档';
   }
 
-  if (draft.tender_lx !== 0 && draft.tender_lx !== 1) {
-    return '请先补全当前页面的货物/服务类型';
+  if (draft.tender_lx !== 0 && draft.tender_lx !== 1 && draft.tender_lx !== 2) {
+    return '请先补全当前页面的货物/工程/服务类型';
   }
 
   if (draft.fund_lx !== 0 && draft.fund_lx !== 1) {

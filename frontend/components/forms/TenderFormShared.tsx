@@ -30,7 +30,7 @@ import type {
   TenderTypeInfo,
 } from '@/types/api';
 import { generateConversationTitle, shouldAutoUpdateConversationTitle } from '@/lib/chat-utils';
-import { syncBrowserUrlToConversation } from '@/utils/tenderTypeMapper';
+import { getTenderTypeFromParams, syncBrowserUrlToConversation } from '@/utils/tenderTypeMapper';
 import { TenderNoInput, type TenderData } from './TenderNoInput';
 import { FileUploader, type UploadedFile } from './FileUploader';
 import { TemplateCandidateDialog } from './TemplateCandidateDialog';
@@ -94,16 +94,45 @@ const segmentedControlClassName =
 const segmentedToggleButtonClassName =
   'relative min-w-[72px] rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50';
 const defaultStyleWritebackMode: StyleWritebackMode = 'full';
+const gngkSharedContentBeforeText = '第三章 招标内容及要求';
+const gngkLegacyFormatAfterText = '第四章 投标文件有关格式';
+const gngkContractTermsAfterText = '第四章 合同条款';
 const gngkFiscalInsertionConfigDefaults: TenderInsertionConfig = {
   before_text: '第四章  招标需求',
   after_text: '第五章  评标方法与程序',
 };
 const gngkServiceInsertionConfigDefaults: TenderInsertionConfig = {
-  before_text: '第三章 招标内容及要求',
-  after_text: '第四章 投标文件有关格式',
+  before_text: gngkSharedContentBeforeText,
+  after_text: gngkLegacyFormatAfterText,
 };
-function resolveDefaultGenerationStyle(tenderLx: TenderLx): GenerationStyle {
-  return tenderLx === 1 ? 'param' : 'template';
+const gngkEngineeringInsertionConfigDefaults: TenderInsertionConfig = {
+  before_text: gngkSharedContentBeforeText,
+  after_text: gngkLegacyFormatAfterText,
+};
+const gngkSelfFundedContractInsertionConfigDefaults: TenderInsertionConfig = {
+  before_text: gngkSharedContentBeforeText,
+  after_text: gngkContractTermsAfterText,
+};
+function resolveDefaultGenerationStyle(): GenerationStyle {
+  return 'template';
+}
+
+function shouldUseGngkContractTermsAfterText(
+  tenderType: TenderType,
+  tenderLx: TenderLx,
+  fundLx: FundLx,
+  ifdzpt2: number | undefined
+): boolean {
+  return tenderType === 'gngk' && tenderLx === 2 && fundLx === 0 && ifdzpt2 === 2;
+}
+
+function resolveFetchedTenderType(tenderTypeInfo: TenderTypeInfo | null): TenderType | null {
+  if (!tenderTypeInfo) {
+    return null;
+  }
+
+  const result = getTenderTypeFromParams(tenderTypeInfo);
+  return result.isValid ? result.tenderType || null : null;
 }
 
 function toDraftFile(file: UploadedFile | null | undefined): ConversationDraftFile | undefined {
@@ -142,13 +171,22 @@ function resolveDefaultInsertionConfig(
   tenderType: TenderType,
   tenderLx: TenderLx,
   fundLx: FundLx,
-  variantDefaults: TenderInsertionConfig
+  variantDefaults: TenderInsertionConfig,
+  tenderData?: TenderData | null
 ): TenderInsertionConfig {
-  if (tenderType === 'gngk' && tenderLx === 1) {
+  if (shouldUseGngkContractTermsAfterText(tenderType, tenderLx, fundLx, tenderData?.ifdzpt2)) {
+    return gngkSelfFundedContractInsertionConfigDefaults;
+  }
+
+  if (tenderType === 'gngk' && tenderLx === 2) {
     return gngkServiceInsertionConfigDefaults;
   }
 
-  if (tenderType === 'gngk' && fundLx === 1) {
+  if (tenderType === 'gngk' && tenderLx === 1) {
+    return gngkEngineeringInsertionConfigDefaults;
+  }
+
+  if (tenderType === 'gngk' && tenderLx === 0 && fundLx === 1) {
     return gngkFiscalInsertionConfigDefaults;
   }
 
@@ -188,6 +226,30 @@ function mergeDraftStateLike(
           },
         }
       : {}),
+    ...(updates.gngk_generation_styles
+      ? {
+          gngk_generation_styles: {
+            ...(draft?.gngk_generation_styles || {}),
+            ...updates.gngk_generation_styles,
+          },
+        }
+      : {}),
+    ...(updates.gngk_engineering_insertion_configs
+      ? {
+          gngk_engineering_insertion_configs: {
+            ...(draft?.gngk_engineering_insertion_configs || {}),
+            ...updates.gngk_engineering_insertion_configs,
+          },
+        }
+      : {}),
+    ...(updates.gngk_service_insertion_configs
+      ? {
+          gngk_service_insertion_configs: {
+            ...(draft?.gngk_service_insertion_configs || {}),
+            ...updates.gngk_service_insertion_configs,
+          },
+        }
+      : {}),
     ...(updates.gngk_service_insertion_config
       ? {
           gngk_service_insertion_config: {
@@ -205,11 +267,21 @@ function resolveGngkScopedInsertionConfig(
   fundLx: FundLx,
   useLegacyServiceDraftFallback = false
 ): Partial<TenderInsertionConfig> | null | undefined {
+  if (tenderLx === 2) {
+    const scopedServiceInsertion = draft?.gngk_service_insertion_configs?.[fundLx];
+    if (scopedServiceInsertion) {
+      return scopedServiceInsertion;
+    }
+
+    if (useLegacyServiceDraftFallback) {
+      return draft?.gngk_service_insertion_config ?? draft?.insertion_config;
+    }
+
+    return undefined;
+  }
+
   if (tenderLx === 1) {
-    return (
-      draft?.gngk_service_insertion_config ??
-      (useLegacyServiceDraftFallback ? draft?.insertion_config : undefined)
-    );
+    return draft?.gngk_engineering_insertion_configs?.[fundLx];
   }
 
   return draft?.gngk_insertion_configs?.[fundLx];
@@ -221,9 +293,16 @@ function resolveVisibleInsertionConfig(
   tenderLx: TenderLx,
   fundLx: FundLx,
   variantDefaults: TenderInsertionConfig,
-  useLegacyServiceDraftFallback = false
+  useLegacyServiceDraftFallback = false,
+  tenderData?: TenderData | null
 ): TenderInsertionConfig {
-  const fallback = resolveDefaultInsertionConfig(tenderType, tenderLx, fundLx, variantDefaults);
+  const fallback = resolveDefaultInsertionConfig(
+    tenderType,
+    tenderLx,
+    fundLx,
+    variantDefaults,
+    tenderData
+  );
   const scopedInsertion =
     tenderType === 'gngk'
       ? resolveGngkScopedInsertionConfig(
@@ -243,13 +322,31 @@ function buildGngkModeCacheUpdates(
   fundLx: FundLx,
   insertionConfig: TenderInsertionConfig
 ): Partial<ConversationFormDraft> {
-  if (tenderLx === 1) {
-    if (areInsertionConfigsEqual(draft?.gngk_service_insertion_config, insertionConfig)) {
+  if (tenderLx === 2) {
+    if (areInsertionConfigsEqual(draft?.gngk_service_insertion_configs?.[fundLx], insertionConfig)) {
       return {};
     }
 
     return {
-      gngk_service_insertion_config: insertionConfig,
+      gngk_service_insertion_configs: {
+        ...(draft?.gngk_service_insertion_configs || {}),
+        [fundLx]: insertionConfig,
+      },
+    };
+  }
+
+  if (tenderLx === 1) {
+    if (
+      areInsertionConfigsEqual(draft?.gngk_engineering_insertion_configs?.[fundLx], insertionConfig)
+    ) {
+      return {};
+    }
+
+    return {
+      gngk_engineering_insertion_configs: {
+        ...(draft?.gngk_engineering_insertion_configs || {}),
+        [fundLx]: insertionConfig,
+      },
     };
   }
 
@@ -263,6 +360,52 @@ function buildGngkModeCacheUpdates(
       [fundLx]: insertionConfig,
     },
   };
+}
+
+function resolveVisibleGenerationStyle(
+  tenderType: TenderType,
+  draft: ConversationFormDraft | null | undefined,
+  tenderLx: TenderLx,
+  useLegacyGngkFallback = false
+): GenerationStyle {
+  if (tenderType !== 'gngk') {
+    return draft?.generation_style ?? resolveDefaultGenerationStyle();
+  }
+
+  const scopedGenerationStyle = draft?.gngk_generation_styles?.[tenderLx];
+  if (scopedGenerationStyle) {
+    return scopedGenerationStyle;
+  }
+
+  if (useLegacyGngkFallback && draft?.generation_style) {
+    return draft.generation_style;
+  }
+
+  return resolveDefaultGenerationStyle();
+}
+
+function buildGngkGenerationStyleCacheUpdates(
+  draft: ConversationFormDraft | null | undefined,
+  tenderLx: TenderLx,
+  generationStyle: GenerationStyle
+): Partial<ConversationFormDraft> {
+  if (areGenerationStylesEqual(draft?.gngk_generation_styles?.[tenderLx], generationStyle)) {
+    return {};
+  }
+
+  return {
+    gngk_generation_styles: {
+      ...(draft?.gngk_generation_styles || {}),
+      [tenderLx]: generationStyle,
+    },
+  };
+}
+
+function areGenerationStylesEqual(
+  current: GenerationStyle | null | undefined,
+  next: GenerationStyle
+): boolean {
+  return current === next;
 }
 
 function buildVisibleInsertionDraftUpdates(
@@ -283,6 +426,25 @@ function buildVisibleInsertionDraftUpdates(
   }
 
   return updates;
+}
+
+function isKnownAutoInsertionConfig(config: TenderInsertionConfig): boolean {
+  return [
+    tenderFormVariantConfigMap.xjcg.insertionConfigDefaults,
+    tenderFormVariantConfigMap.gngk.insertionConfigDefaults,
+    tenderFormVariantConfigMap.gjgk.insertionConfigDefaults,
+    gngkFiscalInsertionConfigDefaults,
+    gngkEngineeringInsertionConfigDefaults,
+    gngkServiceInsertionConfigDefaults,
+    gngkSelfFundedContractInsertionConfigDefaults,
+  ].some((candidate) => areInsertionConfigsEqual(config, candidate));
+}
+
+function resolveInitialTenderData(
+  draft: ConversationFormDraft | null | undefined,
+  initialTenderData?: TenderData | null
+): TenderData | null {
+  return draft?.tender_data || initialTenderData || null;
 }
 
 function buildTemplateCandidateCacheKey(tenderNo: string, projectName: string | null): string {
@@ -310,6 +472,19 @@ function toGjgkFundLabel(fundLx: TenderTypeInfo['fund_lx'] | undefined): string 
   return undefined;
 }
 
+function toTenderLxLabel(tenderLx: TenderTypeInfo['tender_lx'] | undefined): string | undefined {
+  if (tenderLx === 0) {
+    return '货物';
+  }
+  if (tenderLx === 1) {
+    return '工程';
+  }
+  if (tenderLx === 2) {
+    return '服务';
+  }
+  return undefined;
+}
+
 function toTenderInfoItems(
   tenderType: TenderType,
   tenderData: TenderData | null,
@@ -332,6 +507,12 @@ function toTenderInfoItems(
     { label: '售标结束时间', value: tenderData.shell_end_date, key: 'shell_end_date' },
     { label: '递交文件截止时间', value: tenderData.submit_date, key: 'submit_date' },
   ];
+
+  items.push({
+    label: '标的类型',
+    value: toTenderLxLabel(tenderTypeInfo?.tender_lx),
+    key: 'tender_lx',
+  });
 
   if (tenderType === 'gjgk') {
     items.push({
@@ -365,6 +546,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const variantConfig = tenderFormVariantConfigMap[tenderType];
   const { tenderno: urlTenderNo, tender_lx: urlTenderLx, fund_lx: urlFundLx } = useUrlParams();
   const updateConversation = useChatStore((state) => state.updateConversation);
+  const setSelectedTenderType = useChatStore((state) => state.setSelectedTenderType);
   const currentConversation = useChatStore(
     (state) =>
       state.conversations.find((conversation) => conversation.id === state.currentConversationId) ||
@@ -392,17 +574,18 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const [paramFiles, setParamFiles] = useState<UploadedFile[]>(
     (initialDraft?.files?.tender_params as UploadedFile[] | undefined) || []
   );
+  const initialResolvedTenderData = resolveInitialTenderData(initialDraft, initialTenderData);
   const draftTenderLx: TenderLx | undefined =
-    initialDraft?.tender_lx === 0 || initialDraft?.tender_lx === 1
+    initialDraft?.tender_lx === 0 || initialDraft?.tender_lx === 1 || initialDraft?.tender_lx === 2
       ? initialDraft.tender_lx
       : undefined;
   // Priority: draft > URL > default (0=货物)
   // Draft is authoritative for existing conversations; URL only wins when
   // page.tsx explicitly wrote the deep-link values into the draft first.
   const initialTenderLx: TenderLx =
-    draftTenderLx === 0 || draftTenderLx === 1
+    draftTenderLx === 0 || draftTenderLx === 1 || draftTenderLx === 2
       ? draftTenderLx
-      : urlTenderLx === 0 || urlTenderLx === 1
+      : urlTenderLx === 0 || urlTenderLx === 1 || urlTenderLx === 2
         ? urlTenderLx
         : 0;
   const [localTenderLx, setLocalTenderLx] = useState<TenderLx>(initialTenderLx);
@@ -417,9 +600,12 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         : 0;
   const [localFundLx, setLocalFundLx] = useState<FundLx>(initialFundLx);
   const [localGenerationStyle, setLocalGenerationStyle] = useState<GenerationStyle>(
-    initialDraft?.generation_style
-      ? initialDraft.generation_style
-      : resolveDefaultGenerationStyle(initialTenderLx)
+    resolveVisibleGenerationStyle(
+      tenderType,
+      initialDraft,
+      initialTenderLx,
+      tenderType === 'gngk'
+    )
   );
   const [localStyleWritebackMode, setLocalStyleWritebackMode] = useState<StyleWritebackMode>(
     initialDraft?.style_writeback_mode || defaultStyleWritebackMode
@@ -431,7 +617,8 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       initialTenderLx,
       initialFundLx,
       variantConfig.insertionConfigDefaults,
-      tenderType === 'gngk' && initialTenderLx === 1
+      tenderType === 'gngk' && initialTenderLx === 2,
+      initialResolvedTenderData
     );
   });
   const [error, setError] = useState<string | null>(null);
@@ -454,11 +641,13 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const [templateCandidatesRefreshing, setTemplateCandidatesRefreshing] = useState(false);
   const [selectingTemplateRowKey, setSelectingTemplateRowKey] = useState<string | null>(null);
   const didSyncInitialRouteStateRef = useRef(false);
+  const shouldApplyFetchedTypeRef = useRef(false);
   const renderControlsInHeader = headerControlsTarget !== undefined;
   const selectedModel: ModelType = initialDraft?.model || 'deepseek';
   const tenderNo = onDraftChange ? initialDraft?.tender_no || initialTenderNo : localTenderNo;
   const tenderLx: TenderLx =
-    onDraftChange && (initialDraft?.tender_lx === 0 || initialDraft?.tender_lx === 1)
+    onDraftChange &&
+    (initialDraft?.tender_lx === 0 || initialDraft?.tender_lx === 1 || initialDraft?.tender_lx === 2)
       ? initialDraft.tender_lx
       : localTenderLx;
   const fundLx: FundLx =
@@ -466,8 +655,8 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       ? initialDraft.fund_lx
       : localFundLx;
   const generationStyle: GenerationStyle =
-    onDraftChange && initialDraft?.generation_style
-      ? initialDraft.generation_style
+    onDraftChange
+      ? resolveVisibleGenerationStyle(tenderType, initialDraft, tenderLx, tenderType === 'gngk')
       : localGenerationStyle;
   const styleWritebackMode: StyleWritebackMode = onDraftChange
     ? initialDraft?.style_writeback_mode || defaultStyleWritebackMode
@@ -544,6 +733,8 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     tenderLx,
     fundLx,
     initialDraft?.gngk_insertion_configs,
+    initialDraft?.gngk_engineering_insertion_configs,
+    initialDraft?.gngk_service_insertion_configs,
     initialDraft?.gngk_service_insertion_config,
     initialDraft?.insertion_config,
     insertionConfig,
@@ -667,7 +858,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
           nextDraft,
           tenderLx,
           nextFundLx,
-          variantConfig.insertionConfigDefaults
+          variantConfig.insertionConfigDefaults,
+          false,
+          tenderData
         );
 
         Object.assign(nextUpdates, currentModeCacheUpdates);
@@ -706,6 +899,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       tenderType,
       urlTenderNo,
       variantConfig.insertionConfigDefaults,
+      tenderData,
     ]
   );
 
@@ -720,9 +914,22 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         tender_lx: nextTenderLx,
       };
 
-      const nextDefaultStyle = resolveDefaultGenerationStyle(nextTenderLx);
-      setLocalGenerationStyle(nextDefaultStyle);
-      nextUpdates.generation_style = nextDefaultStyle;
+      const currentGenerationStyleCacheUpdates =
+        tenderType === 'gngk'
+          ? buildGngkGenerationStyleCacheUpdates(initialDraft, tenderLx, generationStyle)
+          : {};
+      const nextDraftWithGenerationStyleCache = mergeDraftStateLike(
+        initialDraft,
+        currentGenerationStyleCacheUpdates
+      );
+      const nextGenerationStyle = resolveVisibleGenerationStyle(
+        tenderType,
+        nextDraftWithGenerationStyleCache,
+        nextTenderLx
+      );
+      setLocalGenerationStyle(nextGenerationStyle);
+      nextUpdates.generation_style = nextGenerationStyle;
+      Object.assign(nextUpdates, currentGenerationStyleCacheUpdates);
 
       if (tenderType === 'gngk') {
         const currentModeCacheUpdates = buildGngkModeCacheUpdates(
@@ -731,13 +938,18 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
           fundLx,
           insertionConfig
         );
-        const nextDraft = mergeDraftStateLike(initialDraft, currentModeCacheUpdates);
+        const nextDraft = mergeDraftStateLike(
+          nextDraftWithGenerationStyleCache,
+          currentModeCacheUpdates
+        );
         const nextInsertion = resolveVisibleInsertionConfig(
           tenderType,
           nextDraft,
           nextTenderLx,
           fundLx,
-          variantConfig.insertionConfigDefaults
+          variantConfig.insertionConfigDefaults,
+          false,
+          tenderData
         );
 
         Object.assign(nextUpdates, currentModeCacheUpdates);
@@ -768,6 +980,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     },
     [
       fundLx,
+      generationStyle,
       initialDraft,
       insertionConfig,
       onDraftChange,
@@ -776,6 +989,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       tenderType,
       urlTenderNo,
       variantConfig.insertionConfigDefaults,
+      tenderData,
     ]
   );
 
@@ -786,11 +1000,20 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       }
 
       setLocalGenerationStyle(nextGenerationStyle);
-      onDraftChange?.({
+      const nextUpdates: Partial<ConversationFormDraft> = {
         generation_style: nextGenerationStyle,
-      });
+      };
+
+      if (tenderType === 'gngk') {
+        Object.assign(
+          nextUpdates,
+          buildGngkGenerationStyleCacheUpdates(initialDraft, tenderLx, nextGenerationStyle)
+        );
+      }
+
+      onDraftChange?.(nextUpdates);
     },
-    [generationStyle, onDraftChange]
+    [generationStyle, initialDraft, onDraftChange, tenderLx, tenderType]
   );
 
   const handleStyleWritebackModeChange = useCallback(
@@ -839,6 +1062,124 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     [tenderData, tenderType, tenderTypeInfo]
   );
   const showCancelAction = isSubmitting && canCancel && typeof onCancel === 'function';
+
+  useEffect(() => {
+    if (tenderFetchState.status === 'loading') {
+      shouldApplyFetchedTypeRef.current = true;
+      return;
+    }
+
+    if (tenderFetchState.status === 'idle' || tenderFetchState.status === 'error') {
+      shouldApplyFetchedTypeRef.current = false;
+    }
+  }, [tenderFetchState.status]);
+
+  useEffect(() => {
+    if (
+      !tenderTypeInfo ||
+      tenderFetchState.status !== 'success' ||
+      !shouldApplyFetchedTypeRef.current
+    ) {
+      return;
+    }
+    shouldApplyFetchedTypeRef.current = false;
+
+    const nextTenderType = resolveFetchedTenderType(tenderTypeInfo);
+    const nextTenderLx = tenderTypeInfo.tender_lx;
+    const nextFundLx = tenderTypeInfo.fund_lx;
+    const draftUpdates: Partial<ConversationFormDraft> = {};
+
+    if (tenderLx !== nextTenderLx) {
+      setLocalTenderLx(nextTenderLx);
+      draftUpdates.tender_lx = nextTenderLx;
+    }
+
+    if (fundLx !== nextFundLx) {
+      setLocalFundLx(nextFundLx);
+      draftUpdates.fund_lx = nextFundLx;
+    }
+
+    if (Object.keys(draftUpdates).length > 0) {
+      onDraftChange?.(draftUpdates);
+    }
+
+    if (nextTenderType && tenderType !== nextTenderType) {
+      if (currentConversation) {
+        updateConversation(currentConversation.id, { tenderType: nextTenderType });
+      }
+      setSelectedTenderType(nextTenderType);
+    }
+
+    if (
+      nextTenderType ||
+      draftUpdates.tender_lx !== undefined ||
+      draftUpdates.fund_lx !== undefined
+    ) {
+      syncBrowserUrlToConversation({
+        tenderType: nextTenderType || tenderType,
+        tenderno: tenderNo || urlTenderNo,
+        tender_lx: nextTenderLx,
+        fund_lx: nextFundLx,
+      });
+    }
+  }, [
+    currentConversation,
+    fundLx,
+    onDraftChange,
+    setSelectedTenderType,
+    tenderLx,
+    tenderNo,
+    tenderFetchState.status,
+    tenderType,
+    tenderTypeInfo,
+    updateConversation,
+    urlTenderNo,
+  ]);
+
+  useEffect(() => {
+    if (!tenderTypeInfo) {
+      return;
+    }
+
+    const nextTenderType = resolveFetchedTenderType(tenderTypeInfo);
+    if (nextTenderType && nextTenderType !== tenderType) {
+      return;
+    }
+
+    if (tenderLx !== tenderTypeInfo.tender_lx || fundLx !== tenderTypeInfo.fund_lx) {
+      return;
+    }
+
+    if (!isKnownAutoInsertionConfig(insertionConfig)) {
+      return;
+    }
+
+    const nextInsertion = resolveDefaultInsertionConfig(
+      tenderType,
+      tenderTypeInfo.tender_lx,
+      tenderTypeInfo.fund_lx,
+      variantConfig.insertionConfigDefaults,
+      tenderData
+    );
+    if (areInsertionConfigsEqual(insertionConfig, nextInsertion)) {
+      return;
+    }
+
+    setInsertionConfig(nextInsertion);
+    onDraftChange?.(
+      buildVisibleInsertionDraftUpdates(initialDraft, tenderType, tenderLx, fundLx, nextInsertion)
+    );
+  }, [
+    fundLx,
+    initialDraft,
+    insertionConfig,
+    onDraftChange,
+    tenderData,
+    tenderLx,
+    tenderType,
+    tenderTypeInfo,
+    variantConfig.insertionConfigDefaults,
+  ]);
 
   const loadTemplateCandidates = useCallback(
     async (
@@ -1120,6 +1461,20 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
           className={cn(
             segmentedToggleButtonClassName,
             tenderLx === 1
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'bg-transparent text-slate-700 hover:bg-white/80'
+          )}
+        >
+          工程
+        </button>
+        <span aria-hidden className="h-6 w-px bg-slate-200" />
+        <button
+          type="button"
+          onClick={() => handleTenderLxChange(2)}
+          disabled={isSubmitting}
+          className={cn(
+            segmentedToggleButtonClassName,
+            tenderLx === 2
               ? 'bg-blue-600 text-white shadow-sm'
               : 'bg-transparent text-slate-700 hover:bg-white/80'
           )}

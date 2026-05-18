@@ -29,12 +29,13 @@ export interface TenderData {
   submit_date: string;
   platform: string;
   service_fee: string;
-  tender_lx?: 0 | 1;
+  ifdzpt2?: number;
+  tender_lx?: 0 | 1 | 2;
   fund_source_lx?: number;
 }
 
 export interface TenderTypeInfo {
-  tender_lx: 0 | 1;
+  tender_lx: 0 | 1 | 2;
   purchase_method: number;
   fund_lx: 0 | 1;
 }
@@ -163,7 +164,7 @@ export interface EditTaskRequest {
   edit_prompt: string;
   file_path?: string;
   insertion_config?: InsertionConfig;
-  tender_lx: 0 | 1;
+  tender_lx: 0 | 1 | 2;
   fund_source_lx: 0 | 1;
   tender_data_snapshot?: TenderData;
 }
