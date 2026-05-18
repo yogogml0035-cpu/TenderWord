@@ -29,3 +29,14 @@ def test_render_generate_prompt_routes_param_mode() -> None:
     assert rendered == render_generate_by_param_prompt(data)
     assert "参数优先模式" in rendered.system_prompt
     assert "按参数生成" in rendered.user_prompt
+
+
+def test_render_generate_by_param_prompt_prunes_unsourced_intro_and_reindexes() -> None:
+    rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    assert "引导段硬删除原则" in rendered.system_prompt
+    assert "若新材料没有提供对应事实，必须彻底删除" in rendered.system_prompt
+    assert "保层级，不照抄容器号" in rendered.system_prompt
+    assert "最终必须改写为当前章的第 1 个有效条目" in rendered.system_prompt
