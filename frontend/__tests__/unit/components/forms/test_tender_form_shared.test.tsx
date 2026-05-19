@@ -1472,6 +1472,108 @@ describe('TenderFormShared', () => {
     await waitFor(() => expect(afterInput).toHaveValue('第四章 投标文件有关格式'));
   });
 
+  it('uses self-funded goods anchors for gngk fiscal fund when ifzgcg is 2', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk', tenderLx: 0, fundLx: 1 });
+    mockSyncTenderDataDraft.mockImplementationOnce(
+      async ({
+        tenderNo,
+        updateDraft,
+      }: {
+        tenderNo: string;
+        updateDraft: (updates: Partial<ConversationFormDraft>) => void;
+      }) => {
+        updateDraft({
+          tender_fetch: { status: 'loading' },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        updateDraft({
+          tender_no: tenderNo,
+          tender_data: {
+            ...mockTenderData,
+            ifzgcg: 2,
+          },
+          tender_type_info: buildTenderTypeInfo({
+            tender_lx: 0,
+            purchase_method: 2,
+            fund_lx: 1,
+          }),
+          tender_fetch: { status: 'success' },
+        });
+        return {
+          ...mockTenderData,
+          ifzgcg: 2,
+        };
+      }
+    );
+    renderSharedForm({ tenderType: 'gngk' });
+
+    const fiscalButton = screen.getByRole('button', { name: '财政' });
+    const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
+
+    expect(beforeInput).toHaveValue('第四章  招标需求');
+    expect(afterInput).toHaveValue('第五章  评标方法与程序');
+
+    await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-ZGCG-002');
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+
+    await waitFor(() => expect(fiscalButton).toHaveClass('bg-blue-600'));
+    await waitFor(() => expect(beforeInput).toHaveValue('第三章 招标内容及要求'));
+    expect(afterInput).toHaveValue('第四章 投标文件有关格式');
+  });
+
+  it('uses fiscal goods anchors for gngk when ifzgcg is 1', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk', tenderLx: 0, fundLx: 0 });
+    mockSyncTenderDataDraft.mockImplementationOnce(
+      async ({
+        tenderNo,
+        updateDraft,
+      }: {
+        tenderNo: string;
+        updateDraft: (updates: Partial<ConversationFormDraft>) => void;
+      }) => {
+        updateDraft({
+          tender_fetch: { status: 'loading' },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        updateDraft({
+          tender_no: tenderNo,
+          tender_data: {
+            ...mockTenderData,
+            ifzgcg: 1,
+          },
+          tender_type_info: buildTenderTypeInfo({
+            tender_lx: 0,
+            purchase_method: 2,
+            fund_lx: 1,
+          }),
+          tender_fetch: { status: 'success' },
+        });
+        return {
+          ...mockTenderData,
+          ifzgcg: 1,
+        };
+      }
+    );
+    renderSharedForm({ tenderType: 'gngk' });
+
+    const fiscalButton = screen.getByRole('button', { name: '财政' });
+    const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
+
+    expect(beforeInput).toHaveValue('第三章 招标内容及要求');
+    expect(afterInput).toHaveValue('第四章 投标文件有关格式');
+
+    await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-ZGCG-001');
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+
+    await waitFor(() => expect(fiscalButton).toHaveClass('bg-blue-600'));
+    await waitFor(() => expect(beforeInput).toHaveValue('第四章  招标需求'));
+    expect(afterInput).toHaveValue('第五章  评标方法与程序');
+  });
+
   it('keeps service after_text on 投标文件有关格式 when ifdzpt2 is 3', async () => {
     const user = userEvent.setup();
     setUrlParams({ tenderType: 'gngk', tenderLx: 0, fundLx: 1 });

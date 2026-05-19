@@ -47,7 +47,7 @@ def _normalize_tender_type_payload(payload) -> Dict | None:
     }
 
 
-def _normalize_ifdzpt2(value) -> int | None:
+def _normalize_optional_int(value) -> int | None:
     if value in (None, ""):
         return None
     try:
@@ -80,7 +80,7 @@ def fetch_tender_data(tender_no: str) -> Dict:
       purchase_method=0 表示国际公开）
     - type.tender_lx 表示标的类型（0=货物, 1=工程, 2=服务）
     - data.fund_lx 会透传为业务字段 fund_source_lx
-    - data.ifdzpt2 会透传给前端，用于修正默认插入锚点
+    - data.ifdzpt2 / data.ifzgcg 会透传给前端，用于修正默认插入锚点
 
     Args:
         tender_no: 招标编号
@@ -136,7 +136,8 @@ def fetch_tender_data(tender_no: str) -> Dict:
             "submit_date": data.get("submit_date", ""),
             "platform": data.get("platform", ""),
             "service_fee": "",  # data.get("service_fee", ""),
-            "ifdzpt2": _normalize_ifdzpt2(data.get("ifdzpt2")),
+            "ifdzpt2": _normalize_optional_int(data.get("ifdzpt2")),
+            "ifzgcg": _normalize_optional_int(data.get("ifzgcg")),
             "fund_source_lx": _normalize_fund_source_lx(data.get("fund_lx")),
         }
 

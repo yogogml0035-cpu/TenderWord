@@ -103,6 +103,10 @@ class TenderData(BaseModel):
         default=None,
         description="平台细分编码（命中 2/3 时前端会切换部分默认锚点）",
     )
+    ifzgcg: int | None = Field(
+        default=None,
+        description="政府采购标记（1=政府采购, 2=非政府采购；前端用于修正国内公开财政锚点）",
+    )
     tender_lx: int | None = Field(
         default=None,
         description="标的类型编码（0=货物, 1=工程, 2=服务）",
@@ -133,6 +137,7 @@ class TenderData(BaseModel):
                 "platform": "中国政府采购网",
                 "service_fee": "5000元",
                 "ifdzpt2": 2,
+                "ifzgcg": 1,
                 "tender_lx": 0,
                 "fund_source_lx": 1,
             }

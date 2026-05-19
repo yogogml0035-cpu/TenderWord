@@ -38,6 +38,7 @@ def test_fetch_tender_data_preserves_supported_tender_lx(monkeypatch, tender_lx:
             "platform": "中国招标投标公共服务平台",
             "service_fee": "按比例收取:1.5%",
             "ifdzpt2": "3",
+            "ifzgcg": "2",
             "fund_lx": 0,
         },
         "type": {
@@ -61,6 +62,7 @@ def test_fetch_tender_data_preserves_supported_tender_lx(monkeypatch, tender_lx:
     result = fetch_tender_data_function("0811-DSITC261224")
 
     assert result["data"]["ifdzpt2"] == 3
+    assert result["data"]["ifzgcg"] == 2
     assert result["data"]["fund_source_lx"] == 0
     assert result["type"] == {
         "tender_lx": tender_lx,

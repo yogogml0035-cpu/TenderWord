@@ -40,3 +40,11 @@ def test_render_generate_by_param_prompt_prunes_unsourced_intro_and_reindexes() 
     assert "若新材料没有提供对应事实，必须彻底删除" in rendered.system_prompt
     assert "保层级，不照抄容器号" in rendered.system_prompt
     assert "最终必须改写为当前章的第 1 个有效条目" in rendered.system_prompt
+
+def test_render_generate_by_template_prompt_preserves_colon_attached_lists() -> None:
+    rendered = render_generate_by_template_prompt(build_prompt_input())
+
+    assert "硬换行与冒号挂载列表协议" in rendered.system_prompt
+    assert "原材料里的物理换行和显式编号列表是硬边界" in rendered.system_prompt
+    assert "带显式编号的子项永远不是同一属性短语枚举" in rendered.system_prompt
+    assert "1.1、CRO服务" in rendered.system_prompt

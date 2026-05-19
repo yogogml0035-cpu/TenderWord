@@ -126,6 +126,15 @@ function shouldUseGngkContractTermsAfterText(
   return tenderType === 'gngk' && tenderLx === 2 && fundLx === 0 && ifdzpt2 === 2;
 }
 
+function shouldUseGngkFiscalInsertionConfig(
+  tenderType: TenderType,
+  tenderLx: TenderLx,
+  fundLx: FundLx,
+  ifzgcg: number | undefined
+): boolean {
+  return tenderType === 'gngk' && tenderLx === 0 && fundLx === 1 && ifzgcg !== 2;
+}
+
 function resolveFetchedTenderType(tenderTypeInfo: TenderTypeInfo | null): TenderType | null {
   if (!tenderTypeInfo) {
     return null;
@@ -186,7 +195,7 @@ function resolveDefaultInsertionConfig(
     return gngkEngineeringInsertionConfigDefaults;
   }
 
-  if (tenderType === 'gngk' && tenderLx === 0 && fundLx === 1) {
+  if (shouldUseGngkFiscalInsertionConfig(tenderType, tenderLx, fundLx, tenderData?.ifzgcg)) {
     return gngkFiscalInsertionConfigDefaults;
   }
 

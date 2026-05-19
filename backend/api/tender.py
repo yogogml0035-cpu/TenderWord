@@ -103,6 +103,7 @@ async def get_tender_data(
             platform=tender_data_dict.get("platform", ""),
             service_fee=tender_data_dict.get("service_fee", ""),
             ifdzpt2=tender_data_dict.get("ifdzpt2"),
+            ifzgcg=tender_data_dict.get("ifzgcg"),
             tender_lx=tender_data_dict.get("tender_lx"),
             fund_source_lx=tender_data_dict.get("fund_source_lx"),
         )

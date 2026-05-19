@@ -30,6 +30,7 @@ export interface TenderData {
   platform: string;
   service_fee: string;
   ifdzpt2?: number;
+  ifzgcg?: number;
   tender_lx?: 0 | 1 | 2;
   fund_source_lx?: number;
 }
