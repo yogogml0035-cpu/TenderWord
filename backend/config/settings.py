@@ -17,6 +17,7 @@ PROJECT_ROOT = BACKEND_DIR.parent
 BACKEND_ENV_FILE = BACKEND_DIR / ".env"
 BACKEND_ENV_EXAMPLE_FILE = BACKEND_DIR / ".env.example"
 ENV_FILES = (BACKEND_ENV_FILE,)
+DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash"
 
 
 class Settings(BaseSettings):
@@ -84,7 +85,7 @@ class Settings(BaseSettings):
         description="DeepSeek API 密钥",
     )
     DEEPSEEK_MODEL: str = Field(
-        default="deepseek-chat",
+        default=DEFAULT_DEEPSEEK_MODEL,
         description="DeepSeek 默认模型",
     )
 

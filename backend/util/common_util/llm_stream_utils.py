@@ -161,6 +161,7 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
         base_url_env="DEEPSEEK_BASE_URL",
         model_env="DEEPSEEK_MODEL",
         extra_params={"max_tokens": 8192, "temperature": 0.1},
+        extra_body={"thinking": {"type": "disabled"}},
     ),
 }
 

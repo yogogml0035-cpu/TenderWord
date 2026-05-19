@@ -50,6 +50,8 @@ def test_generate_comments_parses_valid_json_once(tmp_path, monkeypatch) -> None
     result = generate_comments_module.generate_comments(_base_state(), _base_config())
 
     assert len(calls) == 1
+    assert calls[0]["model_override"] is None
+    assert calls[0]["extra_params_override"] == {"temperature": 1.3}
     assert result["generated_comment_count"] == 1
     assert result["polished_comments"] == [
         {

@@ -314,9 +314,7 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
     llm_extra_params_override = None
     effective_model_display = model_provider
     if model_provider == "deepseek":
-        llm_model_override = "deepseek-chat"
         llm_extra_params_override = {"temperature": 1.3}
-        effective_model_display = llm_model_override
 
     progress_log.debug(f"[generate_comments] 使用模型: {effective_model_display}")
 

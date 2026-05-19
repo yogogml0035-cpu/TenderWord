@@ -4,8 +4,20 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+from backend.config.settings import DEFAULT_DEEPSEEK_MODEL, Settings
 from backend.services import chat_stream_service
 from backend.util.common_util import llm_stream_utils
+
+
+def test_deepseek_settings_default_uses_v4_flash() -> None:
+    assert Settings.model_fields["DEEPSEEK_MODEL"].default == DEFAULT_DEEPSEEK_MODEL
+    assert Settings().get_llm_config("deepseek")["model"] == DEFAULT_DEEPSEEK_MODEL
+
+
+def test_deepseek_model_config_disables_thinking() -> None:
+    assert llm_stream_utils.MODEL_CONFIGS["deepseek"].extra_body == {
+        "thinking": {"type": "disabled"}
+    }
 
 
 def test_get_llm_timeout_seconds_uses_settings_by_default(monkeypatch):
@@ -69,7 +81,7 @@ def test_stream_chat_response_uses_configured_timeout(monkeypatch):
     monkeypatch.setattr(
         chat_stream_service.settings,
         "DEEPSEEK_MODEL",
-        "deepseek-chat",
+        DEFAULT_DEEPSEEK_MODEL,
     )
     monkeypatch.setattr(chat_stream_service, "ensure_llm_env", lambda _provider: None)
 
@@ -79,7 +91,9 @@ def test_stream_chat_response_uses_configured_timeout(monkeypatch):
         return SimpleNamespace(timeout=timeout, connect=connect)
 
     class _FakeCompletions:
-        async def create(self, **_kwargs):
+        async def create(self, **kwargs):
+            captured["create_params"] = kwargs
+
             async def _iterator():
                 yield SimpleNamespace(
                     choices=[
@@ -117,4 +131,8 @@ def test_stream_chat_response_uses_configured_timeout(monkeypatch):
 
     assert captured["timeout"] == 20
     assert captured["connect_timeout"] == 10.0
+    assert captured["create_params"]["model"] == DEFAULT_DEEPSEEK_MODEL
+    assert captured["create_params"]["extra_body"] == {
+        "thinking": {"type": "disabled"}
+    }
     assert payloads[-1] == {"event": "done", "data": {"content": "测试回复"}}
