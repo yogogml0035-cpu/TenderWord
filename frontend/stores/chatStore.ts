@@ -127,6 +127,7 @@ export interface ConversationFormDraft {
     before_text: string;
     after_text: string;
   };
+  manual_insertion_config_scope_keys?: string[];
   chat_input?: string;
   pending_rewrite_prompt?: string;
   pending_rewrite_task_id?: string;

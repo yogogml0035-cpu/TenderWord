@@ -176,6 +176,34 @@ function areInsertionConfigsEqual(
   return current?.before_text === next.before_text && current?.after_text === next.after_text;
 }
 
+function buildInsertionConfigScopeKey(
+  tenderType: TenderType,
+  tenderLx: TenderLx,
+  fundLx: FundLx
+): string {
+  return tenderType === 'gngk' ? `${tenderType}:${tenderLx}:${fundLx}` : tenderType;
+}
+
+function buildManualInsertionScopeKeys(
+  draft: ConversationFormDraft | null | undefined,
+  scopeKey: string
+): string[] {
+  const scopeKeys = new Set(draft?.manual_insertion_config_scope_keys || []);
+  scopeKeys.add(scopeKey);
+  return Array.from(scopeKeys);
+}
+
+function isManualInsertionScope(
+  draft: ConversationFormDraft | null | undefined,
+  manualScopeKeysRef: React.MutableRefObject<Set<string>>,
+  scopeKey: string
+): boolean {
+  return (
+    manualScopeKeysRef.current.has(scopeKey) ||
+    !!draft?.manual_insertion_config_scope_keys?.includes(scopeKey)
+  );
+}
+
 function resolveDefaultInsertionConfig(
   tenderType: TenderType,
   tenderLx: TenderLx,
@@ -630,6 +658,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       initialResolvedTenderData
     );
   });
+  const manualInsertionScopeKeysRef = useRef<Set<string>>(
+    new Set(initialDraft?.manual_insertion_config_scope_keys || [])
+  );
   const [error, setError] = useState<string | null>(null);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [templateCandidates, setTemplateCandidates] = useState<TemplateCandidate[]>([]);
@@ -1042,10 +1073,16 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const handleBeforeTextChange = useCallback(
     (value: string) => {
       const next = { ...insertionConfig, before_text: value };
+      const insertionScopeKey = buildInsertionConfigScopeKey(tenderType, tenderLx, fundLx);
+      manualInsertionScopeKeysRef.current.add(insertionScopeKey);
       setInsertionConfig(next);
-      onDraftChange?.(
-        buildVisibleInsertionDraftUpdates(initialDraft, tenderType, tenderLx, fundLx, next)
-      );
+      onDraftChange?.({
+        ...buildVisibleInsertionDraftUpdates(initialDraft, tenderType, tenderLx, fundLx, next),
+        manual_insertion_config_scope_keys: buildManualInsertionScopeKeys(
+          initialDraft,
+          insertionScopeKey
+        ),
+      });
     },
     [fundLx, initialDraft, insertionConfig, onDraftChange, tenderLx, tenderType]
   );
@@ -1053,10 +1090,16 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const handleAfterTextChange = useCallback(
     (value: string) => {
       const next = { ...insertionConfig, after_text: value };
+      const insertionScopeKey = buildInsertionConfigScopeKey(tenderType, tenderLx, fundLx);
+      manualInsertionScopeKeysRef.current.add(insertionScopeKey);
       setInsertionConfig(next);
-      onDraftChange?.(
-        buildVisibleInsertionDraftUpdates(initialDraft, tenderType, tenderLx, fundLx, next)
-      );
+      onDraftChange?.({
+        ...buildVisibleInsertionDraftUpdates(initialDraft, tenderType, tenderLx, fundLx, next),
+        manual_insertion_config_scope_keys: buildManualInsertionScopeKeys(
+          initialDraft,
+          insertionScopeKey
+        ),
+      });
     },
     [fundLx, initialDraft, insertionConfig, onDraftChange, tenderLx, tenderType]
   );
@@ -1156,6 +1199,11 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     }
 
     if (tenderLx !== tenderTypeInfo.tender_lx || fundLx !== tenderTypeInfo.fund_lx) {
+      return;
+    }
+
+    const insertionScopeKey = buildInsertionConfigScopeKey(tenderType, tenderLx, fundLx);
+    if (isManualInsertionScope(initialDraft, manualInsertionScopeKeysRef, insertionScopeKey)) {
       return;
     }
 

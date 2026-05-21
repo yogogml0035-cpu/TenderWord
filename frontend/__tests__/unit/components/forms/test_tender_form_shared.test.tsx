@@ -282,6 +282,10 @@ function mergeDraftState(
     };
   }
 
+  if (updates.manual_insertion_config_scope_keys) {
+    nextDraft.manual_insertion_config_scope_keys = updates.manual_insertion_config_scope_keys;
+  }
+
   if (updates.files) {
     nextDraft.files = {
       ...(previous.files || { tender_params: [] }),
@@ -1620,6 +1624,56 @@ describe('TenderFormShared', () => {
     await waitFor(() => expect(serviceButton).toHaveClass('bg-blue-600'));
     expect(selfFundedButton).toHaveClass('bg-blue-600');
     await waitFor(() => expect(afterInput).toHaveValue('第四章 投标文件有关格式'));
+  });
+
+  it('does not override manually edited service after_text when ifdzpt2 uses the non-contract default', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk', tenderLx: 2, fundLx: 0 });
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({
+        tender_lx: 2,
+        fund_lx: 0,
+        tender_data: {
+          ...mockTenderData,
+          ifdzpt2: 4,
+        },
+        tender_type_info: buildTenderTypeInfo({
+          tender_lx: 2,
+          purchase_method: 2,
+          fund_lx: 0,
+        }),
+        tender_fetch: { status: 'success' },
+      });
+
+      return (
+        <>
+          <TenderFormShared
+            tenderType="gngk"
+            onSubmit={jest.fn()}
+            initialDraft={draft}
+            onDraftChange={(updates) => {
+              setDraft((previous) => mergeDraftState(previous, updates));
+            }}
+          />
+          <pre data-testid="draft-state">{JSON.stringify(draft)}</pre>
+        </>
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
+
+    await waitFor(() => expect(afterInput).toHaveValue('第四章 投标文件有关格式'));
+
+    await user.clear(afterInput);
+    await user.type(afterInput, '第四章 合同条款');
+
+    await waitFor(() => expect(afterInput).toHaveValue('第四章 合同条款'));
+    expect(screen.getByTestId('draft-state')).toHaveTextContent(
+      '"manual_insertion_config_scope_keys":["gngk:2:0"]'
+    );
   });
 
   it('switches the current conversation to gngk and keeps goods anchor on 投标文件有关格式 when ifdzpt2 is 2', async () => {
