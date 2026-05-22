@@ -9,6 +9,7 @@ Source: prd.json
 - 新增 direct-replace 删除节点时，优先让节点只透传 `tender_type` 给 `get_anchor_target_sizes()` 和 `resolve_anchor_content_range()`；same-page / next-page 起点规则应继续由 `tender_config + anchor_utils` 决定，不要在节点里手写页码分支。
 - 新增 same-page direct-replace `update_word` 节点时，优先薄封装 `gjgk_update_word` 的通用 helper；类型专属模块只保留 `tender_type`、锚点解析和 state/style/comment 摘要回写，不再复制另一整份 Word 插入实现。
 - `backend/tests/prompts/test_generate_prompt_routing.py` 对 `backend/prompts/generate_by_template_prompt.py` 的关键提示语采用字面量断言；调整 prompt 示例文案时必须同步复核对应断言，避免文案漂移把后端全量 pytest 卡死。
+- `backend/tests/graphs/test_gngk_tender_graph.py` 是首次生成 graph 路由的回归矩阵；新增或切换类型专属 `NODE_DELETE_TENDER_PARAM` / `NODE_UPDATE_WORD` 时，要同时断言 `document_service.GRAPH_REGISTRY` 和兄弟类型既有绑定，避免把 generate 改动误扩散到其它类型。
 
 ## 2026-05-22 19:06 - US-001
 - 实现了 `gngk_hw_cz` 的 same-page direct-replace 配置，保留原有财政货物锚点文本和 22.0 双字号。
@@ -41,4 +42,12 @@ Source: prd.json
   - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）：财政货物这类 direct-replace `update_word` 可以复用 `gjgk_update_word` 的 `_build_insert_items`、删除/插入/cleanup helper；真正需要类型分流的只有锚点字号、`tender_type` 透传和返回 state 类型。
   - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）：样式回填和批注写回的 `bound_end` 不能回退成 `range_end`，要继续跟随 `after_hit["start"]` 的动态上界，否则会破坏既有 style/comment writeback 合同。
   - 有用的上下文（例如，"评估面板在 component X 中"）：`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py` 现在同时覆盖 plain text、显式空行、Markdown 表格、不走 common protected-field split，以及批注零写回硬失败；本轮已通过该文件、`backend/tests/nodes/test_update_word_inline_style_writeback.py`、`TMPDIR=/tmp ./backend/.venv-linux/bin/python -m pytest backend/tests -v`、`frontend` 下 `npm run type-check` / `npm run lint`。
+---
+## 2026-05-22 20:11 - US-004
+- 实现了 `GngkHwCzTenderGraph` 对财政货物 direct-replace delete/update 节点的显式绑定，并在 `backend.nodes.gngk_word_nodes` 包级导出新节点，保持 `gngk_hw_zc` replacements 与 `DocumentService` 注册表不变。
+- 更改的文件：`backend/graphs/gngk_hw_cz_tender_graph.py`、`backend/nodes/gngk_word_nodes/__init__.py`、`backend/tests/graphs/test_gngk_tender_graph.py`、`tasks/gngk-hw-cz-direct-replace-generation/prd.json`、`tasks/gngk-hw-cz-direct-replace-generation/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）：`gngk_hw_cz` 这类仅首次生成分流的类型，通常只需要在 graph 子类覆写 `NODE_DELETE_TENDER_PARAM` / `NODE_UPDATE_WORD`，而 `NODE_GET_REPLACEMENTS`、`STATE_CLS` 和 `DocumentService` 的表单注册可以继续复用父类。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）：图路由回归不能只断言新类型本身；如果不同时锁住 `xjcg`、`gngk_hw_zc`、`gngk_fw_zc`、`gngk_fw_cz`、`gjgk` 的既有绑定，很容易在后续继承链调整时静默破坏其它类型。
+  - 有用的上下文（例如，"评估面板在 component X 中"）：本轮按 story 指定跑通了 `TMPDIR=/tmp ./backend/.venv-linux/bin/python -m pytest backend/tests/graphs/test_gngk_tender_graph.py backend/tests/services/test_document_service_initial_state.py -v`，并在 `frontend` 跑通了 `TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm run type-check` 与 `npm run lint`；`backend/nodes/skills_nodes/tender_aware_word_dispatch.py` 保持未改，rewrite/edit 范围未扩张。
 ---
