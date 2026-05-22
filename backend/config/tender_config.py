@@ -92,6 +92,8 @@ ANCHOR_CONFIGS: Dict[str, TenderAnchorConfig] = {
         after_text="第五章  评标方法与程序",
         before_size=22.0,
         after_size=22.0,
+        content_start_mode=CONTENT_START_MODE_SAME_PAGE_AFTER_ANCHOR,
+        content_update_mode=CONTENT_UPDATE_MODE_DIRECT_REPLACE,
     ),
     "gngk_fw_cz": TenderAnchorConfig(
         before_text="第三章 招标内容及要求",
