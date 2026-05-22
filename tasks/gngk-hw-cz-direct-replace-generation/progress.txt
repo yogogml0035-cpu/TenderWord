@@ -6,6 +6,8 @@ Source: prd.json
 
 ## Codebase Patterns
 - `backend/config/tender_config.py` 是招标类型锚点、字号、content start/update mode 的集中真源；直替换类型必须在这里显式声明 mode，并让 `get_protected_field_profile()` fail-fast。
+- 新增 direct-replace 删除节点时，优先让节点只透传 `tender_type` 给 `get_anchor_target_sizes()` 和 `resolve_anchor_content_range()`；same-page / next-page 起点规则应继续由 `tender_config + anchor_utils` 决定，不要在节点里手写页码分支。
+- 新增 same-page direct-replace `update_word` 节点时，优先薄封装 `gjgk_update_word` 的通用 helper；类型专属模块只保留 `tender_type`、锚点解析和 state/style/comment 摘要回写，不再复制另一整份 Word 插入实现。
 - `backend/tests/prompts/test_generate_prompt_routing.py` 对 `backend/prompts/generate_by_template_prompt.py` 的关键提示语采用字面量断言；调整 prompt 示例文案时必须同步复核对应断言，避免文案漂移把后端全量 pytest 卡死。
 
 ## 2026-05-22 19:06 - US-001
@@ -23,4 +25,20 @@ Source: prd.json
   - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）：Prompt 层示例文本本身属于测试合同的一部分；即使不改业务逻辑，只改说明文案，也可能影响全量后端 pytest。
   - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）：当 validator notes 指向“既有单测失败”时，先复现那条失败再修，通常能比重跑/重实现当前 story 更快收敛。
   - 有用的上下文（例如，"评估面板在 component X 中"）：本轮在 WSL 下使用 `backend/.venv-linux/bin/python` 跑后端 pytest、使用 Linux `node`/`npm` 和 `/tmp` 临时目录跑 `frontend` 的 `npm run type-check`，可以避开 Windows 路径与临时目录干扰。
+---
+## 2026-05-22 19:34 - US-002
+- 实现了 `gngk_hw_cz` 的直替换删除节点，按 `state.tender_type` 解析财政货物锚点并通过 same-page content range 只删除第四章与第五章之间正文。
+- 更改的文件：`backend/nodes/gngk_word_nodes/gngk_hw_cz_delete_tender_param.py`、`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）：财政货物这类 direct-replace 节点可以直接复用 `gjgk` 的 Word lifecycle，但类型身份、默认锚点和 content range 必须继续从 `tender_config`/`anchor_utils` 读取。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）：如果测试只 monkeypatch `resolve_anchor_content_range()`，容易漏掉 same-page 起点是否真从前锚点末尾开始；至少保留一条走真实 helper 的节点测试更稳。
+  - 有用的上下文（例如，"评估面板在 component X 中"）：本轮已通过 `TMPDIR=/tmp ./backend/.venv-linux/bin/python -m pytest backend/tests -v` 的 262 条后端全量测试，以及 `frontend` 下的 `TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm run type-check`。
+---
+## 2026-05-22 19:57 - US-003
+- 实现了 `gngk_hw_cz` 的 same-page direct-replace `update_word` 节点，复用 `gjgk` 的通用插入 helper，同时保留财政货物自己的 `tender_type`、锚点范围解析、样式回填和批注写回契约。
+- 更改的文件：`backend/nodes/gngk_word_nodes/gngk_hw_cz_update_word.py`、`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`、`tasks/gngk-hw-cz-direct-replace-generation/prd.json`、`tasks/gngk-hw-cz-direct-replace-generation/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）：财政货物这类 direct-replace `update_word` 可以复用 `gjgk_update_word` 的 `_build_insert_items`、删除/插入/cleanup helper；真正需要类型分流的只有锚点字号、`tender_type` 透传和返回 state 类型。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）：样式回填和批注写回的 `bound_end` 不能回退成 `range_end`，要继续跟随 `after_hit["start"]` 的动态上界，否则会破坏既有 style/comment writeback 合同。
+  - 有用的上下文（例如，"评估面板在 component X 中"）：`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py` 现在同时覆盖 plain text、显式空行、Markdown 表格、不走 common protected-field split，以及批注零写回硬失败；本轮已通过该文件、`backend/tests/nodes/test_update_word_inline_style_writeback.py`、`TMPDIR=/tmp ./backend/.venv-linux/bin/python -m pytest backend/tests -v`、`frontend` 下 `npm run type-check` / `npm run lint`。
 ---
