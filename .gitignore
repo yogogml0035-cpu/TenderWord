@@ -79,3 +79,4 @@ frontend/test-results*/
 scripts/ralph/
 tasks/*/screenshots/
 tasks/*/logs/
+.agents/
