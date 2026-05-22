@@ -388,11 +388,13 @@ guide/       可选目录；若存在，仅放本地 Git / worktree 操作说明
 - 系统运行前提是 Windows + Word COM。
 - 但凡能脱离 COM 的逻辑，都应拆出来做单测。
 - Windows 环境只承担必要的 COM 集成验证，不应该承载所有业务逻辑测试。
+- 即使智能体当前在 WSL 中工作，也必须把 Windows 启动路径视为一等约束；涉及启动脚本、依赖安装、路径解析、前端原生依赖、后端虚拟环境或 Word COM 的改动，必须同时考虑 Windows PowerShell 运行方式和 `scripts\start-dev.ps1` 兼容性。
 
 ### WSL 环境执行规范
 
 - 如果检测到 `WSL_DISTRO_NAME` 非空，或 `/proc/version` / `uname -a` 包含 `Microsoft` / `WSL`，默认视为当前在 WSL。
 - 在 WSL 中，前端命令必须优先使用 Linux `node` / `npm`；不要把 Windows `node.exe`、`npm.cmd`、`/mnt/d/...` 下的包装器当成默认运行时。
+- WSL 与 Windows 不得盲目复用同一套平台原生依赖。若用户使用 Windows 入口 `scripts\start-dev.ps1` 同时启动前后端，`frontend\node_modules` 必须由 Windows `npm` 安装或能被脚本修复；排查 Next.js / Tailwind / `lightningcss` / `sharp` 等原生依赖报错时，必须先检查是否存在 WSL 安装、Windows 运行导致的平台 binding 错配。
 - 在 WSL 中执行前端验证前，先确认 `command -v node`、`command -v npm` 指向 Linux 可执行文件；若缺失，先安装 Linux Node.js 18+（可装到用户目录，例如 `~/.local/bin`），再运行 `npm run type-check`、`npm run test`。
 - 在 WSL 中运行前端测试前，必须确保临时目录走 Linux 路径；优先使用 `TMPDIR=/tmp TMP=/tmp TEMP=/tmp`，不要继承 `/mnt/c/.../Temp` 这类 Windows 临时目录，否则 Jest / Playwright 可能在创建缓存目录时直接失败。
 - 在 WSL 中，后端测试禁止复用 Windows 创建的 `backend/.venv`；应单独创建并使用 Linux 虚拟环境 `backend/.venv-linux`。

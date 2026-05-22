@@ -80,3 +80,4 @@ scripts/ralph/
 tasks/*/screenshots/
 tasks/*/logs/
 .agents/
+.playwright-mcp/
