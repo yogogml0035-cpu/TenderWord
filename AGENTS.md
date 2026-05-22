@@ -404,7 +404,7 @@ guide/       可选目录；若存在，仅放本地 Git / worktree 操作说明
 ```bash
 cd backend
 uv venv .venv-linux
-uv pip install --python .venv-linux/bin/python -r requirements.txt
+uv pip install --python .venv-linux/bin/python pip setuptools wheel -r requirements.txt pytest-cov pytest-mock pytest-xdist
 ```
 
 - WSL 下推荐验证命令：
@@ -418,8 +418,7 @@ TMPDIR=/tmp TMP=/tmp TEMP=/tmp CI=1 npm test -- --runInBand
 
 ```bash
 cd backend
-source .venv-linux/bin/activate
-TMPDIR=/tmp python3 -m pytest tests -v
+TMPDIR=/tmp TMP=/tmp TEMP=/tmp .venv-linux/bin/python -m pytest tests -v
 ```
 
 ## 10. 反模式与禁止事项
