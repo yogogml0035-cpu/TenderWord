@@ -14,6 +14,7 @@
 
 - 代码是真源，文档不是。
 - API、SSE、任务状态、共享类型，以 `backend/api/`、`backend/models/`、`frontend/types/`、`frontend/lib/api.ts` 为准。
+- `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 是由代码扫描生成的子系统事实地图，只用于快速理解结构、风险和验证入口；它们不能覆盖代码真源、接口真源或本文件的执行红线。
 - 当前仓库没有顶层 `docs/` 目录；代码注释里若出现 `docs/api-contract.md`、`docs/xxx.md` 一类引用，默认视为历史残留，不可当成真源。
 - README 只做项目导航和启动说明，不承担接口契约职责。
 - 若仓库存在 `guide/`，它只存本地 Git / worktree 操作说明，不是产品文档、接口文档或长期知识源；当前仓库可不包含该目录。
@@ -305,6 +306,13 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - 禁止把产品真相、接口契约、长期架构知识写入 `guide/`。
 - 新增长期知识时，应进入 `asset/`，并同步更新 `asset/README.md`。
 
+### `.planning` 代码地图定位
+
+- `backend/.planning/codebase/` 是后端事实地图，覆盖技术栈、架构、结构、约定、测试、集成和风险；处理后端 graph、task、Word COM、Prompt Layer、SSE 或 API 任务前，可先读这里建立局部上下文。
+- `frontend/.planning/codebase/` 是前端事实地图，覆盖技术栈、架构、结构、约定、测试、集成和风险；处理表单、会话、聊天、SSE 展示、URL 同步或 API client 任务前，可先读这里建立局部上下文。
+- `.planning/codebase/` 只做子系统事实层，不沉淀仓库级红线、接口契约或长期业务规则；稳定规则仍回写本文件或 `asset/`，接口契约仍以代码真源为准。
+- 大范围改动后如地图明显过期，优先用 `$gsd-map-codebase` 分别刷新对应子系统目录，再按本文件和 `asset/README.md` 判断是否需要上提长期规则。
+
 ## 8. 常见入口与同步点
 
 ### 高频目录
@@ -312,6 +320,8 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 ```text
 frontend/    Next.js 前端（表单、会话、聊天、SSE 展示、任务状态）
 backend/     FastAPI + LangGraph 后端（队列、图、节点、Prompt Layer、Word、SSE）
+frontend/.planning/codebase/  前端代码地图事实层（结构、约定、测试、风险）
+backend/.planning/codebase/   后端代码地图事实层（结构、约定、测试、风险）
 asset/       类型规则包与能力规则包
 guide/       可选目录；若存在，仅放本地 Git / worktree 操作说明
 ```
@@ -330,6 +340,8 @@ guide/       可选目录；若存在，仅放本地 Git / worktree 操作说明
 | Prompt Layer | `backend/prompts/`, `backend/services/user_routing_service.py` |
 | Word 工具 | `backend/util/word_util/` |
 | 日志与 SSE | `backend/util/log_util/`, `backend/core/sse_manager.py`, `backend/api/stream.py` |
+| 后端代码地图 | `backend/.planning/codebase/` |
+| 前端代码地图 | `frontend/.planning/codebase/` |
 
 ## 9. 验证与测试门槛
 
