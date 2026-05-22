@@ -69,7 +69,7 @@
 
 - 类型更新模式与受保护字段 profile 解析真源是 `backend/config/tender_config.py`。
 - 当前 `content_update_mode` 只有 `protected_fields` 与 `direct_replace`。
-- `xjcg`、`gngk_hw_zc`、`gngk_hw_cz`、`gngk_fw_cz` 使用 `common_two_field`；`gngk_fw_zc` 使用 `gngk_three_field`；`gjgk` 是 `direct_replace`，不支持受保护字段 profile。
+- `xjcg`、`gngk_hw_zc`、`gngk_fw_cz` 使用 `common_two_field`；`gngk_fw_zc` 使用 `gngk_three_field`；`gngk_hw_cz` 与 `gjgk` 是 `direct_replace`，不支持受保护字段 profile。
 - 受保护字段唯一真源是带中文冒号的 canonical marker；英文冒号兼容必须先规范化，再进入扫描、重绑或 AI 文本拆块。
 - 字段识别必须严格匹配“可选编号前缀 + canonical marker + 值”的字段行；表格行、单元格文本或普通叙述句里的关键字命中不算有效字段。
 - 关键字段缺失、格式非法或顺序非法时必须 fail-fast，不能部分写回后再靠 cleanup 兜底。
@@ -78,6 +78,7 @@
 
 - 正文写回统一使用真实段落边界：`<br>`、字面量 `\n` / `\r\n` / `\r` 先归一化，再落成 Word `\r`。
 - 不得用 `wdLineBreak`、`\v` 或手动换行兜底正文段落，避免多段正文被压成一段。
+- `gngk_hw_cz` 首次生成当前走 same-page direct replace：先清空 `第四章  招标需求` 到 `第五章  评标方法与程序` 之间的正文，再在第四章标题下方同页正文区域插入 AI 生成内容；该路径不再依赖 `交付日期：`、`付款方式：` 等受保护字段。
 - 受保护字段后的正文写回顺序固定为：先复用现成可写段 -> 段内拆段 -> 向后扫描 -> fail-fast。
 - 判断下一段是否可写时，不得把 Heading / `OutlineLevel` 当成锁；真正阻止写入的是 range 锁、字段锁、SDT 锁和文档保护。
 - AI 输出中的显式空行属于正文语义；拆块阶段必须保留空字符串行，cleanup 默认不得无差别压平正文段。
@@ -88,6 +89,7 @@
 
 - `backend/states/base_state.py` 是 `comment_writeback_*`、`style_writeback_*` state 字段真源。
 - `common update_word`、`gjgk_update_word`、`gngk_fw_zc_update_word` 都要把批注和样式回写摘要写回 state。
+- `gngk_hw_cz_update_word` 虽然改为 direct replace，但仍要复用现有样式回填安全门禁，并把 `style_writeback_result`、`style_writeback_summary`、`comment_writeback_*` 摘要完整写回 state / 任务结果 / SSE done metadata。
 - 当 `generated_comment_count > 0` 且最终成功写入数为 `0` 时，update 路径必须硬失败，错误文本包含“批注生成成功但写入失败”。
 - 批注写回的重试只覆盖 Word `Comments.Add` 的 COM / RPC 写入异常；`reference_text` 未匹配属于定位失败，不会靠重试恢复。
 - 批注定位先走 Word 精确 `Find`；精确未命中时，共享 `comment_writeback` 可用规范化唯一匹配兜底，忽略空白、控制符、常见标点和换行。锚点范围内唯一命中才插入；若锚点范围疑似漂移，只允许全文唯一命中兜底；多处命中必须失败，避免把批注错插到其它章节。
