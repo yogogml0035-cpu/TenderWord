@@ -6,6 +6,7 @@ Source: prd.json
 
 ## Codebase Patterns
 - `backend/config/tender_config.py` 是招标类型锚点、字号、content start/update mode 的集中真源；直替换类型必须在这里显式声明 mode，并让 `get_protected_field_profile()` fail-fast。
+- `backend/tests/prompts/test_generate_prompt_routing.py` 对 `backend/prompts/generate_by_template_prompt.py` 的关键提示语采用字面量断言；调整 prompt 示例文案时必须同步复核对应断言，避免文案漂移把后端全量 pytest 卡死。
 
 ## 2026-05-22 19:06 - US-001
 - 实现了 `gngk_hw_cz` 的 same-page direct-replace 配置，保留原有财政货物锚点文本和 22.0 双字号。
@@ -14,4 +15,12 @@ Source: prd.json
   - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）：`gngk_hw_cz` 这类类型切换生成模式时，优先改 `TenderAnchorConfig`，不要在节点里单独兜底 content mode。
   - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）：配置测试原先把 `gngk_hw_cz` 归到 `common_two_field`；切成 `direct_replace` 后，必须同步把 profile 断言改成错误分支，否则 validator 仍会按受保护字段类型看待它。
   - 有用的上下文（例如，"评估面板在 component X 中"）：本轮 story 指定的 pytest `backend/tests/config/test_tender_config_protected_fields.py` 已通过；更大范围的 `backend/tests -v` 当前只剩一个与本 story 无关的既有 prompt 断言失败：`backend/tests/prompts/test_generate_prompt_routing.py::test_render_generate_by_template_prompt_preserves_colon_attached_lists`。
+---
+## 2026-05-22 19:19 - US-001
+- 修复了 `render_generate_by_template_prompt` 的冒号挂载列表示例文案漂移，使后端 prompt 合同测试与全量 `backend/tests` 重新通过，并完成本 story 的最终验收。
+- 更改的文件：`backend/prompts/generate_by_template_prompt.py`、`tasks/gngk-hw-cz-direct-replace-generation/prd.json`、`tasks/gngk-hw-cz-direct-replace-generation/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）：Prompt 层示例文本本身属于测试合同的一部分；即使不改业务逻辑，只改说明文案，也可能影响全量后端 pytest。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）：当 validator notes 指向“既有单测失败”时，先复现那条失败再修，通常能比重跑/重实现当前 story 更快收敛。
+  - 有用的上下文（例如，"评估面板在 component X 中"）：本轮在 WSL 下使用 `backend/.venv-linux/bin/python` 跑后端 pytest、使用 Linux `node`/`npm` 和 `/tmp` 临时目录跑 `frontend` 的 `npm run type-check`，可以避开 Windows 路径与临时目录干扰。
 ---
