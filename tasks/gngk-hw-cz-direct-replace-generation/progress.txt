@@ -1,0 +1,7 @@
+# Ralph Progress
+
+Requirement: tasks/gngk-hw-cz-direct-replace-generation
+Started: 2026-05-22 16:00
+Source: prd.json
+
+## Codebase Patterns
