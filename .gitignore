@@ -75,3 +75,7 @@ backend/tests/test_*
 
 frontend/temp-e2e-results*/
 frontend/test-results*/
+
+scripts/ralph/
+tasks/*/screenshots/
+tasks/*/logs/
