@@ -14,6 +14,7 @@
 
 - 代码是真源，文档不是。
 - API、SSE、任务状态、共享类型，以 `backend/api/`、`backend/models/`、`frontend/types/`、`frontend/lib/api.ts` 为准。
+- 根级 `ARCHITECTURE.md`、`INTERFACES.md` 与 `coding_maps/SYSTEM_MAP.md` 是系统级地图和接口边界导航，用于快速建立跨前后端理解；它们不覆盖代码真源、本文件红线或子项目事实地图。
 - `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 是由代码扫描生成的子系统事实地图，只用于快速理解结构、风险和验证入口；它们不能覆盖代码真源、接口真源或本文件的执行红线。
 - 当前仓库没有顶层 `docs/` 目录；代码注释里若出现 `docs/api-contract.md`、`docs/xxx.md` 一类引用，默认视为历史残留，不可当成真源。
 - README 只做项目导航和启动说明，不承担接口契约职责。
@@ -320,6 +321,9 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 ```text
 frontend/    Next.js 前端（表单、会话、聊天、SSE 展示、任务状态）
 backend/     FastAPI + LangGraph 后端（队列、图、节点、Prompt Layer、Word、SSE）
+ARCHITECTURE.md  根级系统架构地图（系统边界、子系统职责、理解路径）
+INTERFACES.md    根级接口边界地图（API、SSE、任务、模板候选、外部集成）
+coding_maps/     仓库级系统地图（跨子项目调用链、阅读指南、集成风险）
 frontend/.planning/codebase/  前端代码地图事实层（结构、约定、测试、风险）
 backend/.planning/codebase/   后端代码地图事实层（结构、约定、测试、风险）
 asset/       类型规则包与能力规则包
