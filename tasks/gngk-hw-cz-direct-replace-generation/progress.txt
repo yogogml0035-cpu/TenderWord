@@ -11,6 +11,7 @@ Source: prd.json
 - `backend/tests/prompts/test_generate_prompt_routing.py` 对 `backend/prompts/generate_by_template_prompt.py` 的关键提示语采用字面量断言；调整 prompt 示例文案时必须同步复核对应断言，避免文案漂移把后端全量 pytest 卡死。
 - `backend/tests/graphs/test_gngk_tender_graph.py` 是首次生成 graph 路由的回归矩阵；新增或切换类型专属 `NODE_DELETE_TENDER_PARAM` / `NODE_UPDATE_WORD` 时，要同时断言 `document_service.GRAPH_REGISTRY` 和兄弟类型既有绑定，避免把 generate 改动误扩散到其它类型。
 - 首次生成类型路由发生变化时，要同时回写两类知识包：`asset/shared_runtime_word_skill_knowledge_pack.md` 记录 runtime / 受保护字段 / 样式回填边界，`asset/tender_type_identity_session_knowledge_pack.md` 记录 `form_type`、graph/node 分流和前端类型身份事实；只改其一会留下长期文档漂移。
+- 在 WSL 收口 Word COM 相关 story 时，先显式确认 `WSL_DISTRO_NAME` / `uname -a`，再用 Linux `backend/.venv-linux` 和 `TMPDIR=/tmp TMP=/tmp TEMP=/tmp` 跑 backend pytest、frontend `type-check` / `lint` / `jest`；若 PRD 允许降级验收，必须在进度里明确记录真实 COM 验收未执行原因。
 
 ## 2026-05-22 19:06 - US-001
 - 实现了 `gngk_hw_cz` 的 same-page direct-replace 配置，保留原有财政货物锚点文本和 22.0 双字号。
@@ -59,4 +60,12 @@ Source: prd.json
   - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）：类型路由改动如果同时影响 generate runtime 和类型身份，知识回写要分拆到 `shared_runtime_word_skill_knowledge_pack` 与 `tender_type_identity_session_knowledge_pack` 两条主线，分别固定运行时契约和类型分流事实。
   - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）：测试先变绿并不代表需求已经完成；`asset/` 里的长期事实如果还写着旧的 `common_two_field` 或旧 graph 继承现实，后续迭代仍会沿着错误边界扩展。
   - 有用的上下文（例如，"评估面板在 component X 中"）：本轮通过了 `git diff --check`、`TMPDIR=/tmp ./backend/.venv-linux/bin/python -m pytest backend/tests/config/test_tender_config_protected_fields.py backend/tests/graphs/test_gngk_tender_graph.py backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py -v`、`TMPDIR=/tmp ./backend/.venv-linux/bin/python -m pytest backend/tests -v`、`frontend` 下 `TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm run type-check`、`TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm run lint`。
+---
+## 2026-05-22 20:44 - US-006
+- 在当前 WSL 环境下完成财政货物首次生成闭环的替代验收：确认无法执行 Windows + Word COM 真机生成后，补跑后端全量 pytest、前端 `type-check`、`lint` 和全量 Jest，作为本轮允许的降级验证。
+- 更改的文件：`tasks/gngk-hw-cz-direct-replace-generation/prd.json`、`tasks/gngk-hw-cz-direct-replace-generation/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）：当 PRD 对 Word COM 型验收提供 WSL 降级分支时，应把“环境确认 + 可执行替代验证 + 未执行的真机项”三件事一次性写清，避免后续把“未跑 COM”误解为“未验证”。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）：前端 `type-check` / `lint` 通过不代表前端测试已稳；这类收口 story 仍应把 `npm test -- --runInBand` 跑完，否则无法证明 `gngk` 分派、SSE 展示和表单映射回归矩阵保持绿色。
+  - 有用的上下文（例如，"评估面板在 component X 中"）：本轮环境为 `Linux ... microsoft-standard-WSL2`，`WSL_DISTRO_NAME=Ubuntu-24.04`；已通过 `TMPDIR=/tmp ./backend/.venv-linux/bin/python -m pytest backend/tests -v`（266 passed）、`TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm run type-check`、`npm run lint`、`npm test -- --runInBand`（28 suites / 313 tests passed）。真实 Windows + Word COM 模板验收未执行。
 ---
