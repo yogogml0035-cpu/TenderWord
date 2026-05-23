@@ -103,11 +103,11 @@
 
 - `XjcgTenderGraph` 使用 common word 节点，replacement 使用 `xjcg_get_replacements`。
 - `GngkHwZcTenderGraph` 使用 common delete / update，replacement 使用 `gngk_hw_zc_get_replacements`。
-- `GngkHwCzTenderGraph` 当前继承 `GngkHwZcTenderGraph`。
+- `GngkHwCzTenderGraph` 当前仍继承 `GngkHwZcTenderGraph` 的共享主干，但首次生成已显式覆盖为 `gngk_hw_cz_delete_tender_param` + `gngk_hw_cz_update_word` 的 direct replace 路径，replacement 仍复用 `gngk_hw_zc_get_replacements`。
 - `GngkFwZcTenderGraph` 当前覆盖服务特化的 delete / replacement / update。
 - `GngkFwCzTenderGraph` 当前继承 `GngkHwZcTenderGraph`，没有额外覆盖。
 - `GjgkTenderGraph` 使用 `gjgk_*` 专属 delete / replacement / update，并保留 post-update hook。
-- `backend/nodes/skills_nodes/tender_aware_word_dispatch.py` 当前只 special-case `gjgk` 与 `gngk_fw_zc`；其它运行态在 rewrite / edit 中回落 common delete / update。
+- `backend/nodes/skills_nodes/tender_aware_word_dispatch.py` 当前只 special-case `gjgk` 与 `gngk_fw_zc`；`gngk_hw_cz` 本轮没有扩张到 rewrite / edit，仍在 skill runtime 中回落 common delete / update。
 
 ### Replacement 与 profile
 
@@ -132,6 +132,7 @@
 | `2` | `1` | `gngk_fw_cz_tender` |
 
 - 当前仓库仍没有独立 `工程` graph / `form_type`；`tender_lx=1` 的工程模式在 generate / edit 中临时复用现有 `gngk_fw_*` 服务链路。
+- 本轮未新增前端类型；国内公开 `货物 + 财政` 仍由现有 `gngk` 表单在 generate / edit 分派时映射到 `gngk_hw_cz_tender`。
 
 任一处改动都必须双向同步并补测试。
 

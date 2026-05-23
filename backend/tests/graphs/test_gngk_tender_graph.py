@@ -19,6 +19,8 @@ from backend.nodes.gngk_word_nodes import (
     gngk_fw_zc_delete_tender_param,
     gngk_fw_zc_get_replacements,
     gngk_fw_zc_update_word,
+    gngk_hw_cz_delete_tender_param,
+    gngk_hw_cz_update_word,
     gngk_hw_zc_get_replacements,
 )
 from backend.services import document_service
@@ -37,26 +39,58 @@ def test_gngk_fw_zc_graph_overrides_service_specific_word_nodes() -> None:
     assert GngkFwZcTenderGraph.NODE_UPDATE_WORD is gngk_fw_zc_update_word
 
 
+def test_gngk_hw_cz_graph_overrides_direct_replace_word_nodes() -> None:
+    assert (
+        GngkHwCzTenderGraph.NODE_DELETE_TENDER_PARAM
+        is gngk_hw_cz_delete_tender_param
+    )
+    assert GngkHwCzTenderGraph.NODE_GET_REPLACEMENTS is gngk_hw_zc_get_replacements
+    assert GngkHwCzTenderGraph.NODE_UPDATE_WORD is gngk_hw_cz_update_word
+
+
 @pytest.mark.parametrize(
-    ("form_type", "graph_cls", "expected_update"),
+    ("form_type", "graph_cls", "expected_delete", "expected_update"),
     [
-        ("xjcg_tender", XjcgTenderGraph, update_word),
-        ("gngk_hw_zc_tender", GngkHwZcTenderGraph, update_word),
-        ("gngk_hw_cz_tender", GngkHwCzTenderGraph, update_word),
-        ("gngk_fw_cz_tender", GngkFwCzTenderGraph, update_word),
-        ("gngk_fw_zc_tender", GngkFwZcTenderGraph, gngk_fw_zc_update_word),
-        ("gjgk_tender", GjgkTenderGraph, gjgk_update_word),
+        ("xjcg_tender", XjcgTenderGraph, delete_tender_param, update_word),
+        (
+            "gngk_hw_zc_tender",
+            GngkHwZcTenderGraph,
+            delete_tender_param,
+            update_word,
+        ),
+        (
+            "gngk_hw_cz_tender",
+            GngkHwCzTenderGraph,
+            gngk_hw_cz_delete_tender_param,
+            gngk_hw_cz_update_word,
+        ),
+        (
+            "gngk_fw_cz_tender",
+            GngkFwCzTenderGraph,
+            delete_tender_param,
+            update_word,
+        ),
+        (
+            "gngk_fw_zc_tender",
+            GngkFwZcTenderGraph,
+            gngk_fw_zc_delete_tender_param,
+            gngk_fw_zc_update_word,
+        ),
+        ("gjgk_tender", GjgkTenderGraph, None, gjgk_update_word),
     ],
 )
-def test_generate_graph_registry_uses_shared_style_extract_and_expected_update_routes(
+def test_generate_graph_registry_uses_expected_first_generate_word_routes(
     form_type: str,
     graph_cls: type,
+    expected_delete,
     expected_update,
 ) -> None:
     document_service._init_graph_registry()
 
     assert document_service.GRAPH_REGISTRY[form_type] is graph_cls
     assert graph_cls.NODE_EXTRACT_TENDER_PARAMS is extract_tender_params
+    if expected_delete is not None:
+        assert graph_cls.NODE_DELETE_TENDER_PARAM is expected_delete
     assert graph_cls.NODE_UPDATE_WORD is expected_update
 
 

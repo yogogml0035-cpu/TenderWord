@@ -243,13 +243,15 @@ Assert-WindowsVenvCompatible -PyVenvConfigPath $backendPyVenvConfig -FailureMess
 Assert-PathExists -Path $backendEnv -FailureMessage "缺少 backend\.env。请先参考 backend\.env.example 创建环境文件。"
 
 $shellPath = Get-PowerShellHostPath
+$frontendNodeExe = $null
+$frontendNpmCmd = $null
 
 if ($launchFrontend) {
     Assert-PathExists -Path $frontendPackage -FailureMessage "未找到 frontend\package.json。请确认当前目录是项目根目录。"
     Assert-PathExists -Path $frontendEnv -FailureMessage "缺少 frontend\.env.local。请先参考 frontend\.env.local.example 创建环境文件。"
     Assert-PathExists -Path $frontendNodeModules -FailureMessage "缺少 frontend\node_modules。请先进入 frontend 执行 npm install。"
-    $null = Get-CommandPath -Name "npm" -FailureMessage "未找到 npm 命令。请先安装 Node.js 或确保 npm 在 PATH 中。"
-    $cmdPath = if ($env:ComSpec) { $env:ComSpec } else { Get-CommandPath -Name "cmd.exe" -FailureMessage "未找到 cmd.exe。" }
+    $frontendNodeExe = Get-CommandPath -Name "node.exe" -FailureMessage "未找到 node.exe 命令。请先安装 Windows Node.js 或确保 node.exe 在 PATH 中。"
+    $frontendNpmCmd = Get-CommandPath -Name "npm.cmd" -FailureMessage "未找到 npm.cmd 命令。请先安装 Windows Node.js 或确保 npm.cmd 在 PATH 中。"
 }
 
 Assert-PortFree -Port 8000
@@ -257,7 +259,33 @@ if ($launchFrontend) {
     Assert-PortFree -Port 8502
 }
 
-$frontendCommandText = 'if exist "node_modules\.bin\next.cmd" (npm run dev) else (echo [frontend] 检测到缺少 Windows Node.js shim，正在执行 npm ci... && npm ci && npm run dev)'
+$frontendNodeExeLiteral = "'" + (Escape-SingleQuotedText -Text $frontendNodeExe) + "'"
+$frontendNpmCmdLiteral = "'" + (Escape-SingleQuotedText -Text $frontendNpmCmd) + "'"
+$frontendCommandText = @"
+if (-not (Test-Path -LiteralPath "node_modules\.bin\next.cmd")) {
+    Write-Host "[frontend] 检测到缺少 Windows Node.js shim，正在执行 npm ci..." -ForegroundColor Yellow
+    & $frontendNpmCmdLiteral ci
+    if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+} else {
+    & $frontendNodeExeLiteral -e "require('lightningcss')" *> `$null
+    if (`$LASTEXITCODE -ne 0) {
+        Write-Host "[frontend] 检测到 Windows 原生前端依赖缺失或平台不匹配，正在执行 npm ci..." -ForegroundColor Yellow
+        & $frontendNpmCmdLiteral ci
+        if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+    }
+}
+if (Test-Path -LiteralPath ".next") {
+    Write-Host "[frontend] 正在清理 Next.js 缓存..." -ForegroundColor Yellow
+    Remove-Item -LiteralPath ".next" -Recurse -Force
+}
+& $frontendNodeExeLiteral -e "require('lightningcss')" *> `$null
+if (`$LASTEXITCODE -ne 0) {
+    Write-Host "[frontend] 检测到 Windows 原生前端依赖缺失或平台不匹配，正在执行 npm ci..." -ForegroundColor Yellow
+    & $frontendNpmCmdLiteral ci
+    if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+}
+& $frontendNpmCmdLiteral run dev
+"@
 $frontendBanner = "[frontend] 正在执行 npm run dev"
 $frontendTitle = "TenderWord Frontend Dev (8502)"
 $frontendSummary = "dev (npm run dev)"
@@ -311,8 +339,8 @@ try {
     if ($launchFrontend) {
         Start-Sleep -Seconds 1
 
-        $frontendProcess = Start-CmdServiceWindow `
-            -CmdPath $cmdPath `
+        $frontendProcess = Start-ServiceWindow `
+            -ShellPath $shellPath `
             -Title $frontendTitle `
             -WorkingDirectory $frontendDir `
             -Banner $frontendBanner `
