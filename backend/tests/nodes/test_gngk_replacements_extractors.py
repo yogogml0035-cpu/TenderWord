@@ -4,7 +4,9 @@ from backend.nodes.common_word_nodes.get_replacements_shared import (
     extract_public_tender_buyer_name,
     extract_public_tender_bzj_rule,
     extract_public_tender_contact_fields,
+    extract_public_tender_investment,
     extract_public_tender_platform,
+    format_public_tender_investment_value,
 )
 from backend.nodes.gngk_word_nodes.gngk_fw_zc_get_replacements import (
     GNGK_FW_ZC_EXTRACTORS,
@@ -122,6 +124,60 @@ def test_extract_public_tender_buyer_name_matches_service_template() -> None:
     )
 
     assert extracted == "上海市皮肤病医院"
+
+
+def test_extract_public_tender_buyer_name_supports_procurement_label() -> None:
+    log_parts: list[str] = []
+
+    extracted = extract_public_tender_buyer_name(
+        "采购人：复旦大学附属中山医院\n采购代理机构：上海东松医疗科技股份有限公司",
+        {"buyer_name": "新采购人"},
+        log_parts,
+    )
+
+    assert extracted == "复旦大学附属中山医院"
+
+
+def test_extract_public_tender_buyer_name_supports_bidder_label() -> None:
+    log_parts: list[str] = []
+
+    extracted = extract_public_tender_buyer_name(
+        "招标人：复旦大学附属中山医院\n招标代理机构：上海东松医疗科技股份有限公司",
+        {"buyer_name": "新采购人"},
+        log_parts,
+    )
+
+    assert extracted == "复旦大学附属中山医院"
+
+
+def test_extract_public_tender_investment_reads_budget_amount_only() -> None:
+    log_parts: list[str] = []
+
+    extracted = extract_public_tender_investment(
+        "预算金额：450 万元（人民币）\n最高限价：450 万元",
+        {"investment": "140.0"},
+        log_parts,
+    )
+
+    assert extracted == "450"
+
+
+def test_extract_public_tender_investment_ignores_ceiling_amount() -> None:
+    log_parts: list[str] = []
+
+    extracted = extract_public_tender_investment(
+        "最高限价：450 万元",
+        {"investment": "140.0"},
+        log_parts,
+    )
+
+    assert extracted is None
+
+
+def test_format_public_tender_investment_value_strips_only_invalid_trailing_zeroes() -> None:
+    assert format_public_tender_investment_value("140.0") == "140"
+    assert format_public_tender_investment_value("140.5") == "140.5"
+    assert format_public_tender_investment_value("140.05") == "140.05"
 
 
 def test_extract_public_tender_contact_fields_matches_service_template() -> None:

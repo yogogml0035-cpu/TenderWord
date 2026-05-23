@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 from backend.nodes.common_word_nodes.get_replacements_core import (
@@ -307,35 +308,82 @@ def extract_public_tender_buyer_name(
     if not doc_content or not state.get("buyer_name"):
         return None
 
+    def _extract_from_text(text: str) -> Optional[str]:
+        for raw_line in re.split(r"[\r\n\x07]+", text):
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            match = re.search(r"(采购人|招标人)\s*[：:]\s*(.+)", line)
+            if not match:
+                continue
+
+            label = match.group(1)
+            candidate = re.split(
+                r"\s*(?:采购代理机构|招标代理机构|代理机构名称|代理机构|地址|联系人|电话)\s*[：:]",
+                match.group(2),
+                maxsplit=1,
+            )[0].strip()
+            if candidate:
+                log_parts.append(f"从首页提取{label}名称: {candidate}")
+                return candidate
+        return None
+
     first_page_content = doc_content[:5000] if len(doc_content) > 5000 else doc_content
-    buyer_pos = doc_content.find("招标人")
-    if buyer_pos != -1:
-        search_start = max(0, buyer_pos - 100)
-        search_end = min(len(doc_content), buyer_pos + 2000)
-        first_page_content = doc_content[search_start:search_end]
-        log_parts.append(
-            f"在位置 {buyer_pos} 找到 '招标人'，在范围 [{search_start}, {search_end}] 中搜索"
-        )
-    else:
-        log_parts.append("在文档中未找到 '招标人'，在前 5000 个字符中搜索")
+    extracted = _extract_from_text(first_page_content)
+    if extracted:
+        return extracted
 
-    buyer_name_pattern = (
-        r"招标人[:：]\s*([^\n\r]+?)(?:\s*\n\s*招标代理机构|招标代理机构)"
-    )
-    match = re.search(buyer_name_pattern, first_page_content, re.DOTALL)
-    if match:
-        extracted_buyer_name = match.group(1).strip()
-        log_parts.append(f"从首页提取招标人名称: {extracted_buyer_name}")
-        return extracted_buyer_name
+    if len(doc_content) > 5000:
+        log_parts.append("首页内容中未找到 '采购人/招标人' 模式，尝试全文搜索")
+        extracted = _extract_from_text(doc_content)
+        if extracted:
+            return extracted
 
-    buyer_name_pattern2 = r"招标人[:：]\s*([^招标]+?)(?=\s*招标代理机构)"
-    match2 = re.search(buyer_name_pattern2, first_page_content, re.DOTALL)
-    if match2:
-        extracted_buyer_name = match2.group(1).strip()
-        log_parts.append(f"提取招标人名称 (备用模式): {extracted_buyer_name}")
-        return extracted_buyer_name
+    log_parts.append("在文档中未找到 '采购人/招标人' 模式")
+    return None
 
-    log_parts.append("在首页内容中未找到 '招标人' 模式")
+
+def format_public_tender_investment_value(value: Any) -> str:
+    """Normalize investment amount text for replacement pairs."""
+    text = str(value or "").strip().replace(",", "").replace("，", "")
+    if not text:
+        return ""
+
+    amount_match = re.search(r"[-+]?\d+(?:\.\d+)?", text)
+    if not amount_match:
+        return text
+
+    amount_text = amount_match.group(0)
+    try:
+        normalized = format(Decimal(amount_text), "f")
+    except InvalidOperation:
+        return amount_text
+
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    return normalized
+
+
+def extract_public_tender_investment(
+    doc_content: str, state: Any, log_parts: List[str]
+) -> Optional[str]:
+    """Extract the budget amount only from explicit 预算金额 lines."""
+    if not doc_content or state.get("investment") in (None, ""):
+        return None
+
+    for raw_line in re.split(r"[\r\n\x07]+", doc_content):
+        line = raw_line.strip()
+        if not re.search(r"预算金额\s*[：:]", line):
+            continue
+
+        value_part = re.split(r"预算金额\s*[：:]", line, maxsplit=1)[1]
+        extracted = format_public_tender_investment_value(value_part)
+        if extracted:
+            log_parts.append(f"提取预算金额: {extracted}")
+            return extracted
+
+    log_parts.append("未找到 '预算金额' 行，跳过 investment 提取")
     return None
 
 
@@ -663,6 +711,7 @@ __all__ = [
     "extract_public_tender_buyer_name",
     "extract_public_tender_bzj_rule",
     "extract_public_tender_contact_fields",
+    "extract_public_tender_investment",
     "extract_public_tender_project_content",
     "extract_procurement_platform",
     "extract_project_name",
@@ -670,6 +719,7 @@ __all__ = [
     "extract_project_number_from_project_header",
     "extract_public_tender_platform",
     "extract_service_fee",
+    "format_public_tender_investment_value",
     "extract_shell_dates",
     "extract_submit_date",
     "make_platform_extractor",

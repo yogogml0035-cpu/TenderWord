@@ -10,6 +10,7 @@ Source: prd.json
 - `run_get_replacements` builds `placeholder_mapping` and `replacements` from extractor specs and replacement field specs; this task should reuse that mechanism.
 - Core validation can use mocked document content and should not require a real external tender lookup API.
 - Tender data fields that feed generation should be synchronized across `backend/models/tender.py`, `backend/states/base_state.py`, `backend/services/document_service.py` initial/rewrite state keys, `backend/util/common_util/fetch_tender_data.py`, `backend/api/tender.py`, and `frontend/types/api.ts`.
+- Public tender buyer extraction should support both `采购人` and `招标人` labels, while budget extraction should treat only explicit `预算金额` lines as the `investment` source; `最高限价` remains a downstream global replacement effect, not a source field.
 
 ## 2026-05-23 23:49 - US-001
 - 补齐了 `investment` 预算金额数据契约：后端 `TenderData`、公共 graph state、生成初始 state、rewrite snapshot keys、edit state、接口抓取与 tender API 响应都能携带该字段；前端 `TenderData` 类型新增可选 `investment`，保持旧数据兼容。
@@ -19,4 +20,14 @@ Source: prd.json
   - 新增 `TenderData` 字段不能只改 Pydantic model；如果后续 rewrite/edit 或会话恢复需要沿用该字段，也要同步 `REWRITE_STATE_KEYS` 和 `DocumentService` 的状态构建。
   - `fetch_tender_data` 返回字典后，`backend/api/tender.py` 会重新构造 `TenderData`，新增字段需要在这层显式透传，否则 API 响应会被默认值吞掉。
   - Windows 下跑前端 Jest 单文件时，使用 `--runTestsByPath` 加正斜杠路径更稳定；反斜杠 pattern 可能出现 `No tests found`。
+---
+
+## 2026-05-24 00:01 - US-002
+- 扩展了公开招标采购人提取 helper，使 `采购人：...` 与 `招标人：...` 都能提取为 `buyer_name` 旧值；新增预算金额提取和金额格式化 helper，只从 `预算金额` 行提取旧数字，并将 `140.0` 归一为 `140`、保留有效小数。
+- 更改的文件：`backend/nodes/common_word_nodes/get_replacements_shared.py`、`backend/tests/nodes/test_gngk_replacements_extractors.py`、`tasks/gngk-hw-zc-field-replacement-fix/prd.json`、`tasks/gngk-hw-zc-field-replacement-fix/progress.txt`。
+- 验证：`backend\.venv\Scripts\python.exe -m pytest backend\tests\nodes\test_gngk_replacements_extractors.py -v` 通过，`14 passed`；在 `backend/` 下执行 `.\.venv\Scripts\python.exe -m pytest tests -v` 通过，`277 passed, 1 warning`。
+- **未来迭代的学习：**
+  - 公开招标的采购人字段在模板里可能使用 `采购人` 或 `招标人`，helper 应按标签行提取并在代理机构、地址、联系人、电话等后续标签前截断。
+  - `investment` 的旧值来源只能是带 `预算金额` 标签的行；即使 `最高限价` 使用同一数字，也应交给后续全局替换链路处理。
+  - 金额归一化使用纯 helper 更容易单测，避免在 Word COM 读取或 replacement core 中写类型专属金额规则。
 ---
