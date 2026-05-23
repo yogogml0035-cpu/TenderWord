@@ -163,7 +163,7 @@ TenderWord 是前后端分离的招标文档生成、修改和模板复用系统
 
 ## 验证入口
 
-- 后端常规验证：在 `backend/` 运行 `python -m pytest tests -v`。
+- 后端常规验证：在 `backend/` 运行 `.\.venv\Scripts\python.exe -m pytest tests -v`。
 - 前端常规验证：在 `frontend/` 运行 `npm run lint`、`npm run type-check`、相关 `npm run test`。
 - 前端 E2E：在 `frontend/` 运行 `npm run test:e2e`。
 - 文档型变更：根目录运行 `git diff --check`，并扫描文档中的密钥/token 模式。

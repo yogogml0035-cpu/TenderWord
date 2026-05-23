@@ -67,14 +67,14 @@ backend/tests/
 
 ```powershell
 cd backend
-python -m pytest tests -v
+.\.venv\Scripts\python.exe -m pytest tests -v
 ```
 
 Word COM 诊断：
 
 ```powershell
 cd backend
-python scripts/diagnose_word.py
+.\.venv\Scripts\python.exe scripts\diagnose_word.py
 ```
 
 WSL 无 COM 单测：

@@ -389,6 +389,7 @@ guide/       可选目录；若存在，仅放本地 Git / worktree 操作说明
 - 系统运行前提是 Windows + Word COM。
 - 但凡能脱离 COM 的逻辑，都应拆出来做单测。
 - Windows 环境只承担必要的 COM 集成验证，不应该承载所有业务逻辑测试。
+- Windows PowerShell 中后端命令优先显式调用 `backend\.venv\Scripts\python.exe`；裸 `python` 不存在只说明 PATH 未配置，不等于后端虚拟环境损坏。若 Codex 沙箱内 venv 启动器报 `Unable to create process` 或 `Access denied`，必须先用真实 Windows PowerShell / `powershell.exe -NoProfile` 复查后再下结论。
 - 即使智能体当前在 WSL 中工作，也必须把 Windows 启动路径视为一等约束；涉及启动脚本、依赖安装、路径解析、前端原生依赖、后端虚拟环境或 Word COM 的改动，必须同时考虑 Windows PowerShell 运行方式和 `scripts\start-dev.ps1` 兼容性。
 
 ### WSL 环境执行规范
@@ -454,9 +455,9 @@ npm run build
 
 ```bash
 cd backend
-python main.py
-python -m pytest tests -v
-python scripts/diagnose_word.py
+.\.venv\Scripts\python.exe main.py
+.\.venv\Scripts\python.exe -m pytest tests -v
+.\.venv\Scripts\python.exe scripts\diagnose_word.py
 ```
 
 ### 根目录脚本

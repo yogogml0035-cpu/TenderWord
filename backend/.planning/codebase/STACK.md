@@ -56,7 +56,7 @@
 
 ```powershell
 cd backend
-python main.py
+.\.venv\Scripts\python.exe main.py
 ```
 
 或从仓库根目录：
@@ -77,8 +77,8 @@ Windows 后端：
 
 ```powershell
 cd backend
-python -m pytest tests -v
-python scripts/diagnose_word.py
+.\.venv\Scripts\python.exe -m pytest tests -v
+.\.venv\Scripts\python.exe scripts\diagnose_word.py
 ```
 
 WSL 后端无 COM 单测：
