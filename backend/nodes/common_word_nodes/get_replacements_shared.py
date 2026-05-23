@@ -625,30 +625,54 @@ def extract_public_tender_contact_fields(
             return match.group("value")
         return None
 
+    contact_name_label_pattern = r"(?:项目联系人|联系人)"
+    contact_stop_label_pattern = r"(?:电\s*话|传真|电子邮箱|邮箱)"
+
+    def _clean_contact_name(value: str) -> str:
+        name_part = re.split(
+            rf"\s*{contact_stop_label_pattern}\s*[：:]",
+            value,
+            maxsplit=1,
+        )[0]
+        return _strip_wrappers(name_part)
+
     if state.get("project_zbr_xbr"):
-        anchor_pattern = r"邮编[:：]\s*200002\s*(?:\r?\n\s*)*联系人[:：]\s*(.*?)\s*电话[:：]\s*021-63230480\s*转"
+        anchor_pattern = (
+            rf"邮编[:：]\s*200002\s*(?:\r?\n\s*)*"
+            rf"{contact_name_label_pattern}\s*[：:]\s*(.*?)"
+            rf"(?=\s*{contact_stop_label_pattern}\s*[：:])"
+        )
         extracted = _extract_with_pattern(anchor_pattern, anchor_range, re.DOTALL)
         if extracted:
-            project_zbr_xbr = _strip_wrappers(extracted)
+            project_zbr_xbr = _clean_contact_name(extracted)
             log_parts.append(f"按锚点提取项目负责人/项目经办人: {project_zbr_xbr}")
         else:
-            contact_pattern = r"联系人[:：]\s*([^\n\r]+)"
-            extracted = _extract_with_pattern(contact_pattern, search_range)
+            contact_pattern = (
+                rf"{contact_name_label_pattern}\s*[：:]\s*(.*?)"
+                rf"(?=\s*{contact_stop_label_pattern}\s*[：:]|[\n\r\x07]|$)"
+            )
+            extracted = _extract_with_pattern(contact_pattern, search_range, re.DOTALL)
             if extracted:
-                project_zbr_xbr = _strip_wrappers(extracted)
+                project_zbr_xbr = _clean_contact_name(extracted)
                 log_parts.append(f"提取项目负责人/项目经办人: {project_zbr_xbr}")
             else:
                 log_parts.append("未找到项目负责人/项目经办人可提取内容")
 
     if state.get("zbr_xbr_tel"):
-        anchor_pattern = r"电话[:：]\s*021-63230480\s*转\s*(.*?)\s*传真[:：]"
+        anchor_pattern = (
+            rf"电\s*话[:：]\s*021-63230480\s*转\s*(.*?)"
+            rf"(?=\s*(?:传真|电子邮箱|邮箱)\s*[：:])"
+        )
         extracted = _extract_with_pattern(anchor_pattern, anchor_range, re.DOTALL)
         if extracted:
             zbr_xbr_tel = _strip_wrappers(re.sub(r"\s+", "", extracted))
             log_parts.append(f"按锚点提取负责人/经办人电话: {zbr_xbr_tel}")
         else:
-            tel_pattern = r"电话[:：]\s*[^\n\r]*转\s*([^\n\r]+)"
-            extracted = _extract_with_pattern(tel_pattern, search_range)
+            tel_pattern = (
+                r"电\s*话[:：]\s*[^\n\r]*?转\s*(.*?)"
+                r"(?=\s*(?:传真|电子邮箱|邮箱)\s*[：:]|[\n\r\x07]|$)"
+            )
+            extracted = _extract_with_pattern(tel_pattern, search_range, re.DOTALL)
             if extracted:
                 zbr_xbr_tel = _strip_wrappers(re.sub(r"\s+", "", extracted))
                 log_parts.append(f"提取负责人/经办人电话: {zbr_xbr_tel}")

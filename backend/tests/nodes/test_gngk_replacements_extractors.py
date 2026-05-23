@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from backend.nodes.common_word_nodes.get_replacements_shared import (
     extract_public_tender_buyer_name,
     extract_public_tender_bzj_rule,
@@ -194,6 +196,61 @@ def test_extract_public_tender_contact_fields_matches_service_template() -> None
     )
 
     assert extracted == ("史倩倩、陈雯婷", "8607、8619", "shiqianqian")
+
+
+@pytest.mark.parametrize(
+    "stop_fragment",
+    [
+        "电话：021-63230480 转8607、8619",
+        "电 话：021-63230480 转8607、8619",
+        "传真：021-63299235",
+        "邮箱：shiqianqian@dongsong-cn.com",
+        "电子邮箱：shiqianqian@dongsong-cn.com",
+    ],
+)
+def test_extract_public_tender_project_contact_stops_before_contact_labels(
+    stop_fragment: str,
+) -> None:
+    doc_content = f"""
+招标代理机构：上海东松医疗科技股份有限公司
+地址：上海市宁波路1号申华金融大厦11楼
+邮编：200002
+项目联系人：史倩倩、刘宇昂 {stop_fragment}
+""".strip()
+    log_parts: list[str] = []
+
+    project_zbr_xbr, _, _ = extract_public_tender_contact_fields(
+        doc_content,
+        {"project_zbr_xbr": "新主办协办"},
+        log_parts,
+    )
+
+    assert project_zbr_xbr == "史倩倩、刘宇昂"
+
+
+def test_extract_public_tender_contact_fields_supports_generic_contact_before_spaced_phone() -> None:
+    doc_content = """
+招标代理机构：上海东松医疗科技股份有限公司
+地址：上海市宁波路1号申华金融大厦11楼
+邮编：200002
+联系人：史倩倩、刘宇昂
+电 话：021-63230480 转8607、8619
+传真：021-63299235
+电子邮箱：shiqianqian@dongsong-cn.com
+""".strip()
+    log_parts: list[str] = []
+
+    extracted = extract_public_tender_contact_fields(
+        doc_content,
+        {
+            "project_zbr_xbr": "新主办协办",
+            "zbr_xbr_tel": "新电话",
+            "zbr_pinyin": "newpinyin",
+        },
+        log_parts,
+    )
+
+    assert extracted == ("史倩倩、刘宇昂", "8607、8619", "shiqianqian")
 
 
 def test_extract_public_tender_bzj_rule_matches_service_template() -> None:
