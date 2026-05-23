@@ -114,6 +114,11 @@
 - 公开招标 family 的共享 replacement 逻辑在 `backend/nodes/gngk_word_nodes/gngk_get_replacements.py`。
 - `gngk_get_replacements.py` 只提供公共 extractor / replacement field 构建器，不作为 graph 节点兼容别名。
 - 当前 graph wrapper 真名是 `gngk_hw_zc_get_replacements` 与 `gngk_fw_zc_get_replacements`。
+- `gngk_hw_zc_get_replacements` 当前保持薄 wrapper，直接复用 `build_gngk_common_extractors()` 与 `build_gngk_common_replacement_fields()`；不要为货物自筹重新插入 `project_content_v1` 或 `similar_project_performance_date` 这两个历史特殊字段。
+- 公开招标 family 的 `buyer_name` 旧值支持 `采购人：...` 与 `招标人：...` 双标签；命中后在采购代理、招标代理、地址、联系人、电话等后续标签前截断。
+- `investment` 是预算金额替换字段，旧值只能来自显式 `预算金额：...` 行；`最高限价` 不作为 `investment` 旧值来源。替换对只提供旧数字到新数字，正文中同数字的全局替换范围继续由 `replace_content` 负责。
+- `investment` 新值格式化由 `ReplacementFieldSpec.new_value_formatter` 绑定 `format_public_tender_investment_value()` 完成：`140.0` 归一为 `140`，`140.5` / `140.05` 等有效小数保持。
+- `project_zbr_xbr` 旧值支持 `项目联系人：...` 与 `联系人：...`，并在 `电话`、`电 话`、`传真`、`邮箱`、`电子邮箱` 等联系方式标签前停止；修改该边界时要同时锁定 `zbr_xbr_tel` 与 `zbr_pinyin` 既有提取结果。
 - 受保护字段 profile 与 `direct_replace` 边界详见 `asset/shared_runtime_word_skill_knowledge_pack.md`。
 
 ## 前端表单与任务分派
@@ -180,6 +185,7 @@
 ## 关联测试与验证入口
 
 - 后端类型与 graph：`backend/tests/graphs/test_gngk_tender_graph.py`、`backend/tests/graphs/test_gjgk_tender_graph.py`、`backend/tests/config/test_tender_config_protected_fields.py`
+- 后端公开招标 replacement：`backend/tests/nodes/test_gngk_replacements_extractors.py`
 - 后端服务装配：`backend/tests/services/test_document_service_initial_state.py`
 - 后端运行时分发：`backend/tests/nodes/test_tender_aware_word_dispatch.py`
 - 前端映射与注册：`frontend/__tests__/unit/utils/test_tender_type_mapper.test.ts`、`frontend/__tests__/unit/lib/test_form_data_converter.test.ts`、`frontend/__tests__/unit/components/chat/test_tender_form_registry.test.tsx`
@@ -190,6 +196,9 @@
 ## 回归风险
 
 - 类型元数据仍分散在前后端多个位置；新增类型不能只改一侧。
+- `gngk_hw_zc` replacement 边界回归时，容易把服务/国际公开历史字段误带回货物自筹；必须确认 `project_content_v1` 与 `similar_project_performance_date` 不在提取器、字段列表或模拟替换结果中。
+- 预算金额提取不能为了覆盖正文最高限价而反向读取 `最高限价` 行；同金额联动应保持在后续全局替换机制内。
+- 联系人姓名与联系方式可能被 Word 文本读成同一行；`project_zbr_xbr` 需要依赖停止标签截断，而不是假设换行一定存在。
 - `tender_config.py` 与 `DocumentService.REWRITE_DEFAULT_ANCHORS` 当前存在双份默认锚点语义，只改其中一处会导致 rewrite 与 generate / edit 漂移。
 - `gngk_fw_cz` 当前没有像 `gngk_fw_zc` 那样在 skill runtime 专门分发；若业务希望两者一致，必须显式改代码与测试。
 - 绕过 canonical URL helper 手工 patch 参数，容易留下与当前会话不一致的残余 URL。

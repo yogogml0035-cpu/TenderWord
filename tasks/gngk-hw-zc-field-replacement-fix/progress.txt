@@ -13,6 +13,7 @@ Source: prd.json
 - Public tender buyer extraction should support both `采购人` and `招标人` labels, while budget extraction should treat only explicit `预算金额` lines as the `investment` source; `最高限价` remains a downstream global replacement effect, not a source field.
 - Public tender contact extraction is shared across `gngk`/`gjgk`; `project_zbr_xbr` should support `项目联系人`/`联系人` and stop before contact-method labels such as `电话`/`电 话`/`传真`/`邮箱`/`电子邮箱`.
 - `ReplacementFieldSpec` supports `new_value_formatter` for field-level new-value normalization before replacement pair generation; use it for amount-like fields instead of pre-mutating generation state.
+- `gngk` graph/node/replacement boundary knowledge belongs in `asset/tender_type_identity_session_knowledge_pack.md`; reserve `asset/shared_runtime_word_skill_knowledge_pack.md` for shared runtime, Word helper, task result, and SSE contracts.
 
 ## 2026-05-23 23:49 - US-001
 - 补齐了 `investment` 预算金额数据契约：后端 `TenderData`、公共 graph state、生成初始 state、rewrite snapshot keys、edit state、接口抓取与 tender API 响应都能携带该字段；前端 `TenderData` 类型新增可选 `investment`，保持旧数据兼容。
@@ -52,4 +53,14 @@ Source: prd.json
   - `gngk_hw_zc_get_replacements` 现在应保持薄 wrapper，直接复用 gngk common extractor / field builder；不要重新插入 `project_content_v1` 或 `similar_project_performance_date` 这种类型外字段。
   - 金额类 replacement 新值归一化应挂在 `ReplacementFieldSpec.new_value_formatter`，这样旧值提取、state 原值和最终替换对边界更清楚。
   - 用 monkeypatch 替换 wrapper 内的 `run_get_replacements` 可以纯文本验证 `placeholder_mapping` 与 `replacements`，避免单测依赖 Word COM 或真实接口。
+---
+
+## 2026-05-24 00:51 - US-005
+- 同步了国内公开货物自筹 replacement 边界知识包：记录 `buyer_name` 的 `采购人/招标人` 双标签、`investment` 只从 `预算金额` 行提取且新值归一化、`project_zbr_xbr` 的联系方式停止标签，以及 `project_content_v1` / `similar_project_performance_date` 不属于货物自筹替换字段。
+- 更改的文件：`asset/README.md`、`asset/tender_type_identity_session_knowledge_pack.md`、`tasks/gngk-hw-zc-field-replacement-fix/prd.json`、`tasks/gngk-hw-zc-field-replacement-fix/progress.txt`。
+- 验证：`backend\.venv\Scripts\python.exe -m pytest backend\tests\nodes\test_gngk_replacements_extractors.py -v` 通过，`21 passed`；`backend\.venv\Scripts\python.exe -m pytest backend\tests\services\test_document_service_initial_state.py backend\tests\util\test_fetch_tender_data.py -v` 通过，`23 passed`；`backend\.venv\Scripts\python.exe -m pytest backend\tests\graphs\test_gngk_tender_graph.py -v` 通过，`10 passed, 1 warning`；在 `frontend/` 下执行 `npm run type-check` 通过。
+- **未来迭代的学习：**
+  - `gngk` graph/node/replacement 边界属于 `asset/tender_type_identity_session_knowledge_pack.md` 的维护范围；只有 Word COM、helper、任务结果或 SSE 主干才优先写入 `asset/shared_runtime_word_skill_knowledge_pack.md`。
+  - 知识包要记录稳定边界和验证入口，不保留本轮实现时间线；字段级修复应同时写清旧值来源、停止标签、字段列表排除项和对应测试路径。
+  - `backend/tests/nodes/test_gngk_replacements_extractors.py` 可以作为无真实接口、无 Word 文档依赖的 replacement 闭环验证入口。
 ---
