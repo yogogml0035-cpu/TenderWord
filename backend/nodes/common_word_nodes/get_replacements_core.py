@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import inspect
 from typing import Any, Callable, List, Optional, Tuple, Union
 
@@ -62,13 +62,14 @@ class ReplacementFieldSpec:
         field_name: 字段名称
         skip_if_equal: 如果旧值等于新值，是否跳过替换（默认 True）
         fallback_fields: 备用字段列表，当主字段值为空时按顺序尝试使用这些字段
+        new_value_formatter: 可选的新值格式化函数，用于字段级规范化后再生成替换对
 
     Example:
         ```python
         spec = ReplacementFieldSpec(
-            field_name="project_content_v1",
+            field_name="project_content",
             skip_if_equal=True,
-            fallback_fields=["project_content"]  # 用于 gngk 的 project_content_v1 fallback
+            fallback_fields=["project_summary"]
         )
         ```
     """
@@ -76,6 +77,7 @@ class ReplacementFieldSpec:
     field_name: str
     skip_if_equal: bool = True
     fallback_fields: Optional[List[str]] = None
+    new_value_formatter: Optional[Callable[[Any], Any]] = None
 
 
 # --- Word COM 工具导入 ---
@@ -285,6 +287,14 @@ def run_get_replacements(
                             f"字段 '{field_name}' 有占位符 '{old_value}' 但 state 中没有新值，跳过"
                         )
                         continue
+
+                    if field_spec.new_value_formatter is not None:
+                        new_value = field_spec.new_value_formatter(new_value)
+                        if not new_value:
+                            log_parts.append(
+                                f"字段 '{field_name}' 新值格式化后为空，跳过"
+                            )
+                            continue
                     
                     # 应用 skip_if_equal 规则
                     if field_spec.skip_if_equal and old_value == new_value:

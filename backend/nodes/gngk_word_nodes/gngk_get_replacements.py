@@ -14,11 +14,13 @@ from backend.nodes.common_word_nodes.get_replacements_shared import (
     extract_public_tender_buyer_name,
     extract_public_tender_bzj_rule,
     extract_public_tender_contact_fields,
+    extract_public_tender_investment,
     extract_public_tender_platform,
     extract_public_tender_project_content,
     extract_service_fee,
     extract_shell_dates,
     extract_submit_date,
+    format_public_tender_investment_value,
 )
 from backend.states import GngkTenderGraphState
 from backend.util.common_util.tender_number import extract_numeric_tail_project_number
@@ -162,6 +164,11 @@ def build_gngk_common_extractors(
             extract_callable=extract_public_tender_buyer_name,
         ),
         ExtractorSpec(
+            name="investment",
+            enabled_if=lambda state: state.get("investment") is not None,
+            extract_callable=extract_public_tender_investment,
+        ),
+        ExtractorSpec(
             name="contact_fields",
             enabled_if=lambda state: any(
                 [
@@ -199,7 +206,18 @@ def build_gngk_common_extractors(
 
 
 def build_gngk_common_replacement_fields() -> List[ReplacementFieldSpec]:
-    return build_common_replacement_fields()
+    fields = build_common_replacement_fields()
+    investment_field = ReplacementFieldSpec(
+        field_name="investment",
+        new_value_formatter=format_public_tender_investment_value,
+    )
+    for index, field in enumerate(fields):
+        if field.field_name == "buyer_name":
+            fields.insert(index + 1, investment_field)
+            break
+    else:
+        fields.append(investment_field)
+    return fields
 
 
 GNGK_COMMON_EXTRACTORS: List[ExtractorSpec] = build_gngk_common_extractors()

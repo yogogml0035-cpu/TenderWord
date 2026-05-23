@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import pathlib
-import re
 import sys
-from typing import List, Optional
+from typing import List
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
@@ -21,139 +20,10 @@ from backend.nodes.gngk_word_nodes.gngk_get_replacements import (
 from backend.states import GngkTenderGraphState
 
 
-def extract_project_content_v1(
-    doc_content: str, state: GngkTenderGraphState, log_parts: List[str]
-) -> Optional[str]:
-    """从正文中提取 project_content（v1）"""
-    if not doc_content:
-        return None
-    if not state.get("project_content") and not state.get("project_content_v1"):
-        return None
-
-    chapter_match = re.search(r"第二章\s*投标人须知", doc_content)
-    if not chapter_match:
-        log_parts.append("未找到起始章节标记「第二章 投标人须知」")
-        return None
-    chapter_pos = chapter_match.start()
-    log_parts.append(f"在位置 {chapter_pos} 找到章节标记「第二章 投标人须知」")
-
-    search_after_chapter = chapter_match.end()
-    project_name_marker = re.compile(r"项目名称\s*[：:]")
-    match_pn = project_name_marker.search(doc_content[search_after_chapter:])
-    if not match_pn:
-        log_parts.append("在章节之后未找到「项目名称：」")
-        return None
-
-    pn_pos = search_after_chapter + match_pn.start()
-    log_parts.append(f"在位置 {pn_pos} 找到「项目名称：」")
-
-    pn_line_start = pn_pos
-    while pn_line_start > 0 and doc_content[pn_line_start - 1] not in ("\n", "\r"):
-        pn_line_start -= 1
-    pn_line_end = pn_pos
-    while pn_line_end < len(doc_content) and doc_content[pn_line_end] not in (
-        "\n",
-        "\r",
-    ):
-        pn_line_end += 1
-    while pn_line_end < len(doc_content) and doc_content[pn_line_end] in ("\n", "\r"):
-        pn_line_end += 1
-    content_start = pn_line_end
-    log_parts.append(f"「项目名称：」下一段起始位置: {content_start}")
-
-    device_marker = re.compile(r"设备名称及数量\s*[：:]")
-    match_device = device_marker.search(doc_content[content_start:])
-    if not match_device:
-        log_parts.append("在内容起始之后未找到「设备名称及数量：」")
-        return None
-
-    device_pos = content_start + match_device.start()
-    log_parts.append(f"在位置 {device_pos} 找到「设备名称及数量：」")
-
-    candidates = []
-    for ch in ("\x07", "\r", "\n"):
-        idx = doc_content.find(ch, device_pos)
-        if idx != -1:
-            candidates.append(idx)
-    end_pos = min(candidates) if candidates else len(doc_content)
-
-    raw_extracted = doc_content[device_pos:end_pos]
-    extracted_content = raw_extracted.replace("\x07", "").strip()
-
-    if extracted_content:
-        log_parts.append(
-            f"成功提取 project_content_v1，长度: {len(extracted_content)} 字符"
-        )
-        log_parts.append(f"提取内容: {repr(extracted_content)}")
-        return extracted_content
-    log_parts.append("提取区间为空")
-    return None
-
-
-def extract_similar_project_performance_date(
-    doc_content: str, state: GngkTenderGraphState, log_parts: List[str]
-) -> Optional[str]:
-    del state
-    if not doc_content:
-        return None
-
-    marker = "2、类似项目业绩"
-    marker_pos = doc_content.find(marker)
-    if marker_pos == -1:
-        log_parts.append("未找到标记 '2、类似项目业绩'")
-        return None
-
-    next_item_pos = doc_content.find("3、", marker_pos + len(marker))
-    search_end = (
-        next_item_pos
-        if next_item_pos != -1
-        else min(len(doc_content), marker_pos + 8000)
-    )
-    search_range = doc_content[marker_pos:search_end]
-
-    pattern = r"(自\d{4}年\d{1,2}月\d{1,2}日至今)"
-    match = re.search(pattern, search_range)
-    if match:
-        extracted = match.group(1).strip()
-        log_parts.append(f"在“2、类似项目业绩”条目中提取日期: {extracted}")
-        return extracted
-
-    log_parts.append(
-        "在“2、类似项目业绩”条目范围内未找到日期模式 '自xxxx年xx月xx日至今'"
-    )
-    return None
-
-
-_GNGK_COMMON_EXTRACTORS = build_gngk_common_extractors()
-GNGK_HW_ZC_EXTRACTORS: List[ExtractorSpec] = [
-    _GNGK_COMMON_EXTRACTORS[0],
-    ExtractorSpec(
-        name="project_content_v1",
-        enabled_if=lambda state: state.get("project_content") is not None
-        or state.get("project_content_v1") is not None,
-        extract_callable=extract_project_content_v1,
-    ),
-    *_GNGK_COMMON_EXTRACTORS[1:],
-    ExtractorSpec(
-        name="similar_project_performance_date",
-        enabled_if=lambda state: state.get("similar_project_performance_date")
-        is not None,
-        extract_callable=extract_similar_project_performance_date,
-    ),
-]
-
-
-_GNGK_HW_ZC_BASE_REPLACEMENT_FIELDS = build_gngk_common_replacement_fields()
-GNGK_HW_ZC_REPLACEMENT_FIELDS: List[ReplacementFieldSpec] = [
-    _GNGK_HW_ZC_BASE_REPLACEMENT_FIELDS[0],
-    ReplacementFieldSpec(
-        field_name="project_content_v1",
-        skip_if_equal=True,
-        fallback_fields=["project_content"],
-    ),
-    *_GNGK_HW_ZC_BASE_REPLACEMENT_FIELDS[1:],
-    ReplacementFieldSpec(field_name="similar_project_performance_date"),
-]
+GNGK_HW_ZC_EXTRACTORS: List[ExtractorSpec] = build_gngk_common_extractors()
+GNGK_HW_ZC_REPLACEMENT_FIELDS: List[
+    ReplacementFieldSpec
+] = build_gngk_common_replacement_fields()
 GNGK_EXTRACTORS = GNGK_HW_ZC_EXTRACTORS
 GNGK_REPLACEMENT_FIELDS = GNGK_HW_ZC_REPLACEMENT_FIELDS
 
@@ -204,9 +74,9 @@ if __name__ == "__main__":
             "project_number": "253505",
             "project_name": "细胞电转仪",
             "project_content": "项目名称及数量：细胞电转仪   壹套",
-            "project_content_v1": "设备名称及数量：细胞电转仪/壹套",
             "bzj_rule": "项目预算的2%",
             "buyer_name": "复旦大学附属中山医院",
+            "investment": "140",
             "project_zbr_xbr": "徐旭东、任彧晟",
             "zbr_xbr_tel": "8605、8625",
             "zbr_pinyin": "xuxudong",
@@ -215,7 +85,6 @@ if __name__ == "__main__":
             "submit_date": "2025年12月12日11:00",
             "platform": "中国采购与招标网（https://www.chinabidding.cn/）",
             "service_fee": "百分之壹伍（1.5%）",
-            "similar_project_performance_date": "自2022年09月01日至今",
         }
 
         try:
