@@ -1,298 +1,117 @@
-<!-- refreshed: 2026-05-22 -->
-# Architecture
+<!-- refreshed: 2026-05-23 -->
+# 前端架构事实地图
 
-**Analysis Date:** 2026-05-22
+**分析日期：** 2026-05-23
 
-## System Overview
+**范围：** `frontend/`，并在启动、验证和 API 边界上参考根级 `AGENTS.md`、`README.md` 与 `scripts/`。
+
+## 系统总览
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                    Next.js App Router                        │
-│  `frontend/app/layout.tsx`, `frontend/app/page.tsx`,          │
-│  `frontend/app/tender/page.tsx`                               │
-└───────────────┬─────────────────────────────────────────────┘
-                │
-                ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  Tender Workspace Shell                      │
-├──────────────────┬──────────────────┬───────────────────────┤
-│ Tender Type Nav  │ Form Panel       │ Chat / Task Panel      │
-│ `frontend/components/chat/TenderTypeSidebar.tsx`              │
-│ `frontend/components/chat/FormPanel.tsx`                      │
-│ `frontend/components/chat/ChatPanel.tsx`                      │
-└────────┬─────────┴────────┬─────────┴──────────┬────────────┘
-         │                  │                     │
-         ▼                  ▼                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Client State and Runtime Streams                │
-│ `frontend/stores/chatStore.ts`                               │
-│ `frontend/stores/chatStreamStore.ts`                          │
-│ `frontend/stores/chatTaskSessionStore.ts`                     │
-└────────┬────────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Frontend API / SSE Boundary                     │
-│ `frontend/lib/api.ts`, `frontend/lib/sse.ts`,                 │
-│ `frontend/hooks/useChatSSE.ts`, `frontend/hooks/useTaskHeartbeat.ts` |
-└─────────────────────────────────────────────────────────────┘
+Next.js App Router
+  -> / 与 /tender 页面
+  -> 三栏工作台：类型侧栏 / 表单 / 聊天任务
+  -> Zustand sessionStorage 持久化
+  -> 统一 API client + SSE runtime
+  -> FastAPI /api
 ```
 
-## Component Responsibilities
+前端是 TenderWord 的浏览器工作台。它负责招标类型选择、URL 深链、会话和草稿、文件上传、模板候选弹窗、生成任务创建、普通聊天、rewrite/edit 任务创建、SSE 进度展示和下载入口。
 
-| Component | Responsibility | File |
-|-----------|----------------|------|
-| Root layout | Defines the app metadata, language, and global CSS import for every route. | `frontend/app/layout.tsx` |
-| Home page | Provides the `/` entry screen and links users into the workspace route. | `frontend/app/page.tsx` |
-| Tender page | Owns the three-column workspace, URL parameter intake, conversation bootstrap, tender-data prefetch, and conversation heartbeat. | `frontend/app/tender/page.tsx` |
-| Tender type sidebar | Groups conversations by frontend tender type, creates/selects conversations, renames/deletes them, and syncs blank conversation URLs. | `frontend/components/chat/TenderTypeSidebar.tsx` |
-| Form panel | Mounts the registered form for the selected tender type, creates generate tasks, attaches SSE and heartbeat monitoring, and renders queue/running overlays. | `frontend/components/chat/FormPanel.tsx` |
-| Chat panel | Handles normal chat, rewrite routing, edit task creation, edit-file upload, task cancellation, message retry, and download actions. | `frontend/components/chat/ChatPanel.tsx` |
-| Message list | Renders normal messages plus task log/content/download message variants. | `frontend/components/chat/MessageList.tsx` |
-| Shared tender form | Implements tender lookup, file upload, template candidate selection, insertion anchors, generation style, style writeback mode, and form validation. | `frontend/components/forms/TenderFormShared.tsx` |
-| Tender form registry | Maps `TenderType` values to display names, form components, and form-to-API converters. | `frontend/components/chat/tenderFormRegistry.ts` |
-| API client | Centralizes JSON requests, upload, task creation/status/cancel/heartbeat, downloads, template candidates, SSE URL building, and user NDJSON streams. | `frontend/lib/api.ts` |
-| SSE runtime | Wraps `EventSource` with reconnect, heartbeat timeout, Last-Event-ID query support, and duplicate event suppression. | `frontend/lib/sse.ts` |
-| Main persisted store | Holds conversations, drafts, task summaries, task-message mappings, unread result state, selected type, and canonical URL sync helpers. | `frontend/stores/chatStore.ts` |
-| Stream store | Holds in-memory task logs, AI text, progress, current node, and last SSE event id. | `frontend/stores/chatStreamStore.ts` |
-| Task session store | Persists task stream resume metadata in `sessionStorage`. | `frontend/stores/chatTaskSessionStore.ts` |
+## 主要层次
 
-## Pattern Overview
+| 层 | 职责 | 关键路径 |
+| --- | --- | --- |
+| 路由层 | App Router 页面边界、工作台组合、URL 参数接入 | `frontend/app/` |
+| 工作台 UI | 类型侧栏、表单面板、聊天面板、消息列表、任务消息 | `frontend/components/chat/` |
+| 表单层 | 各招标类型表单、共享字段、上传、模板候选、锚点、生成风格 | `frontend/components/forms/` |
+| 状态层 | 会话、草稿、任务摘要、stream runtime、历史、侧栏状态 | `frontend/stores/` |
+| API / SSE 层 | JSON、上传、下载、NDJSON、SSE URL、EventSource wrapper、任务心跳 | `frontend/lib/`, `frontend/hooks/` |
+| 类型与映射层 | 前端 TenderType、API 类型、聊天类型、URL canonical 化 | `frontend/types/`, `frontend/utils/` |
+| 测试层 | Jest 单元/集成测试与 Playwright E2E | `frontend/__tests__/`, `frontend/e2e/` |
 
-**Overall:** Client-heavy Next.js App Router workspace with Zustand session persistence and a centralized API/SSE boundary.
+## 关键运行链路
 
-**Key Characteristics:**
-- Use App Router pages only for route boundaries and workspace composition; the stateful `/tender` route is a client component in `frontend/app/tender/page.tsx`.
-- Use three explicit workspace panels, not nested page subroutes, for the tender type list, form, and chat/task timeline in `frontend/components/chat/TenderTypeSidebar.tsx`, `frontend/components/chat/FormPanel.tsx`, and `frontend/components/chat/ChatPanel.tsx`.
-- Use `frontend/stores/chatStore.ts` as the main session model and keep live SSE payload state in `frontend/stores/chatStreamStore.ts`.
-- Use `frontend/lib/api.ts` for all backend-facing request helpers; API request and response shapes are mirrored in `frontend/types/api.ts`.
-- Use `frontend/utils/tenderTypeMapper.ts` and `frontend/stores/chatStore.ts` for canonical URL construction and browser URL replacement.
+### `/tender` 深链与会话启动
 
-## Layers
+1. `frontend/hooks/useUrlParams.ts` 从 URL 解析 `tender_lx`、`purchase_method`、`fund_lx`、`tenderno`。
+2. `frontend/utils/tenderTypeMapper.ts` 只用 `purchase_method` 判定前端 `TenderType`。
+3. `frontend/app/tender/page.tsx` hydration 后选择或创建会话。
+4. `gngk` 会话按 `tenderType + tenderno + tender_lx + fund_lx` 精确匹配。
+5. URL 参数先写入 draft，再由 `TenderFormShared` 按 `draft > URL > default` 初始化。
+6. `syncBrowserUrlToConversation()` 与 store 层 `syncUrlToCurrentConversation()` 维护 canonical URL。
 
-**Routing Layer:**
-- Purpose: Define route boundaries and compose the workspace shell.
-- Location: `frontend/app/`
-- Contains: `frontend/app/layout.tsx`, `frontend/app/page.tsx`, `frontend/app/tender/page.tsx`, and `frontend/app/globals.css`.
-- Depends on: Next.js App Router APIs from `next/link` and `next/navigation`, plus workspace components from `frontend/components/chat/`.
-- Used by: Browser navigation to `/` and `/tender`; Playwright base routes in `frontend/e2e/test_home.spec.ts` and `frontend/e2e/test_url_conversation.spec.ts`.
+### 生成任务
 
-**Workspace UI Layer:**
-- Purpose: Present the three-column tender workflow and task state.
-- Location: `frontend/components/chat/`
-- Contains: Conversation navigation, form panel, chat panel, composer, message list, and task message components in `frontend/components/chat/TenderTypeSidebar.tsx`, `frontend/components/chat/FormPanel.tsx`, `frontend/components/chat/ChatPanel.tsx`, `frontend/components/chat/ChatInput.tsx`, `frontend/components/chat/TaskLogMessage.tsx`, `frontend/components/chat/TaskContentMessage.tsx`, and `frontend/components/chat/TaskDownloadMessage.tsx`.
-- Depends on: Stores in `frontend/stores/`, hooks in `frontend/hooks/`, API helpers in `frontend/lib/api.ts`, and types in `frontend/types/`.
-- Used by: `frontend/app/tender/page.tsx`.
+1. `TenderFormShared` 收集招标数据、上传文件、模板候选结果、插入锚点、生成风格和样式回填模式。
+2. `FormPanel` 通过 `tenderFormRegistry` 获取表单组件和转换器。
+3. `frontend/lib/formDataConverter.ts` 把前端类型转换为后端 `GenerateRequest.form_type`。
+4. `gngk` 由 `tender_lx + fund_lx` 分派到四套后端 form type；工程类当前复用服务链路。
+5. `frontend/lib/api.ts` 调用 `createGenerateTask()`。
+6. `chatStore.startTask()` 创建任务消息组和 task summary。
+7. `useCurrentConversationTaskStatus()` 查询队列/运行状态，`useChatSSE()` 连接任务 SSE。
+8. SSE `log`、`llm`、`progress`、`done`、`error` 进入 `chatStreamStore` 和任务消息。
+9. 任务完成后 `TaskDownloadMessage` 展示下载入口，下载仍经 `frontend/lib/api.ts`。
 
-**Form Layer:**
-- Purpose: Capture tender-specific inputs, fetch tender metadata, upload files, select templates, validate submission readiness, and emit normalized form data.
-- Location: `frontend/components/forms/`
-- Contains: Shared implementation in `frontend/components/forms/TenderFormShared.tsx`, thin type wrappers in `frontend/components/forms/XjcgTenderForm.tsx`, `frontend/components/forms/GngkTenderForm.tsx`, `frontend/components/forms/GjgkTenderForm.tsx`, defaults in `frontend/components/forms/tenderFormConfig.ts`, upload controls in `frontend/components/forms/FileUploader.tsx`, and template candidate UI in `frontend/components/forms/TemplateCandidateDialog.tsx`.
-- Depends on: `frontend/lib/tenderFetch.ts`, `frontend/lib/api.ts`, `frontend/utils/tenderTypeMapper.ts`, `frontend/stores/chatStore.ts`, and shared controls in `frontend/components/forms/shared/`.
-- Used by: `frontend/components/chat/FormPanel.tsx` through `frontend/components/chat/tenderFormRegistry.ts`.
+### 普通聊天、rewrite 与 edit
 
-**State Layer:**
-- Purpose: Store persistent session state, transient stream data, and UI history.
-- Location: `frontend/stores/`
-- Contains: Main chat/session/task store in `frontend/stores/chatStore.ts`, stream runtime in `frontend/stores/chatStreamStore.ts`, SSE resume metadata in `frontend/stores/chatTaskSessionStore.ts`, history state in `frontend/stores/historyStore.ts`, and sidebar/UI state in `frontend/stores/useAppStore.ts`.
-- Depends on: Zustand and Zustand middleware declared in `frontend/package.json`, type contracts in `frontend/types/`, and URL sync helpers in `frontend/utils/tenderTypeMapper.ts`.
-- Used by: Workspace components in `frontend/components/chat/`, layout components in `frontend/components/layout/`, and SSE hooks in `frontend/hooks/`.
+- 普通聊天和 rewrite 使用 `streamUserMessage()` 调用 `/api/user/stream` 并解析 NDJSON。
+- `route: reply` 追加普通 AI 消息；`route: rewrite` 接收 `task_accepted` 后进入任务/SSE 链路。
+- edit 模式由 `ChatPanel` 上传待改 Word 文件、构造 `EditTaskRequest` 并调用 `createEditTask()`。
+- edit 的 `form_type` 在 `ChatPanel` 中按当前页面类型和 draft 的 `tender_lx/fund_lx` 计算，必须与 `formDataConverter.ts` 保持同步。
+- `chat_input` 在消息受理时立即清空；中断恢复才使用 `pending_rewrite_prompt` / `pending_edit_prompt`。
 
-**API and Streaming Layer:**
-- Purpose: Own backend-facing HTTP calls, file downloads, NDJSON user streams, and task SSE streams.
-- Location: `frontend/lib/` and `frontend/hooks/`
-- Contains: API client in `frontend/lib/api.ts`, base URL resolver in `frontend/lib/apiBaseUrl.ts`, `EventSource` wrapper in `frontend/lib/sse.ts`, task SSE mapper in `frontend/hooks/useChatSSE.ts`, generic SSE hook in `frontend/hooks/useSSE.ts`, heartbeat hook in `frontend/hooks/useTaskHeartbeat.ts`, and task-status polling in `frontend/hooks/useCurrentConversationTaskStatus.ts`.
-- Depends on: API event and model types in `frontend/types/api.ts`.
-- Used by: `frontend/components/chat/FormPanel.tsx`, `frontend/components/chat/ChatPanel.tsx`, `frontend/components/forms/TenderFormShared.tsx`, and `frontend/components/forms/FileUploader.tsx`.
+### 模板候选
 
-**Type and Mapping Layer:**
-- Purpose: Centralize frontend tender identity, API request/response contracts, chat model types, and URL mapping.
-- Location: `frontend/types/` and `frontend/utils/`
-- Contains: `TenderType`, `TenderLx`, and `FundLx` in `frontend/types/index.ts`; API contracts in `frontend/types/api.ts`; chat/message contracts in `frontend/types/chat.ts`; URL and purchase-method mapping in `frontend/utils/tenderTypeMapper.ts`.
-- Depends on: No runtime services.
-- Used by: Forms, stores, API client, route bootstrap, and tests across `frontend/__tests__/unit/`.
+- `TenderFormShared` 打开 `TemplateCandidateDialog`。
+- 候选列表、选择和下载 URL 都通过 `frontend/lib/api.ts` 的 `/api/template-candidates*` helper。
+- 前端只展示后端返回的 `selectable` 与 `blocked_reason`，不直接请求外部候选接口或文件 URL。
+- 选择成功后，后端返回的 clean draft / origin tender 文件写回表单 draft。
 
-## Data Flow
+## 核心抽象
 
-### `/tender` Deep-Link and Conversation Bootstrap
+- `TenderType`：前端 UI 类型，仅有 `xjcg`、`gngk`、`gjgk`。
+- `GenerateRequest` / `EditTaskRequest`：前端镜像后端任务创建 payload，位于 `frontend/types/api.ts`。
+- `ConversationFormDraft`：每个会话的表单、文件、锚点、聊天输入和 pending 恢复状态。
+- `TaskMessageGroupIds`：一个 task id 对应 log/content/download 三类任务消息。
+- `chatStreamStore`：运行中任务的 transient logs、AI 文本、进度、当前节点和 `lastEventId`。
+- `buildCanonicalSearchParams()`：会话身份到浏览器 URL 的唯一构造入口。
+- `tenderFormRegistry`：TenderType 到显示名、表单组件和 generate converter 的注册表。
 
-1. `frontend/hooks/useUrlParams.ts` parses `tender_lx`, `purchase_method`, `fund_lx`, and `tenderno` through `frontend/utils/tenderTypeMapper.ts`.
-2. `frontend/app/tender/page.tsx` waits for hydration via `frontend/hooks/useHydrated.ts`, selects the URL tender type in `frontend/stores/chatStore.ts`, and computes a gngk identity key from `tenderType + tenderno + tender_lx + fund_lx`.
-3. `frontend/app/tender/page.tsx` reuses an existing conversation with `findConversationByTenderNo` or `findGngkConversationByIdentity` from `frontend/stores/chatStore.ts`, or creates one with `createConversation`.
-4. `frontend/app/tender/page.tsx` writes URL-derived `tender_lx` and `fund_lx` into the draft before `frontend/components/forms/TenderFormShared.tsx` initializes, preserving the draft-over-URL priority.
-5. `frontend/app/tender/page.tsx` calls `syncTenderDataDraft` from `frontend/lib/tenderFetch.ts`, which calls `fetchTenderDataWithType` in `frontend/lib/api.ts` and updates `ConversationFormDraft` in `frontend/stores/chatStore.ts`.
-6. `frontend/components/chat/FormPanel.tsx` and `frontend/components/chat/ChatPanel.tsx` read the current conversation and draft from `frontend/stores/chatStore.ts`.
+## 架构约束
 
-### Generate Task Path
+- 组件不直接裸写后端 `fetch`；统一通过 `frontend/lib/api.ts`。
+- JSON 错误统一收敛为 `ApiError`，UI 至少展示 message。
+- URL canonical 化统一走 `frontend/utils/tenderTypeMapper.ts` 和 store helper。
+- 会话、草稿和任务恢复语义继续使用 `sessionStorage`。
+- 从 `sessionStorage` 恢复 running task 前必须先查任务状态，404 / `TASK_NOT_FOUND` 收敛为本地中断态。
+- 新增 SSE 事件类型必须同步前端 `types/api.ts`、`useChatSSE` 和测试。
+- 类型 identity 或 `form_type` 分派变化必须同步 `formDataConverter.ts`、`ChatPanel.tsx`、`tenderTypeMapper.ts`、注册表、store 和测试。
 
-1. `frontend/components/forms/TenderFormShared.tsx` validates tender number, tender data, uploaded files, technical parameter files, and insertion anchors.
-2. `frontend/components/chat/FormPanel.tsx` receives form data through `tenderFormComponentMap` in `frontend/components/chat/tenderFormRegistry.ts`.
-3. `frontend/components/chat/FormPanel.tsx` selects the converter from `tenderFormConverterMap` in `frontend/components/chat/tenderFormRegistry.ts`.
-4. `frontend/lib/formDataConverter.ts` maps frontend `TenderType` and gngk `tender_lx + fund_lx` to backend `GenerateRequest.form_type` values defined in `frontend/types/api.ts`.
-5. `frontend/components/chat/FormPanel.tsx` calls `createGenerateTask` in `frontend/lib/api.ts`, then calls `startTask` in `frontend/stores/chatStore.ts`.
-6. `frontend/components/chat/FormPanel.tsx` immediately calls `getTaskStatus` in `frontend/lib/api.ts` to hydrate queue/progress metadata into `taskSummaries` in `frontend/stores/chatStore.ts`.
-7. `frontend/hooks/useCurrentConversationTaskStatus.ts` polls `getTaskStatus` and `getTaskList` from `frontend/lib/api.ts` for queue/running overlays.
-8. `frontend/hooks/useChatSSE.ts` connects to `/api/stream/{taskId}` through `frontend/hooks/useSSE.ts` and `frontend/lib/sse.ts` once the task is running.
-9. `frontend/hooks/useChatSSE.ts` maps `log`, `llm`, `progress`, `done`, and `error` events from `frontend/types/api.ts` into `frontend/stores/chatStreamStore.ts` and task messages in `frontend/stores/chatStore.ts`.
-10. `frontend/components/chat/MessageList.tsx` renders the task group with `frontend/components/chat/TaskLogMessage.tsx`, `frontend/components/chat/TaskContentMessage.tsx`, and `frontend/components/chat/TaskDownloadMessage.tsx`.
-11. `frontend/components/chat/ChatPanel.tsx` downloads completed files through `downloadFile` in `frontend/lib/api.ts`.
+## 反模式
 
-### Normal Chat, Rewrite, and Edit Path
+- 在组件中直接调用后端 URL 或外部模板候选 URL。
+- 手工 patch 单个 query 参数导致 canonical URL 与会话身份漂移。
+- 只在表单转换器或只在 ChatPanel 修改 gngk form type 分派。
+- 直接 append 任务消息，绕过 `chatStore` 的 task group 方法。
+- 把 pending rewrite/edit prompt 当成正常发送后的延迟清空机制。
+- 让用户态 SSE UI 展示候选打分、淘汰阈值等排障细节。
 
-1. `frontend/components/chat/ChatInput.tsx` keeps composer text in the current conversation draft through `frontend/components/chat/ChatPanel.tsx` and `frontend/stores/chatStore.ts`.
-2. For normal chat, `frontend/components/chat/ChatPanel.tsx` calls `streamUserMessage` in `frontend/lib/api.ts`, which posts NDJSON to `/api/user/stream`.
-3. `frontend/lib/api.ts` parses user stream events into the `UserStreamEvent` union from `frontend/types/api.ts`.
-4. For `route: reply`, `frontend/components/chat/ChatPanel.tsx` appends chunk/done content to a normal AI message in `frontend/stores/chatStore.ts`.
-5. For `route: rewrite`, `frontend/components/chat/ChatPanel.tsx` handles `task_accepted`, calls `startTask` in `frontend/stores/chatStore.ts`, and leaves task progress to `frontend/hooks/useChatSSE.ts`.
-6. For edit mode, `frontend/components/chat/ChatPanel.tsx` uploads the edit file through `uploadFile` in `frontend/lib/api.ts`, builds an `EditTaskRequest` from `frontend/types/api.ts`, calls `createEditTask`, and starts the accepted task in `frontend/stores/chatStore.ts`.
-7. `frontend/components/chat/ChatPanel.tsx` cancels a normal stream through an `AbortController` and cancels task work through `cancelTask` in `frontend/lib/api.ts`.
+## 错误处理
 
-### Template Candidate Path
+- `frontend/lib/api.ts` 将 HTTP / wrapped error 解析为 `ApiError`。
+- 表单、模板弹窗、聊天面板和任务消息展示用户可读错误。
+- `useTaskHeartbeat`、`useCurrentConversationTaskStatus` 和 `useChatSSE` 负责处理 terminal / missing task。
+- 后端重启通过会话心跳检测，并由 `chatStore.handleBackendRestart()` 收敛本地 running task。
+- 下载失败当前在 `ChatPanel` 中提示用户，并保留 console 错误用于排障。
 
-1. `frontend/components/forms/TenderFormShared.tsx` opens `frontend/components/forms/TemplateCandidateDialog.tsx` from the file-upload section.
-2. `frontend/components/forms/TenderFormShared.tsx` calls `fetchTemplateCandidates` in `frontend/lib/api.ts` with tender number and optional project name.
-3. `frontend/components/forms/TemplateCandidateDialog.tsx` displays `TemplateCandidate` rows from `frontend/types/api.ts` and builds stable row keys with `buildTemplateCandidateRowKey`.
-4. `frontend/components/forms/TenderFormShared.tsx` calls `selectTemplateCandidate` in `frontend/lib/api.ts`, converts selected backend files into `UploadedFile` objects, and writes them to the draft file cache in `frontend/stores/chatStore.ts`.
-5. `frontend/components/forms/TemplateCandidateDialog.tsx` uses `getTemplateCandidateDownloadUrl` from `frontend/lib/api.ts` for candidate download links.
+## 横切关注点
 
-**State Management:**
-- Persistent conversation, draft, task summary, and unread-result state belongs in `frontend/stores/chatStore.ts` and is persisted with `createJSONStorage(() => sessionStorage)`.
-- Persisted task stream resume metadata belongs in `frontend/stores/chatTaskSessionStore.ts` and is persisted with `createJSONStorage(() => sessionStorage)`.
-- Live stream payloads belong in `frontend/stores/chatStreamStore.ts` and are cleared after terminal task handling in `frontend/hooks/useChatSSE.ts` and `frontend/components/chat/FormPanel.tsx`.
-- UI-only sidebar state belongs in `frontend/stores/useAppStore.ts`; generation history snapshots belong in `frontend/stores/historyStore.ts`.
-
-## Key Abstractions
-
-**TenderType:**
-- Purpose: Frontend tender family identifier for `xjcg`, `gngk`, and `gjgk`.
-- Examples: `frontend/types/index.ts`, `frontend/components/chat/tenderFormRegistry.ts`, `frontend/utils/tenderTypeMapper.ts`.
-- Pattern: Use `TenderType` for frontend routing, UI grouping, and form component selection; convert to backend `form_type` only at API request boundaries.
-
-**GenerateRequest and EditTaskRequest:**
-- Purpose: Typed frontend mirrors of task creation payloads.
-- Examples: `frontend/types/api.ts`, `frontend/lib/formDataConverter.ts`, `frontend/components/chat/ChatPanel.tsx`.
-- Pattern: Generate requests are produced by converter functions in `frontend/lib/formDataConverter.ts`; edit requests are built in `frontend/components/chat/ChatPanel.tsx`.
-
-**ConversationFormDraft:**
-- Purpose: Per-conversation persisted form/composer state.
-- Examples: `frontend/stores/chatStore.ts`, `frontend/components/forms/TenderFormShared.tsx`, `frontend/components/chat/ChatInput.tsx`.
-- Pattern: Forms and chat panels write draft updates through `updateConversationDraft`; do not create independent local persistence for conversation-scoped form state.
-
-**Task Message Group:**
-- Purpose: Bind one task id to separate log, content, and download AI messages.
-- Examples: `TaskMessageGroupIds` and `LocatedTaskMessageGroup` in `frontend/stores/chatStore.ts`; renderers in `frontend/components/chat/TaskLogMessage.tsx`, `frontend/components/chat/TaskContentMessage.tsx`, and `frontend/components/chat/TaskDownloadMessage.tsx`.
-- Pattern: Use `startTask`, `ensureTaskLogMessage`, `ensureTaskContentMessage`, `completeTask`, `failTask`, and `cancelTask` from `frontend/stores/chatStore.ts` instead of appending ad hoc task messages.
-
-**SSE Stream State:**
-- Purpose: Hold transient logs, AI text, progress, current node, and last event id for running tasks.
-- Examples: `frontend/stores/chatStreamStore.ts`, `frontend/hooks/useChatSSE.ts`, `frontend/lib/sse.ts`.
-- Pattern: `useChatSSE` translates backend event names into store updates and terminal task transitions.
-
-**Canonical URL Parameters:**
-- Purpose: Keep browser query parameters aligned with selected conversation identity.
-- Examples: `buildCanonicalSearchParams` and `syncBrowserUrlToConversation` in `frontend/utils/tenderTypeMapper.ts`; `syncUrlToCurrentConversation` in `frontend/stores/chatStore.ts`.
-- Pattern: Update URL through these helpers only; do not patch individual query parameters in components.
-
-**Tender Form Registry:**
-- Purpose: Single frontend registry for tender display names, form components, and generate converters.
-- Examples: `frontend/components/chat/tenderFormRegistry.ts`, form wrappers in `frontend/components/forms/XjcgTenderForm.tsx`, `frontend/components/forms/GngkTenderForm.tsx`, and `frontend/components/forms/GjgkTenderForm.tsx`.
-- Pattern: Add or change a tender form through the registry plus converter map, not by branching in `frontend/components/chat/FormPanel.tsx`.
-
-## Entry Points
-
-**Home Route:**
-- Location: `frontend/app/page.tsx`
-- Triggers: Browser navigation to `/`.
-- Responsibilities: Link users to `/tender` and render a small feature overview.
-
-**Tender Workspace Route:**
-- Location: `frontend/app/tender/page.tsx`
-- Triggers: Browser navigation to `/tender` with or without canonical query parameters.
-- Responsibilities: Parse URL parameters, select or create conversations, fetch tender data, run conversation heartbeat, and render `TenderTypeSidebar`, `FormPanel`, and `ChatPanel`.
-
-**Development Server:**
-- Location: `frontend/package.json`
-- Triggers: `npm run dev`.
-- Responsibilities: Runs Next.js on port `8502`.
-
-**Next Configuration:**
-- Location: `frontend/next.config.ts`
-- Triggers: Next.js dev/build/start lifecycle.
-- Responsibilities: Computes allowed dev origins, proxies `/api/:path*` to the resolved backend base URL, sets production cache headers, configures localhost backend images, and enables strict TypeScript build behavior.
-
-**API Boundary:**
-- Location: `frontend/lib/api.ts`
-- Triggers: Form submission, chat streams, task status polling, uploads, downloads, template candidate actions, and heartbeats.
-- Responsibilities: Normalize request headers/body, parse wrapped API success/error payloads, throw `ApiError`, and expose typed endpoint helpers.
-
-**SSE Boundary:**
-- Location: `frontend/hooks/useChatSSE.ts`
-- Triggers: Active task state in `frontend/components/chat/FormPanel.tsx`.
-- Responsibilities: Confirm task state before connecting, map SSE payloads to stores, finalize terminal tasks, and recover from missing tasks.
-
-## Architectural Constraints
-
-- **Runtime:** Next.js, React, Tailwind, and Zustand versions are declared in `frontend/package.json`; Node `>=20.9.0` is required by `frontend/package.json` and `frontend/.nvmrc`.
-- **API prefix:** Frontend requests target `/api/...` helpers in `frontend/lib/api.ts`, while dev rewrites proxy `/api/:path*` in `frontend/next.config.ts`.
-- **Base URL:** Resolve API base URL through `frontend/lib/apiBaseUrl.ts`; it reads `NEXT_PUBLIC_API_URL` candidates and can derive the backend host from `window.location`.
-- **Global state:** Shared mutable client state is intentionally concentrated in Zustand stores under `frontend/stores/`.
-- **Session persistence:** Conversation state, drafts, task summaries, task stream sessions, history, and sidebar state use browser storage in `frontend/stores/chatStore.ts`, `frontend/stores/chatTaskSessionStore.ts`, `frontend/stores/historyStore.ts`, and `frontend/stores/useAppStore.ts`.
-- **Hydration:** Components that read persisted session state gate user-visible state with `frontend/hooks/useHydrated.ts`.
-- **URL identity:** Canonical URL construction is centralized in `frontend/utils/tenderTypeMapper.ts` and `frontend/stores/chatStore.ts`.
-- **gngk identity:** `frontend/app/tender/page.tsx` and `frontend/stores/chatStore.ts` match gngk conversations by `tenderno + tender_lx + fund_lx`.
-- **SSE resume:** `frontend/lib/sse.ts`, `frontend/hooks/useChatSSE.ts`, and `frontend/stores/chatTaskSessionStore.ts` preserve `lastEventId` for late join or refresh recovery.
-- **Circular imports:** No circular dependency tooling was detected; import direction should remain pages -> components -> hooks/stores/lib/types based on imports observed in `frontend/app/tender/page.tsx`, `frontend/components/chat/FormPanel.tsx`, `frontend/components/forms/TenderFormShared.tsx`, and `frontend/stores/chatStore.ts`.
-- **Authentication:** Not detected in the frontend; `frontend/lib/api.ts` does not attach auth headers.
-
-## Anti-Patterns
-
-### Raw Backend Calls in Components
-
-**What happens:** Components could call `fetch` directly instead of adding typed helpers.
-**Why it's wrong:** Error normalization, wrapped response handling, base URL resolution, and request serialization live in `frontend/lib/api.ts`.
-**Do this instead:** Add a helper in `frontend/lib/api.ts`, mirror the contract in `frontend/types/api.ts`, and call the helper from components such as `frontend/components/forms/TenderFormShared.tsx` or `frontend/components/chat/ChatPanel.tsx`.
-
-### URL Query Patching Outside the Mapper
-
-**What happens:** Components could manually mutate individual query parameters.
-**Why it's wrong:** gngk conversation identity depends on multiple parameters staying synchronized.
-**Do this instead:** Use `syncBrowserUrlToConversation` and `buildCanonicalSearchParams` in `frontend/utils/tenderTypeMapper.ts`, or the store-level `syncUrlToCurrentConversation` in `frontend/stores/chatStore.ts`.
-
-### Duplicated Tender Type Registration
-
-**What happens:** A new tender type could be added only in one UI component or only in an API converter.
-**Why it's wrong:** The frontend tender type appears in `frontend/types/index.ts`, `frontend/utils/tenderTypeMapper.ts`, `frontend/components/chat/tenderFormRegistry.ts`, `frontend/components/forms/tenderFormConfig.ts`, `frontend/lib/formDataConverter.ts`, and tests under `frontend/__tests__/unit/`.
-**Do this instead:** Update the type, URL mapper, registry, form defaults, converter, API type union, and related tests together.
-
-### Ad Hoc Task Message Mutation
-
-**What happens:** Components could append task log/content/download messages directly.
-**Why it's wrong:** Terminal cleanup, unread result marking, task-message grouping, stream clearing, and backend restart handling are implemented in `frontend/stores/chatStore.ts`.
-**Do this instead:** Use task methods from `frontend/stores/chatStore.ts` and stream updates from `frontend/hooks/useChatSSE.ts`.
-
-## Error Handling
-
-**Strategy:** Normalize backend errors into `ApiError`, show user-facing messages in the UI, and keep task terminal state consistent through store transitions.
-
-**Patterns:**
-- JSON request errors are parsed by `buildApiError` and thrown as `ApiError` in `frontend/lib/api.ts`.
-- Chat and form components display `ApiError.message` through composer notices, form errors, template dialog errors, or task messages in `frontend/components/chat/ChatPanel.tsx` and `frontend/components/forms/TenderFormShared.tsx`.
-- Missing or terminal tasks are detected by `frontend/hooks/useTaskHeartbeat.ts`, `frontend/hooks/useCurrentConversationTaskStatus.ts`, and `frontend/hooks/useChatSSE.ts`, then reconciled through `discardStaleTask`, `completeTask`, `failTask`, or `cancelTask` in `frontend/stores/chatStore.ts`.
-- Backend restart is detected through conversation heartbeat in `frontend/app/tender/page.tsx` and handled by `handleBackendRestart` in `frontend/stores/chatStore.ts`.
-- Download failures in `frontend/components/chat/ChatPanel.tsx` currently log to console and show an alert.
-
-## Cross-Cutting Concerns
-
-**Logging:** User-visible task logs are rendered by `frontend/components/chat/TaskLogMessage.tsx`; debug and failure messages use `console.error` or `console.warn` in `frontend/lib/sse.ts`, `frontend/components/chat/FormPanel.tsx`, and `frontend/components/chat/ChatPanel.tsx`.
-
-**Validation:** URL validation lives in `frontend/utils/tenderTypeMapper.ts` and `frontend/hooks/useUrlParams.ts`; form validation lives in `frontend/components/forms/TenderFormShared.tsx`; API payload parsing lives in `frontend/lib/api.ts`; type-level contracts live in `frontend/types/api.ts`.
-
-**Authentication:** Not detected in frontend files; `frontend/lib/api.ts` makes unauthenticated browser requests.
-
-**Styling:** Tailwind 4 is configured through `frontend/app/globals.css` and `frontend/postcss.config.mjs`; shared class merging uses `cn` from `frontend/lib/utils.ts`.
-
-**Testing Hooks:** Architecture-critical flows have unit and E2E coverage locations in `frontend/__tests__/unit/` and `frontend/e2e/`; Playwright uses `http://localhost:8502` in `frontend/playwright.config.ts`.
+- 样式：Tailwind 4，主题与全局样式在 `frontend/app/globals.css`。
+- 图标：`lucide-react` 已作为依赖。
+- 测试：Jest 使用 jsdom，Playwright baseURL 是 `http://localhost:8502`。
+- 认证：当前前端未检测到稳定登录或 auth header。
 
 ---
 
-*Architecture analysis: 2026-05-22*
+*前端架构分析：2026-05-23*

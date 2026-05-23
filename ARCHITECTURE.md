@@ -1,6 +1,6 @@
-# TenderWord Architecture
+# TenderWord 架构地图
 
-**Generated:** 2026-05-22
+**生成日期：** 2026-05-23
 
 本文件是根级系统架构地图，描述 TenderWord 的系统边界、子系统职责和推荐理解路径。实现细节仍以代码为准；子系统内部事实以 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 为准。
 
@@ -9,13 +9,13 @@
 TenderWord 是招标文档生成与修改系统，核心闭环是：
 
 ```text
-Browser / Next.js workspace
+浏览器 / Next.js 工作台
   -> FastAPI /api
-  -> task queue + SSE
-  -> LangGraph tender or skill workflow
+  -> 任务队列 + SSE
+  -> LangGraph tender 或 skill workflow
   -> Prompt Layer + LLM provider
-  -> Word COM document operations
-  -> generated file / task result / download
+  -> Word COM 文档操作
+  -> 生成文件 / 任务结果 / 下载
 ```
 
 系统的完整能力依赖 Windows + Word COM。前端可以在 WSL/Linux Node 环境运行，但后端 Word 自动化必须使用 Windows Python、pywin32 和本机 Word/WPS COM 能力。
@@ -82,17 +82,17 @@ Browser / Next.js workspace
 
 ```text
 frontend/app/
-  route boundary and workspace composition
+  路由边界与工作台组合
 frontend/components/chat/
-  workspace panels, chat, task messages, sidebar
+  工作台面板、聊天、任务消息、侧栏
 frontend/components/forms/
-  tender forms, uploads, template candidate dialog
+  招标表单、上传、模板候选弹窗
 frontend/stores/
-  persisted session state and transient stream state
+  持久化会话状态与临时 stream 状态
 frontend/lib/
-  API client, SSE wrapper, tender fetch helpers
-frontend/types/ and frontend/utils/
-  API contracts, tender identity, URL mapping
+  API client、SSE wrapper、招标数据 helper
+frontend/types/ 与 frontend/utils/
+  API 契约、招标身份、URL 映射
 ```
 
 核心原则：
@@ -106,27 +106,27 @@ frontend/types/ and frontend/utils/
 
 ```text
 backend/api/
-  FastAPI routers
+  FastAPI 路由
 backend/models/
-  Pydantic API and runtime contracts
+  Pydantic API 与运行时契约
 backend/services/
-  task creation, routing, conversation, ranking coordination
+  任务创建、路由、会话、排序编排
 backend/task/
-  queue, progress, cancellation, heartbeat
+  队列、进度、取消、心跳
 backend/core/
-  SSE manager and cross-runtime infrastructure
+  SSE 管理与跨线程基础设施
 backend/graphs/
-  LangGraph tender, skill, and user workflows
+  LangGraph tender、skill、user 工作流
 backend/states/
-  Typed graph state contracts
+  Typed graph state 契约
 backend/nodes/
-  graph node callables
+  graph 节点 callable
 backend/helper/word_helper/
-  reusable Word business logic
+  可复用 Word 业务逻辑
 backend/util/
-  low-level Word COM, HTTP, storage, logging, LLM utilities
-backend/prompts/ and backend/skills/
-  Prompt Layer and task skill runtime
+  底层 Word COM、HTTP、存储、日志、LLM 工具
+backend/prompts/ 与 backend/skills/
+  Prompt Layer 与 task skill 运行时
 ```
 
 核心原则：
@@ -138,7 +138,7 @@ backend/prompts/ and backend/skills/
 
 ## 关键运行链路
 
-### Generate
+### 生成
 
 `POST /api/generate` 由前端表单提交，后端创建任务并通过 tender graph 执行文档生成。任务进度通过 SSE 回到前端，完成后前端展示下载入口。
 
@@ -150,7 +150,7 @@ backend/prompts/ and backend/skills/
 - `backend/graphs/base_graph.py`
 - `backend/services/document_service.py`
 
-### Rewrite / Chat
+### Rewrite / 聊天
 
 `POST /api/user/stream` 返回 NDJSON。后端根据用户意图路由为普通回复或 rewrite task。rewrite task 进入同一任务队列和 SSE 进度链路。
 
@@ -172,7 +172,7 @@ Edit 是显式 task 入口，只走 `POST /api/edit`。它复用任务队列、S
 - `backend/services/document_service.py`
 - `backend/skills/edit/`
 
-### Template Candidates
+### 模板候选
 
 模板候选由后端代理外部列表、AI 重排、下载和落盘，前端只通过项目内 API helper 交互。
 
@@ -199,7 +199,8 @@ Edit 是显式 task 入口，只走 `POST /api/edit`。它复用任务队列、S
 2. `backend/.planning/codebase/ARCHITECTURE.md`
 3. `backend/.planning/codebase/STRUCTURE.md`
 4. `backend/.planning/codebase/CONVENTIONS.md`
-5. 相关 `asset/*.md`
+5. `backend/.planning/codebase/TESTING.md`
+6. 相关 `asset/*.md`
 
 ### 改前端
 
@@ -217,6 +218,15 @@ Edit 是显式 task 入口，只走 `POST /api/edit`。它复用任务队列、S
 4. `frontend/lib/api.ts`
 5. `frontend/types/api.ts`
 6. 相关前后端测试
+
+### 改 Word 运行时或招标类型
+
+1. `AGENTS.md`
+2. `backend/.planning/codebase/ARCHITECTURE.md`
+3. `backend/.planning/codebase/CONVENTIONS.md`
+4. `asset/shared_runtime_word_skill_knowledge_pack.md`
+5. `asset/tender_type_identity_session_knowledge_pack.md`
+6. 相关 graph、node、helper、前端转换器和测试
 
 ## 维护建议
 

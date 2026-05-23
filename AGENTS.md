@@ -1,4 +1,4 @@
-# TenderWord Agent Operating Guide (AGENTS.md)
+# TenderWord 智能体操作指南（AGENTS.md）
 
 本文件是 TenderWord 仓库内智能体与人类协作的执行规范。它服务于当前代码库，而不是历史设想。默认目标是让后续新增招标类型、新 graph、新节点、新工具和新接口持续向统一扩展模型收敛，而不是继续复制分叉。
 
@@ -175,6 +175,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - 当前尤其要注意“前端 `gngk` 单类型，后端四套 `form_type`，运行态再按 family 收敛到 `gngk`”这一现实。
 - `get_tender_type_family()` 是公开招标家族共享 prompt、replacement 与公共节点路由的真源；新增运行态时不得绕开 family 收敛逻辑。
 - `gngk` replacement 与类型节点命名按运行态分流，继续使用 `gngk_hw_zc_get_replacements`、`gngk_fw_zc_get_replacements` 这类真名；不得回退到 `gngk_get_replacements` 一类历史兼容别名。
+- `gngk_hw_cz` 当前是 direct-replace 首次生成类型：`GngkHwCzTenderGraph` 显式覆写 delete/update 节点，继续复用货物自筹 replacement；锚点、同页起点和 direct-replace mode 以 `backend/config/tender_config.py` 为准。
 - `frontend/lib/formDataConverter.ts` 与 `frontend/components/chat/ChatPanel.tsx` 当前都在计算 `gngk` 的 `form_type`；任一处变更都必须双向同步并补测试。
 - 在未完成集中化之前，新增类型必须完整走同步检查清单，不能漏改任何一层。
 

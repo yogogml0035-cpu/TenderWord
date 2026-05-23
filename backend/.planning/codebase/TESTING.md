@@ -1,294 +1,104 @@
-# Testing Patterns
+# 后端测试事实地图
 
-**Analysis Date:** 2026-05-22
+**分析日期：** 2026-05-23
 
-## Test Framework
+**范围：** `backend/tests/` 与后端验证命令。
 
-**Runner:**
-- `pytest` is the backend test runner. It is declared in `backend/requirements.txt` and used by backend validation guidance in `AGENTS.md`.
-- `pytest-asyncio` is declared in `backend/requirements.txt` and used for async route/service tests such as `backend/tests/api/test_generate_api.py` and `backend/tests/api/test_tender_api.py`.
-- No dedicated `pytest.ini`, `pyproject.toml`, or backend coverage config is detected; `backend/tests/conftest.py` supplies import-path setup for the current test suite.
+## 测试框架
 
-**Assertion Library:**
-- Use plain `assert`, `pytest.raises`, `pytest.mark.parametrize`, `monkeypatch`, `tmp_path`, and focused fake objects. Examples live in `backend/tests/config/test_tender_config_protected_fields.py`, `backend/tests/nodes/test_gngk_fw_zc_update_word.py`, and `backend/tests/helper/test_content_ops.py`.
+- 框架：pytest。
+- async 支持：pytest-asyncio。
+- 入口：从 `backend/` 运行 `python -m pytest tests -v`。
+- 共享 fixture：`backend/tests/conftest.py`。
 
-**Run Commands:**
-```bash
-cd backend
-python -m pytest tests -v              # Run all backend tests
-python -m pytest tests/nodes -v        # Run a backend module scope
-python -m pytest tests -v -k protected # Run a focused expression
-python scripts/diagnose_word.py        # Manual Word COM diagnostic on Windows
-```
+## 测试文件组织
 
-**WSL backend validation:**
-```bash
-cd backend
-source .venv-linux/bin/activate
-TMPDIR=/tmp python3 -m pytest tests -v
-```
-
-The WSL virtualenv and temp-directory rules come from `AGENTS.md`; Windows + Word COM setup requirements come from `README.md`.
-
-## Test File Organization
-
-**Location:**
-- Backend tests are centralized under `backend/tests/` and grouped by module scope.
-- Current backend scopes include `backend/tests/api/`, `backend/tests/config/`, `backend/tests/graphs/`, `backend/tests/helper/`, `backend/tests/logging/`, `backend/tests/models/`, `backend/tests/nodes/`, `backend/tests/progress/`, `backend/tests/prompts/`, `backend/tests/services/`, `backend/tests/skills/`, and `backend/tests/util/`.
-- Do not add business tests directly under `backend/tests/` root except `backend/tests/conftest.py` and `backend/tests/__init__.py`; this placement rule is explicit in `AGENTS.md`.
-
-**Naming:**
-- Use `test_*.py` for every backend test file, as required by `AGENTS.md` and demonstrated by `backend/tests/api/test_generate_api.py`, `backend/tests/graphs/test_gngk_tender_graph.py`, and `backend/tests/nodes/test_comment_writeback.py`.
-- Use test function names that state the behavior and expected result, such as `test_get_generate_task_missing_task_returns_404()` in `backend/tests/api/test_generate_api.py` and `test_split_polished_text_into_blocks_rejects_missing_or_out_of_order_fields()` in `backend/tests/nodes/test_gngk_fw_zc_update_word.py`.
-
-**Structure:**
 ```text
 backend/tests/
-├── api/        # FastAPI route behavior and API error contracts
-├── config/     # tender_config and settings-derived contract tests
-├── graphs/     # graph registry, workflow wiring, state propagation
-├── helper/     # COM-free Word helper logic
-├── logging/    # audit/progress log path and config propagation
-├── models/     # Pydantic request/response model defaults and validation
-├── nodes/      # common and type-specific node behavior with fake COM objects
-├── progress/   # task progress tracking and graph wrapper behavior
-├── prompts/    # prompt routing and output contract rendering
-├── services/   # service state construction and task result payloads
-├── skills/     # task skill declaration and workflow contracts
-└── util/       # external request utilities and LLM stream utilities
+├── api/        # API route 行为
+├── config/     # tender_config 等配置约束
+├── graphs/     # graph 注册、节点绑定、流程路由
+├── helper/     # Word helper 纯逻辑
+├── logging/    # audit/progress/execution log 路径
+├── models/     # Pydantic 模型校验
+├── nodes/      # Word 节点、skill 节点
+├── progress/   # 进度追踪
+├── prompts/    # prompt 文案与机器契约
+├── services/   # service 编排
+├── skills/     # task skill loader/声明
+└── util/       # 通用工具
 ```
 
-## Test Structure
+新增或重命名测试必须使用 `test_*.py`，不要放在 `backend/tests/` 根目录。
 
-**Suite Organization:**
-```python
-from __future__ import annotations
+## 关键测试覆盖
 
-import pytest
+- API：`backend/tests/api/test_generate_api.py`、`backend/tests/api/test_tender_api.py`。
+- 类型配置：`backend/tests/config/test_tender_config_protected_fields.py`。
+- graph 路由：`backend/tests/graphs/test_gngk_tender_graph.py`、`backend/tests/graphs/test_gjgk_tender_graph.py`。
+- Word helper：`backend/tests/helper/test_content_ops.py`、`test_delete_ops.py`、`test_paragraph_boundary_ops.py`、`test_inline_style_ops.py`。
+- 节点：`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`、`test_gngk_fw_zc_update_word.py`、`test_common_update_word_split.py`、`test_comment_writeback.py`。
+- prompt：`backend/tests/prompts/test_generate_prompt_routing.py`、`test_comment_prompt_reference_contract.py`。
+- service：`backend/tests/services/test_document_service_initial_state.py`、`test_document_service_task_result.py`、`test_user_routing_service.py`。
 
-from backend.config.tender_config import get_protected_field_profile
+## Mock 与 fixture 模式
 
+- Word COM 相关单测优先使用 fake document/range/paragraph 对象覆盖业务逻辑。
+- LLM、HTTP、SSE 和文件系统副作用用 monkeypatch 或临时目录隔离。
+- 真实 Word COM 只用于必要集成验收；当前多数后端测试不要求本机 Word。
+- gngk graph 路由测试应同时断言 `GRAPH_REGISTRY` 和各兄弟类型节点绑定，避免继承链变更误扩散。
 
-@pytest.mark.parametrize(
-    ("tender_type", "expected_key"),
-    [
-        ("xjcg", "common_two_field"),
-        ("gngk_fw_zc", "gngk_three_field"),
-    ],
-)
-def test_get_protected_field_profile_resolves_expected_profile(
-    tender_type: str,
-    expected_key: str,
-) -> None:
-    profile = get_protected_field_profile(tender_type)
+## COM 安全测试策略
 
-    assert profile.key == expected_key
-```
+- 能从 Word COM 中拆出的逻辑应进入 `backend/helper/word_helper/` 并用 fake 对象测试。
+- `backend/util/word_util/` 的底层 COM 生命周期可用诊断脚本或 Windows 环境集成验证。
+- WSL 下只能作为无 COM 替代验证，不能声称完成真实 Word 生成闭环。
+- 对 direct-replace 类型，测试至少覆盖锚点范围、删除边界、写回正文、显式空行、Markdown 表格、样式回填摘要和批注硬失败契约。
 
-This is the pattern used by `backend/tests/config/test_tender_config_protected_fields.py`.
+## 覆盖缺口
 
-**Patterns:**
-- Use direct unit invocation for route handlers when the behavior does not require an ASGI server, as in `backend/tests/api/test_generate_api.py`.
-- Use `pytest.mark.asyncio` for async route tests, as in `backend/tests/api/test_generate_api.py` and `backend/tests/api/test_tender_api.py`.
-- Use `pytest.mark.parametrize` for type matrices, graph registries, and protected-field profiles, as in `backend/tests/config/test_tender_config_protected_fields.py`, `backend/tests/graphs/test_gngk_tender_graph.py`, and `backend/tests/services/test_document_service_initial_state.py`.
-- Use explicit fake classes for Word-like COM objects rather than importing Word or pywin32 in unit tests. Examples include `_FakeRange` and `_FakeDocument` in `backend/tests/nodes/test_comment_writeback.py`, `_FakeDoc` in `backend/tests/nodes/test_gngk_fw_zc_update_word.py`, and `_FakeFormatRange` in `backend/tests/helper/test_content_ops.py`.
-- Use helper builders for repetitive Pydantic request setup, such as `build_request()` in `backend/tests/services/test_document_service_initial_state.py` and `_build_edit_request()` in `backend/tests/logging/test_task_audit_log_paths.py`.
+- 真实 `.doc/.docx` + Word COM 端到端覆盖仍依赖人工或 Windows 环境。
+- 任务队列、SSE、下载链路虽然有单元覆盖，但完整跨端 E2E 需要前端 Playwright 或手工环境。
+- 外部模板候选和招标详情接口应继续通过 mock 测试，不依赖真实外部服务。
 
-## Mocking
+## 验证命令
 
-**Framework:** `pytest` `monkeypatch` is the primary mocking tool; `unittest.mock.patch` and `MagicMock` are used when call assertions or context-managed patching are clearer.
+后端常规验证：
 
-**Patterns:**
-```python
-def test_stream_llm_completion_uses_configured_timeout_when_unspecified(monkeypatch):
-    monkeypatch.setattr(llm_stream_utils.settings, "LLM_STREAM_TIMEOUT_SECONDS", 20)
-    monkeypatch.setattr(llm_stream_utils, "ensure_llm_env", lambda _provider: None)
-```
-
-This style is used in `backend/tests/util/test_llm_stream_utils.py`.
-
-```python
-with patch("backend.nodes.common_word_nodes.comment_writeback.time.sleep") as mock_sleep:
-    result = write_polished_comments(...)
-```
-
-This style is used for retry timing assertions in `backend/tests/nodes/test_comment_writeback.py`.
-
-**What to Mock:**
-- Mock LLM calls and environment checks, as in `backend/tests/util/test_llm_stream_utils.py` and `backend/tests/nodes/test_edit_audit_logging.py`.
-- Mock Word COM lifecycle functions and document/range objects when testing node behavior, as in `backend/tests/nodes/test_update_word_inline_style_writeback.py`, `backend/tests/nodes/test_replace_content.py`, and `backend/tests/helper/test_content_ops.py`.
-- Mock task queue and SSE side effects when testing progress wrappers, as in `backend/tests/progress/test_edit_progress_tracking.py`.
-- Mock log directories with `tmp_path` for audit path tests, as in `backend/tests/logging/test_task_audit_log_paths.py`.
-- Mock external HTTP responses in utility tests, as in `backend/tests/util/test_fetch_tender_data.py`.
-
-**What NOT to Mock:**
-- Do not mock pure parsing and contract helpers when the helper is the unit under test. Test real behavior in `backend/helper/word_helper/protected_fields.py`, `backend/helper/word_helper/content_ops.py`, and `backend/helper/word_helper/inline_style_ops.py` through `backend/tests/helper/` and `backend/tests/nodes/`.
-- Do not mock graph registry wiring when asserting backend `form_type` to graph/node bindings. `backend/tests/graphs/test_gngk_tender_graph.py` calls `document_service._init_graph_registry()` and checks the real `GRAPH_REGISTRY`.
-- Do not use real Word COM for normal unit tests. Word COM is a Windows integration boundary documented in `README.md` and constrained by `AGENTS.md`.
-
-## Fixtures and Factories
-
-**Test Data:**
-```python
-def build_request(
-    *,
-    origin_tender: str | None,
-    template: str | None,
-    form_type: FormType = FormType.GJGK_TENDER,
-) -> GenerateRequest:
-    ...
-```
-
-Use local builders like `build_request()` in `backend/tests/services/test_document_service_initial_state.py` when constructing full Pydantic models.
-
-**Location:**
-- Shared global test setup lives in `backend/tests/conftest.py`; currently it only adjusts import paths.
-- Keep fixtures close to the tests that need them when they are scope-specific, as in `backend/tests/progress/test_edit_progress_tracking.py`.
-- Keep fake COM classes in the test module that exercises that behavior, as in `backend/tests/nodes/test_comment_writeback.py`, `backend/tests/nodes/test_gngk_fw_zc_update_word.py`, and `backend/tests/helper/test_content_ops.py`.
-
-## Coverage
-
-**Requirements:** Not enforced by a visible backend coverage configuration. Root validation guidance in `AGENTS.md` requires `python -m pytest tests -v` for backend changes.
-
-**View Coverage:**
-```bash
-# Not configured in this repository.
-# Add a coverage tool only with explicit project agreement.
-```
-
-**Current coverage shape:**
-- API error behavior is covered in `backend/tests/api/test_generate_api.py` and `backend/tests/api/test_tender_api.py`.
-- Tender config and protected-field profiles are covered in `backend/tests/config/test_tender_config_protected_fields.py`.
-- Graph wiring and state propagation are covered in `backend/tests/graphs/test_gngk_tender_graph.py` and `backend/tests/graphs/test_gjgk_tender_graph.py`.
-- Word helper behavior is covered in `backend/tests/helper/test_content_ops.py`, `backend/tests/helper/test_inline_style_ops.py`, and `backend/tests/helper/test_paragraph_boundary_ops.py`.
-- Node behavior is covered in `backend/tests/nodes/`, including comment writeback, update word, protected fields, replacement extraction, and skill dispatch.
-- Service state construction and task payloads are covered in `backend/tests/services/`.
-- Prompt and skill contracts are covered in `backend/tests/prompts/` and `backend/tests/skills/`.
-
-## Test Types
-
-**Unit Tests:**
-- Prefer unit tests for COM-free helpers, prompt renderers, Pydantic model validation, task progress logic, and service state construction. Examples live in `backend/tests/helper/`, `backend/tests/prompts/`, `backend/tests/models/`, `backend/tests/progress/`, and `backend/tests/services/`.
-
-**Integration Tests:**
-- Use lightweight integration tests for graph registration, workflow wiring, and graph compilation with fake nodes. `backend/tests/graphs/test_gngk_tender_graph.py` compiles a test graph and asserts state propagation without Word COM.
-- Use service-level tests for task result payloads and initial state construction without launching FastAPI or Word, as in `backend/tests/services/test_document_service_initial_state.py` and `backend/tests/services/test_document_service_task_result.py`.
-
-**E2E Tests:**
-- Backend-only E2E is not currently represented under `backend/tests/`.
-- User-visible browser E2E belongs to frontend Playwright per `AGENTS.md`; backend changes that alter task creation, SSE, completion, failure, or download contracts should add backend tests plus frontend/API contract coverage where appropriate.
-- Real Word COM verification is a Windows integration activity. Use `python scripts/diagnose_word.py` from `backend/scripts/diagnose_word.py` and document the environment when a change requires real Word validation.
-
-## COM-Safe Testing Strategy
-
-**Default strategy:**
-- Keep unit tests COM-free by extracting logic into `backend/helper/word_helper/` and using fake Word objects in `backend/tests/helper/` and `backend/tests/nodes/`.
-- Test protected-field parsing, blank-line preservation, markdown table conversion, paragraph boundary decisions, inline style matching, and writeback summaries without opening Word. Relevant implementation paths are `backend/helper/word_helper/protected_fields.py`, `backend/helper/word_helper/text_parsing.py`, `backend/helper/word_helper/content_ops.py`, `backend/helper/word_helper/paragraph_boundary_ops.py`, and `backend/helper/word_helper/inline_style_ops.py`.
-- Patch or fake `create_word_application`, `open_document_with_retry`, and `close_word_application` when a node-level test needs to cross the Word lifecycle boundary, following `backend/tests/nodes/test_update_word_inline_style_writeback.py`.
-
-**Windows-only checks:**
-- Run real Word COM diagnostics only on Windows with Microsoft Word available, as stated in `README.md`.
-- Use `backend/scripts/diagnose_word.py` for environment diagnostics before claiming a COM integration works.
-- Keep Linux/WSL pytest focused on logic that does not require Word COM; WSL backend test setup is documented in `AGENTS.md`.
-
-## Common Patterns
-
-**Async Testing:**
-```python
-@pytest.mark.asyncio
-async def test_get_generate_task_missing_task_returns_404():
-    with pytest.raises(HTTPException) as exc_info:
-        await get_generate_task("missing-task")
-
-    assert exc_info.value.status_code == 404
-```
-
-Use this pattern for async API handlers, as in `backend/tests/api/test_generate_api.py`.
-
-**Error Testing:**
-```python
-with pytest.raises(ValueError, match="缺少关键字段: 服务期限："):
-    split_polished_text_into_blocks("服务地点：上海院区\n付款方式：按季度结算")
-```
-
-Use this pattern for fail-fast business contracts, as in `backend/tests/nodes/test_gngk_fw_zc_update_word.py` and `backend/tests/config/test_tender_config_protected_fields.py`.
-
-**Graph Wiring Testing:**
-```python
-document_service._init_graph_registry()
-
-assert document_service.GRAPH_REGISTRY["gngk_fw_zc_tender"] is GngkFwZcTenderGraph
-assert GngkFwZcTenderGraph.NODE_UPDATE_WORD is gngk_fw_zc_update_word
-```
-
-Use this pattern when adding or changing backend `form_type` routing, as in `backend/tests/graphs/test_gngk_tender_graph.py`.
-
-**Progress Testing:**
-```python
-wrapped = wrap_node_with_progress(lambda state, config=None: {"ok": True}, node_name)
-result = wrapped({}, {"configurable": {"task_id": "task-edit-1"}})
-```
-
-Use this pattern for progress-node coverage, as in `backend/tests/progress/test_edit_progress_tracking.py`.
-
-**LLM Stream Testing:**
-```python
-monkeypatch.setattr(llm_stream_utils, "ensure_llm_env", lambda _provider: None)
-monkeypatch.setattr(llm_stream_utils, "_stream_openai_compatible", _fake_stream_openai_compatible)
-```
-
-Use this pattern for timeout/config behavior without real network calls, as in `backend/tests/util/test_llm_stream_utils.py`.
-
-## Validation Commands By Change Type
-
-**Any backend change:**
-```bash
+```powershell
 cd backend
 python -m pytest tests -v
 ```
 
-This is the minimum backend command required by `AGENTS.md`.
+Word COM 诊断：
 
-**Backend route or API contract change:**
-```bash
+```powershell
 cd backend
-python -m pytest tests/api tests/models tests/services -v
+python scripts/diagnose_word.py
 ```
 
-Also check shared API contract implications named in `AGENTS.md`: `backend/api/`, `backend/models/`, `frontend/types/`, and `frontend/lib/api.ts`.
+WSL 无 COM 单测：
 
-**Graph, state, node, or tender type routing change:**
 ```bash
 cd backend
-python -m pytest tests/graphs tests/services tests/nodes tests/config -v
+TMPDIR=/tmp TMP=/tmp TEMP=/tmp .venv-linux/bin/python -m pytest tests -v
 ```
 
-Use this for changes in `backend/graphs/`, `backend/states/`, `backend/nodes/`, `backend/config/tender_config.py`, and `backend/services/document_service.py`.
+文档变更：
 
-**Word helper change:**
 ```bash
-cd backend
-python -m pytest tests/helper tests/nodes -v
+git diff --check
 ```
 
-Use this for changes in `backend/helper/word_helper/` and Word-node callers under `backend/nodes/`.
+## 按变更类型选择测试
 
-**Prompt, LLM, or skill runtime change:**
-```bash
-cd backend
-python -m pytest tests/prompts tests/skills tests/util tests/nodes -v
-```
-
-Use this for changes in `backend/prompts/`, `backend/skills/`, `backend/services/user_routing_service.py`, `backend/services/chat_stream_service.py`, and `backend/util/common_util/llm_stream_utils.py`.
-
-**Logging, progress, SSE, or task queue change:**
-```bash
-cd backend
-python -m pytest tests/logging tests/progress tests/services tests/api -v
-```
-
-Use this for changes in `backend/util/log_util/`, `backend/core/sse_manager.py`, `backend/task/task_queue_manager.py`, `backend/graphs/base_graph.py`, and `backend/api/stream.py`.
+- API / 模型：相关 `backend/tests/api/`、`backend/tests/models/`，必要时全量 pytest。
+- graph / 类型路由：`backend/tests/graphs/`、`backend/tests/services/test_document_service_initial_state.py`。
+- Word helper：`backend/tests/helper/` 与使用该 helper 的节点测试。
+- Word 节点：相关 `backend/tests/nodes/`，必要时全量 pytest。
+- prompt：`backend/tests/prompts/` 与调用该 prompt 的节点/service 测试。
+- 任务/SSE：`backend/tests/services/`、`backend/tests/progress/`、相关 API 测试。
 
 ---
 
-*Testing analysis: 2026-05-22*
+*后端测试分析：2026-05-23*
