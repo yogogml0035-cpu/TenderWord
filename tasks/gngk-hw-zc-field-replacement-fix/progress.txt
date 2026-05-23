@@ -1,0 +1,11 @@
+# Ralph Progress
+
+Requirement: tasks/gngk-hw-zc-field-replacement-fix
+Started: 2026-05-23 22:00
+Source: prd.json
+
+## Codebase Patterns
+
+- `gngk_hw_zc_get_replacements` is the current graph wrapper for domestic public goods self-funded replacement extraction.
+- `run_get_replacements` builds `placeholder_mapping` and `replacements` from extractor specs and replacement field specs; this task should reuse that mechanism.
+- Core validation can use mocked document content and should not require a real external tender lookup API.
