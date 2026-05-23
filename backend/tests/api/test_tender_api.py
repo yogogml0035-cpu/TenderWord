@@ -14,6 +14,7 @@ async def test_get_tender_data_preserves_ifzgcg(monkeypatch):
                 "project_number": "261004",
                 "project_content": "68Ge/68Ga发生器 壹台",
                 "buyer_name": "上海市东方医院",
+                "investment": "140.0",
                 "ifzgcg": 2,
             },
             "type": {
@@ -28,5 +29,6 @@ async def test_get_tender_data_preserves_ifzgcg(monkeypatch):
 
     assert response.data is not None
     assert response.data.ifzgcg == 2
+    assert response.data.investment == "140.0"
     assert response.type is not None
     assert response.type.fund_lx == 1

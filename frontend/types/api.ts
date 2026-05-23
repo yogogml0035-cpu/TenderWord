@@ -21,6 +21,7 @@ export interface TenderData {
   project_content: string;
   bzj_rule: string;
   buyer_name: string;
+  investment?: string;
   project_zbr_xbr: string;
   zbr_xbr_tel: string;
   zbr_pinyin: string;

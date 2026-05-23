@@ -43,6 +43,7 @@ class TenderData(BaseModel):
         project_number: 项目编号
         project_content: 项目内容/采购需求
         buyer_name: 采购人名称
+        investment: 预算金额
         bzj_rule: 保证金规则说明
         project_zbr_xbr: 项目负责人姓名（主标人或协标人）
         zbr_xbr_tel: 负责人联系电话
@@ -68,6 +69,7 @@ class TenderData(BaseModel):
     buyer_name: str = Field(
         ..., description="采购人名称", min_length=1, examples=["某某单位"]
     )
+    investment: str = Field(default="", description="预算金额", examples=["140"])
 
     # 规则和联系人信息
     bzj_rule: str = Field(default="", description="保证金规则说明")
@@ -127,6 +129,7 @@ class TenderData(BaseModel):
                 "project_number": "ZBGG-2024-001",
                 "project_content": "采购信息化系统一套，包含硬件和软件...",
                 "buyer_name": "某某事业单位",
+                "investment": "140",
                 "bzj_rule": "投标保证金为项目预算的2%",
                 "project_zbr_xbr": "张三",
                 "zbr_xbr_tel": "13800138000",

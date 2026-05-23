@@ -124,6 +124,7 @@ def fetch_tender_data(tender_no: str) -> Dict:
             "project_content": data.get("project_content", ""),
             "bzj_rule": data.get("bzj_rule", ""),
             "buyer_name": data.get("buyer_name", ""),
+            "investment": data.get("investment", ""),
             "project_zbr_xbr": data.get("project_zbr_xbr", ""),
             "zbr_xbr_tel": data.get("zbr_xbr_tel", ""),
             "zbr_pinyin": data.get("zbr_pinyin", ""),
