@@ -14,10 +14,13 @@ from backend.helper.word_helper.inline_style_ops import (
     apply_inline_style_fragments,
     summarize_style_writeback_result,
 )
+from backend.helper.word_helper.delete_ops import (
+    delete_range_content_preserving_locked_blocks as _delete_original_content,
+    trim_leading_layout_controls_preserving_locked_blocks as _trim_leading_layout_controls,
+)
 from backend.nodes.common_word_nodes.comment_writeback import write_polished_comments
 from backend.nodes.gjgk_word_nodes.gjgk_update_word import (
     _build_insert_items,
-    _delete_original_content,
     _describe_range_state,
     _ensure_insert_range,
     _find_first_insert_position_on_anchor_page,
@@ -29,7 +32,6 @@ from backend.nodes.gjgk_word_nodes.gjgk_update_word import (
     _remove_marker_paragraphs,
     _reposition_insert_range_if_locked,
     _set_collapsed_range,
-    _trim_leading_layout_controls,
     cleanup_blank_paragraphs,
     is_locked_exception,
 )
@@ -53,6 +55,28 @@ DEFAULT_TENDER_TYPE = "gngk_hw_cz"
 
 def _visible_log(message: str) -> None:
     progress_log.info(f"[{NODE_NAME}] {message}")
+
+
+def _merge_adjacent_text_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """把连续文本行合并为一次 Word 写入，减少连续撞锁定边界的机会。"""
+    merged: list[dict[str, Any]] = []
+    pending_lines: list[str] = []
+
+    def flush_pending() -> None:
+        if not pending_lines:
+            return
+        merged.append({"type": "text", "line": "\n".join(pending_lines)})
+        pending_lines.clear()
+
+    for item in items:
+        if item.get("type") == "text":
+            pending_lines.append(str(item.get("line", "")))
+            continue
+        flush_pending()
+        merged.append(item)
+
+    flush_pending()
+    return merged
 
 
 def gngk_hw_cz_update_word(
@@ -82,13 +106,14 @@ def gngk_hw_cz_update_word(
         )
 
     before_size, after_size = get_anchor_target_sizes(tender_type)
-    items = _build_insert_items(polished_text)
-    if not items:
+    raw_items = _build_insert_items(polished_text)
+    if not raw_items:
         raise ValueError("gngk_hw_cz 插入内容为空，无法执行更新")
 
     has_explicit_blank_lines = any(
-        item.get("type") == "text" and item.get("line") == "" for item in items
+        item.get("type") == "text" and item.get("line") == "" for item in raw_items
     )
+    items = _merge_adjacent_text_items(raw_items)
 
     log_parts = [f"共解析插入项 {len(items)} 条"]
     word = None

@@ -322,6 +322,88 @@ def test_delete_node_defaults_to_gngk_hw_cz_and_deletes_same_page_content_range(
     assert fake_doc.saved is True
 
 
+def test_delete_node_routes_through_lock_aware_deletion(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    doc_path = _build_doc_path(tmp_path)
+    fake_doc = _FakeDoc()
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        delete_module,
+        "create_word_application",
+        lambda **_kwargs: (_FakeWord(), False),
+    )
+    monkeypatch.setattr(
+        delete_module,
+        "open_document_with_retry",
+        lambda **_kwargs: fake_doc,
+    )
+    monkeypatch.setattr(
+        delete_module,
+        "save_document_with_retry",
+        lambda *_args, **_kwargs: setattr(fake_doc, "saved", True),
+    )
+    monkeypatch.setattr(
+        delete_module,
+        "close_word_application",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        delete_module,
+        "unprotect_document",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        delete_module,
+        "get_anchor_target_sizes",
+        lambda _tender_type: (22.0, 22.0),
+    )
+    monkeypatch.setattr(
+        delete_module,
+        "find_anchor_range",
+        lambda **_kwargs: (
+            {"start": 10, "end": 20, "page": 1},
+            {"start": 80, "end": 90, "page": 1},
+        ),
+    )
+
+    def _fake_delete_content_between_anchors(doc, **kwargs):
+        captured["doc"] = doc
+        captured["kwargs"] = kwargs
+        kwargs["log_parts"].append("锁感知删除测试日志")
+        return {
+            "deleted_tables": 0,
+            "skipped_tables": 0,
+            "deleted_paragraphs": 1,
+            "skipped_paragraphs": 1,
+            "used_fallback_delete": False,
+        }
+
+    monkeypatch.setattr(
+        delete_module,
+        "_delete_content_between_anchors",
+        _fake_delete_content_between_anchors,
+    )
+
+    delete_module.gngk_hw_cz_delete_tender_param(
+        {
+            "prepared_doc_path": str(doc_path),
+            "insertion_before_text": "第四章 招标需求",
+            "insertion_after_text": "第五章 评标方法与程序",
+        },
+        config=None,
+    )
+
+    assert captured["doc"] is fake_doc
+    assert captured["kwargs"]["range_start"] == 20
+    assert captured["kwargs"]["range_end"] == 80
+    assert captured["kwargs"]["after_anchor_start"] == 80
+    assert fake_doc.deleted_ranges == []
+    assert fake_doc.saved is True
+
+
 def test_delete_node_uses_state_tender_type_instead_of_hardcoded_gjgk(
     monkeypatch,
     tmp_path: Path,
@@ -480,8 +562,7 @@ def test_update_node_inserts_text_blank_lines_and_markdown_tables_without_protec
     )
 
     assert inserted_items == [
-        ("text", "第一段"),
-        ("text", ""),
+        ("text", "第一段\n"),
         ("table", [["列1", "列2"], ["A", "B"]]),
     ]
     assert cleanup_calls == []
@@ -496,6 +577,24 @@ def test_update_node_inserts_text_blank_lines_and_markdown_tables_without_protec
     assert result["comment_writeback_failed"] == 0
     assert result["comment_writeback_skipped"] == 0
     assert fake_doc.saved is True
+
+
+def test_merge_adjacent_text_items_keeps_tables_as_boundaries() -> None:
+    merged = update_module._merge_adjacent_text_items(
+        [
+            {"type": "text", "line": "第一段"},
+            {"type": "text", "line": ""},
+            {"type": "text", "line": "第二段"},
+            {"type": "table", "rows": [["A"]]},
+            {"type": "text", "line": "第三段"},
+        ]
+    )
+
+    assert merged == [
+        {"type": "text", "line": "第一段\n\n第二段"},
+        {"type": "table", "rows": [["A"]]},
+        {"type": "text", "line": "第三段"},
+    ]
 
 
 def test_update_node_uses_state_tender_type_for_anchor_mode_and_style_bounds(

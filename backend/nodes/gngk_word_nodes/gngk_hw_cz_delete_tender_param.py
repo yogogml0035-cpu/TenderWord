@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shutil
 import sys
 import time
 from typing import Optional
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[3]
+BACKEND_ROOT = PROJECT_ROOT / "backend"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -17,6 +19,9 @@ from backend.config.tender_config import (
     get_anchor_target_sizes,
     get_content_update_mode,
     get_default_anchor_texts,
+)
+from backend.helper.word_helper.delete_ops import (
+    delete_range_content_preserving_locked_blocks,
 )
 from backend.states import TenderGraphStateBase
 from backend.util.log_util.progress_log import progress_log
@@ -34,6 +39,10 @@ from backend.util.word_util.anchor_utils import (
 
 NODE_NAME = "gngk_hw_cz_delete_tender_param"
 DEFAULT_TENDER_TYPE = "gngk_hw_cz"
+DEFAULT_TEST_SOURCE_DOC = (
+    BACKEND_ROOT / "test_doc" / "254226-小动物活体光声显微成像设备-招标文件-初稿1（审2）.doc"
+)
+DEFAULT_TEST_SUFFIX = "-delete-test"
 
 
 def _visible_log(message: str) -> None:
@@ -45,6 +54,31 @@ def _calculate_elapsed_seconds(
 ) -> float:
     current = time.monotonic() if current_monotonic is None else current_monotonic
     return max(0.0, current - start_monotonic)
+
+
+def _delete_content_between_anchors(
+    doc,
+    *,
+    range_start: int,
+    range_end: int,
+    after_anchor_start: int,
+    log_parts: list[str],
+) -> dict[str, int | bool]:
+    """锁感知删除正文区间，避免 Word 因局部锁定拒绝整段 Delete。"""
+    after_anchor_marker = doc.Range(int(after_anchor_start), int(after_anchor_start))
+
+    def get_bound_end() -> int:
+        try:
+            return int(after_anchor_marker.Start)
+        except Exception:
+            return int(range_end)
+
+    return delete_range_content_preserving_locked_blocks(
+        doc,
+        range_start=int(range_start),
+        get_bound_end=get_bound_end,
+        log_parts=log_parts,
+    )
 
 
 def gngk_hw_cz_delete_tender_param(
@@ -168,7 +202,23 @@ def gngk_hw_cz_delete_tender_param(
                 f"range_start={range_start}, range_end={range_end}, doc_end={doc_end}"
             )
 
-        doc.Range(range_start, range_end).Delete()
+        deletion_log_parts: list[str] = []
+        deletion_stats = _delete_content_between_anchors(
+            doc,
+            range_start=range_start,
+            range_end=range_end,
+            after_anchor_start=int(after_hit["start"]),
+            log_parts=deletion_log_parts,
+        )
+        for part in deletion_log_parts:
+            print(f"[{NODE_NAME}] {part}")
+        _visible_log(
+            "锁感知删除完成: "
+            f"表格 {deletion_stats['deleted_tables']} 个，"
+            f"段落 {deletion_stats['deleted_paragraphs']} 个，"
+            f"跳过锁定表格 {deletion_stats['skipped_tables']} 个，"
+            f"跳过锁定段落 {deletion_stats['skipped_paragraphs']} 个"
+        )
         _visible_log(f"删除完成，页码范围 {start_page}-{end_page}，准备保存文档")
 
         save_document_with_retry(doc, node_name=NODE_NAME)
@@ -204,3 +254,63 @@ def gngk_hw_cz_delete_tender_param(
     _visible_log(f"节点执行完成，耗时 {elapsed_time:.2f} 秒")
 
     return TenderGraphStateBase(**dict(state))
+
+
+def main() -> None:
+    """复制真实样本文档并直接执行本删除节点，便于本地 Word COM 验证。"""
+    print("=" * 80)
+    print(f"开始测试 {NODE_NAME} 节点")
+    print("=" * 80)
+
+    source_doc_path = DEFAULT_TEST_SOURCE_DOC
+    test_doc_path = source_doc_path.with_name(
+        f"{source_doc_path.stem}{DEFAULT_TEST_SUFFIX}{source_doc_path.suffix}"
+    )
+
+    if not source_doc_path.exists():
+        print(f"错误: 测试文件不存在: {source_doc_path}")
+        sys.exit(1)
+
+    if test_doc_path.exists():
+        test_doc_path.unlink()
+    shutil.copy2(source_doc_path, test_doc_path)
+
+    before_text, after_text = get_default_anchor_texts(DEFAULT_TENDER_TYPE)
+    test_state: TenderGraphStateBase = {
+        "tender_type": DEFAULT_TENDER_TYPE,
+        "prepared_doc_path": str(test_doc_path),
+        "insertion_before_text": before_text,
+        "insertion_after_text": after_text,
+    }
+
+    print(f"测试类型: {DEFAULT_TENDER_TYPE}")
+    print(f"源文件: {source_doc_path}")
+    print(f"测试副本: {test_doc_path}")
+    print(f"前置锚点: {before_text}")
+    print(f"后置锚点: {after_text}")
+    print()
+
+    try:
+        result_state = gngk_hw_cz_delete_tender_param(test_state, config=None)
+    except Exception as exc:
+        print()
+        print("删除操作失败")
+        print(f"错误信息: {exc}")
+        import traceback
+
+        print()
+        print("详细错误堆栈:")
+        traceback.print_exc()
+        sys.exit(1)
+
+    print()
+    print("删除操作执行完成")
+    print(f"删除结果文件: {test_doc_path}")
+    print("返回状态:")
+    for key, value in result_state.items():
+        print(f"  {key}: {value}")
+    print("=" * 80)
+
+
+if __name__ == "__main__":
+    main()

@@ -79,6 +79,10 @@ from backend.helper.word_helper.cleanup_ops import (
     cleanup_empty_tables,
     multi_pass_cleanup,
 )
+from backend.helper.word_helper.delete_ops import (
+    delete_range_content_preserving_locked_blocks,
+    trim_leading_layout_controls_preserving_locked_blocks,
+)
 from backend.helper.word_helper.semantic_matcher import (
     clean_semantic_text,
     normalize_semantic_text,
@@ -163,6 +167,9 @@ __all__ = [
     "cleanup_blank_paragraphs",
     "cleanup_empty_tables",
     "multi_pass_cleanup",
+    # delete_ops
+    "delete_range_content_preserving_locked_blocks",
+    "trim_leading_layout_controls_preserving_locked_blocks",
     # semantic_matcher
     "clean_semantic_text",
     "normalize_semantic_text",
