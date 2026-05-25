@@ -12,7 +12,11 @@ from backend.models.generate import (
     StyleWritebackMode,
 )
 from backend.models.tender import TenderData
-from backend.services.document_service import DocumentService, REWRITE_DEFAULT_ANCHORS
+from backend.services.document_service import (
+    DocumentService,
+    REWRITE_DEFAULT_ANCHORS,
+    REWRITE_STATE_KEYS,
+)
 
 
 def build_request(
@@ -24,6 +28,7 @@ def build_request(
     fund_source_lx: int = 1,
     generation_style: GenerationStyle = GenerationStyle.TEMPLATE,
     style_writeback_mode: StyleWritebackMode = StyleWritebackMode.FULL,
+    investment: str = "140",
 ) -> GenerateRequest:
     file_paths: dict[str, object] = {"tender_params": ["D:/UploadFiles/params.docx"]}
     if origin_tender is not None:
@@ -38,6 +43,7 @@ def build_request(
             project_number="0811-254DSITC2512",
             project_content="采购内容",
             buyer_name="采购人",
+            investment=investment,
             bzj_rule="规则",
             project_zbr_xbr="张三",
             zbr_xbr_tel="13800000000",
@@ -111,6 +117,20 @@ def test_build_initial_state_carries_style_writeback_mode() -> None:
     state = service._build_initial_state(request, task_id="task-3b")
 
     assert state["style_writeback_mode"] == "bold_only"
+
+
+def test_build_initial_state_carries_investment_and_rewrite_snapshot_key() -> None:
+    service = object.__new__(DocumentService)
+    request = build_request(
+        origin_tender="D:/UploadFiles/review.docx",
+        template="D:/UploadFiles/template.docx",
+        investment="140.0",
+    )
+
+    state = service._build_initial_state(request, task_id="task-investment")
+
+    assert state["investment"] == "140.0"
+    assert "investment" in REWRITE_STATE_KEYS
 
 
 @pytest.mark.parametrize(

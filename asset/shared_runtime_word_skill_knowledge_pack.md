@@ -9,6 +9,7 @@
 ## 当前真源
 
 - 任务创建与运行时装配：`backend/services/document_service.py`
+- 招标详情数据契约：`backend/api/tender.py`、`backend/models/tender.py`、`backend/util/common_util/fetch_tender_data.py`
 - 生成任务 REST 入口：`backend/api/generate.py`
 - Graph 主干、锁、取消与进度包装：`backend/graphs/base_graph.py`、`backend/task/task_queue_manager.py`
 - task skill runtime：`backend/graphs/skill_graph.py`、`backend/skills/`
@@ -17,6 +18,12 @@
 - SSE 与日志透传：`backend/core/sse_manager.py`、`backend/api/stream.py`、`backend/models/sse.py`、`backend/util/log_util/`
 
 ## 运行时分层
+
+### 招标详情 API
+
+- `GET /api/tender/{tender_no}` 会把外部招标详情接口数据装配成 `backend.models.tender.TenderData`；外部接口字段类型可能波动，例如 `investment` 可能返回数字而不是字符串。
+- `TenderData` 是前端表单和后续 generate/rewrite/edit 快照的文本契约边界；预算、项目编号、联系人、日期、平台等文本字段必须在模型边界转成字符串，不能把可显示数字误判成“招标数据格式错误”。
+- 排查“输入招标编号显示格式错误”时，先看后端响应体里的 Pydantic 字段错误；若外部数据已返回且只是字段类型不匹配，应修归一化契约，而不是收紧招标编号格式。
 
 ### Generate / Rewrite / Edit
 
@@ -116,6 +123,7 @@
 ## 关联测试与验证入口
 
 - 运行时与任务结果：`backend/tests/services/test_document_service_initial_state.py`、`backend/tests/services/test_document_service_task_result.py`
+- 招标详情 API：`backend/tests/api/test_tender_api.py`、`backend/tests/util/test_fetch_tender_data.py`
 - 生成任务 API：`backend/tests/api/test_generate_api.py`
 - 用户流式 rewrite 路由：`backend/tests/services/test_user_routing_service.py`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
 - skill 与 edit/rewrite：`backend/tests/nodes/test_tender_aware_word_dispatch.py`、`backend/tests/nodes/test_edit_audit_logging.py`、`backend/tests/progress/test_edit_progress_tracking.py`
@@ -129,6 +137,7 @@
 ## 回归风险
 
 - 改 skill workflow、dispatch 或 task result 时，容易出现 generate/rewrite/edit 某一条链路漏同步。
+- 改招标详情模型或外部接口解析时，容易把上游字段类型波动误报为编号不存在或数据格式错误；需要覆盖数字预算、缺失可选字段和类型路由三类回归。
 - 改受保护字段规则时，必须同时检查 `tender_config.py`、`protected_fields.py`、三条 update 路径和严格匹配测试。
 - 改样式回填或 SSE 结果结构时，必须同步检查后端 `DoneEventData`、任务结果 payload、`frontend/hooks/useChatSSE.ts` 和 chat store metadata。
 - 任何新增 Word helper 都要先确认代码真实落地，再写入知识包；不要把目标设计提前写成已完成事实。

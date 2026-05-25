@@ -5,15 +5,15 @@
 ## 当前有效知识包
 
 - `shared_runtime_word_skill_knowledge_pack.md`
-  - 适用范围：generate / rewrite / edit 运行时、用户流式 rewrite 路由、Prompt Layer、LLM provider 默认模型与思考模式开关、generate prompt 路由模式契约、模板生成的参考符号零继承、硬换行与冒号挂载列表约束、task skill runtime、task skill 输出范围契约、按参数生成时的无源引导段删除与重编号约束、参考限权、参数表格 schema 真源、商务章去重删除、Word COM、共享 Word helper、批注/样式回写、样式颜色门禁、任务结果与 SSE 透传。
+  - 适用范围：generate / rewrite / edit 运行时、招标详情 API 数据契约、用户流式 rewrite 路由、Prompt Layer、LLM provider 默认模型与思考模式开关、generate prompt 路由模式契约、模板生成的参考符号零继承、硬换行与冒号挂载列表约束、task skill runtime、task skill 输出范围契约、按参数生成时的无源引导段删除与重编号约束、参考限权、参数表格 schema 真源、商务章去重删除、Word COM、共享 Word helper、批注/样式回写、样式颜色门禁、任务结果与 SSE 透传。
 - `tender_type_identity_session_knowledge_pack.md`
-  - 适用范围：招标类型 identity、`form_type` / `tender_type` / family、`gngk` 子类型分派、anchor 默认值、graph/node 特化、canonical URL、当前页面会话与草稿恢复。
+  - 适用范围：招标类型 identity、`form_type` / `tender_type` / family、`gngk` 子类型分派、anchor 默认值、graph/node/replacement 特化、国内公开货物自筹替换字段边界、canonical URL、当前页面会话与草稿恢复。
 - `template_candidate_pipeline_knowledge_pack.md`
   - 适用范围：模板候选获取、同优先级 AI 重排、下载代理、文件落盘、上传槽位回填、模板弹窗缓存与刷新。
 
 ## 使用路由
 
-- 改 Prompt Layer、task skill、generate / rewrite / edit runtime、Word COM、SSE、任务结果透传、批注/样式回写或 `backend/helper/word_helper/` 时，优先读取 `shared_runtime_word_skill_knowledge_pack.md`。
+- 改招标详情 API 数据契约、Prompt Layer、task skill、generate / rewrite / edit runtime、Word COM、SSE、任务结果透传、批注/样式回写或 `backend/helper/word_helper/` 时，优先读取 `shared_runtime_word_skill_knowledge_pack.md`。
 - 改招标类型 identity、`form_type` 分派、anchor config、graph/state/node/replacement 收敛、URL 判型、当前页面会话、`sessionStorage` 语义、聊天草稿与排队恢复时，优先读取 `tender_type_identity_session_knowledge_pack.md`。
 - 改模板候选、AI 重排、下载代理、文件回填与模板弹窗时，优先读取 `template_candidate_pipeline_knowledge_pack.md`。
 

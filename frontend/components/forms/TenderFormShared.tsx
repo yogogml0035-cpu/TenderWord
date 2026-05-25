@@ -184,6 +184,22 @@ function buildInsertionConfigScopeKey(
   return tenderType === 'gngk' ? `${tenderType}:${tenderLx}:${fundLx}` : tenderType;
 }
 
+function buildFetchedInsertionApplyKey(
+  tenderType: TenderType,
+  tenderTypeInfo: TenderTypeInfo,
+  tenderData: TenderData | null
+): string {
+  return [
+    tenderType,
+    tenderTypeInfo.purchase_method,
+    tenderTypeInfo.tender_lx,
+    tenderTypeInfo.fund_lx,
+    tenderData?.project_number || '',
+    tenderData?.ifdzpt2 ?? '',
+    tenderData?.ifzgcg ?? '',
+  ].join(':');
+}
+
 function buildManualInsertionScopeKeys(
   draft: ConversationFormDraft | null | undefined,
   scopeKey: string
@@ -351,6 +367,45 @@ function resolveVisibleInsertionConfig(
       : draft?.insertion_config;
 
   return resolveInsertionConfig(scopedInsertion, fallback);
+}
+
+function resolveModeChangeInsertionConfig(
+  tenderType: TenderType,
+  draft: ConversationFormDraft | null | undefined,
+  manualScopeKeysRef: React.MutableRefObject<Set<string>>,
+  tenderLx: TenderLx,
+  fundLx: FundLx,
+  variantDefaults: TenderInsertionConfig,
+  tenderData?: TenderData | null
+): TenderInsertionConfig {
+  const fallback = resolveDefaultInsertionConfig(
+    tenderType,
+    tenderLx,
+    fundLx,
+    variantDefaults,
+    tenderData
+  );
+
+  if (tenderType !== 'gngk') {
+    return resolveInsertionConfig(draft?.insertion_config, fallback);
+  }
+
+  const scopedInsertion = resolveGngkScopedInsertionConfig(draft, tenderLx, fundLx, false);
+  if (!scopedInsertion) {
+    return fallback;
+  }
+
+  const resolvedScopedInsertion = resolveInsertionConfig(scopedInsertion, fallback);
+  const insertionScopeKey = buildInsertionConfigScopeKey(tenderType, tenderLx, fundLx);
+
+  if (
+    isManualInsertionScope(draft, manualScopeKeysRef, insertionScopeKey) ||
+    !isKnownAutoInsertionConfig(resolvedScopedInsertion)
+  ) {
+    return resolvedScopedInsertion;
+  }
+
+  return fallback;
 }
 
 function buildGngkModeCacheUpdates(
@@ -535,6 +590,11 @@ function toTenderInfoItems(
     { label: '项目名称', value: tenderData.project_name, key: 'project_name' },
     { label: '项目编号', value: tenderData.project_number, key: 'project_number' },
     { label: '项目内容', value: tenderData.project_content, key: 'project_content' },
+    {
+      label: '总投资',
+      value: tenderData.investment ? `${tenderData.investment}万元` : tenderData.investment,
+      key: 'investment',
+    },
     { label: '保证金规则', value: tenderData.bzj_rule, key: 'bzj_rule' },
     { label: '采购人', value: tenderData.buyer_name, key: 'buyer_name' },
     { label: '主办人/协办人', value: tenderData.project_zbr_xbr, key: 'project_zbr_xbr' },
@@ -661,6 +721,8 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const manualInsertionScopeKeysRef = useRef<Set<string>>(
     new Set(initialDraft?.manual_insertion_config_scope_keys || [])
   );
+  const optimisticTenderLxRef = useRef<TenderLx>(initialTenderLx);
+  const optimisticFundLxRef = useRef<FundLx>(initialFundLx);
   const [error, setError] = useState<string | null>(null);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [templateCandidates, setTemplateCandidates] = useState<TemplateCandidate[]>([]);
@@ -682,6 +744,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const [selectingTemplateRowKey, setSelectingTemplateRowKey] = useState<string | null>(null);
   const didSyncInitialRouteStateRef = useRef(false);
   const shouldApplyFetchedTypeRef = useRef(false);
+  const fetchedInsertionApplyKeyRef = useRef<string | null>(null);
   const renderControlsInHeader = headerControlsTarget !== undefined;
   const selectedModel: ModelType = initialDraft?.model || 'deepseek';
   const tenderNo = onDraftChange ? initialDraft?.tender_no || initialTenderNo : localTenderNo;
@@ -721,6 +784,11 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     () => normalizeTemplateProjectName(tenderData?.project_name),
     [tenderData]
   );
+
+  useEffect(() => {
+    optimisticTenderLxRef.current = tenderLx;
+    optimisticFundLxRef.current = fundLx;
+  }, [fundLx, tenderLx]);
 
   useEffect(() => {
     if (!onDraftChange || didSyncInitialRouteStateRef.current) {
@@ -875,10 +943,14 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
 
   const handleFundLxChange = useCallback(
     (nextFundLx: FundLx) => {
-      if (fundLx === nextFundLx) {
+      const currentTenderLx = optimisticTenderLxRef.current;
+      const currentFundLx = optimisticFundLxRef.current;
+
+      if (currentFundLx === nextFundLx) {
         return;
       }
 
+      optimisticFundLxRef.current = nextFundLx;
       setLocalFundLx(nextFundLx);
 
       const nextUpdates: Partial<ConversationFormDraft> = {
@@ -888,19 +960,18 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       if (tenderType === 'gngk') {
         const currentModeCacheUpdates = buildGngkModeCacheUpdates(
           initialDraft,
-          tenderLx,
-          fundLx,
+          currentTenderLx,
+          currentFundLx,
           insertionConfig
         );
         const nextDraft = mergeDraftStateLike(initialDraft, currentModeCacheUpdates);
-        const nextInsertion = resolveVisibleInsertionConfig(
+        const nextInsertion = resolveModeChangeInsertionConfig(
           tenderType,
           nextDraft,
-          tenderLx,
+          manualInsertionScopeKeysRef,
+          currentTenderLx,
           nextFundLx,
-          variantConfig.insertionConfigDefaults,
-          false,
-          tenderData
+          variantConfig.insertionConfigDefaults
         );
 
         Object.assign(nextUpdates, currentModeCacheUpdates);
@@ -909,7 +980,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
           buildVisibleInsertionDraftUpdates(
             nextDraft,
             tenderType,
-            tenderLx,
+            currentTenderLx,
             nextFundLx,
             nextInsertion
           )
@@ -925,13 +996,11 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       syncBrowserUrlToConversation({
         tenderType,
         tenderno: tenderNo || urlTenderNo,
-        tender_lx: tenderLx,
+        tender_lx: currentTenderLx,
         fund_lx: nextFundLx,
       });
     },
     [
-      tenderLx,
-      fundLx,
       initialDraft,
       insertionConfig,
       onDraftChange,
@@ -939,16 +1008,19 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       tenderType,
       urlTenderNo,
       variantConfig.insertionConfigDefaults,
-      tenderData,
     ]
   );
 
   const handleTenderLxChange = useCallback(
     (nextTenderLx: TenderLx) => {
-      if (tenderLx === nextTenderLx) {
+      const currentTenderLx = optimisticTenderLxRef.current;
+      const currentFundLx = optimisticFundLxRef.current;
+
+      if (currentTenderLx === nextTenderLx) {
         return;
       }
 
+      optimisticTenderLxRef.current = nextTenderLx;
       setLocalTenderLx(nextTenderLx);
       const nextUpdates: Partial<ConversationFormDraft> = {
         tender_lx: nextTenderLx,
@@ -956,7 +1028,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
 
       const currentGenerationStyleCacheUpdates =
         tenderType === 'gngk'
-          ? buildGngkGenerationStyleCacheUpdates(initialDraft, tenderLx, generationStyle)
+          ? buildGngkGenerationStyleCacheUpdates(initialDraft, currentTenderLx, generationStyle)
           : {};
       const nextDraftWithGenerationStyleCache = mergeDraftStateLike(
         initialDraft,
@@ -974,22 +1046,21 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       if (tenderType === 'gngk') {
         const currentModeCacheUpdates = buildGngkModeCacheUpdates(
           initialDraft,
-          tenderLx,
-          fundLx,
+          currentTenderLx,
+          currentFundLx,
           insertionConfig
         );
         const nextDraft = mergeDraftStateLike(
           nextDraftWithGenerationStyleCache,
           currentModeCacheUpdates
         );
-        const nextInsertion = resolveVisibleInsertionConfig(
+        const nextInsertion = resolveModeChangeInsertionConfig(
           tenderType,
           nextDraft,
+          manualInsertionScopeKeysRef,
           nextTenderLx,
-          fundLx,
-          variantConfig.insertionConfigDefaults,
-          false,
-          tenderData
+          currentFundLx,
+          variantConfig.insertionConfigDefaults
         );
 
         Object.assign(nextUpdates, currentModeCacheUpdates);
@@ -999,7 +1070,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
             nextDraft,
             tenderType,
             nextTenderLx,
-            fundLx,
+            currentFundLx,
             nextInsertion
           )
         );
@@ -1015,21 +1086,18 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         tenderType,
         tenderno: tenderNo || urlTenderNo,
         tender_lx: nextTenderLx,
-        fund_lx: fundLx,
+        fund_lx: currentFundLx,
       });
     },
     [
-      fundLx,
       generationStyle,
       initialDraft,
       insertionConfig,
       onDraftChange,
-      tenderLx,
       tenderNo,
       tenderType,
       urlTenderNo,
       variantConfig.insertionConfigDefaults,
-      tenderData,
     ]
   );
 
@@ -1118,6 +1186,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   useEffect(() => {
     if (tenderFetchState.status === 'loading') {
       shouldApplyFetchedTypeRef.current = true;
+      fetchedInsertionApplyKeyRef.current = null;
       return;
     }
 
@@ -1201,6 +1270,16 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     if (tenderLx !== tenderTypeInfo.tender_lx || fundLx !== tenderTypeInfo.fund_lx) {
       return;
     }
+
+    const fetchedInsertionApplyKey = buildFetchedInsertionApplyKey(
+      tenderType,
+      tenderTypeInfo,
+      tenderData
+    );
+    if (fetchedInsertionApplyKeyRef.current === fetchedInsertionApplyKey) {
+      return;
+    }
+    fetchedInsertionApplyKeyRef.current = fetchedInsertionApplyKey;
 
     const insertionScopeKey = buildInsertionConfigScopeKey(tenderType, tenderLx, fundLx);
     if (isManualInsertionScope(initialDraft, manualInsertionScopeKeysRef, insertionScopeKey)) {

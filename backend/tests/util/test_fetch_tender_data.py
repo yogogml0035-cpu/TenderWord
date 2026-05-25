@@ -64,8 +64,42 @@ def test_fetch_tender_data_preserves_supported_tender_lx(monkeypatch, tender_lx:
     assert result["data"]["ifdzpt2"] == 3
     assert result["data"]["ifzgcg"] == 2
     assert result["data"]["fund_source_lx"] == 0
+    assert result["data"]["investment"] == ""
     assert result["type"] == {
         "tender_lx": tender_lx,
         "purchase_method": 2,
         "fund_lx": 0,
     }
+
+
+def test_fetch_tender_data_preserves_investment(monkeypatch):
+    payload = {
+        "data": {
+            "project_name": "医疗设备采购",
+            "project_number": "261005",
+            "project_content": "设备一批",
+            "buyer_name": "上海市东方医院",
+            "investment": "140.0",
+            "fund_lx": 0,
+        },
+        "type": {
+            "tender_lx": 0,
+            "purchase_method": 2,
+            "fund_lx": 0,
+        },
+    }
+
+    monkeypatch.setattr(
+        fetch_tender_data_module.requests,
+        "get",
+        lambda *args, **kwargs: _FakeResponse(payload),
+    )
+    monkeypatch.setattr(
+        fetch_tender_data_module.settings,
+        "TENDER_DATA_API_URL",
+        "https://example.com/tender",
+    )
+
+    result = fetch_tender_data_function("0811-DSITC261005")
+
+    assert result["data"]["investment"] == "140.0"

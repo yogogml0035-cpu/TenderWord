@@ -93,6 +93,7 @@ async def get_tender_data(
             project_number=tender_data_dict.get("project_number", ""),
             project_content=tender_data_dict.get("project_content", ""),
             buyer_name=tender_data_dict.get("buyer_name", ""),
+            investment=tender_data_dict.get("investment", ""),
             bzj_rule=tender_data_dict.get("bzj_rule", ""),
             project_zbr_xbr=tender_data_dict.get("project_zbr_xbr", ""),
             zbr_xbr_tel=tender_data_dict.get("zbr_xbr_tel", ""),

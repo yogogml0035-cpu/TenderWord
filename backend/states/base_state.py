@@ -87,6 +87,7 @@ class TenderGraphStateBase(BaseState, total=False):
     project_content: str
     bzj_rule: str
     buyer_name: str
+    investment: str
     project_zbr_xbr: str
     zbr_xbr_tel: str
     zbr_pinyin: str
