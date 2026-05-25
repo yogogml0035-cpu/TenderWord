@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class TenderType(BaseModel):
@@ -121,6 +121,29 @@ class TenderData(BaseModel):
         ge=0,
         le=1,
     )
+
+    @field_validator(
+        "project_name",
+        "project_number",
+        "project_content",
+        "buyer_name",
+        "investment",
+        "bzj_rule",
+        "project_zbr_xbr",
+        "zbr_xbr_tel",
+        "zbr_pinyin",
+        "shell_start_date",
+        "shell_end_date",
+        "submit_date",
+        "platform",
+        "service_fee",
+        mode="before",
+    )
+    @classmethod
+    def coerce_text_fields(cls, value: object) -> str:
+        if value is None:
+            return ""
+        return str(value)
 
     model_config = {
         "json_schema_extra": {

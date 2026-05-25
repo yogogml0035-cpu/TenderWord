@@ -210,6 +210,9 @@ def test_extract_public_tender_contact_fields_matches_service_template() -> None
     [
         "电话：021-63230480 转8607、8619",
         "电 话：021-63230480 转8607、8619",
+        "电\u3000话：\u3000\u3000021-63230480 转8607、8619",
+        "联系电话：021-63230480 转8607、8619",
+        "联系方式：021-63230480 转8607、8619",
         "传真：021-63299235",
         "邮箱：shiqianqian@dongsong-cn.com",
         "电子邮箱：shiqianqian@dongsong-cn.com",
@@ -233,6 +236,37 @@ def test_extract_public_tender_project_contact_stops_before_contact_labels(
     )
 
     assert project_zbr_xbr == "史倩倩、刘宇昂"
+
+
+def test_extract_public_tender_contact_fields_does_not_jump_to_unrelated_zipcode() -> None:
+    doc_content = """
+采购代理机构名称：上海东松医疗科技股份有限公司
+地址：上海市宁波路1号申华金融大厦11楼
+联系人：史倩倩、刘宇昂
+联系电话：021-63230480转8607、8622
+传真：021-63299235
+电子邮箱：shiqianqian@dongsong-cn.com
+
+10、投标人基本情况简介格式
+（一）基本情况：
+1、单位名称：
+2、地址：
+3、邮编：
+4、电话/传真：
+""".strip()
+    log_parts: list[str] = []
+
+    extracted = extract_public_tender_contact_fields(
+        doc_content,
+        {
+            "project_zbr_xbr": "新主办协办",
+            "zbr_xbr_tel": "新电话",
+            "zbr_pinyin": "newpinyin",
+        },
+        log_parts,
+    )
+
+    assert extracted == ("史倩倩、刘宇昂", "8607、8622", "shiqianqian")
 
 
 def test_extract_public_tender_contact_fields_supports_generic_contact_before_spaced_phone() -> None:

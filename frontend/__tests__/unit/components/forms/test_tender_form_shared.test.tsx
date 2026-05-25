@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TenderFormShared, type BaseTenderFormData } from '@/components/forms/TenderFormShared';
 import type { UploadedFile } from '@/components/forms/FileUploader';
@@ -24,6 +24,7 @@ const mockTenderData: TenderData = {
   project_content: '测试内容',
   bzj_rule: '测试保证金规则',
   buyer_name: '测试采购人',
+  investment: '30.0',
   project_zbr_xbr: '张三',
   zbr_xbr_tel: '13800138000',
   zbr_pinyin: 'zhangsan',
@@ -578,6 +579,7 @@ describe('TenderFormShared', () => {
       })
     );
     expect(screen.getByText('测试项目')).toBeInTheDocument();
+    expect(screen.getByText('总投资').parentElement).toHaveTextContent('30.0万元');
     expect(screen.getByText('测试采购人')).toBeInTheDocument();
     expect(screen.getByTestId('tender-no-input')).toHaveAttribute('data-fetch-status', 'success');
   });
@@ -1408,7 +1410,7 @@ describe('TenderFormShared', () => {
     expect(screen.getByText('标的类型').parentElement).toHaveTextContent('工程');
   });
 
-  it('applies fetched gngk type info to buttons and self-funded contract-terms anchor', async () => {
+  it('applies fetched gngk type info once and lets later switches use mode defaults', async () => {
     const user = userEvent.setup();
     setUrlParams({ tenderType: 'gngk', tenderLx: 0, fundLx: 1 });
     mockSyncTenderDataDraft.mockImplementationOnce(
@@ -1468,7 +1470,7 @@ describe('TenderFormShared', () => {
 
     await user.click(selfFundedButton);
     await waitFor(() => expect(selfFundedButton).toHaveClass('bg-blue-600'));
-    await waitFor(() => expect(afterInput).toHaveValue('第四章 合同条款'));
+    await waitFor(() => expect(afterInput).toHaveValue('第四章 投标文件有关格式'));
 
     await user.click(goodsButton);
     await waitFor(() => expect(goodsButton).toHaveClass('bg-blue-600'));
@@ -1476,7 +1478,309 @@ describe('TenderFormShared', () => {
     await waitFor(() => expect(afterInput).toHaveValue('第四章 投标文件有关格式'));
   });
 
-  it('uses self-funded goods anchors for gngk fiscal fund when ifzgcg is 2', async () => {
+  it('keeps fetched anchors auto-scoped so later gngk type switches still update anchors', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk', tenderLx: 0, fundLx: 1 });
+    mockSyncTenderDataDraft.mockImplementationOnce(
+      async ({
+        tenderNo,
+        updateDraft,
+      }: {
+        tenderNo: string;
+        updateDraft: (updates: Partial<ConversationFormDraft>) => void;
+      }) => {
+        updateDraft({
+          tender_fetch: { status: 'loading' },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        updateDraft({
+          tender_no: tenderNo,
+          tender_data: {
+            ...mockTenderData,
+            ifdzpt2: 2,
+          },
+          tender_type_info: buildTenderTypeInfo({
+            tender_lx: 2,
+            purchase_method: 2,
+            fund_lx: 0,
+          }),
+          tender_fetch: { status: 'success' },
+        });
+        return {
+          ...mockTenderData,
+          ifdzpt2: 2,
+        };
+      }
+    );
+    renderSharedForm({ tenderType: 'gngk' });
+
+    const serviceButton = screen.getByRole('button', { name: '服务' });
+    const goodsButton = screen.getByRole('button', { name: '货物' });
+    const fiscalButton = screen.getByRole('button', { name: '财政' });
+    const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
+
+    await user.type(screen.getByLabelText('招标编号输入框'), '0811-DSITC251498');
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+
+    await waitFor(() => expect(serviceButton).toHaveClass('bg-blue-600'));
+    await waitFor(() => expect(afterInput).toHaveValue('第四章 合同条款'));
+
+    await user.click(goodsButton);
+    await user.click(fiscalButton);
+
+    await waitFor(() => expect(goodsButton).toHaveClass('bg-blue-600'));
+    expect(fiscalButton).toHaveClass('bg-blue-600');
+    await waitFor(() => expect(beforeInput).toHaveValue('第四章  招标需求'));
+    expect(afterInput).toHaveValue('第五章  评标方法与程序');
+  });
+
+  it('keeps fetched anchors auto-scoped in store-backed drafts', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk', tenderLx: 0, fundLx: 1 });
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          id: 'conv-1',
+          title: '0811-DSITC251498',
+          tenderType: 'gngk',
+          createdAt: 1,
+          updatedAt: 1,
+          messages: [],
+        },
+      ],
+      currentConversationId: 'conv-1',
+      activeTaskIds: [],
+      taskMessageMap: {},
+      conversationDrafts: {
+        'conv-1': {
+          tender_no: '0811-DSITC251498',
+          tender_lx: 0,
+          fund_lx: 1,
+          model: 'deepseek',
+          generation_style: 'template',
+          style_writeback_mode: 'full',
+          insertion_config: {
+            before_text: '第四章  招标需求',
+            after_text: '第五章  评标方法与程序',
+          },
+          gngk_insertion_configs: {
+            1: {
+              before_text: '第四章  招标需求',
+              after_text: '第五章  评标方法与程序',
+            },
+          },
+        },
+      },
+      taskSummaries: {},
+      unreadConversationResults: {},
+      isLoading: false,
+      error: null,
+      selectedTenderType: 'gngk',
+    }));
+    mockSyncTenderDataDraft.mockImplementationOnce(
+      async ({
+        tenderNo,
+        updateDraft,
+      }: {
+        tenderNo: string;
+        updateDraft: (updates: Partial<ConversationFormDraft>) => void;
+      }) => {
+        updateDraft({
+          tender_fetch: { status: 'loading' },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        updateDraft({
+          tender_no: tenderNo,
+          tender_data: {
+            ...mockTenderData,
+            ifdzpt2: 2,
+          },
+          tender_type_info: buildTenderTypeInfo({
+            tender_lx: 2,
+            purchase_method: 2,
+            fund_lx: 0,
+          }),
+          tender_fetch: { status: 'success' },
+        });
+        return {
+          ...mockTenderData,
+          ifdzpt2: 2,
+        };
+      }
+    );
+
+    render(<StoreBackedSharedFormHarness />);
+
+    const serviceButton = screen.getByRole('button', { name: '服务' });
+    const goodsButton = screen.getByRole('button', { name: '货物' });
+    const fiscalButton = screen.getByRole('button', { name: '财政' });
+    const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
+
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+
+    await waitFor(() => expect(serviceButton).toHaveClass('bg-blue-600'));
+    await waitFor(() => expect(afterInput).toHaveValue('第四章 合同条款'));
+
+    await user.click(goodsButton);
+    await user.click(fiscalButton);
+
+    await waitFor(() => expect(goodsButton).toHaveClass('bg-blue-600'));
+    expect(fiscalButton).toHaveClass('bg-blue-600');
+    await waitFor(() => expect(beforeInput).toHaveValue('第四章  招标需求'));
+    expect(afterInput).toHaveValue('第五章  评标方法与程序');
+  });
+
+  it('recomputes stale automatic gngk anchor caches after fetched tender data changes defaults', async () => {
+    const user = userEvent.setup();
+    setUrlParams({ tenderType: 'gngk', tenderLx: 2, fundLx: 0 });
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          id: 'conv-1',
+          title: '0811-DSITC251498',
+          tenderType: 'gngk',
+          createdAt: 1,
+          updatedAt: 1,
+          messages: [],
+        },
+      ],
+      currentConversationId: 'conv-1',
+      activeTaskIds: [],
+      taskMessageMap: {},
+      conversationDrafts: {
+        'conv-1': {
+          tender_no: '0811-DSITC251498',
+          tender_lx: 2,
+          fund_lx: 0,
+          model: 'deepseek',
+          generation_style: 'template',
+          style_writeback_mode: 'full',
+          tender_data: {
+            ...mockTenderData,
+            ifdzpt2: 2,
+          },
+          tender_type_info: buildTenderTypeInfo({
+            tender_lx: 2,
+            purchase_method: 2,
+            fund_lx: 0,
+          }),
+          insertion_config: {
+            before_text: '第三章 招标内容及要求',
+            after_text: '第四章 合同条款',
+          },
+          gngk_service_insertion_configs: {
+            0: {
+              before_text: '第三章 招标内容及要求',
+              after_text: '第四章 合同条款',
+            },
+          },
+          gngk_insertion_configs: {
+            1: {
+              before_text: '第三章 招标内容及要求',
+              after_text: '第四章 投标文件有关格式',
+            },
+          },
+        },
+      },
+      taskSummaries: {},
+      unreadConversationResults: {},
+      isLoading: false,
+      error: null,
+      selectedTenderType: 'gngk',
+    }));
+
+    render(<StoreBackedSharedFormHarness />);
+
+    const goodsButton = screen.getByRole('button', { name: '货物' });
+    const fiscalButton = screen.getByRole('button', { name: '财政' });
+    const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
+
+    expect(afterInput).toHaveValue('第四章 合同条款');
+
+    await user.click(goodsButton);
+    await user.click(fiscalButton);
+
+    await waitFor(() => expect(goodsButton).toHaveClass('bg-blue-600'));
+    expect(fiscalButton).toHaveClass('bg-blue-600');
+    await waitFor(() => expect(beforeInput).toHaveValue('第四章  招标需求'));
+    expect(afterInput).toHaveValue('第五章  评标方法与程序');
+  });
+
+  it('uses the latest optimistic gngk type when target and fund toggles happen in the same render', async () => {
+    setUrlParams({ tenderType: 'gngk', tenderLx: 2, fundLx: 0 });
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          id: 'conv-1',
+          title: '0811-DSITC251498',
+          tenderType: 'gngk',
+          createdAt: 1,
+          updatedAt: 1,
+          messages: [],
+        },
+      ],
+      currentConversationId: 'conv-1',
+      activeTaskIds: [],
+      taskMessageMap: {},
+      conversationDrafts: {
+        'conv-1': {
+          tender_no: '0811-DSITC251498',
+          tender_lx: 2,
+          fund_lx: 0,
+          model: 'deepseek',
+          generation_style: 'template',
+          style_writeback_mode: 'full',
+          tender_data: {
+            ...mockTenderData,
+            ifdzpt2: 2,
+          },
+          tender_type_info: buildTenderTypeInfo({
+            tender_lx: 2,
+            purchase_method: 2,
+            fund_lx: 0,
+          }),
+          insertion_config: {
+            before_text: '第三章 招标内容及要求',
+            after_text: '第四章 合同条款',
+          },
+          gngk_service_insertion_configs: {
+            0: {
+              before_text: '第三章 招标内容及要求',
+              after_text: '第四章 合同条款',
+            },
+          },
+        },
+      },
+      taskSummaries: {},
+      unreadConversationResults: {},
+      isLoading: false,
+      error: null,
+      selectedTenderType: 'gngk',
+    }));
+
+    render(<StoreBackedSharedFormHarness />);
+
+    const goodsButton = screen.getByRole('button', { name: '货物' });
+    const fiscalButton = screen.getByRole('button', { name: '财政' });
+    const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
+
+    fireEvent.click(goodsButton);
+    fireEvent.click(fiscalButton);
+
+    await waitFor(() => expect(goodsButton).toHaveClass('bg-blue-600'));
+    expect(fiscalButton).toHaveClass('bg-blue-600');
+    await waitFor(() => expect(beforeInput).toHaveValue('第四章  招标需求'));
+    expect(afterInput).toHaveValue('第五章  评标方法与程序');
+  });
+
+  it('applies fetched ifzgcg goods anchors once without locking later fiscal switches', async () => {
     const user = userEvent.setup();
     setUrlParams({ tenderType: 'gngk', tenderLx: 0, fundLx: 1 });
     mockSyncTenderDataDraft.mockImplementationOnce(
@@ -1525,6 +1829,13 @@ describe('TenderFormShared', () => {
     await waitFor(() => expect(fiscalButton).toHaveClass('bg-blue-600'));
     await waitFor(() => expect(beforeInput).toHaveValue('第三章 招标内容及要求'));
     expect(afterInput).toHaveValue('第四章 投标文件有关格式');
+
+    await user.click(screen.getByRole('button', { name: '自筹' }));
+    await waitFor(() => expect(beforeInput).toHaveValue('第三章 招标内容及要求'));
+
+    await user.click(fiscalButton);
+    await waitFor(() => expect(beforeInput).toHaveValue('第四章  招标需求'));
+    expect(afterInput).toHaveValue('第五章  评标方法与程序');
   });
 
   it('uses fiscal goods anchors for gngk when ifzgcg is 1', async () => {

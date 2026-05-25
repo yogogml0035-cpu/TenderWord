@@ -566,11 +566,28 @@ def extract_public_tender_contact_fields(
     anchor_range = doc_content[search_start:search_end]
 
     zipcode_marker = "邮编："
-    zipcode_pos = doc_content.find(zipcode_marker, search_start)
+    zipcode_pos = -1
+    if agency_pos != -1:
+        zipcode_pos = doc_content.find(zipcode_marker, search_start, search_end)
+        contact_label_match = re.search(
+            r"(?:项目联系人|联系人)\s*[：:]",
+            doc_content[search_start:search_end],
+        )
+        if (
+            zipcode_pos != -1
+            and contact_label_match is not None
+            and zipcode_pos > search_start + contact_label_match.start()
+        ):
+            log_parts.append(
+                "当前范围内 '邮编：' 位于联系人之后，判定为无关后文标记"
+            )
+            zipcode_pos = -1
 
     if zipcode_pos == -1:
-        log_parts.append("在 '采购代理机构名称：' 之后未找到 '邮编：' 标记")
-        if agency_pos != -1:
+        if agency_pos == -1:
+            log_parts.append("未定位到采购代理机构锚点，跳过 '邮编：' 二级锚点")
+        else:
+            log_parts.append("在当前采购代理机构范围内未找到 '邮编：' 标记")
             search_start = agency_pos + len(agency_marker)
             search_end = min(len(doc_content), agency_pos + 2000)
     else:
@@ -626,7 +643,7 @@ def extract_public_tender_contact_fields(
         return None
 
     contact_name_label_pattern = r"(?:项目联系人|联系人)"
-    contact_stop_label_pattern = r"(?:电\s*话|传真|电子邮箱|邮箱)"
+    contact_stop_label_pattern = r"(?:联系方式|联系\s*电话|电\s*话|电话|传真|电子邮箱|邮箱)"
 
     def _clean_contact_name(value: str) -> str:
         name_part = re.split(
