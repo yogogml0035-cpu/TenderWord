@@ -481,6 +481,88 @@ describe('ChatPanel', () => {
     });
   });
 
+  it('routes gngk goods fiscal edit with ifzgcg=2 to the self-funded goods graph', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          tenderType: 'gngk',
+          currentTaskId: undefined,
+        },
+      ],
+      selectedTenderType: 'gngk',
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请补充技术要求',
+          input_mode: 'edit',
+          edit_file: {
+            id: 'file-1',
+            file_path: 'D:/UploadFiles/edit.docx',
+            file_name: 'edit.docx',
+            original_name: 'edit.docx',
+            size: 128,
+            upload_time: new Date().toISOString(),
+          },
+          tender_lx: 0,
+          fund_lx: 1,
+          insertion_config: {
+            before_text: '第三章 招标内容及要求',
+            after_text: '第四章 投标文件有关格式',
+          },
+          tender_data: {
+            project_name: '国内公开财政货物项目',
+            project_number: 'GNGK-2026-001',
+            project_content: '原始内容',
+            bzj_rule: '',
+            buyer_name: '示例单位',
+            project_zbr_xbr: '',
+            zbr_xbr_tel: '',
+            zbr_pinyin: '',
+            shell_start_date: '',
+            shell_end_date: '',
+            submit_date: '',
+            platform: '',
+            service_fee: '',
+            ifzgcg: 2,
+            tender_lx: 0,
+            fund_source_lx: 1,
+          },
+        },
+      },
+    }));
+    mockCreateEditTask.mockResolvedValue({
+      task_id: 'task-edit',
+      task_kind: 'edit',
+      status: 'queued',
+      queue_position: 0,
+      waiting_count: 0,
+    });
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      expect(mockCreateEditTask).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockCreateEditTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation_id: 'conv-1',
+        form_type: 'gngk_hw_zc_tender',
+        tender_lx: 0,
+        fund_source_lx: 1,
+        tender_data_snapshot: expect.objectContaining({
+          ifzgcg: 2,
+          fund_source_lx: 1,
+        }),
+      })
+    );
+  });
+
   it('keeps the latest edit output as the default file for the next edit', async () => {
     useChatStore.setState((state) => ({
       ...state,

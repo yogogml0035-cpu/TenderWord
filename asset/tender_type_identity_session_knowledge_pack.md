@@ -11,8 +11,9 @@
 - 后端类型与运行态：`backend/models/generate.py`、`backend/config/tender_config.py`、`backend/services/document_service.py`
 - graph / node 绑定：`backend/graphs/`、`backend/nodes/`
 - 前端 URL 与 canonical 化：`frontend/utils/tenderTypeMapper.ts`
+- `gngk` 后端 `form_type` 分派：`frontend/lib/gngkFormType.ts`
 - 表单到后端请求转换：`frontend/lib/formDataConverter.ts`
-- chat/edit 任务类型分派：`frontend/components/chat/ChatPanel.tsx`
+- chat/edit 任务创建：`frontend/components/chat/ChatPanel.tsx`
 - 表单注册与默认锚点：`frontend/components/chat/tenderFormRegistry.ts`、`frontend/components/forms/tenderFormConfig.ts`、`frontend/components/forms/TenderFormShared.tsx`
 - 当前页面会话与任务恢复：`frontend/stores/chatStore.ts`、`frontend/app/tender/page.tsx`
 
@@ -60,7 +61,7 @@
   - `fund_lx` 决定自筹 / 财政按钮
   - `purchase_method` 决定是否把当前会话 / 表单切到 `xjcg`、`gngk` 或 `gjgk`
 - 这次回写只在“获取信息”成功完成的当次校正里生效一次；校正完成后，货物 / 工程 / 服务与自筹 / 财政按钮仍然允许用户继续手动切换，只有再次点击“获取信息”才会重新按接口结果校验。
-- `/api/tender` 现在还会透传 `data.ifdzpt2` 与 `data.ifzgcg` 给前端；两者都不参与大类判型，只参与“获取信息”成功当次的 `gngk` 锚点修正。
+- `/api/tender` 现在还会透传 `data.ifdzpt2` 与 `data.ifzgcg` 给前端；两者都不参与大类判型。`ifdzpt2` 只参与“获取信息”成功当次的 `gngk` 锚点修正；`ifzgcg` 同时参与货物财政的锚点修正与 `form_type` / graph 分派。
 
 ### Canonical URL
 
@@ -126,19 +127,20 @@
 
 ### `gngk` 到后端 `form_type`
 
-`frontend/lib/formDataConverter.ts` 与 `frontend/components/chat/ChatPanel.tsx` 当前都按同一规则计算 `gngk` 的 `form_type`：
+`frontend/lib/gngkFormType.ts` 是 generate 与 edit 共享的 `gngk` 后端 `form_type` 分派真源，`frontend/lib/formDataConverter.ts` 与 `frontend/components/chat/ChatPanel.tsx` 都必须调用它：
 
-| `tender_lx` | `fund_lx` | 后端 `form_type` |
-| --- | --- | --- |
-| `0` | `0` | `gngk_hw_zc_tender` |
-| `0` | `1` | `gngk_hw_cz_tender` |
-| `1` | `0` | `gngk_fw_zc_tender` |
-| `1` | `1` | `gngk_fw_cz_tender` |
-| `2` | `0` | `gngk_fw_zc_tender` |
-| `2` | `1` | `gngk_fw_cz_tender` |
+| `tender_lx` | `fund_lx` | 附加条件 | 后端 `form_type` |
+| --- | --- | --- | --- |
+| `0` | `0` | - | `gngk_hw_zc_tender` |
+| `0` | `1` | `tender_data.ifzgcg === 2` | `gngk_hw_zc_tender` |
+| `0` | `1` | `tender_data.ifzgcg !== 2` 或缺失 | `gngk_hw_cz_tender` |
+| `1` | `0` | - | `gngk_fw_zc_tender` |
+| `1` | `1` | - | `gngk_fw_cz_tender` |
+| `2` | `0` | - | `gngk_fw_zc_tender` |
+| `2` | `1` | - | `gngk_fw_cz_tender` |
 
 - 当前仓库仍没有独立 `工程` graph / `form_type`；`tender_lx=1` 的工程模式在 generate / edit 中临时复用现有 `gngk_fw_*` 服务链路。
-- 本轮未新增前端类型；国内公开 `货物 + 财政` 仍由现有 `gngk` 表单在 generate / edit 分派时映射到 `gngk_hw_cz_tender`。
+- 本轮未新增前端类型；国内公开 `货物 + 财政 + ifzgcg=2` 仍保持 URL、会话身份、按钮态与请求业务资金字段为财政，但 generate / edit 的 `form_type` 映射到 `gngk_hw_zc_tender`，复用货物自筹 graph。
 
 任一处改动都必须双向同步并补测试。
 
@@ -156,7 +158,7 @@
 - 判断“手改后的锚点”不能只看文本值是否等于某个已知默认值，因为用户可能手动输入另一个场景的默认文案；前端草稿用 `manual_insertion_config_scope_keys` 按 `tenderType + tender_lx + fund_lx` 标记用户已手改的组合，命中后 `ifdzpt2` / `ifzgcg` 默认锚点修正不得再覆盖。
 - 工程模式默认锚点为 `第三章 招标内容及要求` -> `第四章 投标文件有关格式`，即使 `ifdzpt2 = 2` 也不会切到 `第四章 合同条款`。
 - 服务模式默认锚点为 `第三章 招标内容及要求` -> `第四章 投标文件有关格式`（若命中上一条服务合同条款规则，则改为 `第四章 合同条款`）。
-- 财政货物默认锚点为 `第四章  招标需求` -> `第五章  评标方法与程序`；若“获取信息”成功且接口返回类型为“货物 + 财政 + ifzgcg = 2”，当次回填按货物自筹默认锚点 `第三章 招标内容及要求` -> `第四章 投标文件有关格式` 显示。用户后续切出再切回“货物 + 财政”时，不再继续受 `ifzgcg` 影响，恢复财政货物默认锚点，除非该组合已被用户手动编辑锁定。
+- 财政货物默认锚点为 `第四章  招标需求` -> `第五章  评标方法与程序`；若“获取信息”成功且接口返回类型为“货物 + 财政 + ifzgcg = 2”，当次回填按货物自筹默认锚点 `第三章 招标内容及要求` -> `第四章 投标文件有关格式` 显示，且 generate / edit 走 `gngk_hw_zc_tender` graph。用户后续切出再切回“货物 + 财政”时，不再继续受 `ifzgcg` 影响，恢复财政货物默认锚点，除非该组合已被用户手动编辑锁定。
 - `generation_style` 是 generate 表单态：货物、工程、服务默认都为 `template`；后端只在 generate runtime 使用该字段。
 
 ## 当前页面会话生命周期

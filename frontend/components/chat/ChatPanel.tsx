@@ -20,6 +20,7 @@ import type { Message } from '@/types/chat';
 import type { ModelType } from '@/components/forms/ModelSelector';
 import type { ConversationDraftFile, ConversationFormDraft } from '@/stores/chatStore';
 import { tenderTypeDisplayNameMap } from './tenderFormRegistry';
+import { resolveGngkFormType } from '@/lib/gngkFormType';
 
 interface ChatPanelProps {
   className?: string;
@@ -101,11 +102,11 @@ function resolveEditFormType(
     return null;
   }
 
-  // 工程类当前先复用服务链路，避免因缺少独立 graph 导致 edit 不可用。
-  if (tenderLx === 1 || tenderLx === 2) {
-    return fundSourceLx === 1 ? 'gngk_fw_cz_tender' : 'gngk_fw_zc_tender';
-  }
-  return fundSourceLx === 1 ? 'gngk_hw_cz_tender' : 'gngk_hw_zc_tender';
+  return resolveGngkFormType({
+    tender_lx: tenderLx,
+    fund_lx: fundSourceLx,
+    ifzgcg: draft?.tender_data?.ifzgcg,
+  });
 }
 
 function getEditContextMessage(

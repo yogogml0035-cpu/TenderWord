@@ -11,6 +11,7 @@ import type { GngkTenderFormData } from '@/components/forms/GngkTenderForm';
 import type { GjgkTenderFormData } from '@/components/forms/GjgkTenderForm';
 import type { UploadedFile } from '@/components/forms/FileUploader';
 import type { GenerateRequest, FilesConfig } from '@/types/api';
+import { resolveGngkFormType } from '@/lib/gngkFormType';
 
 // ============================================
 // Type Exports
@@ -65,14 +66,6 @@ function buildFilesConfig(
     clean_draft: extractFilePath(cleanDraft),
     tender_params: paramPaths,
   };
-}
-
-function resolveGngkFormType(formData: GngkTenderFormData): GngkGenerateRequest['form_type'] {
-  // 工程类当前先复用服务链路，避免因缺少独立 graph 导致无法提交。
-  if (formData.tender_lx === 1 || formData.tender_lx === 2) {
-    return formData.fund_lx === 1 ? 'gngk_fw_cz_tender' : 'gngk_fw_zc_tender';
-  }
-  return formData.fund_lx === 1 ? 'gngk_hw_cz_tender' : 'gngk_hw_zc_tender';
 }
 
 // ============================================
@@ -197,7 +190,11 @@ export function convertGngkFormToApiRequest(
   );
 
   const request: GngkGenerateRequest = {
-    form_type: resolveGngkFormType(formData),
+    form_type: resolveGngkFormType({
+      tender_lx: formData.tender_lx,
+      fund_lx: formData.fund_lx,
+      ifzgcg: formData.tender_data.ifzgcg,
+    }),
     tender_data: {
       ...formData.tender_data,
       tender_lx: formData.tender_lx,

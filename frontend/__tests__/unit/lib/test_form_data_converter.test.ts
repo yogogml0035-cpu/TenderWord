@@ -132,6 +132,37 @@ describe('formDataConverter', () => {
     expect(request.tender_data.fund_source_lx).toBe(fund_lx);
   });
 
+  it.each([
+    { ifzgcg: 2, expected: 'gngk_hw_zc_tender' },
+    { ifzgcg: 1, expected: 'gngk_hw_cz_tender' },
+    { ifzgcg: undefined, expected: 'gngk_hw_cz_tender' },
+  ])(
+    'maps gngk goods fiscal ifzgcg=$ifzgcg to $expected while keeping fiscal tender data',
+    ({ ifzgcg, expected }) => {
+      const request = convertGngkFormToApiRequest({
+        tender_no: 'GNGK-001',
+        tender_lx: 0,
+        fund_lx: 1,
+        generation_style: 'template',
+        style_writeback_mode: 'full',
+        tender_data: {
+          ...baseTenderData,
+          ...(ifzgcg === undefined ? {} : { ifzgcg }),
+        },
+        model: 'deepseek',
+        files: baseFiles,
+        insertion_config: {
+          before_text: '第三章 招标内容及要求',
+          after_text: '第四章 投标文件有关格式',
+        },
+      });
+
+      expect(request.form_type).toBe(expected);
+      expect(request.tender_data.tender_lx).toBe(0);
+      expect(request.tender_data.fund_source_lx).toBe(1);
+    }
+  );
+
   it('keeps xjcg graph selection stable while forwarding tender_lx', () => {
     const request = convertXjcgFormToApiRequest({
       tender_no: 'XJCG-001',
