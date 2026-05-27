@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 from backend.models.task import TaskKind
@@ -24,6 +24,7 @@ class SSEEventType(str, Enum):
     PROGRESS = "progress"  # 进度更新
     NODE_START = "node_start"  # 节点开始
     NODE_COMPLETE = "node_complete"  # 节点完成
+    AGENT_STEP = "agent_step"  # 智能体步骤
     DONE = "done"  # 任务完成
     ERROR = "error"  # 错误
     HEARTBEAT = "heartbeat"  # 心跳
@@ -125,6 +126,36 @@ class ProgressEventData(BaseModel):
     current_node: Optional[str] = Field(default=None, description="当前节点")
     current_node_display: Optional[str] = Field(
         default=None, description="当前节点显示名"
+    )
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now().isoformat(), description="时间戳"
+    )
+
+
+class AgentStepFindingData(BaseModel):
+    """
+    智能体审核意见数据模型
+    """
+
+    evidence: str = Field(..., description="审核依据")
+    fix_hint: str = Field(..., description="修复建议")
+
+
+class AgentStepEventData(BaseModel):
+    """
+    智能体步骤事件数据模型
+    """
+
+    task_id: str = Field(..., description="任务ID")
+    task_kind: TaskKind = Field(default=TaskKind.GENERATE, description="任务类别")
+    step_type: Literal["draft", "audit", "revision"] = Field(..., description="步骤类型")
+    round: int = Field(..., ge=0, description="审核/修复轮次")
+    node: str = Field(..., description="当前智能体节点")
+    is_complete: bool = Field(default=False, description="是否完成")
+    content: Optional[str] = Field(default=None, description="正文快照")
+    findings: List[AgentStepFindingData] = Field(
+        default_factory=list,
+        description="审核意见列表",
     )
     timestamp: str = Field(
         default_factory=lambda: datetime.now().isoformat(), description="时间戳"

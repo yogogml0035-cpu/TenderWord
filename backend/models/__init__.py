@@ -49,6 +49,8 @@ from .upload import (
 
 # SSE 事件模型
 from .sse import (
+    AgentStepEventData,
+    AgentStepFindingData,
     DoneEventData,
     ErrorEventData,
     HeartbeatEventData,
@@ -131,6 +133,8 @@ __all__ = [
     # SSE 事件
     "SSEEventType",
     "SSEEvent",
+    "AgentStepEventData",
+    "AgentStepFindingData",
     "LogEventData",
     "LLMEventData",
     "ProgressEventData",

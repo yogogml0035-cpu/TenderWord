@@ -17,6 +17,7 @@ Source: prd.json
 - DeepAgents model construction should reuse `MODEL_CONFIGS` and `settings.get_llm_config()`; pass common ChatOpenAI params like `temperature` and `max_tokens` explicitly, while provider-specific `extra_body` stays from `MODEL_CONFIGS`.
 - Host agent runtime tests should drive a deterministic phase sequence (`generate` -> `verify` -> `revise`) through the fake runner payloads; this locks workflow order without invoking real DeepAgents or LLMs.
 - LangGraph conditional edges cannot be attached directly to a list-based join; add a lightweight gate node after the join and have it return `{}` so it does not concurrently rewrite existing state keys.
+- 新增 SSE 事件必须双侧补契约：后端 `backend/models/sse.py` / `SSEManager` 负责模型、缓冲与重放，前端 `frontend/types/api.ts` 必须同步事件 union 和 payload interface，并用独立类型测试锁定。
 
 ## 2026-05-27 13:58 - US-001
 - 实现了 generate-only `generation_mode` 契约：后端 `GenerateRequest` 新增 `workflow | agent` 默认 `workflow`，`DocumentService._build_initial_state()` 写入 generate state，rewrite/edit 初始 state 保持不包含该字段。
@@ -73,4 +74,16 @@ Source: prd.json
   - Graph 分流应保留在 `StandardTenderWorkflowGraph`，通过可覆盖的 `NODE_HOST_AGENT_GENERATE` 注入测试节点，避免各招标类型 graph 复制 mode gate。
   - LangGraph 的 list join 后不能直接挂 conditional edges；需要用返回 `{}` 的 gate 节点承接 join，再做条件路由，否则会对已有 state key 产生并发写入冲突。
   - `host_agent` 要加入 `TRACKED_PROGRESS_NODES` 和 `NodeName` / `NODE_DISPLAY_NAMES`，否则任务进度和用户可见节点名不会同步。
+---
+
+## 2026-05-27 17:32 - US-006
+- 补齐 `agent_step` SSE 契约：后端新增/整理 `AgentStepEventData` 与 `SSEEventType.AGENT_STEP`，`SSEManager.send_agent_step()` 支持缓冲和断线重放，`DocumentService` graph config 注入 agent step callback，`host_agent_generate` 将 runtime payload 转成 SSE 事件。
+- 同步前端 API 类型：`frontend/types/api.ts` 新增 `SSEAgentStepEvent`、`SSEAgentStepFinding`，并把 `'agent_step'` 加入 `SSEEventType` union。
+- 针对 validator notes 修复了 `backend/tests/nodes/test_host_agent_generate.py` 的 fake runner 签名，并新增后端模型/manager 重放测试与前端类型契约测试。
+- 更改的文件：`backend/api/stream.py`、`backend/core/sse_manager.py`、`backend/models/__init__.py`、`backend/models/sse.py`、`backend/nodes/common_word_nodes/host_agent_generate.py`、`backend/services/document_service.py`、`backend/tests/models/test_sse_agent_step.py`、`backend/tests/services/test_sse_manager_agent_step.py`、`backend/tests/services/test_document_service_agent_step.py`、`backend/tests/nodes/test_host_agent_generate.py`、`frontend/types/api.ts`、`frontend/__tests__/unit/types/test_api_sse_agent_step.test.ts`、`tasks/deepagents-generation-mode-refactor/prd.json`、`tasks/deepagents-generation-mode-refactor/progress.txt`。
+- 验证：`backend\.venv\Scripts\python.exe -m pytest backend\tests\nodes\test_host_agent_generate.py backend\tests\models\test_sse_agent_step.py backend\tests\services\test_sse_manager_agent_step.py backend\tests\services\test_document_service_agent_step.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend\tests -q`、`npm run type-check`、`npm run lint`、`npm run test -- --runTestsByPath __tests__\unit\types\test_api_sse_agent_step.test.ts --runInBand`、`npm run test -- --runInBand`、`git diff --check` 均通过。
+- **未来迭代的学习：**
+  - `AgentStepEventData.model_dump(mode="json")` 更适合作为测试断言输出，可避免枚举字段在 Pydantic dump 中保留 Enum 实例导致断言漂移。
+  - `host_agent_generate` 的 runtime fake 需要接受 keyword-only `step_callback`，否则新增事件桥接后节点单测会被签名差异打断。
+  - `agent_step` 只补事件契约和传输层；前端卡片解析与保留属于后续 `useChatSSE` / store story，不应提前混入本轮。
 ---

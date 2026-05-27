@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 from backend.models import (
+    AgentStepEventData,
     DoneEventData,
     EditTaskRequest,
     ErrorEventData,
@@ -299,6 +300,14 @@ class SSECallback:
         event = SSEEvent(
             event=SSEEventType.PROGRESS,
             data=progress_data.model_dump(),
+        )
+        self.push_event(event)
+
+    def push_agent_step(self, agent_step_data: AgentStepEventData) -> None:
+        """推送智能体步骤事件."""
+        event = SSEEvent(
+            event=SSEEventType.AGENT_STEP,
+            data=agent_step_data.model_dump(mode="json"),
         )
         self.push_event(event)
 
@@ -891,6 +900,7 @@ class DocumentService:
                             task_id,
                             callback,
                             model_provider,
+                            task_kind=task_kind,
                             llm_node_name=llm_node_name or TASK_KIND_TO_LLM_NODE.get(task_kind, "generate_polished_text"),
                             task_audit_log_path=task_audit_log_path,
                             rewrite_log_path=rewrite_log_path,
@@ -1151,6 +1161,7 @@ class DocumentService:
         task_id: str,
         callback: SSECallback,
         model_provider: str,
+        task_kind: str = "generate",
         llm_node_name: str = "generate_polished_text",
         task_audit_log_path: Optional[str] = None,
         rewrite_log_path: Optional[str] = None,
@@ -1192,8 +1203,10 @@ class DocumentService:
         config = {
             "configurable": {
                 "task_id": task_id,
+                "task_kind": task_kind,
                 "llm_stream_callback": llm_relay.on_snapshot,
                 "llm_stream_complete_callback": llm_relay.flush,
+                "agent_step_callback": callback.push_agent_step,
                 "suppress_llm_stdout": True,
                 "model_provider": model_provider,
                 "task_audit_log_path": resolved_task_audit_log_path,

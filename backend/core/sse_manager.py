@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any, AsyncIterator, Dict, List, Optional, Set
 
 from backend.config.settings import settings
-from backend.models.sse import SSEEvent, SSEEventType
+from backend.models.sse import AgentStepEventData, SSEEvent, SSEEventType
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +168,30 @@ class SSEManager:
                 total_nodes=total_nodes,
                 current_node=current_node,
                 current_node_display=current_node_display,
+            )
+        )
+
+    def send_agent_step_threadsafe(
+        self,
+        task_id: str,
+        step_type: str,
+        round: int,
+        node: str,
+        task_kind: str = "generate",
+        content: Optional[str] = None,
+        findings: Optional[List[dict[str, str]]] = None,
+        is_complete: bool = False,
+    ) -> None:
+        self._schedule(
+            self.send_agent_step(
+                task_id=task_id,
+                task_kind=task_kind,
+                step_type=step_type,
+                round=round,
+                node=node,
+                content=content,
+                findings=findings,
+                is_complete=is_complete,
             )
         )
 
@@ -613,6 +637,30 @@ class SSEManager:
                 "timestamp": datetime.now().isoformat(),
             },
         )
+
+    async def send_agent_step(
+        self,
+        task_id: str,
+        step_type: str,
+        round: int,
+        node: str,
+        task_kind: str = "generate",
+        content: Optional[str] = None,
+        findings: Optional[List[dict[str, str]]] = None,
+        is_complete: bool = False,
+    ) -> int:
+        """发送智能体步骤事件."""
+        data = AgentStepEventData(
+            task_id=task_id,
+            task_kind=task_kind,
+            step_type=step_type,
+            round=round,
+            node=node,
+            content=content,
+            findings=findings or [],
+            is_complete=is_complete,
+        ).model_dump(mode="json")
+        return await self.broadcast(task_id, SSEEventType.AGENT_STEP, data)
 
     async def send_done(
         self,

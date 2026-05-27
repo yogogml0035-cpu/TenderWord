@@ -11,9 +11,10 @@ def test_host_agent_generate_returns_standard_polished_text_contract(monkeypatch
         "backend.nodes.common_word_nodes.host_agent_generate"
     )
 
-    def fake_run_host_agent_generation(state, config=None):
+    def fake_run_host_agent_generation(state, config=None, *, step_callback=None):
         captured["state"] = state
         captured["config"] = config
+        captured["step_callback"] = step_callback
         return HostAgentFinalOutput(polished_text="agent final text")
 
     monkeypatch.setattr(
@@ -27,6 +28,8 @@ def test_host_agent_generate_returns_standard_polished_text_contract(monkeypatch
 
     result = node_module.host_agent_generate(state, config)
 
-    assert captured == {"state": state, "config": config}
+    assert captured["state"] is state
+    assert captured["config"] is config
+    assert captured["step_callback"] is None
     assert result["polished_text"] == "agent final text"
     assert result["generate_polished_done"] is True
