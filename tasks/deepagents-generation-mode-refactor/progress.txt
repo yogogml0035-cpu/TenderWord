@@ -20,6 +20,7 @@ Source: prd.json
 - 新增 SSE 事件必须双侧补契约：后端 `backend/models/sse.py` / `SSEManager` 负责模型、缓冲与重放，前端 `frontend/types/api.ts` 必须同步事件 union 和 payload interface，并用独立类型测试锁定。
 - 智能体过程卡不要复用旧 `task-content` 单卡；使用独立 `agent-step` messageKind 持久化 draft/audit/revision，避免 `ChatPanel` 的运行时 `aiText` 合并覆盖历史过程卡。
 - 逐类型 graph agent 分支验证可复用真实 graph 类，通过 monkeypatch 类级 `NODE_*` callable 替换 Word/LLM 节点，并用 `set_generation_agent_runner()` 注入 fake runner；这样能验证真实 mode gate 和后续 `update_word` 接收的 `polished_text`。
+- 逐类型 graph 测试不要把未声明在 `TenderGraphStateBase` / 专属 state 中的字段当作跨节点契约；优先断言已声明 state、真实节点绑定、调用顺序和 update 节点核心入参。
 
 ## 2026-05-27 13:58 - US-001
 - 实现了 generate-only `generation_mode` 契约：后端 `GenerateRequest` 新增 `workflow | agent` 默认 `workflow`，`DocumentService._build_initial_state()` 写入 generate state，rewrite/edit 初始 state 保持不包含该字段。
@@ -134,4 +135,15 @@ Source: prd.json
   - `gngk_hw_zc` agent 闭环测试应先断言类级真实节点绑定，再 monkeypatch fake 节点；否则无法证明 graph 仍走既有 replacement wrapper 与 common update 路径。
   - 对公开招标通用货物链路，fake `get_replacements` 返回值要在 fake `update_word` 中再次断言，才能覆盖 word operations subgraph 到写回节点的 state 传递。
   - `gngk_hw_zc` 的 `tender_type` 运行态应保持为 `gngk_hw_zc`，host agent payload 会透传该值给生成 prompt / runner。
+---
+
+## 2026-05-27 20:39 - US-011
+- 为 `gngk_hw_cz_tender` 新增 agent / workflow 分支闭环验证：agent 分支使用 fake DeepAgents runner 产出非空 `polished_text`，并断言 direct-replace `gngk_hw_cz_update_word` 接收到该正文；workflow 分支断言仍走旧 `generate_polished_text`，不会调用 `host_agent`。
+- 测试同时锁定 `GngkHwCzTenderGraph` 仍覆写 `gngk_hw_cz_delete_tender_param` 与 `gngk_hw_cz_update_word`，并继续继承 `gngk_hw_zc_get_replacements`，避免新增 mode gate 影响货物财政 direct-replace 编排。
+- 更改的文件：`backend/tests/graphs/test_gngk_hw_cz_generation_mode_agent.py`、`tasks/deepagents-generation-mode-refactor/prd.json`、`tasks/deepagents-generation-mode-refactor/progress.txt`。
+- 验证：`backend\.venv\Scripts\python.exe -m pytest backend\tests\graphs\test_gngk_hw_cz_generation_mode_agent.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend\tests\graphs\test_gngk_hw_cz_generation_mode_agent.py backend\tests\graphs\test_gngk_tender_graph.py backend\tests\graphs\test_generation_mode_branching.py backend\tests\nodes\test_host_agent_generate.py backend\tests\agents\test_generation_host_agent.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend\tests -q`、`npm run lint`、`npm run type-check`、`npm run test -- --runInBand`、`git diff --check` 均通过。
+- **未来迭代的学习：**
+  - `gngk_hw_cz` 是 direct-replace 特化 graph：delete / update 节点是财政专属，replacement 仍复用 `gngk_hw_zc_get_replacements`。
+  - LangGraph state 不会可靠保留未声明字段；逐类型 graph 测试应优先断言已声明 state 契约、节点调用顺序和 update 节点接收到的核心字段。
+  - direct-replace 闭环测试要同时覆盖 agent 和 workflow，确保 mode gate 不会绕开专属 delete / update 节点。
 ---
