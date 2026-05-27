@@ -16,6 +16,7 @@ Source: prd.json
 - DeepAgents `CompiledSubAgent` is a `TypedDict`; custom subagents should be dicts with `name`、`description`、`runnable`，and the compiled runnable state must include `messages`.
 - DeepAgents model construction should reuse `MODEL_CONFIGS` and `settings.get_llm_config()`; pass common ChatOpenAI params like `temperature` and `max_tokens` explicitly, while provider-specific `extra_body` stays from `MODEL_CONFIGS`.
 - Host agent runtime tests should drive a deterministic phase sequence (`generate` -> `verify` -> `revise`) through the fake runner payloads; this locks workflow order without invoking real DeepAgents or LLMs.
+- LangGraph conditional edges cannot be attached directly to a list-based join; add a lightweight gate node after the join and have it return `{}` so it does not concurrently rewrite existing state keys.
 
 ## 2026-05-27 13:58 - US-001
 - 实现了 generate-only `generation_mode` 契约：后端 `GenerateRequest` 新增 `workflow | agent` 默认 `workflow`，`DocumentService._build_initial_state()` 写入 generate state，rewrite/edit 初始 state 保持不包含该字段。
@@ -61,4 +62,15 @@ Source: prd.json
   - host agent 的 fake runner 应按阶段返回输出，避免单次最终响应掩盖“初稿 -> 审核 -> 修复 -> 复审”的顺序契约。
   - `response_format=HostAgentFinalOutput` 不适合阶段化 runner，因为 `verify` 阶段必须允许直接返回 JSON 数组。
   - 第 3 轮修复后当前实现不再追加第 4 次审核，后续 SSE/UI 测试应按最后一次触发修复的 findings 验证放行行为。
+---
+
+## 2026-05-27 15:56 - US-005
+- 在 `StandardTenderWorkflowGraph` 基类中接入 `generation_mode` 分流：workflow 继续进入 `generate_polished_text`，agent 进入新增公共 `host_agent` 节点；两个分支都继续接入既有批注分支和 `update_word`。
+- 新增 `host_agent_generate` 公共节点，将 DeepAgents runtime 的 `HostAgentFinalOutput` 转换为既有 `polished_text` 与 `generate_polished_done` state 契约；同步任务进度追踪和节点显示名。
+- 更改的文件：`backend/graphs/base_graph.py`、`backend/nodes/common_word_nodes/__init__.py`、`backend/nodes/common_word_nodes/host_agent_generate.py`、`backend/task/task_queue_manager.py`、`backend/tests/graphs/test_generation_mode_branching.py`、`backend/tests/nodes/test_host_agent_generate.py`、`tasks/deepagents-generation-mode-refactor/prd.json`、`tasks/deepagents-generation-mode-refactor/progress.txt`。
+- 验证：`backend\.venv\Scripts\python.exe -m pytest backend\tests\nodes\test_host_agent_generate.py backend\tests\graphs\test_generation_mode_branching.py backend\tests\graphs\test_generation_mode_workflow.py backend\tests\graphs\test_gjgk_tender_graph.py backend\tests\graphs\test_gngk_tender_graph.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend\tests -q`、`npm run type-check`、`npm run lint`、`npm run test -- --runInBand`、`git diff --check` 均通过。
+- **未来迭代的学习：**
+  - Graph 分流应保留在 `StandardTenderWorkflowGraph`，通过可覆盖的 `NODE_HOST_AGENT_GENERATE` 注入测试节点，避免各招标类型 graph 复制 mode gate。
+  - LangGraph 的 list join 后不能直接挂 conditional edges；需要用返回 `{}` 的 gate 节点承接 join，再做条件路由，否则会对已有 state key 产生并发写入冲突。
+  - `host_agent` 要加入 `TRACKED_PROGRESS_NODES` 和 `NodeName` / `NODE_DISPLAY_NAMES`，否则任务进度和用户可见节点名不会同步。
 ---

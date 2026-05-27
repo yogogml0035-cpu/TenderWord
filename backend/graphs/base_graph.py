@@ -28,6 +28,7 @@ from typing import Callable, Any, Optional, TextIO, Type, TypedDict
 
 from backend.config.settings import settings
 from backend.util.log_util.progress_log import progress_log
+from backend.nodes.common_word_nodes.host_agent_generate import host_agent_generate
 from abc import ABC, abstractmethod
 from langgraph.graph import END, START, StateGraph
 import contextlib
@@ -258,6 +259,7 @@ TRACKED_PROGRESS_NODES = {
     "edit_text",
     "rewrite_text",
     "generate_polished_text",
+    "host_agent",
     "generate_comments",
     "update_word",
 }
@@ -481,6 +483,7 @@ class StandardTenderWorkflowGraph(BaseGraph):
     NODE_GET_REPLACEMENTS: Callable
     NODE_REPLACE_CONTENT: Callable
     NODE_GENERATE_POLISHED_TEXT: Callable
+    NODE_HOST_AGENT_GENERATE: Callable = host_agent_generate
     NODE_GENERATE_COMMENTS: Callable
     NODE_UPDATE_WORD: Callable
 
@@ -500,10 +503,12 @@ class StandardTenderWorkflowGraph(BaseGraph):
     def estimate_total_nodes(self, initial_state: dict) -> int:
         origin_tender_path = initial_state.get("origin_tender_path")
         has_origin_for_comments = bool(origin_tender_path and str(origin_tender_path).strip())
+        generation_mode = str(initial_state.get("generation_mode") or "workflow").strip()
+        generation_node = "host_agent" if generation_mode == "agent" else "generate_polished_text"
         base_nodes = {
             "prepare_template",
             "extract_tender_params",
-            "generate_polished_text",
+            generation_node,
             "update_word",
         }
         if has_origin_for_comments:
@@ -529,11 +534,15 @@ class StandardTenderWorkflowGraph(BaseGraph):
         node_copy_comments = getattr(type(self), "NODE_COPY_COMMENTS")
         node_extract_tender_params = getattr(type(self), "NODE_EXTRACT_TENDER_PARAMS")
         node_generate_polished_text = getattr(type(self), "NODE_GENERATE_POLISHED_TEXT")
+        node_host_agent_generate = getattr(type(self), "NODE_HOST_AGENT_GENERATE")
         node_generate_comments = getattr(type(self), "NODE_GENERATE_COMMENTS")
         node_update_word = getattr(type(self), "NODE_UPDATE_WORD")
 
         def comments_branch_done(state, config):
             return state
+
+        def generation_mode_gate(state, config):
+            return {}
 
         def comments_ready(state, config):
             path = state.get("origin_tender_path")
@@ -558,7 +567,9 @@ class StandardTenderWorkflowGraph(BaseGraph):
         builder.add_node("extract_tender_params", self.wrap_node("extract_tender_params", node_extract_tender_params))
         builder.add_node("comments_ready", self.wrap_node("comments_ready", comments_ready))
         builder.add_node("word_operations_subgraph", self._build_word_operations_subgraph())
+        builder.add_node("generation_mode_gate", self.wrap_node("generation_mode_gate", generation_mode_gate))
         builder.add_node("generate_polished_text", self.wrap_node("generate_polished_text", node_generate_polished_text))
+        builder.add_node("host_agent", self.wrap_node("host_agent", node_host_agent_generate))
         builder.add_node("comments_branch_done", self.wrap_node("comments_branch_done", comments_branch_done))
         builder.add_node("generate_comments", self.wrap_node("generate_comments", node_generate_comments))
         builder.add_node("update_word", self.wrap_node("update_word", node_update_word))
@@ -585,7 +596,15 @@ class StandardTenderWorkflowGraph(BaseGraph):
         builder.add_edge("copy_comments", "comments_ready")
 
         builder.add_edge(["extract_tender_params", "comments_ready"], "word_operations_subgraph")
-        builder.add_edge(["extract_tender_params", "comments_ready"], "generate_polished_text")
+        builder.add_edge(["extract_tender_params", "comments_ready"], "generation_mode_gate")
+        builder.add_conditional_edges(
+            "generation_mode_gate",
+            self._select_generation_node,
+            {
+                "generate_polished_text": "generate_polished_text",
+                "host_agent": "host_agent",
+            },
+        )
 
         def _has_origin_for_comments(state) -> str:
             path = state.get("origin_tender_path")
@@ -593,6 +612,14 @@ class StandardTenderWorkflowGraph(BaseGraph):
 
         builder.add_conditional_edges(
             "generate_polished_text",
+            _has_origin_for_comments,
+            {
+                "generate_comments": "generate_comments",
+                "comments_branch_done": "comments_branch_done",
+            },
+        )
+        builder.add_conditional_edges(
+            "host_agent",
             _has_origin_for_comments,
             {
                 "generate_comments": "generate_comments",
@@ -611,6 +638,10 @@ class StandardTenderWorkflowGraph(BaseGraph):
             builder.add_edge("update_word", END)
 
         return builder
+
+    @staticmethod
+    def _select_generation_node(state) -> str:
+        return "host_agent" if state.get("generation_mode") == "agent" else "generate_polished_text"
 
     def _build_word_operations_subgraph(self):
         state_cls = self.STATE_CLS
