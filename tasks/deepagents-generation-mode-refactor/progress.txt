@@ -13,6 +13,8 @@ Source: prd.json
 - Graph difference coverage should target `xjcg`, `gngk_hw_zc`, `gngk_hw_cz`, `gngk_fw_zc`, and `gjgk`; inherited `gngk_fw_cz` only needs smoke.
 - Workflow branch regression tests can subclass `StandardTenderWorkflowGraph` with fake nodes and assert `NODE_HOST_AGENT_GENERATE` is not called while `generation_mode` remains `workflow`.
 - The old generate content card contract is anchored by `TASK_KIND_TO_LLM_NODE["generate"] == "generate_polished_text"` plus `_LLMSnapshotRelay` emitting `llm` events with `content_mode: "snapshot"`.
+- DeepAgents `CompiledSubAgent` is a `TypedDict`; custom subagents should be dicts with `name`、`description`、`runnable`，and the compiled runnable state must include `messages`.
+- DeepAgents model construction should reuse `MODEL_CONFIGS` and `settings.get_llm_config()`; pass common ChatOpenAI params like `temperature` and `max_tokens` explicitly, while provider-specific `extra_body` stays from `MODEL_CONFIGS`.
 
 ## 2026-05-27 13:58 - US-001
 - 实现了 generate-only `generation_mode` 契约：后端 `GenerateRequest` 新增 `workflow | agent` 默认 `workflow`，`DocumentService._build_initial_state()` 写入 generate state，rewrite/edit 初始 state 保持不包含该字段。
@@ -35,4 +37,15 @@ Source: prd.json
   - 旧 workflow 行为目前不需要生产代码改动；最有价值的是在基类 graph、旧节点和 LLM relay 三层加防回归测试。
   - `backend.nodes.common_word_nodes` 包级导出的是函数；需要 monkeypatch 旧节点内部依赖时，应通过 `importlib.import_module("backend.nodes.common_word_nodes.generate_polished_text")` 获取模块。
   - `generate_polished_text` 的流式 UI 契约不只在节点内，还由 `DocumentService._LLMSnapshotRelay` 和 `TASK_KIND_TO_LLM_NODE` 共同决定。
+---
+
+## 2026-05-27 14:43 - US-003
+- 建立了 `backend/agents/generation` 运行时：新增 host_agent 入口、fake runner 注入点、DeepAgents `CompiledSubAgent` 包装的 generate / verify 子图、JSON 协议解析、模型工厂和协议错误类型。
+- `generate_agent` 复用 `render_generate_prompt()`、`GeneratePromptInput` 和 `stream_llm_completion()` 的 prompt / 模型输入；`verify_agent` 强制审核输出为 JSON 数组且每项包含 `evidence` 与 `fix_hint`；host_agent 最终输出必须是结构化 JSON 且包含非空 `polished_text`，纯文本会失败。
+- 更改的文件：`backend/agents/__init__.py`、`backend/agents/generation/*`、`backend/tests/agents/test_generation_host_agent.py`、`backend/requirements.txt`、`tasks/deepagents-generation-mode-refactor/prd.json`、`tasks/deepagents-generation-mode-refactor/progress.txt`。
+- 验证：`backend\.venv\Scripts\python.exe -m pip install "deepagents>=0.6.4"`、`backend\.venv\Scripts\python.exe -m pytest backend\tests\agents\test_generation_host_agent.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend\tests\models\test_generate_request_generation_style.py backend\tests\graphs\test_generation_mode_workflow.py backend\tests\nodes\test_generate_polished_text_workflow.py backend\tests\util\test_llm_stream_utils.py backend\tests\agents\test_generation_host_agent.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend\tests -q`、`npm run type-check`、`npm run lint`、`npm run test -- --runInBand`、`git diff --check` 均通过。
+- **未来迭代的学习：**
+  - `CompiledSubAgent` 不是类实例，而是 TypedDict 形状；测试应断言 `name`、`description`、`runnable`，并确认 runnable 是已 compile 的 graph。
+  - fake runner 注入点放在 host_agent runtime 层，可以让后续 graph 分支测试不触发真实 LLM 或 DeepAgents 工具调用。
+  - Pydantic `Settings` 实例不适合 monkeypatch 单个方法；测试模型工厂时替换整个 `settings` 对象更稳定。
 ---
