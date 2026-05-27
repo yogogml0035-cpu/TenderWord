@@ -124,3 +124,14 @@ Source: prd.json
   - agent 分支测试除了检查最终 `state.polished_text`，还要在 fake `update_word` 中记录入参，确认后续写回节点真实接收同一正文。
   - workflow 回归可以把 `NODE_HOST_AGENT_GENERATE` 替换成会抛错的 callable，确保默认旧路径不会误触智能体节点。
 ---
+
+## 2026-05-27 20:22 - US-010
+- 为 `gngk_hw_zc_tender` 新增 agent / workflow 分支闭环验证：agent 分支使用 fake DeepAgents runner 产出非空 `polished_text`，并断言后续公共 `update_word` 接收到该正文；workflow 分支断言仍走旧 `generate_polished_text`，不会调用 `host_agent`。
+- 测试同时锁定 `GngkHwZcTenderGraph` 仍使用既有 `gngk_hw_zc_get_replacements` wrapper 与公共 `update_word` 路径，避免新增 mode gate 影响货物自筹 graph 的 replacement / update 编排。
+- 更改的文件：`backend/tests/graphs/test_gngk_hw_zc_generation_mode_agent.py`、`tasks/deepagents-generation-mode-refactor/prd.json`、`tasks/deepagents-generation-mode-refactor/progress.txt`。
+- 验证：`backend\.venv\Scripts\python.exe -m pytest backend\tests\graphs\test_gngk_hw_zc_generation_mode_agent.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend\tests\graphs\test_gngk_hw_zc_generation_mode_agent.py backend\tests\graphs\test_gngk_tender_graph.py backend\tests\graphs\test_generation_mode_branching.py backend\tests\nodes\test_host_agent_generate.py backend\tests\agents\test_generation_host_agent.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend\tests -q`、`npm run type-check`、`npm run lint`、`npm run test -- --runInBand`、`git diff --check` 均通过。
+- **未来迭代的学习：**
+  - `gngk_hw_zc` agent 闭环测试应先断言类级真实节点绑定，再 monkeypatch fake 节点；否则无法证明 graph 仍走既有 replacement wrapper 与 common update 路径。
+  - 对公开招标通用货物链路，fake `get_replacements` 返回值要在 fake `update_word` 中再次断言，才能覆盖 word operations subgraph 到写回节点的 state 传递。
+  - `gngk_hw_zc` 的 `tender_type` 运行态应保持为 `gngk_hw_zc`，host agent payload 会透传该值给生成 prompt / runner。
+---
