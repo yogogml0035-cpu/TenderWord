@@ -32,6 +32,13 @@ class GenerationStyle(str, Enum):
     PARAM = "param"
 
 
+class GenerationMode(str, Enum):
+    """生成方式枚举，仅影响初次 generate 的 graph 分支。"""
+
+    WORKFLOW = "workflow"
+    AGENT = "agent"
+
+
 class StyleWritebackMode(str, Enum):
     """样式回填模式枚举，仅影响初次 generate 的 Word 样式回填。"""
 
@@ -93,6 +100,10 @@ class GenerateRequest(BaseModel):
         default=GenerationStyle.TEMPLATE,
         description="生成风格（仅初次 generate 生效）",
     )
+    generation_mode: GenerationMode = Field(
+        default=GenerationMode.WORKFLOW,
+        description="生成方式（仅初次 generate 生效）",
+    )
     style_writeback_mode: StyleWritebackMode = Field(
         default=StyleWritebackMode.FULL,
         description="样式回填模式（仅初次 generate 生效）",
@@ -135,6 +146,7 @@ class GenerateRequest(BaseModel):
                     "after_text": "第四章 响应文件有关格式",
                 },
                 "generation_style": "template",
+                "generation_mode": "workflow",
                 "style_writeback_mode": "full",
                 "model": "deepseek",
             }

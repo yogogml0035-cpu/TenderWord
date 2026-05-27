@@ -720,6 +720,7 @@ describe('TenderFormShared', () => {
     expect(onSubmit.mock.calls[0][0]).toMatchObject({
       tender_no: 'TEST-001',
       tender_lx: 0,
+      generation_mode: 'workflow',
       generation_style: 'template',
       style_writeback_mode: 'full',
       tender_data: {
@@ -779,6 +780,48 @@ describe('TenderFormShared', () => {
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
         generation_style: 'param',
+      })
+    );
+  });
+
+  it('defaults generation mode into draft updates and submit payload', async () => {
+    const user = userEvent.setup();
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <>
+          <TenderFormShared
+            tenderType="xjcg"
+            onSubmit={onSubmit}
+            initialDraft={draft}
+            onDraftChange={(updates) => {
+              setDraft((previous) => mergeDraftState(previous, updates));
+            }}
+          />
+          <pre data-testid="draft-state">{JSON.stringify(draft)}</pre>
+        </>
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('draft-state')).toHaveTextContent('"generation_mode":"workflow"')
+    );
+
+    await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+    await user.click(screen.getByLabelText('上传模板文件（可选）'));
+    await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
+    await user.click(screen.getByRole('button', { name: '开始生成' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        generation_mode: 'workflow',
       })
     );
   });

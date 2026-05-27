@@ -7,6 +7,18 @@ Source: prd.json
 ## Codebase Patterns
 
 - Generate-only request fields currently follow `generation_style` and `style_writeback_mode`: backend model -> `DocumentService._build_initial_state()` -> graph state -> frontend form/converter/draft tests.
+- Generate-only fields that must always reach `/api/generate` can be optional in form draft data, but converters should normalize missing values to explicit API defaults.
 - Standard generate graph centralizes shared flow in `StandardTenderWorkflowGraph`; type graphs should not copy the generation mode split.
 - The current LLM content card is driven by `llm` events for `generate_polished_text`; agent audit/revision display must use a new `agent_step` event and keep `done` / `error` as terminal events.
 - Graph difference coverage should target `xjcg`, `gngk_hw_zc`, `gngk_hw_cz`, `gngk_fw_zc`, and `gjgk`; inherited `gngk_fw_cz` only needs smoke.
+
+## 2026-05-27 13:58 - US-001
+- 实现了 generate-only `generation_mode` 契约：后端 `GenerateRequest` 新增 `workflow | agent` 默认 `workflow`，`DocumentService._build_initial_state()` 写入 generate state，rewrite/edit 初始 state 保持不包含该字段。
+- 前端 `GenerateRequest`、`BaseTenderFormData`、`ConversationFormDraft` 和三类 form converter 同步新增 `generation_mode`；表单和新会话默认 `workflow`，converter 对未显式传入的表单数据补齐 `workflow` payload。
+- 更改的文件：`backend/models/generate.py`、`backend/models/__init__.py`、`backend/services/document_service.py`、`backend/states/base_state.py`、`frontend/types/api.ts`、`frontend/components/forms/TenderFormShared.tsx`、`frontend/components/forms/XjcgTenderForm.tsx`、`frontend/stores/chatStore.ts`、`frontend/lib/formDataConverter.ts`，以及相关后端/前端单测。
+- 验证：`backend\.venv\Scripts\python.exe -m pytest backend/tests/models/test_generate_request_generation_style.py backend/tests/services/test_document_service_initial_state.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend/tests -q`、`npm run type-check`、`npm run lint`、`npm run test -- --runTestsByPath __tests__/unit/lib/test_form_data_converter.test.ts __tests__/unit/components/forms/test_tender_form_shared.test.tsx __tests__/unit/components/chat/test_tender_form_registry.test.tsx __tests__/unit/stores/test_chat_store_conversation_scope.test.ts __tests__/unit/lib/test_api.test.ts`、`npm run test -- --runInBand`、`git diff --check` 均通过。
+- **未来迭代的学习：**
+  - 前端 generate-only 默认值应在 `TenderFormShared` 的 draft 初始化和 `formDataConverter` 的 API payload 双侧兜底，避免旧草稿或未显式选择的表单遗漏字段。
+  - `generation_mode` 不能进入 rewrite/edit 请求模型或 skill graph initial state；只改 generate request 和 `DocumentService._build_initial_state()`。
+  - `XjcgTenderFormData` 不是 `BaseTenderFormData` 的别名，新增表单基础字段时要同步检查它的手写接口。
+---

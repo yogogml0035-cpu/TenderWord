@@ -140,6 +140,7 @@ export interface InsertionConfig {
 }
 
 export type GenerationStyle = 'template' | 'param';
+export type GenerationMode = 'workflow' | 'agent';
 export type StyleWritebackMode = 'full' | 'bold_only';
 
 export interface GenerateRequest {
@@ -154,6 +155,7 @@ export interface GenerateRequest {
   file_paths: FilesConfig;
   insertion_config?: InsertionConfig;
   generation_style?: GenerationStyle;
+  generation_mode: GenerationMode;
   style_writeback_mode: StyleWritebackMode;
   conversation_id?: string;
   model: 'deepseek' | 'qwen' | 'doubao';

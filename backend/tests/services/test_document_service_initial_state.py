@@ -7,6 +7,7 @@ from backend.models.generate import (
     EditTaskRequest,
     FormType,
     GenerateRequest,
+    GenerationMode,
     GenerationStyle,
     LLMModel,
     StyleWritebackMode,
@@ -26,6 +27,7 @@ def build_request(
     form_type: FormType = FormType.GJGK_TENDER,
     tender_lx: int = 0,
     fund_source_lx: int = 1,
+    generation_mode: GenerationMode = GenerationMode.WORKFLOW,
     generation_style: GenerationStyle = GenerationStyle.TEMPLATE,
     style_writeback_mode: StyleWritebackMode = StyleWritebackMode.FULL,
     investment: str = "140",
@@ -57,6 +59,7 @@ def build_request(
             fund_source_lx=fund_source_lx,
         ),
         file_paths=file_paths,
+        generation_mode=generation_mode,
         generation_style=generation_style,
         style_writeback_mode=style_writeback_mode,
         model=LLMModel.DEEPSEEK,
@@ -104,6 +107,19 @@ def test_build_initial_state_carries_generation_style() -> None:
     state = service._build_initial_state(request, task_id="task-3")
 
     assert state["generation_style"] == "param"
+
+
+def test_build_initial_state_carries_generation_mode() -> None:
+    service = object.__new__(DocumentService)
+    request = build_request(
+        origin_tender="D:/UploadFiles/review.docx",
+        template="D:/UploadFiles/template.docx",
+        generation_mode=GenerationMode.AGENT,
+    )
+
+    state = service._build_initial_state(request, task_id="task-3a")
+
+    assert state["generation_mode"] == "agent"
 
 
 def test_build_initial_state_carries_style_writeback_mode() -> None:
@@ -272,3 +288,5 @@ def test_edit_and_rewrite_initial_state_do_not_receive_generation_style() -> Non
 
     assert "generation_style" not in edit_state
     assert "generation_style" not in rewrite_state
+    assert "generation_mode" not in edit_state
+    assert "generation_mode" not in rewrite_state

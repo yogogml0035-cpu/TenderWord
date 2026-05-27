@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from backend.models.generate import GenerateRequest, GenerationStyle, StyleWritebackMode
+from backend.models.generate import (
+    GenerateRequest,
+    GenerationMode,
+    GenerationStyle,
+    StyleWritebackMode,
+)
 from backend.models.tender import TenderData
 
 
@@ -39,6 +44,18 @@ def test_generate_request_accepts_param_generation_style() -> None:
     request = GenerateRequest(**{**build_payload(), "generation_style": "param"})
 
     assert request.generation_style == GenerationStyle.PARAM
+
+
+def test_generate_request_defaults_generation_mode_to_workflow() -> None:
+    request = GenerateRequest(**build_payload())
+
+    assert request.generation_mode == GenerationMode.WORKFLOW
+
+
+def test_generate_request_accepts_agent_generation_mode() -> None:
+    request = GenerateRequest(**{**build_payload(), "generation_mode": "agent"})
+
+    assert request.generation_mode == GenerationMode.AGENT
 
 
 def test_generate_request_defaults_style_writeback_mode_to_full() -> None:

@@ -22,6 +22,7 @@ import {
   selectTemplateCandidate,
 } from '@/lib/api';
 import type {
+  GenerationMode,
   GenerationStyle,
   StyleWritebackMode,
   TemplateCandidate,
@@ -49,6 +50,7 @@ export interface BaseTenderFormData {
   tender_no: string;
   tender_lx: TenderLx;
   fund_lx: FundLx;
+  generation_mode?: GenerationMode;
   generation_style: GenerationStyle;
   style_writeback_mode: StyleWritebackMode;
   tender_data: TenderData;
@@ -93,6 +95,7 @@ const segmentedControlClassName =
   'inline-flex items-center rounded-2xl border border-slate-200 bg-slate-100/85 p-1 shadow-sm';
 const segmentedToggleButtonClassName =
   'relative min-w-[72px] rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50';
+const defaultGenerationMode: GenerationMode = 'workflow';
 const defaultStyleWritebackMode: StyleWritebackMode = 'full';
 const gngkSharedContentBeforeText = '第三章 招标内容及要求';
 const gngkLegacyFormatAfterText = '第四章 投标文件有关格式';
@@ -704,6 +707,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       tenderType === 'gngk'
     )
   );
+  const [localGenerationMode] = useState<GenerationMode>(
+    initialDraft?.generation_mode || defaultGenerationMode
+  );
   const [localStyleWritebackMode, setLocalStyleWritebackMode] = useState<StyleWritebackMode>(
     initialDraft?.style_writeback_mode || defaultStyleWritebackMode
   );
@@ -761,6 +767,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     onDraftChange
       ? resolveVisibleGenerationStyle(tenderType, initialDraft, tenderLx, tenderType === 'gngk')
       : localGenerationStyle;
+  const generationMode: GenerationMode = onDraftChange
+    ? initialDraft?.generation_mode || defaultGenerationMode
+    : localGenerationMode;
   const styleWritebackMode: StyleWritebackMode = onDraftChange
     ? initialDraft?.style_writeback_mode || defaultStyleWritebackMode
     : localStyleWritebackMode;
@@ -859,6 +868,16 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       style_writeback_mode: defaultStyleWritebackMode,
     });
   }, [initialDraft?.style_writeback_mode, onDraftChange]);
+
+  useEffect(() => {
+    if (!onDraftChange || initialDraft?.generation_mode) {
+      return;
+    }
+
+    onDraftChange({
+      generation_mode: defaultGenerationMode,
+    });
+  }, [initialDraft?.generation_mode, onDraftChange]);
 
   const applyTenderDraftUpdates = useCallback(
     (updates: TenderDraftUpdates) => {
@@ -1536,6 +1555,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         tender_no: tenderNo,
         tender_lx: tenderLx,
         fund_lx: fundLx,
+        generation_mode: generationMode,
         generation_style: generationStyle,
         style_writeback_mode: styleWritebackMode,
         tender_data: {
@@ -1560,6 +1580,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       fundLx,
       tenderData,
       selectedModel,
+      generationMode,
       generationStyle,
       styleWritebackMode,
       originFile,
