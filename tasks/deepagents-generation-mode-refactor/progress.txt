@@ -22,6 +22,7 @@ Source: prd.json
 - 逐类型 graph agent 分支验证可复用真实 graph 类，通过 monkeypatch 类级 `NODE_*` callable 替换 Word/LLM 节点，并用 `set_generation_agent_runner()` 注入 fake runner；这样能验证真实 mode gate 和后续 `update_word` 接收的 `polished_text`。
 - 逐类型 graph 测试不要把未声明在 `TenderGraphStateBase` / 专属 state 中的字段当作跨节点契约；优先断言已声明 state、真实节点绑定、调用顺序和 update 节点核心入参。
 - `gjgk` graph 的 `replace_content` 是 `get_post_update_steps()` 中的 post-update hook；验证国际公开链路时应锁定 `gjgk_update_word -> replace_content` 顺序，而不是只断言 update 节点。
+- `gngk_fw_cz` 当前是 `GngkHwZcTenderGraph` 的继承复用链路；smoke 测试应断言继承来的 common delete/update 与 `gngk_hw_zc_get_replacements`，再用 fake runner 验证 mode gate 未断。
 
 ## 2026-05-27 13:58 - US-001
 - 实现了 generate-only `generation_mode` 契约：后端 `GenerateRequest` 新增 `workflow | agent` 默认 `workflow`，`DocumentService._build_initial_state()` 写入 generate state，rewrite/edit 初始 state 保持不包含该字段。
@@ -169,4 +170,15 @@ Source: prd.json
   - `gjgk` 是国际公开特化 graph：delete / replacement / update 都是 `gjgk` 专属节点，且 `replace_content` 作为 post-update hook 在 `gjgk_update_word` 后运行。
   - `gjgk_update_word` 执行时尚未有 `replace_content_done`，因此测试应把 update 接收正文和 post-hook 完成状态分开断言。
   - 国际公开闭环测试要同时覆盖 agent 和 workflow，确保 mode gate 不会绕开专属 delete / replacement / update / post-update 链路。
+---
+
+## 2026-05-27 22:11 - US-014
+- 为 `gngk_fw_cz_tender` 新增继承复用 agent 分支 smoke：使用 fake DeepAgents runner 产出非空 `polished_text`，并断言正文继续进入继承来的 common `update_word` 路径。
+- 测试锁定 `GngkFwCzTenderGraph` 仍是 `GngkHwZcTenderGraph` 的继承复用链路，并继续使用 common `delete_tender_param`、`gngk_hw_zc_get_replacements` 和 common `update_word`。
+- 更改的文件：`backend/tests/graphs/test_gngk_fw_cz_generation_mode_agent.py`、`tasks/deepagents-generation-mode-refactor/prd.json`、`tasks/deepagents-generation-mode-refactor/progress.txt`。
+- 验证：`backend\.venv\Scripts\python.exe -m pytest backend\tests\graphs\test_gngk_fw_cz_generation_mode_agent.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend\tests -q`、`npm run type-check`、`npm run lint`、`npm run test -- --runInBand` 均通过。
+- **未来迭代的学习：**
+  - `gngk_fw_cz` 当前没有专属 graph 节点覆写；验证它时不要复制服务自筹专属断言，应锁定继承自 `gngk_hw_zc` 的公共链路。
+  - 继承 smoke 仍要记录 fake `update_word` 接收到的 `polished_text` 和 `replacements`，这样才能证明 agent 输出没有只停留在 graph state。
+  - 该 story 只补后端 smoke，不涉及 UI；浏览器验证留给后续 mock E2E story。
 ---
