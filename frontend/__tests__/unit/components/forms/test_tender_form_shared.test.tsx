@@ -474,6 +474,23 @@ describe('TenderFormShared', () => {
     expect(screen.getByRole('button', { name: '按模板优先' })).not.toHaveClass('bg-blue-600');
   });
 
+  it('renders generation mode inside advanced settings with workflow default and restores agent draft', () => {
+    const firstRender = renderSharedForm();
+
+    expect(screen.getByText('生成方式')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: '生成方式' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '工作流' })).toHaveClass('bg-blue-600');
+    expect(screen.getByRole('button', { name: '智能体' })).not.toHaveClass('bg-blue-600');
+
+    firstRender.unmount();
+    renderSharedForm({
+      initialDraft: { generation_mode: 'agent' },
+    });
+
+    expect(screen.getByRole('button', { name: '智能体' })).toHaveClass('bg-blue-600');
+    expect(screen.getByRole('button', { name: '工作流' })).not.toHaveClass('bg-blue-600');
+  });
+
   it('renders style writeback mode inside advanced settings with full default and restores bold-only draft', () => {
     const firstRender = renderSharedForm();
 
@@ -503,20 +520,27 @@ describe('TenderFormShared', () => {
     const generationStyleField = screen
       .getByRole('group', { name: '生成风格' })
       .closest('div.space-y-1\\.5');
+    const generationModeField = screen
+      .getByRole('group', { name: '生成方式' })
+      .closest('div.space-y-1\\.5');
     const styleWritebackField = screen
       .getByRole('group', { name: '样式修订' })
       .closest('div.space-y-1\\.5');
 
     const anchorRow = beforeTextField?.parentElement;
-    const optionRow = generationStyleField?.parentElement;
+    const generationOptionRow = generationModeField?.parentElement;
+    const writebackRow = styleWritebackField?.parentElement;
 
     expect(anchorRow).not.toBeNull();
-    expect(anchorRow).toHaveClass('grid', 'gap-4', 'sm:grid-cols-2');
+    expect(anchorRow).toHaveClass('grid', 'gap-4', '[grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))]');
     expect(afterTextField?.parentElement).toBe(anchorRow);
 
-    expect(optionRow).not.toBeNull();
-    expect(optionRow).toHaveClass('grid', 'gap-4', 'sm:grid-cols-2');
-    expect(styleWritebackField?.parentElement).toBe(optionRow);
+    expect(generationOptionRow).not.toBeNull();
+    expect(generationOptionRow).toHaveClass('grid', 'gap-4', '[grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))]');
+    expect(generationStyleField?.parentElement).toBe(generationOptionRow);
+
+    expect(writebackRow).not.toBeNull();
+    expect(writebackRow).toHaveClass('grid', 'gap-4', '[grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))]');
   });
 
   it.each([
@@ -822,6 +846,51 @@ describe('TenderFormShared', () => {
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
         generation_mode: 'workflow',
+      })
+    );
+  });
+
+  it('persists agent generation mode through draft updates and submit payload', async () => {
+    const user = userEvent.setup();
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <>
+          <TenderFormShared
+            tenderType="xjcg"
+            onSubmit={onSubmit}
+            initialDraft={draft}
+            onDraftChange={(updates) => {
+              setDraft((previous) => mergeDraftState(previous, updates));
+            }}
+          />
+          <pre data-testid="draft-state">{JSON.stringify(draft)}</pre>
+        </>
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    await user.click(screen.getByRole('button', { name: '智能体' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('draft-state')).toHaveTextContent('"generation_mode":"agent"')
+    );
+    expect(screen.getByRole('button', { name: '智能体' })).toHaveClass('bg-blue-600');
+
+    await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+    await user.click(screen.getByLabelText('上传模板文件（可选）'));
+    await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
+    await user.click(screen.getByRole('button', { name: '开始生成' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        generation_mode: 'agent',
       })
     );
   });

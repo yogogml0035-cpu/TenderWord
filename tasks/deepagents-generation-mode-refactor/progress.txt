@@ -87,3 +87,16 @@ Source: prd.json
   - `host_agent_generate` 的 runtime fake 需要接受 keyword-only `step_callback`，否则新增事件桥接后节点单测会被签名差异打断。
   - `agent_step` 只补事件契约和传输层；前端卡片解析与保留属于后续 `useChatSSE` / store story，不应提前混入本轮。
 ---
+
+## 2026-05-27 18:02 - US-007
+- 在 `TenderFormShared` 高级设置中新增“生成方式”切换控件，选项为“工作流 / 智能体”；默认工作流，切换智能体会写入当前会话草稿并随提交 payload 透传。
+- 修复高级设置控件在窄工作台面板内的固定双列重叠问题，改为 `auto-fit + minmax(14rem, 1fr)` 的响应式网格，避免“生成方式”和“生成风格”按钮互相遮挡。
+- 补充前端单测：控件默认/草稿恢复、agent 草稿持久化与提交 payload、以及 rewrite/edit 请求即使草稿带 `generation_mode` 也不会透传该字段。
+- 更改的文件：`frontend/components/forms/TenderFormShared.tsx`、`frontend/__tests__/unit/components/forms/test_tender_form_shared.test.tsx`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`、`tasks/deepagents-generation-mode-refactor/prd.json`、`tasks/deepagents-generation-mode-refactor/progress.txt`。
+- 浏览器证据：复用本地 `http://localhost:8502`，截图保存到 `tasks/deepagents-generation-mode-refactor/screenshots/us-007-generation-mode-agent.png`，console 日志保存到 `tasks/deepagents-generation-mode-refactor/logs/us-007-browser-console.log`。
+- 验证：`npm run test -- --runTestsByPath __tests__\unit\components\forms\test_tender_form_shared.test.tsx __tests__\unit\components\chat\test_chat_panel.test.tsx __tests__\unit\lib\test_form_data_converter.test.ts --runInBand`、`npm run lint`、`npm run type-check`、`npm run test -- --runInBand`、`git diff --check` 均通过。
+- **未来迭代的学习：**
+  - `TenderFormShared` 的高级设置位于右侧工作台窄面板，新增 segmented control 时不要用固定 `sm:grid-cols-2` 假设宽度；用内容最小宽度约束防止按钮覆盖。
+  - `generation_mode` 是全局 generate 草稿字段，不像 `gngk_generation_styles` 那样按 `tender_lx` 分桶。
+  - rewrite/edit 回归可以在聊天草稿中故意放 `generation_mode: "agent"`，再断言 `streamUserMessage` / `createEditTask` payload 没有该字段。
+---

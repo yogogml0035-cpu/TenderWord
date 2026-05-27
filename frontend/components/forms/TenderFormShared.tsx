@@ -95,6 +95,8 @@ const segmentedControlClassName =
   'inline-flex items-center rounded-2xl border border-slate-200 bg-slate-100/85 p-1 shadow-sm';
 const segmentedToggleButtonClassName =
   'relative min-w-[72px] rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50';
+const advancedSettingsGridClassName =
+  'grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))]';
 const defaultGenerationMode: GenerationMode = 'workflow';
 const defaultStyleWritebackMode: StyleWritebackMode = 'full';
 const gngkSharedContentBeforeText = '第三章 招标内容及要求';
@@ -707,7 +709,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       tenderType === 'gngk'
     )
   );
-  const [localGenerationMode] = useState<GenerationMode>(
+  const [localGenerationMode, setLocalGenerationMode] = useState<GenerationMode>(
     initialDraft?.generation_mode || defaultGenerationMode
   );
   const [localStyleWritebackMode, setLocalStyleWritebackMode] = useState<StyleWritebackMode>(
@@ -1141,6 +1143,20 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       onDraftChange?.(nextUpdates);
     },
     [generationStyle, initialDraft, onDraftChange, tenderLx, tenderType]
+  );
+
+  const handleGenerationModeChange = useCallback(
+    (nextGenerationMode: GenerationMode) => {
+      if (generationMode === nextGenerationMode) {
+        return;
+      }
+
+      setLocalGenerationMode(nextGenerationMode);
+      onDraftChange?.({
+        generation_mode: nextGenerationMode,
+      });
+    },
+    [generationMode, onDraftChange]
   );
 
   const handleStyleWritebackModeChange = useCallback(
@@ -1757,7 +1773,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
 
         <FormSection title="高级设置（可选）" index={3}>
           <div className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className={advancedSettingsGridClassName}>
               <FormField
                 label="插入位置前文本"
                 name="before_text"
@@ -1781,7 +1797,40 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
               />
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className={advancedSettingsGridClassName}>
+              <div className="space-y-1.5">
+                <p className="block text-sm font-semibold text-[var(--foreground)]">生成方式</p>
+                <div role="group" aria-label="生成方式" className={segmentedControlClassName}>
+                  <button
+                    type="button"
+                    onClick={() => handleGenerationModeChange('workflow')}
+                    disabled={isSubmitting}
+                    className={cn(
+                      segmentedToggleButtonClassName,
+                      generationMode === 'workflow'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-transparent text-slate-700 hover:bg-white/80'
+                    )}
+                  >
+                    工作流
+                  </button>
+                  <span aria-hidden className="h-6 w-px bg-slate-200" />
+                  <button
+                    type="button"
+                    onClick={() => handleGenerationModeChange('agent')}
+                    disabled={isSubmitting}
+                    className={cn(
+                      segmentedToggleButtonClassName,
+                      generationMode === 'agent'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-transparent text-slate-700 hover:bg-white/80'
+                    )}
+                  >
+                    智能体
+                  </button>
+                </div>
+              </div>
+
               <div className="space-y-1.5">
                 <p className="block text-sm font-semibold text-[var(--foreground)]">生成风格</p>
                 <div role="group" aria-label="生成风格" className={segmentedControlClassName}>
@@ -1814,7 +1863,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
                   </button>
                 </div>
               </div>
+            </div>
 
+            <div className={advancedSettingsGridClassName}>
               <div className="space-y-1.5">
                 <p className="block text-sm font-semibold text-[var(--foreground)]">样式修订</p>
                 <div role="group" aria-label="样式修订" className={segmentedControlClassName}>
