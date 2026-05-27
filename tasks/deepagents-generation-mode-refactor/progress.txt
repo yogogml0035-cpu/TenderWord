@@ -11,6 +11,8 @@ Source: prd.json
 - Standard generate graph centralizes shared flow in `StandardTenderWorkflowGraph`; type graphs should not copy the generation mode split.
 - The current LLM content card is driven by `llm` events for `generate_polished_text`; agent audit/revision display must use a new `agent_step` event and keep `done` / `error` as terminal events.
 - Graph difference coverage should target `xjcg`, `gngk_hw_zc`, `gngk_hw_cz`, `gngk_fw_zc`, and `gjgk`; inherited `gngk_fw_cz` only needs smoke.
+- Workflow branch regression tests can subclass `StandardTenderWorkflowGraph` with fake nodes and assert `NODE_HOST_AGENT_GENERATE` is not called while `generation_mode` remains `workflow`.
+- The old generate content card contract is anchored by `TASK_KIND_TO_LLM_NODE["generate"] == "generate_polished_text"` plus `_LLMSnapshotRelay` emitting `llm` events with `content_mode: "snapshot"`.
 
 ## 2026-05-27 13:58 - US-001
 - 实现了 generate-only `generation_mode` 契约：后端 `GenerateRequest` 新增 `workflow | agent` 默认 `workflow`，`DocumentService._build_initial_state()` 写入 generate state，rewrite/edit 初始 state 保持不包含该字段。
@@ -21,4 +23,16 @@ Source: prd.json
   - 前端 generate-only 默认值应在 `TenderFormShared` 的 draft 初始化和 `formDataConverter` 的 API payload 双侧兜底，避免旧草稿或未显式选择的表单遗漏字段。
   - `generation_mode` 不能进入 rewrite/edit 请求模型或 skill graph initial state；只改 generate request 和 `DocumentService._build_initial_state()`。
   - `XjcgTenderFormData` 不是 `BaseTenderFormData` 的别名，新增表单基础字段时要同步检查它的手写接口。
+---
+
+## 2026-05-27 14:17 - US-002
+- 用回归测试锁定默认 workflow 旧路径：`generation_mode="workflow"` 时标准生成 graph 仍执行 `generate_polished_text`，不会调用预留的 `host_agent` 节点，且后续仍进入 `update_word`。
+- 用节点单测锁定旧 `generate_polished_text` 内部契约：继续通过 `render_generate_prompt()` 构造 prompt，并调用 `stream_llm_completion()`，同时保持流式 snapshot 和完成回调。
+- 用服务单测锁定用户可见初稿卡事件：generate 任务的 LLM relay 仍以 `generate_polished_text` 节点发送 `llm` snapshot 事件。
+- 更改的文件：`backend/tests/graphs/test_generation_mode_workflow.py`、`backend/tests/nodes/test_generate_polished_text_workflow.py`、`backend/tests/services/test_document_service_llm_snapshot.py`、`tasks/deepagents-generation-mode-refactor/prd.json`、`tasks/deepagents-generation-mode-refactor/progress.txt`。
+- 验证：`backend\.venv\Scripts\python.exe -m pytest backend\tests\nodes\test_generate_polished_text_workflow.py backend\tests\graphs\test_generation_mode_workflow.py backend\tests\services\test_document_service_llm_snapshot.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend\tests\models\test_generate_request_generation_style.py backend\tests\services\test_document_service_initial_state.py backend\tests\services\test_document_service_task_result.py backend\tests\prompts\test_generate_prompt_routing.py backend\tests\util\test_llm_stream_utils.py backend\tests\graphs\test_generation_mode_workflow.py backend\tests\nodes\test_generate_polished_text_workflow.py backend\tests\services\test_document_service_llm_snapshot.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend\tests -q`、`npm run type-check`、`npm run lint`、`npm run test -- --runTestsByPath __tests__\unit\hooks\test_use_chat_sse.test.tsx __tests__\unit\components\forms\test_tender_form_shared.test.tsx __tests__\unit\lib\test_form_data_converter.test.ts __tests__\unit\stores\test_chat_store_conversation_scope.test.ts`、`npm run test -- --runInBand`、`git diff --check` 均通过。
+- **未来迭代的学习：**
+  - 旧 workflow 行为目前不需要生产代码改动；最有价值的是在基类 graph、旧节点和 LLM relay 三层加防回归测试。
+  - `backend.nodes.common_word_nodes` 包级导出的是函数；需要 monkeypatch 旧节点内部依赖时，应通过 `importlib.import_module("backend.nodes.common_word_nodes.generate_polished_text")` 获取模块。
+  - `generate_polished_text` 的流式 UI 契约不只在节点内，还由 `DocumentService._LLMSnapshotRelay` 和 `TASK_KIND_TO_LLM_NODE` 共同决定。
 ---
