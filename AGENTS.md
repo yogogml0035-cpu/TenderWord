@@ -60,7 +60,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - 后端：FastAPI、LangGraph、pywin32
 - 前端 UI 类型：`xjcg`、`gngk`、`gjgk`
 - 后端 `FormType`：`xjcg_tender`、`gngk_hw_zc_tender`、`gngk_hw_cz_tender`、`gngk_fw_zc_tender`、`gngk_fw_cz_tender`、`gjgk_tender`
-- `gngk` 在前端转换层根据 `tender_lx + fund_source_lx` 分派到“货物 / 服务 × 自筹 / 财政”四套后端 graph
+- `gngk` 在前端共享 helper `frontend/lib/gngkFormType.ts` 中根据 `tender_lx + fund_lx + ifzgcg` 分派到“货物 / 服务（含工程复用）× 自筹 / 财政”四套后端 `form_type`
 - 当前真实 API 前缀：`/api`
 - 当前真实关键链路：创建任务 -> 任务队列 -> SSE 推送 -> 完成 / 失败 -> 下载 / rewrite
 
@@ -70,6 +70,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - 前端 API 真入口：`frontend/lib/api.ts`
 - 前端基础 URL 解析：`frontend/lib/apiBaseUrl.ts`
 - 前端表单到后端请求转换：`frontend/lib/formDataConverter.ts`
+- `gngk` 后端 `form_type` 分派：`frontend/lib/gngkFormType.ts`
 - 后端入口：`backend/main.py`
 - 任务创建：`backend/api/generate.py`
 - 任务状态 / 取消 / 心跳：`backend/api/tasks.py`
@@ -176,7 +177,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - `get_tender_type_family()` 是公开招标家族共享 prompt、replacement 与公共节点路由的真源；新增运行态时不得绕开 family 收敛逻辑。
 - `gngk` replacement 与类型节点命名按运行态分流，继续使用 `gngk_hw_zc_get_replacements`、`gngk_fw_zc_get_replacements` 这类真名；不得回退到 `gngk_get_replacements` 一类历史兼容别名。
 - `gngk_hw_cz` 当前是 direct-replace 首次生成类型：`GngkHwCzTenderGraph` 显式覆写 delete/update 节点，继续复用货物自筹 replacement；锚点、同页起点和 direct-replace mode 以 `backend/config/tender_config.py` 为准。
-- `frontend/lib/formDataConverter.ts` 与 `frontend/components/chat/ChatPanel.tsx` 当前都在计算 `gngk` 的 `form_type`；任一处变更都必须双向同步并补测试。
+- `frontend/lib/gngkFormType.ts` 是 `gngk` 后端 `form_type` 分派真源；`frontend/lib/formDataConverter.ts` 与 `frontend/components/chat/ChatPanel.tsx` 只能调用该 helper，修改分派必须同步生成、edit 两类测试。
 - 在未完成集中化之前，新增类型必须完整走同步检查清单，不能漏改任何一层。
 
 ## 5. 新增或修改一种招标类型的同步清单
@@ -197,8 +198,8 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - `frontend/utils/tenderTypeMapper.ts`：补齐 URL 参数映射
 - `frontend/components/chat/tenderFormRegistry.ts`：补齐显示名、组件、转换器注册
 - `frontend/components/forms/tenderFormConfig.ts`：补齐默认锚点
-- `frontend/lib/formDataConverter.ts`：补齐前端类型到后端 `form_type` 的转换逻辑
-- 涉及类型 identity、URL 判型或 `gngk` 子类型分派时，必须同步检查 `frontend/components/chat/ChatPanel.tsx`、`frontend/stores/chatStore.ts`、`frontend/components/forms/TenderFormShared.tsx` 的任务创建、会话匹配、URL 同步与初始化优先级
+- `frontend/lib/gngkFormType.ts`：补齐 `gngk` 后端 `form_type` 分派逻辑；`frontend/lib/formDataConverter.ts`：补齐前端类型到后端请求的转换逻辑
+- 涉及类型 identity、URL 判型或 `gngk` 子类型分派时，必须同步检查 `frontend/components/chat/ChatPanel.tsx` 是否继续调用共享 helper，以及 `frontend/stores/chatStore.ts`、`frontend/components/forms/TenderFormShared.tsx` 的任务创建、会话匹配、URL 同步与初始化优先级
 - 如果类型选择 UI、默认文案、会话创建或历史筛选依赖类型枚举，必须同步更新对应组件和 store
 
 ### 样例与知识包必须同步

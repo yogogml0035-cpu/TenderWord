@@ -1,6 +1,6 @@
 # 前端测试事实地图
 
-**分析日期：** 2026-05-23
+**分析日期：** 2026-05-27
 
 **范围：** `frontend/__tests__/`、`frontend/e2e/` 与前端验证命令。
 
@@ -39,7 +39,7 @@ frontend/e2e/
 - 聊天组件：`frontend/__tests__/unit/components/chat/`。
 - 表单组件：`frontend/__tests__/unit/components/forms/`。
 - API client：`frontend/__tests__/unit/lib/test_api.test.ts`、`test_api_base_url.test.ts`。
-- 表单转换器：`frontend/__tests__/unit/lib/test_form_data_converter.test.ts`。
+- 表单转换器与 `gngk` form type 分派：`frontend/__tests__/unit/lib/test_form_data_converter.test.ts`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`。
 - SSE：`frontend/__tests__/unit/lib/test_sse.test.ts`、`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`。
 - store：`frontend/__tests__/unit/stores/`。
 - URL 映射：`frontend/__tests__/unit/utils/test_tender_type_mapper.test.ts`。
@@ -97,7 +97,7 @@ git diff --check
 
 - API client：`frontend/__tests__/unit/lib/test_api.test.ts`，必要时同步类型测试。
 - URL / 会话：`test_tender_type_mapper.test.ts`、`test_chat_store_conversation_scope.test.ts`、`frontend/e2e/test_url_conversation.spec.ts`。
-- 表单/转换器：相关表单测试、`test_form_data_converter.test.ts`、注册表测试。
+- 表单/转换器：相关表单测试、`test_form_data_converter.test.ts`、`test_chat_panel.test.tsx` 中的 edit form type 覆盖、注册表测试。
 - SSE/任务：`test_use_chat_sse.test.tsx`、task store 测试、`test_use_task_heartbeat.test.tsx`。
 - 模板候选：表单与 API client 测试，必要时补弹窗交互测试。
 - UI/页面：相关组件测试，真实浏览器契约补 Playwright。
@@ -110,4 +110,4 @@ git diff --check
 
 ---
 
-*前端测试分析：2026-05-23*
+*前端测试分析：2026-05-27*

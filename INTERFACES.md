@@ -1,6 +1,6 @@
 # TenderWord 接口边界
 
-**生成日期：** 2026-05-23
+**生成日期：** 2026-05-27
 
 本文件记录 TenderWord 当前已确认的系统级接口边界。具体模型和行为以 `backend/api/`、`backend/models/`、`frontend/types/api.ts` 和 `frontend/lib/api.ts` 为准。
 
@@ -27,8 +27,8 @@
 | 运行时 | `backend/task/task_queue_manager.py`, `backend/graphs/base_graph.py` |
 
 同步要求：
-- `GenerateRequest.form_type` 变化必须同步 `frontend/types/api.ts`、`frontend/lib/formDataConverter.ts` 和 `backend/models/generate.py`。
-- `gngk` 的后端分派依赖 `tender_lx + fund_lx`，并且 generate 分派在 `frontend/lib/formDataConverter.ts`、edit 分派在 `frontend/components/chat/ChatPanel.tsx`，不能只改其中一处。
+- `GenerateRequest.form_type` 变化必须同步 `frontend/types/api.ts`、`frontend/lib/formDataConverter.ts` 和 `backend/models/generate.py`；`gngk` 分派变化还必须同步 `frontend/lib/gngkFormType.ts`。
+- `gngk` 的后端分派依赖 `tender_lx + fund_lx + ifzgcg`，共享真源是 `frontend/lib/gngkFormType.ts`；generate 由 `formDataConverter.ts` 调用该 helper，edit 由 `ChatPanel.tsx` 调用该 helper，不能绕开 helper 单独改调用点。
 
 ### 任务状态、取消与心跳
 
@@ -166,6 +166,7 @@
 关键同步点：
 
 - `frontend/lib/formDataConverter.ts`
+- `frontend/lib/gngkFormType.ts`
 - `frontend/components/chat/ChatPanel.tsx`
 - `frontend/utils/tenderTypeMapper.ts`
 - `frontend/components/chat/tenderFormRegistry.ts`
@@ -218,6 +219,6 @@ Word COM 只存在于后端：
 
 - 接口返回异常：先看 `frontend/lib/api.ts` 的 `ApiError` 包装，再看对应 `backend/api/` route 和 `backend/models/`。
 - SSE 卡住：先区分任务是否还存在、队列是否运行、后端是否发出 `error` / `done`，再看 `backend/core/sse_manager.py` 和 `frontend/hooks/useChatSSE.ts`。
-- `gngk` 类型不对：同时检查 URL 参数、draft、`formDataConverter`、`ChatPanel` edit form type、后端 `FormType` 和 `GRAPH_REGISTRY`。
+- `gngk` 类型不对：同时检查 URL 参数、draft、`gngkFormType`、`formDataConverter`、`ChatPanel` edit 调用点、后端 `FormType` 和 `GRAPH_REGISTRY`。
 - 模板候选不可选：检查 `year`、blocked reason、后端归一化、AI row_index 重排和前端选择按钮状态。
 - Word 写回异常：先看任务队列、graph 锁、protected fields、paragraph boundary helper，再看类型专属 node。

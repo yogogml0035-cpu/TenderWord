@@ -1,6 +1,6 @@
 # 后端风险事实地图
 
-**分析日期：** 2026-05-23
+**分析日期：** 2026-05-27
 
 **范围：** `backend/` 当前技术债、脆弱点、安全边界和测试缺口。
 
@@ -79,7 +79,7 @@
 
 ## 回归风险检查
 
-- 改 `FormType` 或 graph registry：同步前端 union、converter、ChatPanel edit 分派、graph 测试。
+- 改 `FormType` 或 graph registry：同步前端 union、`gngkFormType`、converter、ChatPanel edit 调用点、graph 测试。
 - 改 SSE event：同步后端模型、发送方、前端类型、`useChatSSE` 和测试。
 - 改 Word helper：同步相关节点测试和 `asset/shared_runtime_word_skill_knowledge_pack.md`。
 - 改类型 identity / URL：同步 `asset/tender_type_identity_session_knowledge_pack.md`。

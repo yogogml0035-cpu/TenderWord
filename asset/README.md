@@ -1,4 +1,4 @@
-# Asset Knowledge Pack Index
+# 知识包索引
 
 `asset/` 是 TenderWord 的长期知识沉淀入口。`AGENTS.md` 保存跨主题不变量，本目录保存 topic 级当前事实、同步面、验证入口和回归风险。
 

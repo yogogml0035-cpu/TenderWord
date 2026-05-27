@@ -1,20 +1,20 @@
 # 前端风险事实地图
 
-**分析日期：** 2026-05-23
+**分析日期：** 2026-05-27
 
 **范围：** `frontend/` 当前技术债、脆弱点、安全边界和测试缺口。
 
 ## 技术债
 
 **类型身份仍分散注册：**
-- 文件：`frontend/types/index.ts`、`frontend/types/api.ts`、`frontend/utils/tenderTypeMapper.ts`、`frontend/components/chat/tenderFormRegistry.ts`、`frontend/components/forms/tenderFormConfig.ts`、`frontend/lib/formDataConverter.ts`、`frontend/components/chat/ChatPanel.tsx`
+- 文件：`frontend/types/index.ts`、`frontend/types/api.ts`、`frontend/utils/tenderTypeMapper.ts`、`frontend/components/chat/tenderFormRegistry.ts`、`frontend/components/forms/tenderFormConfig.ts`、`frontend/lib/gngkFormType.ts`、`frontend/lib/formDataConverter.ts`、`frontend/components/chat/ChatPanel.tsx`
 - 风险：新增或调整招标类型时容易漏改某一层。
 - 安全修改：按 AGENTS 清单同步所有注册点和测试。
 
-**gngk form type 有两处计算：**
-- 文件：`frontend/lib/formDataConverter.ts`、`frontend/components/chat/ChatPanel.tsx`
-- 风险：generate 和 edit 分派漂移，导致同一页面生成和修改走不同后端 graph。
-- 安全修改：任一处变化必须双向同步并补单测。
+**gngk form type 共享 helper 不能被绕过：**
+- 文件：`frontend/lib/gngkFormType.ts`、`frontend/lib/formDataConverter.ts`、`frontend/components/chat/ChatPanel.tsx`
+- 风险：调用点私自分派会让 generate 和 edit 走不同后端 graph。
+- 安全修改：分派规则只改 `resolveGngkFormType()`，并同步覆盖生成转换器与 ChatPanel edit 测试。
 
 **会话、URL 和 draft 优先级复杂：**
 - 文件：`frontend/app/tender/page.tsx`、`frontend/stores/chatStore.ts`、`frontend/components/forms/TenderFormShared.tsx`、`frontend/utils/tenderTypeMapper.ts`
@@ -67,12 +67,12 @@
 
 - 真实后端 + Word COM 生成链路无法由常规前端 Jest 覆盖。
 - 模板候选和 SSE 的复杂 UI 状态仍可补更多 mock E2E。
-- gngk 新类型或子类型分派变化时，需要同时覆盖 converter、ChatPanel edit、URL、store 会话匹配。
+- gngk 新类型或子类型分派变化时，需要同时覆盖 `gngkFormType`、converter、ChatPanel edit、URL、store 会话匹配。
 
 ## 回归风险检查
 
 - 改 API：同步 `types/api.ts`、`lib/api.ts`、后端模型和测试。
-- 改 gngk 分派：同步 generate converter 与 edit builder。
+- 改 gngk 分派：同步 `gngkFormType`、generate converter 与 edit builder。
 - 改 URL：同步 mapper、store、页面启动和 E2E。
 - 改任务 UI：同步 task group store、stream store、SSE hook 和消息组件测试。
 - 改模板候选：同步 API client、弹窗、表单回填和知识包。

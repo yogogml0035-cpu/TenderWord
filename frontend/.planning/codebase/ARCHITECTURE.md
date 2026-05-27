@@ -1,7 +1,7 @@
-<!-- refreshed: 2026-05-23 -->
+<!-- refreshed: 2026-05-27 -->
 # 前端架构事实地图
 
-**分析日期：** 2026-05-23
+**分析日期：** 2026-05-27
 
 **范围：** `frontend/`，并在启动、验证和 API 边界上参考根级 `AGENTS.md`、`README.md` 与 `scripts/`。
 
@@ -45,8 +45,8 @@ Next.js App Router
 
 1. `TenderFormShared` 收集招标数据、上传文件、模板候选结果、插入锚点、生成风格和样式回填模式。
 2. `FormPanel` 通过 `tenderFormRegistry` 获取表单组件和转换器。
-3. `frontend/lib/formDataConverter.ts` 把前端类型转换为后端 `GenerateRequest.form_type`。
-4. `gngk` 由 `tender_lx + fund_lx` 分派到四套后端 form type；工程类当前复用服务链路。
+3. `frontend/lib/formDataConverter.ts` 把前端类型转换为后端 `GenerateRequest`。
+4. `gngk` 由 `frontend/lib/gngkFormType.ts` 根据 `tender_lx + fund_lx + ifzgcg` 分派到四套后端 form type；工程类当前复用服务链路。
 5. `frontend/lib/api.ts` 调用 `createGenerateTask()`。
 6. `chatStore.startTask()` 创建任务消息组和 task summary。
 7. `useCurrentConversationTaskStatus()` 查询队列/运行状态，`useChatSSE()` 连接任务 SSE。
@@ -58,7 +58,7 @@ Next.js App Router
 - 普通聊天和 rewrite 使用 `streamUserMessage()` 调用 `/api/user/stream` 并解析 NDJSON。
 - `route: reply` 追加普通 AI 消息；`route: rewrite` 接收 `task_accepted` 后进入任务/SSE 链路。
 - edit 模式由 `ChatPanel` 上传待改 Word 文件、构造 `EditTaskRequest` 并调用 `createEditTask()`。
-- edit 的 `form_type` 在 `ChatPanel` 中按当前页面类型和 draft 的 `tender_lx/fund_lx` 计算，必须与 `formDataConverter.ts` 保持同步。
+- edit 的 `form_type` 在 `ChatPanel` 中按当前页面类型和 draft 调用 `resolveGngkFormType()`，必须与生成链路共用 `frontend/lib/gngkFormType.ts`。
 - `chat_input` 在消息受理时立即清空；中断恢复才使用 `pending_rewrite_prompt` / `pending_edit_prompt`。
 
 ### 模板候选
@@ -86,13 +86,13 @@ Next.js App Router
 - 会话、草稿和任务恢复语义继续使用 `sessionStorage`。
 - 从 `sessionStorage` 恢复 running task 前必须先查任务状态，404 / `TASK_NOT_FOUND` 收敛为本地中断态。
 - 新增 SSE 事件类型必须同步前端 `types/api.ts`、`useChatSSE` 和测试。
-- 类型 identity 或 `form_type` 分派变化必须同步 `formDataConverter.ts`、`ChatPanel.tsx`、`tenderTypeMapper.ts`、注册表、store 和测试。
+- 类型 identity 或 `form_type` 分派变化必须同步 `gngkFormType.ts`、`formDataConverter.ts`、`ChatPanel.tsx`、`tenderTypeMapper.ts`、注册表、store 和测试。
 
 ## 反模式
 
 - 在组件中直接调用后端 URL 或外部模板候选 URL。
 - 手工 patch 单个 query 参数导致 canonical URL 与会话身份漂移。
-- 只在表单转换器或只在 ChatPanel 修改 gngk form type 分派。
+- 绕过 `gngkFormType.ts`，只在表单转换器或只在 `ChatPanel` 修改 gngk form type 分派。
 - 直接 append 任务消息，绕过 `chatStore` 的 task group 方法。
 - 把 pending rewrite/edit prompt 当成正常发送后的延迟清空机制。
 - 让用户态 SSE UI 展示候选打分、淘汰阈值等排障细节。

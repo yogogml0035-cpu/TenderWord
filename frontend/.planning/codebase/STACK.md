@@ -1,6 +1,6 @@
 # 前端技术栈事实地图
 
-**分析日期：** 2026-05-23
+**分析日期：** 2026-05-27
 
 **范围：** `frontend/` 及前端启动/测试相关根脚本。
 
@@ -61,7 +61,7 @@ npm run test:e2e       # Playwright
 - 页面入口：`frontend/app/page.tsx`、`frontend/app/tender/page.tsx`。
 - API 入口：`frontend/lib/api.ts`。
 - SSE 入口：`frontend/lib/sse.ts`、`frontend/hooks/useChatSSE.ts`。
-- 表单转换：`frontend/lib/formDataConverter.ts`。
+- 表单转换：`frontend/lib/formDataConverter.ts`；`gngk` form type 分派：`frontend/lib/gngkFormType.ts`。
 - URL 映射：`frontend/utils/tenderTypeMapper.ts`。
 - 主 store：`frontend/stores/chatStore.ts`。
 

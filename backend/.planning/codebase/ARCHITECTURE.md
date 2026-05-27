@@ -1,7 +1,7 @@
-<!-- refreshed: 2026-05-23 -->
+<!-- refreshed: 2026-05-27 -->
 # 后端架构事实地图
 
-**分析日期：** 2026-05-23
+**分析日期：** 2026-05-27
 
 **范围：** 仅覆盖 `backend/`，并在启动、验证和 Windows/WSL 运行边界上参考根级 `AGENTS.md`、`README.md` 与 `scripts/`。
 
@@ -105,7 +105,7 @@ FastAPI /api
 - 在节点里硬编码类型锚点、受保护字段 profile 或 family。
 - 在类型节点之间互相 import 私有 helper，导致 Word 业务逻辑继续分叉。
 - 新增 SSE 事件但不更新前端类型、解析和测试。
-- 修改 `form_type` 或 gngk 分派时只改前端或只改后端。
+- 修改 `form_type` 或 gngk 分派时只改后端，或绕过前端共享 helper `frontend/lib/gngkFormType.ts`。
 
 ## 错误处理
 

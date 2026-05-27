@@ -1,6 +1,6 @@
 # TenderWord 架构地图
 
-**生成日期：** 2026-05-23
+**生成日期：** 2026-05-27
 
 本文件是根级系统架构地图，描述 TenderWord 的系统边界、子系统职责和推荐理解路径。实现细节仍以代码为准；子系统内部事实以 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 为准。
 
@@ -90,7 +90,7 @@ frontend/components/forms/
 frontend/stores/
   持久化会话状态与临时 stream 状态
 frontend/lib/
-  API client、SSE wrapper、招标数据 helper
+  API client、SSE wrapper、招标数据 helper、gngk form type helper
 frontend/types/ 与 frontend/utils/
   API 契约、招标身份、URL 映射
 ```
@@ -99,6 +99,7 @@ frontend/types/ 与 frontend/utils/
 
 - 组件不直接写裸 `fetch`，后端调用统一进 `frontend/lib/api.ts`。
 - URL canonical 化统一走 `frontend/utils/tenderTypeMapper.ts` 和 store helpers。
+- `gngk` 后端 `form_type` 分派统一走 `frontend/lib/gngkFormType.ts`。
 - 会话语义继续使用 `sessionStorage`。
 - `TenderFormShared` 初始化优先级是 `draft > URL > default`。
 
@@ -145,6 +146,7 @@ backend/prompts/ 与 backend/skills/
 关键入口：
 - `frontend/components/chat/FormPanel.tsx`
 - `frontend/lib/formDataConverter.ts`
+- `frontend/lib/gngkFormType.ts`
 - `backend/api/generate.py`
 - `backend/services/document_service.py`
 - `backend/graphs/base_graph.py`
@@ -226,7 +228,7 @@ Edit 是显式 task 入口，只走 `POST /api/edit`。它复用任务队列、S
 3. `backend/.planning/codebase/CONVENTIONS.md`
 4. `asset/shared_runtime_word_skill_knowledge_pack.md`
 5. `asset/tender_type_identity_session_knowledge_pack.md`
-6. 相关 graph、node、helper、前端转换器和测试
+6. 相关 graph、node、helper、前端转换器、`gngkFormType` 和测试
 
 ## 维护建议
 

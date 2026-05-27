@@ -1,6 +1,6 @@
 # 后端编码约定事实地图
 
-**分析日期：** 2026-05-23
+**分析日期：** 2026-05-27
 
 **范围：** `backend/` 源码和测试约定。
 
@@ -71,7 +71,7 @@
 ## API 与模型约定
 
 - `backend/models/` 是后端 API 和运行态模型真源。
-- `GenerateRequest.form_type` 变化必须同步前端类型、转换器、ChatPanel edit 分派和测试。
+- `GenerateRequest.form_type` 变化必须同步前端类型、`gngkFormType`、转换器、ChatPanel edit 调用点和测试。
 - SSE 事件类型变化必须同步后端模型、发送方、前端 union 类型、解析和测试。
 - `generation_style` 是 generate-only 字段，不进入 rewrite/edit 请求模型、skill state 或 prompt surface。
 

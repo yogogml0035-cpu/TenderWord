@@ -1,6 +1,6 @@
 # 前端结构事实地图
 
-**分析日期：** 2026-05-23
+**分析日期：** 2026-05-27
 
 **范围：** `frontend/` 源码、测试和前端配置。
 
@@ -36,7 +36,7 @@ frontend/
 | `frontend/components/forms/` | XJCG/GNGK/GJGK 表单 wrapper、共享表单、上传、模板候选弹窗、锚点默认值。 |
 | `frontend/components/layout/` | Header、Sidebar、HistorySection、MainLayout。 |
 | `frontend/hooks/` | hydration、URL 参数、SSE、任务状态、任务心跳、当前任务摘要。 |
-| `frontend/lib/` | `api.ts`、`sse.ts`、`apiBaseUrl.ts`、`formDataConverter.ts`、`tenderFetch.ts`、工具函数。 |
+| `frontend/lib/` | `api.ts`、`sse.ts`、`apiBaseUrl.ts`、`formDataConverter.ts`、`gngkFormType.ts`、`tenderFetch.ts`、工具函数。 |
 | `frontend/stores/` | 主会话 store、stream store、task session store、历史 store、UI store。 |
 | `frontend/types/` | `TenderType`、API payload/event、聊天消息类型。 |
 | `frontend/utils/` | tender type 与 canonical URL 映射。 |
@@ -69,6 +69,7 @@ frontend/
 - `frontend/hooks/useChatSSE.ts`：任务 SSE 到 store/UI 的映射。
 - `frontend/types/api.ts`：API 和 SSE 类型。
 - `frontend/lib/formDataConverter.ts`：表单到 `GenerateRequest` 转换。
+- `frontend/lib/gngkFormType.ts`：`gngk` 后端 `form_type` 共享分派 helper。
 - `frontend/utils/tenderTypeMapper.ts`：URL 判型、canonical URL 构造与同步。
 
 ### 状态
@@ -81,7 +82,7 @@ frontend/
 
 ### 测试
 
-- `frontend/__tests__/unit/lib/test_form_data_converter.test.ts`：表单转换器。
+- `frontend/__tests__/unit/lib/test_form_data_converter.test.ts`：表单转换器和 `gngk` form type 分派。
 - `frontend/__tests__/unit/utils/test_tender_type_mapper.test.ts`：URL 和类型映射。
 - `frontend/__tests__/unit/stores/test_chat_store_conversation_scope.test.ts`：会话 scope。
 - `frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`：SSE 映射。

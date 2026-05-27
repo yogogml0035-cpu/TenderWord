@@ -1,6 +1,6 @@
 # 前端编码约定事实地图
 
-**分析日期：** 2026-05-23
+**分析日期：** 2026-05-27
 
 **范围：** `frontend/` 源码、类型、测试和 UI 状态约定。
 
@@ -41,9 +41,10 @@
 
 - 前端 UI 类型只有 `xjcg`、`gngk`、`gjgk`。
 - 后端 form type union 在 `frontend/types/api.ts`。
-- `frontend/lib/formDataConverter.ts` 负责生成任务的 form type 分派。
-- `frontend/components/chat/ChatPanel.tsx` 负责 edit 任务的 form type 分派。
-- 修改 `gngk` 的 `tender_lx + fund_lx` 分派时，两处必须同步并补测试。
+- `frontend/lib/gngkFormType.ts` 是 `gngk` 后端 form type 分派真源。
+- `frontend/lib/formDataConverter.ts` 负责生成任务转换，并调用 `resolveGngkFormType()`。
+- `frontend/components/chat/ChatPanel.tsx` 负责 edit 任务构造，并调用 `resolveGngkFormType()`。
+- 修改 `gngk` 的 `tender_lx + fund_lx + ifzgcg` 分派时，只改共享 helper，并补生成与 edit 测试。
 - 默认锚点在 `frontend/components/forms/tenderFormConfig.ts`；后端最终锚点配置在 `backend/config/tender_config.py`。
 
 ## SSE 与任务约定
@@ -65,7 +66,7 @@
 
 - 注释用于解释非显然业务约束，例如 gngk 工程类复用服务链路。
 - 避免把 API 契约只写在注释里，类型和测试才是约束。
-- 复杂派生逻辑优先抽函数并补单测，例如 URL 参数解析、form type 分派、SSE event parse。
+- 复杂派生逻辑优先抽函数并补单测，例如 URL 参数解析、`gngk` form type 分派、SSE event parse。
 
 ## 模块边界
 

@@ -1,6 +1,6 @@
 # TenderWord 系统地图
 
-**生成日期：** 2026-05-23
+**生成日期：** 2026-05-27
 
 本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它不替代代码真源、不替代根级 `AGENTS.md` 的执行红线，也不替代 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 的子系统事实文档。
 
@@ -22,7 +22,7 @@ TenderWord 是前后端分离的招标文档生成、修改和模板复用系统
 1. 用户进入 `/tender`，`frontend/app/tender/page.tsx` 解析 URL 参数并恢复或创建会话。
 2. `frontend/components/forms/TenderFormShared.tsx` 收集招标数据、文件、模板候选和插入锚点。
 3. `frontend/components/chat/FormPanel.tsx` 通过 `tenderFormRegistry` 选择转换器。
-4. `frontend/lib/formDataConverter.ts` 把前端 `TenderType` 与 `gngk` 子类型参数转换为后端 `GenerateRequest.form_type`。
+4. `frontend/lib/formDataConverter.ts` 把前端 `TenderType` 转换为后端 `GenerateRequest`；其中 `gngk` 后端 `form_type` 由共享 helper `frontend/lib/gngkFormType.ts` 根据 `tender_lx + fund_lx + ifzgcg` 解析。
 5. `frontend/lib/api.ts` 调用 `POST /api/generate`。
 6. `backend/api/generate.py` 校验请求并交给 `backend/services/document_service.py`。
 7. `DocumentService` 选择 `GRAPH_REGISTRY`，构造初始 state，并提交到 `backend/task/task_queue_manager.py`。
@@ -58,7 +58,7 @@ TenderWord 是前后端分离的招标文档生成、修改和模板复用系统
 | 边界 | 前端入口 | 后端入口 | 同步要求 |
 | --- | --- | --- | --- |
 | API client | `frontend/lib/api.ts` | `backend/api/` | API 形状变化时同步 `frontend/types/api.ts`、后端 `backend/models/` 和测试。 |
-| 招标类型身份 | `frontend/types/index.ts`, `frontend/utils/tenderTypeMapper.ts`, `frontend/lib/formDataConverter.ts` | `backend/models/generate.py`, `backend/config/tender_config.py`, `backend/services/document_service.py` | 新增或修改类型必须同步前端 UI 类型、后端 `form_type`、URL、graph/state/node、anchor 和测试。 |
+| 招标类型身份 | `frontend/types/index.ts`, `frontend/utils/tenderTypeMapper.ts`, `frontend/lib/gngkFormType.ts`, `frontend/lib/formDataConverter.ts` | `backend/models/generate.py`, `backend/config/tender_config.py`, `backend/services/document_service.py` | 新增或修改类型必须同步前端 UI 类型、后端 `form_type`、URL、graph/state/node、anchor 和测试。 |
 | 会话和 URL | `frontend/stores/chatStore.ts`, `frontend/utils/tenderTypeMapper.ts` | `backend/api/conversations.py`, `backend/services/conversation_service.py` | 地址栏、会话身份、任务恢复和后端心跳需保持一致。 |
 | 任务与 SSE | `frontend/hooks/useChatSSE.ts`, `frontend/lib/sse.ts`, `frontend/stores/*` | `backend/api/stream.py`, `backend/core/sse_manager.py`, `backend/task/task_queue_manager.py` | 新增 SSE 事件必须同步后端模型、前端类型、解析和测试。 |
 | Word 运行时 | 无前端直接入口 | `backend/graphs/`, `backend/nodes/`, `backend/helper/word_helper/`, `backend/util/word_util/` | 前端不得触碰 COM；后端新增 graph/node/tool 不得绕过队列、锁、取消检查和进度包装。 |
@@ -153,7 +153,7 @@ TenderWord 是前后端分离的招标文档生成、修改和模板复用系统
 ## 集成风险检查清单
 
 - API 形状变化是否同步后端模型、前端类型、API client 和测试。
-- `gngk` 的 `tender_lx + fund_lx` 是否同时同步 `frontend/lib/formDataConverter.ts` 和 `frontend/components/chat/ChatPanel.tsx`。
+- `gngk` 的 `tender_lx + fund_lx + ifzgcg` 分派是否集中在 `frontend/lib/gngkFormType.ts`，且 `formDataConverter.ts` 与 `ChatPanel.tsx` 是否都调用该 helper。
 - 新增或修改 SSE 事件是否同步后端事件模型、前端事件 union、`useChatSSE` 和测试。
 - Word COM 相关改动是否仍然经过任务队列、graph 锁、取消检查和进度包装。
 - Prompt 或 LLM 流式改动是否复用 `LLM_STREAM_TIMEOUT_SECONDS`，并保留 Prompt Layer 边界。

@@ -1,6 +1,6 @@
 # 前端集成事实地图
 
-**分析日期：** 2026-05-23
+**分析日期：** 2026-05-27
 
 **范围：** `frontend/` 对后端 API、浏览器运行时、存储、测试工具和本地启动环境的集成边界。
 
@@ -84,7 +84,7 @@
 
 - API shape 变化必须同步 `frontend/types/api.ts`、`frontend/lib/api.ts`、后端模型和测试。
 - SSE 事件变化必须同步事件类型、解析、store 映射和测试。
-- gngk form type 分派必须同步 `formDataConverter.ts` 与 `ChatPanel.tsx`。
+- gngk form type 分派必须集中在 `frontend/lib/gngkFormType.ts`，`formDataConverter.ts` 与 `ChatPanel.tsx` 只能调用共享 helper。
 - URL 参数变化必须同步 `tenderTypeMapper.ts`、store、页面启动和 E2E。
 - 模板候选改动不能绕过后端代理。
 

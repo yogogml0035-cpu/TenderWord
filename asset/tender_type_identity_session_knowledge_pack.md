@@ -108,7 +108,7 @@
 - `GngkFwZcTenderGraph` 当前覆盖服务特化的 delete / replacement / update。
 - `GngkFwCzTenderGraph` 当前继承 `GngkHwZcTenderGraph`，没有额外覆盖。
 - `GjgkTenderGraph` 使用 `gjgk_*` 专属 delete / replacement / update，并保留 post-update hook。
-- `backend/nodes/skills_nodes/tender_aware_word_dispatch.py` 当前只 special-case `gjgk` 与 `gngk_fw_zc`；`gngk_hw_cz` 本轮没有扩张到 rewrite / edit，仍在 skill runtime 中回落 common delete / update。
+- `backend/nodes/skills_nodes/tender_aware_word_dispatch.py` 当前只 special-case `gjgk` 与 `gngk_fw_zc`；`gngk_hw_cz` 当前没有扩张到 rewrite / edit，仍在 skill runtime 中回落 common delete / update。
 
 ### Replacement 与 profile
 
@@ -140,9 +140,9 @@
 | `2` | `1` | - | `gngk_fw_cz_tender` |
 
 - 当前仓库仍没有独立 `工程` graph / `form_type`；`tender_lx=1` 的工程模式在 generate / edit 中临时复用现有 `gngk_fw_*` 服务链路。
-- 本轮未新增前端类型；国内公开 `货物 + 财政 + ifzgcg=2` 仍保持 URL、会话身份、按钮态与请求业务资金字段为财政，但 generate / edit 的 `form_type` 映射到 `gngk_hw_zc_tender`，复用货物自筹 graph。
+- 当前未新增独立工程前端类型；国内公开 `货物 + 财政 + ifzgcg=2` 仍保持 URL、会话身份、按钮态与请求业务资金字段为财政，但 generate / edit 的 `form_type` 映射到 `gngk_hw_zc_tender`，复用货物自筹 graph。
 
-任一处改动都必须双向同步并补测试。
+分派规则只改 `resolveGngkFormType()`；调用点保持复用 helper，并同步补生成转换器与 ChatPanel edit 测试。
 
 ### `TenderFormShared` 初始化与模式缓存
 
