@@ -18,6 +18,7 @@ Source: prd.json
 - Host agent runtime tests should drive a deterministic phase sequence (`generate` -> `verify` -> `revise`) through the fake runner payloads; this locks workflow order without invoking real DeepAgents or LLMs.
 - LangGraph conditional edges cannot be attached directly to a list-based join; add a lightweight gate node after the join and have it return `{}` so it does not concurrently rewrite existing state keys.
 - 新增 SSE 事件必须双侧补契约：后端 `backend/models/sse.py` / `SSEManager` 负责模型、缓冲与重放，前端 `frontend/types/api.ts` 必须同步事件 union 和 payload interface，并用独立类型测试锁定。
+- 浏览器层 SSE named event 必须在 `frontend/lib/sse.ts` 的 `createSSEConnection()` 中显式 `addEventListener`；只在 `useChatSSE` 单测里 mock `onMessage` 不能覆盖真实 EventSource 传输。
 - 智能体过程卡不要复用旧 `task-content` 单卡；使用独立 `agent-step` messageKind 持久化 draft/audit/revision，避免 `ChatPanel` 的运行时 `aiText` 合并覆盖历史过程卡。
 - 逐类型 graph agent 分支验证可复用真实 graph 类，通过 monkeypatch 类级 `NODE_*` callable 替换 Word/LLM 节点，并用 `set_generation_agent_runner()` 注入 fake runner；这样能验证真实 mode gate 和后续 `update_word` 接收的 `polished_text`。
 - 逐类型 graph 测试不要把未声明在 `TenderGraphStateBase` / 专属 state 中的字段当作跨节点契约；优先断言已声明 state、真实节点绑定、调用顺序和 update 节点核心入参。
@@ -181,4 +182,16 @@ Source: prd.json
   - `gngk_fw_cz` 当前没有专属 graph 节点覆写；验证它时不要复制服务自筹专属断言，应锁定继承自 `gngk_hw_zc` 的公共链路。
   - 继承 smoke 仍要记录 fake `update_word` 接收到的 `polished_text` 和 `replacements`，这样才能证明 agent 输出没有只停留在 graph state。
   - 该 story 只补后端 smoke，不涉及 UI；浏览器验证留给后续 mock E2E story。
+---
+
+## 2026-05-27 23:14 - US-015
+- 新增 mock E2E：预置 `xjcg` 会话草稿，选择“智能体”后提交生成，mock `/api/generate`、任务状态、heartbeat 和 `/api/stream/{task_id}`，验证初稿卡、审核卡、revision 卡和下载入口都在浏览器中可见。
+- 修复真实 EventSource 传输层遗漏：`createSSEConnection()` 现在显式监听 `agent_step` named event，并补单测锁定该事件能进入消费者 `onMessage`。
+- 更改的文件：`frontend/lib/sse.ts`、`frontend/__tests__/unit/lib/test_sse.test.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`、`tasks/deepagents-generation-mode-refactor/prd.json`、`tasks/deepagents-generation-mode-refactor/progress.txt`。
+- 浏览器证据：截图保存到 `tasks/deepagents-generation-mode-refactor/screenshots/us-015-agent-e2e.png`，console 日志保存到 `tasks/deepagents-generation-mode-refactor/logs/us-015-browser-console.log`（no console errors）。
+- 验证：`npm run test -- --runTestsByPath __tests__\unit\lib\test_sse.test.ts --runInBand`、`npm run type-check`、`npm run lint`、`git diff --check`、`npm run test:e2e -- e2e/test_generation_mode_agent.spec.ts`、`npm run test -- --runInBand` 均通过。
+- **未来迭代的学习：**
+  - 前端新增 SSE named event 时，除了 `useChatSSE` 分支和类型 union，还必须在底层 `frontend/lib/sse.ts` 注册 `EventSource.addEventListener(eventName, ...)`。
+  - E2E 可以通过 sessionStorage 预置完整 `conversationDrafts` 的文件和招标数据，绕开真实上传、后端和 Word COM，专注验证用户可见链路。
+  - `agent-step` 过程卡完成后不进入旧 `task-content` 分组；done 事件只负责追加下载入口，测试应分别断言过程卡和下载卡。
 ---
