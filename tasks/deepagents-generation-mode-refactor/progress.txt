@@ -15,6 +15,7 @@ Source: prd.json
 - The old generate content card contract is anchored by `TASK_KIND_TO_LLM_NODE["generate"] == "generate_polished_text"` plus `_LLMSnapshotRelay` emitting `llm` events with `content_mode: "snapshot"`.
 - DeepAgents `CompiledSubAgent` is a `TypedDict`; custom subagents should be dicts with `name`、`description`、`runnable`，and the compiled runnable state must include `messages`.
 - DeepAgents model construction should reuse `MODEL_CONFIGS` and `settings.get_llm_config()`; pass common ChatOpenAI params like `temperature` and `max_tokens` explicitly, while provider-specific `extra_body` stays from `MODEL_CONFIGS`.
+- Host agent runtime tests should drive a deterministic phase sequence (`generate` -> `verify` -> `revise`) through the fake runner payloads; this locks workflow order without invoking real DeepAgents or LLMs.
 
 ## 2026-05-27 13:58 - US-001
 - 实现了 generate-only `generation_mode` 契约：后端 `GenerateRequest` 新增 `workflow | agent` 默认 `workflow`，`DocumentService._build_initial_state()` 写入 generate state，rewrite/edit 初始 state 保持不包含该字段。
@@ -48,4 +49,16 @@ Source: prd.json
   - `CompiledSubAgent` 不是类实例，而是 TypedDict 形状；测试应断言 `name`、`description`、`runnable`，并确认 runnable 是已 compile 的 graph。
   - fake runner 注入点放在 host_agent runtime 层，可以让后续 graph 分支测试不触发真实 LLM 或 DeepAgents 工具调用。
   - Pydantic `Settings` 实例不适合 monkeypatch 单个方法；测试模型工厂时替换整个 `settings` 对象更稳定。
+---
+
+## 2026-05-27 15:13 - US-004
+- 实现了智能体生成审核修复循环：host agent 现在按 `generate`、`verify`、`revise` 阶段驱动 runner，先生成初稿，再审核，审核意见非空时修复并复审，最多修复 3 轮。
+- 补齐失败策略：审核输出不是合法 JSON 数组会硬失败；runner 或模型报告不支持工具调用时转成 `GenerationAgentToolCallUnsupportedError`，不会回退 workflow；revision 最终纯文本仍按协议错误失败。
+- 第 3 轮修复完成后直接放行最终 `polished_text`，并保留触发最后一轮修复的审核意见供后续事件/结果使用。
+- 更改的文件：`backend/agents/generation/host_agent.py`、`backend/agents/generation/__init__.py`、`backend/tests/agents/test_generation_host_agent.py`、`tasks/deepagents-generation-mode-refactor/prd.json`、`tasks/deepagents-generation-mode-refactor/progress.txt`。
+- 验证：`backend\.venv\Scripts\python.exe -m pytest backend\tests\agents\test_generation_host_agent.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend\tests -q`、`npm run type-check`、`npm run lint`、`npm run test -- --runInBand`、`git diff --check` 均通过。
+- **未来迭代的学习：**
+  - host agent 的 fake runner 应按阶段返回输出，避免单次最终响应掩盖“初稿 -> 审核 -> 修复 -> 复审”的顺序契约。
+  - `response_format=HostAgentFinalOutput` 不适合阶段化 runner，因为 `verify` 阶段必须允许直接返回 JSON 数组。
+  - 第 3 轮修复后当前实现不再追加第 4 次审核，后续 SSE/UI 测试应按最后一次触发修复的 findings 验证放行行为。
 ---

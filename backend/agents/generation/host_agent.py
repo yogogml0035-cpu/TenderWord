@@ -25,6 +25,8 @@ from backend.states import TenderGraphStateBase
 
 MAX_REVISION_ROUNDS = 3
 HOST_AGENT_NODE = "host_agent"
+GENERATE_AGENT_NODE = "generate_agent"
+VERIFY_AGENT_NODE = "verify_agent"
 
 
 class GenerationAgentRunner(Protocol):
@@ -48,12 +50,12 @@ def set_generation_agent_runner(runner: GenerationAgentRunner | None) -> None:
 
 def build_generation_subagents() -> GenerationSubAgents:
     generate_agent: CompiledSubAgent = {
-        "name": "generate_agent",
+        "name": GENERATE_AGENT_NODE,
         "description": "Generate the first draft procurement requirement text.",
         "runnable": create_generate_agent_graph(),
     }
     verify_agent: CompiledSubAgent = {
-        "name": "verify_agent",
+        "name": VERIFY_AGENT_NODE,
         "description": (
             "Audit procurement requirement text and return a JSON array of "
             "objects with evidence and fix_hint."
@@ -69,26 +71,37 @@ def create_host_agent_runner(model_provider: str) -> GenerationAgentRunner:
         model=create_generation_chat_model(model_provider),
         tools=[],
         system_prompt=(
-            "你是采购需求生成 host_agent。必须调用 generate_agent 生成初稿，"
-            "调用 verify_agent 审核，并按审核意见修复。最终只输出结构化 JSON，"
-            "至少包含 polished_text。"
+            "你是采购需求生成 host_agent。系统会用 agent_phase 指定当前阶段。"
+            "agent_phase=generate 时必须调用 generate_agent 并只输出 "
+            "{\"draft_text\":\"...\"}；agent_phase=verify 时必须调用 "
+            "verify_agent 并只输出 JSON 数组；agent_phase=revise 时按 "
+            "audit_findings 修复 current_text，并只输出 "
+            "{\"polished_text\":\"...\"}。不要自动回退到非工具调用模式。"
         ),
         subagents=[subagents.generate_agent, subagents.verify_agent],
-        response_format=HostAgentFinalOutput,
         name=HOST_AGENT_NODE,
     )
 
 
-def _extract_text_from_runner_output(output: dict[str, Any] | str) -> str:
-    if isinstance(output, str):
-        return output
-    structured = output.get("structured_response")
-    if structured is not None:
-        if isinstance(structured, HostAgentFinalOutput):
-            return structured.model_dump_json(ensure_ascii=False)
-        if hasattr(structured, "model_dump_json"):
-            return structured.model_dump_json()
-        return json.dumps(structured, ensure_ascii=False)
+def _jsonable(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if isinstance(value, list):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _jsonable(item) for key, item in value.items()}
+    return value
+
+
+def _extract_structured_response(output: dict[str, Any] | str) -> Any:
+    if not isinstance(output, dict):
+        return None
+    return output.get("structured_response")
+
+
+def _extract_message_text(output: dict[str, Any] | str) -> str:
+    if not isinstance(output, dict):
+        return str(output or "")
     messages = output.get("messages")
     if isinstance(messages, list):
         for message in reversed(messages):
@@ -98,6 +111,19 @@ def _extract_text_from_runner_output(output: dict[str, Any] | str) -> str:
             if str(content or "").strip():
                 return str(content)
     return ""
+
+
+def _extract_text_from_runner_output(output: dict[str, Any] | str) -> str:
+    if isinstance(output, str):
+        return output
+    structured = _extract_structured_response(output)
+    if structured is not None:
+        if isinstance(structured, HostAgentFinalOutput):
+            return structured.model_dump_json(ensure_ascii=False)
+        if hasattr(structured, "model_dump_json"):
+            return structured.model_dump_json()
+        return json.dumps(_jsonable(structured), ensure_ascii=False)
+    return _extract_message_text(output)
 
 
 def _is_tool_call_unsupported(error: BaseException) -> bool:
@@ -115,19 +141,51 @@ def _is_tool_call_unsupported(error: BaseException) -> bool:
     return any(marker in message for marker in markers)
 
 
-def _invoke_host_runner(
+def _invoke_runner(
     runner: GenerationAgentRunner,
     payload: dict[str, Any],
-) -> HostAgentFinalOutput:
+) -> dict[str, Any] | str:
     try:
-        output = runner.invoke(payload)
+        return runner.invoke(payload)
     except Exception as exc:
         if _is_tool_call_unsupported(exc):
             raise GenerationAgentToolCallUnsupportedError(
                 "当前模型或 DeepAgents runner 不支持工具调用，无法使用智能体生成"
             ) from exc
         raise
-    return parse_host_agent_final_output(_extract_text_from_runner_output(output))
+
+
+def _coerce_draft_text(value: Any) -> str | None:
+    if isinstance(value, dict):
+        return value.get("draft_text") or value.get("polished_text")
+    if isinstance(value, HostAgentFinalOutput):
+        return value.polished_text
+    if hasattr(value, "draft_text"):
+        return getattr(value, "draft_text")
+    return None
+
+
+def _parse_draft_output(output: dict[str, Any] | str) -> str:
+    draft_text = _coerce_draft_text(_extract_structured_response(output))
+    if draft_text is None:
+        raw_text = _extract_message_text(output)
+        try:
+            draft_text = _coerce_draft_text(json.loads(raw_text))
+        except json.JSONDecodeError:
+            draft_text = raw_text
+    normalized = str(draft_text or "").strip()
+    if not normalized:
+        raise GenerationAgentProtocolError("generate_agent 必须返回非空初稿正文")
+    return normalized
+
+
+def _parse_verify_output(output: dict[str, Any] | str) -> list[AuditFinding]:
+    return parse_audit_findings(_extract_text_from_runner_output(output))
+
+
+def _parse_revision_output(output: dict[str, Any] | str) -> str:
+    final_output = parse_host_agent_final_output(_extract_text_from_runner_output(output))
+    return final_output.polished_text
 
 
 def _emit_step(
@@ -153,6 +211,34 @@ def _build_generation_payload(
     }
 
 
+def _build_phase_payload(
+    base_payload: dict[str, Any],
+    phase: str,
+    *,
+    current_text: str = "",
+    findings: list[AuditFinding] | None = None,
+    revision_round: int = 0,
+) -> dict[str, Any]:
+    audit_findings = [finding.model_dump() for finding in findings or []]
+    phase_payload = {
+        **base_payload,
+        "agent_phase": phase,
+        "current_text": current_text,
+        "audit_findings": audit_findings,
+        "revision_round": revision_round,
+    }
+    if phase == "generate":
+        instruction = "调用 generate_agent 生成采购需求初稿，并只输出 JSON 对象 draft_text。"
+    elif phase == "verify":
+        instruction = "调用 verify_agent 审核 current_text，并只输出 JSON 数组。"
+    else:
+        instruction = (
+            "根据 audit_findings 修复 current_text，并只输出 JSON 对象 polished_text。"
+        )
+    phase_payload["messages"] = [{"role": "user", "content": instruction}]
+    return phase_payload
+
+
 def run_host_agent_generation(
     state: TenderGraphStateBase,
     config: dict[str, Any] | None = None,
@@ -163,22 +249,89 @@ def run_host_agent_generation(
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     model_provider = str(configurable.get("model_provider") or "deepseek")
     selected_runner = runner or _fake_runner or create_host_agent_runner(model_provider)
-    output = _invoke_host_runner(
-        selected_runner,
-        _build_generation_payload(state, model_provider),
+    base_payload = _build_generation_payload(state, model_provider)
+
+    draft_text = _parse_draft_output(
+        _invoke_runner(
+            selected_runner,
+            _build_phase_payload(base_payload, "generate"),
+        )
     )
     _emit_step(
         step_callback,
         AgentStepPayload(
-            step_type="revision",
-            round=int(output.revision_rounds),
-            node=HOST_AGENT_NODE,
-            content=output.polished_text,
-            findings=output.audit_findings,
+            step_type="draft",
+            round=0,
+            node=GENERATE_AGENT_NODE,
+            content=draft_text,
             is_complete=True,
         ),
     )
-    return output
+
+    current_text = draft_text
+    revision_rounds = 0
+    last_findings: list[AuditFinding] = []
+
+    while True:
+        findings = _parse_verify_output(
+            _invoke_runner(
+                selected_runner,
+                _build_phase_payload(
+                    base_payload,
+                    "verify",
+                    current_text=current_text,
+                    revision_round=revision_rounds,
+                ),
+            )
+        )
+        last_findings = findings
+        _emit_step(
+            step_callback,
+            AgentStepPayload(
+                step_type="audit",
+                round=revision_rounds,
+                node=VERIFY_AGENT_NODE,
+                findings=findings,
+                is_complete=True,
+            ),
+        )
+        if not findings:
+            return HostAgentFinalOutput(
+                polished_text=current_text,
+                audit_findings=[],
+                revision_rounds=revision_rounds,
+            )
+
+        revision_rounds += 1
+        current_text = _parse_revision_output(
+            _invoke_runner(
+                selected_runner,
+                _build_phase_payload(
+                    base_payload,
+                    "revise",
+                    current_text=current_text,
+                    findings=findings,
+                    revision_round=revision_rounds,
+                ),
+            )
+        )
+        _emit_step(
+            step_callback,
+            AgentStepPayload(
+                step_type="revision",
+                round=revision_rounds,
+                node=HOST_AGENT_NODE,
+                content=current_text,
+                findings=findings,
+                is_complete=True,
+            ),
+        )
+        if revision_rounds >= MAX_REVISION_ROUNDS:
+            return HostAgentFinalOutput(
+                polished_text=current_text,
+                audit_findings=last_findings,
+                revision_rounds=revision_rounds,
+            )
 
 
 def parse_verify_agent_output(raw_content: str) -> list[AuditFinding]:
@@ -186,8 +339,10 @@ def parse_verify_agent_output(raw_content: str) -> list[AuditFinding]:
 
 
 __all__ = [
+    "GENERATE_AGENT_NODE",
     "HOST_AGENT_NODE",
     "MAX_REVISION_ROUNDS",
+    "VERIFY_AGENT_NODE",
     "GenerationSubAgents",
     "build_generation_subagents",
     "create_host_agent_runner",

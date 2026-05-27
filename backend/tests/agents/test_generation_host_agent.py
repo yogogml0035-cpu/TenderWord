@@ -17,18 +17,33 @@ from backend.prompts.types import GeneratePromptInput, RenderedPrompt
 
 
 class FakeRunner:
-    def __init__(self, output):
-        self.output = output
+    def __init__(self, outputs):
+        self.outputs = outputs if isinstance(outputs, list) else [outputs]
         self.payloads: list[dict] = []
 
     def invoke(self, payload: dict):
+        index = len(self.payloads)
+        if index >= len(self.outputs):
+            raise AssertionError(f"unexpected runner invocation {index + 1}")
         self.payloads.append(payload)
-        return self.output
+        return self.outputs[index]
 
 
 class ToolCallUnsupportedRunner:
     def invoke(self, payload: dict):
         raise RuntimeError("model does not support tools or tool calls")
+
+
+def _draft_output(text: str) -> dict:
+    return {"structured_response": {"draft_text": text}}
+
+
+def _audit_output(items: list[dict[str, str]]) -> dict:
+    return {"structured_response": items}
+
+
+def _revision_output(text: str) -> dict:
+    return {"structured_response": {"polished_text": text}}
 
 
 def test_build_generation_subagents_wraps_compiled_state_graphs() -> None:
@@ -107,13 +122,12 @@ def test_verify_agent_output_must_be_json_array_with_evidence_and_fix_hint() -> 
 
 def test_host_agent_accepts_structured_json_with_non_empty_polished_text() -> None:
     runner = FakeRunner(
-        {
-            "structured_response": {
-                "polished_text": "final text",
-                "audit_findings": [{"evidence": "e", "fix_hint": "f"}],
-                "revision_rounds": 1,
-            }
-        }
+        [
+            _draft_output("draft text"),
+            _audit_output([{"evidence": "missing warranty", "fix_hint": "add it"}]),
+            _revision_output("final text"),
+            _audit_output([]),
+        ]
     )
     events = []
 
@@ -131,25 +145,93 @@ def test_host_agent_accepts_structured_json_with_non_empty_polished_text() -> No
     )
 
     assert result.polished_text == "final text"
-    assert result.audit_findings[0].evidence == "e"
-    assert runner.payloads == [
-        {
-            "tender_type": "xjcg",
-            "generation_style": "template",
-            "project_info": "project",
-            "tender_params": "params",
-            "origin_tender_params": "origin",
-            "model_provider": "deepseek",
-        }
+    assert result.audit_findings == []
+    assert result.revision_rounds == 1
+    assert [payload["agent_phase"] for payload in runner.payloads] == [
+        "generate",
+        "verify",
+        "revise",
+        "verify",
     ]
-    assert events[0].step_type == "revision"
-    assert events[0].content == "final text"
-    assert events[0].is_complete is True
+    assert runner.payloads[0]["project_info"] == "project"
+    assert runner.payloads[1]["current_text"] == "draft text"
+    assert runner.payloads[2]["audit_findings"] == [
+        {"evidence": "missing warranty", "fix_hint": "add it"}
+    ]
+    assert runner.payloads[3]["current_text"] == "final text"
+    assert [event.step_type for event in events] == [
+        "draft",
+        "audit",
+        "revision",
+        "audit",
+    ]
+    assert [event.round for event in events] == [0, 0, 1, 1]
+    assert events[2].content == "final text"
+    assert events[2].is_complete is True
+
+
+def test_host_agent_rejects_invalid_audit_json() -> None:
+    runner = FakeRunner([_draft_output("draft text"), "not json"])
+
+    with pytest.raises(GenerationAgentProtocolError, match="JSON"):
+        run_host_agent_generation({}, runner=runner)
+
+
+def test_host_agent_releases_after_third_revision_with_findings() -> None:
+    runner = FakeRunner(
+        [
+            _draft_output("draft"),
+            _audit_output([{"evidence": "e1", "fix_hint": "f1"}]),
+            _revision_output("revision 1"),
+            _audit_output([{"evidence": "e2", "fix_hint": "f2"}]),
+            _revision_output("revision 2"),
+            _audit_output([{"evidence": "e3", "fix_hint": "f3"}]),
+            _revision_output("revision 3"),
+        ]
+    )
+    events = []
+
+    result = run_host_agent_generation(
+        {},
+        runner=runner,
+        step_callback=events.append,
+    )
+
+    assert result.polished_text == "revision 3"
+    assert result.revision_rounds == 3
+    assert result.audit_findings[0].evidence == "e3"
+    assert [payload["agent_phase"] for payload in runner.payloads] == [
+        "generate",
+        "verify",
+        "revise",
+        "verify",
+        "revise",
+        "verify",
+        "revise",
+    ]
+    assert [event.step_type for event in events] == [
+        "draft",
+        "audit",
+        "revision",
+        "audit",
+        "revision",
+        "audit",
+        "revision",
+    ]
+    assert events[-1].round == 3
 
 
 def test_host_agent_rejects_plain_text_final_output() -> None:
+    runner = FakeRunner(
+        [
+            _draft_output("draft text"),
+            _audit_output([{"evidence": "missing", "fix_hint": "fix"}]),
+            "plain final text",
+        ]
+    )
+
     with pytest.raises(GenerationAgentProtocolError, match="JSON"):
-        run_host_agent_generation({}, runner=FakeRunner("plain final text"))
+        run_host_agent_generation({}, runner=runner)
 
 
 def test_host_agent_rejects_tool_call_unsupported_errors() -> None:
@@ -159,7 +241,7 @@ def test_host_agent_rejects_tool_call_unsupported_errors() -> None:
 
 def test_fake_runner_injection_point(monkeypatch) -> None:
     set_generation_agent_runner(
-        FakeRunner({"structured_response": {"polished_text": "injected text"}})
+        FakeRunner([_draft_output("injected text"), _audit_output([])])
     )
     monkeypatch.setattr(
         host_agent_module,
