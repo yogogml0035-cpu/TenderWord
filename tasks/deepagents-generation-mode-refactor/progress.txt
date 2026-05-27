@@ -1,0 +1,12 @@
+# Ralph Progress
+
+Requirement: tasks/deepagents-generation-mode-refactor
+Started: 2026-05-27 12:30
+Source: prd.json
+
+## Codebase Patterns
+
+- Generate-only request fields currently follow `generation_style` and `style_writeback_mode`: backend model -> `DocumentService._build_initial_state()` -> graph state -> frontend form/converter/draft tests.
+- Standard generate graph centralizes shared flow in `StandardTenderWorkflowGraph`; type graphs should not copy the generation mode split.
+- The current LLM content card is driven by `llm` events for `generate_polished_text`; agent audit/revision display must use a new `agent_step` event and keep `done` / `error` as terminal events.
+- Graph difference coverage should target `xjcg`, `gngk_hw_zc`, `gngk_hw_cz`, `gngk_fw_zc`, and `gjgk`; inherited `gngk_fw_cz` only needs smoke.

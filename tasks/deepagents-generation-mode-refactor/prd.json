@@ -1,0 +1,317 @@
+{
+  "project": "TenderWord",
+  "branchName": "ralph/deepagents-generation-mode-refactor",
+  "description": "在初次生成任务中新增工作流和智能体两种生成方式，默认工作流保持旧路径，智能体模式通过 DeepAgents host_agent 生成、审核并最多修复 3 轮，最终复用现有 polished_text 写回与下载链路。",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "新增 generate-only 生成方式契约",
+      "description": "作为开发者，我需要在前后端请求契约中表达 generation_mode，以便初次生成任务可以明确选择工作流或智能体。",
+      "acceptanceCriteria": [
+        "后端 GenerateRequest 接受 generation_mode，取值只允许 workflow 或 agent，默认值为 workflow",
+        "DocumentService 初始 generate state 写入 generation_mode，rewrite 和 edit 请求模型不包含 generation_mode",
+        "前端 GenerateRequest、BaseTenderFormData、ConversationFormDraft 和 formDataConverter 都包含 generation_mode",
+        "未显式选择时，提交 generate 的 API payload 使用 workflow",
+        "backend/tests/models/test_generate_request_generation_style.py 覆盖默认值和 agent 输入",
+        "frontend/__tests__/unit/lib/test_form_data_converter.test.ts 覆盖三类 converter 透传 generation_mode",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-002",
+      "title": "保持 workflow 分支旧行为不变",
+      "description": "作为默认使用者，我想继续走当前工作流生成，以便新增智能体能力不会改变现有体验。",
+      "acceptanceCriteria": [
+        "generation_mode 为 workflow 时，标准生成 graph 仍执行 generate_polished_text 节点",
+        "generate_polished_text 仍调用 render_generate_prompt 和 stream_llm_completion",
+        "workflow 分支仍发送现有 llm snapshot 事件，前端初稿内容卡行为不变",
+        "现有 generation_style 和 style_writeback_mode 相关后端与前端测试继续通过",
+        "新增测试能证明 workflow 分支没有调用 host_agent",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-003",
+      "title": "建立 DeepAgents host_agent 运行时",
+      "description": "作为高级用户，我想选择智能体生成方式，以便系统可以先生成、再审核、再按意见修复采购需求正文。",
+      "acceptanceCriteria": [
+        "新增 backend/agents/generation 运行时模块，并提供 fake runner 注入点",
+        "generate_agent 和 verify_agent 都由已 compile 的 StateGraph 包装成 CompiledSubAgent",
+        "generate_agent 复用当前 generate prompt 输入和当前用户选择的模型配置",
+        "verify_agent 输出合法 JSON 数组，每项包含 evidence 和 fix_hint",
+        "host_agent 最终输出结构化 JSON，至少包含非空 polished_text",
+        "最终纯文本输出会导致任务失败并返回明确错误",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-004",
+      "title": "实现智能体审核修复循环和失败策略",
+      "description": "作为用户，我想看到智能体按审核意见多轮修复，以便最终正文经过自动质检。",
+      "acceptanceCriteria": [
+        "智能体流程先生成初稿，再审核初稿",
+        "审核意见非空时进入修复，修复后继续审核",
+        "最多修复 3 轮",
+        "第 3 轮修复完成后直接放行最终 polished_text，即使仍有审核意见也不失败",
+        "审核输出无法解析为 JSON 数组时任务失败",
+        "模型或 DeepAgents runner 报告不支持工具调用时任务失败，不自动回退 workflow",
+        "backend/tests/agents/test_generation_host_agent.py 覆盖成功、非法审核 JSON、工具调用不支持和第 3 轮放行",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-005",
+      "title": "接入标准生成 graph 的 agent 分支",
+      "description": "作为开发者，我需要在标准生成 graph 中统一接入 agent 分支，以便所有招标类型共享同一生成方式分流。",
+      "acceptanceCriteria": [
+        "StandardTenderWorkflowGraph 增加 mode gate，并按 generation_mode 分流到 generate_polished_text 或 host_agent",
+        "host_agent 节点返回 polished_text 和 generate_polished_done",
+        "workflow 和 agent 两个分支都继续接入现有 generate_comments 或 comments_branch_done，再进入 update_word",
+        "Graph 分流逻辑只在基类实现，不在各招标类型 graph 中复制",
+        "estimate_total_nodes 和 NodeDisplayNames 包含 host_agent 或实际智能体节点名",
+        "backend/tests/graphs/test_generation_mode_branching.py 覆盖 workflow 与 agent 分支",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-006",
+      "title": "新增 agent_step SSE 契约",
+      "description": "作为前端开发者，我需要稳定的智能体步骤事件，以便渲染审核和修复过程卡片。",
+      "acceptanceCriteria": [
+        "后端 SSEEventType 新增 agent_step，并新增 AgentStepEventData",
+        "agent_step 数据包含 task_id、task_kind、step_type、round、node、timestamp 和 is_complete",
+        "audit 事件包含 findings，每条 finding 包含 evidence 与 fix_hint",
+        "revision 事件包含本轮修复正文快照或完成正文",
+        "agent_step 事件进入 sse_manager 缓冲，断线续传时可重放",
+        "任务失败仍发送 error 终态，任务成功仍发送 done 终态",
+        "frontend/types/api.ts 同步新增 SSEAgentStepEvent 和 SSEEventType union",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-007",
+      "title": "前端生成方式切换和草稿持久化",
+      "description": "作为前端用户，我想在高级设置中选择工作流或智能体，以便控制本次初次生成方式。",
+      "acceptanceCriteria": [
+        "高级设置中出现生成方式切换控件，选项为工作流和智能体",
+        "默认选中工作流",
+        "用户切换到智能体后，当前会话草稿保存 generation_mode 为 agent",
+        "刷新页面或切换会话后，当前会话恢复上次选择",
+        "提交生成时 createGenerateTask payload 包含当前 generation_mode",
+        "rewrite 和 edit 请求 payload 不包含 generation_mode",
+        "frontend/__tests__/unit/components/forms/test_tender_form_shared.test.tsx 覆盖控件和草稿恢复",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-008",
+      "title": "前端智能体过程卡片保留",
+      "description": "作为用户，我想在会话历史中看到初稿、审核意见和修复内容，以便理解智能体生成过程。",
+      "acceptanceCriteria": [
+        "useChatSSE 能解析 agent_step 事件",
+        "智能体模式下保留初稿生成卡",
+        "审核卡按轮次追加 evidence 和 fix_hint",
+        "每轮 revision 生成或更新一张可区分的 AI 修改内容卡",
+        "任务 done 后 agent 过程卡仍保留在会话历史中",
+        "done 事件仍生成下载入口卡",
+        "frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx 和 frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts 覆盖卡片保留",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-009",
+      "title": "xjcg agent 分支闭环验证",
+      "description": "作为验证者，我需要确认询价采购 graph 在智能体模式下仍能产出最终正文，以便覆盖独立 graph 差异。",
+      "acceptanceCriteria": [
+        "使用 fake DeepAgents runner 运行 xjcg_tender agent 分支",
+        "执行结果 state 包含非空 polished_text",
+        "测试能证明后续 update_word 可接收该 polished_text",
+        "同一测试文件覆盖 xjcg_tender workflow 分支仍走旧节点",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-010",
+      "title": "gngk_hw_zc agent 分支闭环验证",
+      "description": "作为验证者，我需要确认国内公开货物自筹 graph 在智能体模式下仍能产出最终正文，以便覆盖公开招标通用货物链路。",
+      "acceptanceCriteria": [
+        "使用 fake DeepAgents runner 运行 gngk_hw_zc_tender agent 分支",
+        "执行结果 state 包含非空 polished_text",
+        "测试确认 gngk_hw_zc 仍使用既有 replacement 与 common update 路径",
+        "同一测试文件覆盖 workflow 分支行为不变",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-011",
+      "title": "gngk_hw_cz agent 分支闭环验证",
+      "description": "作为验证者，我需要确认国内公开货物财政 direct-replace graph 在智能体模式下仍能产出最终正文，以便覆盖专属删除和写回链路。",
+      "acceptanceCriteria": [
+        "使用 fake DeepAgents runner 运行 gngk_hw_cz_tender agent 分支",
+        "执行结果 state 包含非空 polished_text",
+        "测试确认后续仍进入 gngk_hw_cz_delete_tender_param 和 gngk_hw_cz_update_word",
+        "同一测试文件覆盖 workflow 分支行为不变",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-012",
+      "title": "gngk_fw_zc agent 分支闭环验证",
+      "description": "作为验证者，我需要确认国内公开服务自筹 graph 在智能体模式下仍能产出最终正文，以便覆盖服务专属节点链路。",
+      "acceptanceCriteria": [
+        "使用 fake DeepAgents runner 运行 gngk_fw_zc_tender agent 分支",
+        "执行结果 state 包含非空 polished_text",
+        "测试确认后续仍进入服务专属 delete 和 update 节点",
+        "同一测试文件覆盖 workflow 分支行为不变",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-013",
+      "title": "gjgk agent 分支闭环验证",
+      "description": "作为验证者，我需要确认国际公开 graph 在智能体模式下仍能产出最终正文，以便覆盖国际公开专属流程和 post-update hook。",
+      "acceptanceCriteria": [
+        "使用 fake DeepAgents runner 运行 gjgk_tender agent 分支",
+        "执行结果 state 包含非空 polished_text",
+        "测试确认后续仍进入 gjgk 专属 delete、replacement、update 与 post-update hook",
+        "同一测试文件覆盖 workflow 分支行为不变",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-014",
+      "title": "继承复用链路 smoke 验证",
+      "description": "作为验证者，我需要对继承复用链路做最小 smoke，以便确认未覆盖矩阵不会遗漏继承分支。",
+      "acceptanceCriteria": [
+        "使用 fake DeepAgents runner 运行 gngk_fw_cz_tender agent 分支 smoke",
+        "执行结果 state 包含非空 polished_text",
+        "测试确认继承链路没有因为新增 mode gate 断开",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-015",
+      "title": "mock E2E 智能体用户可见链路",
+      "description": "作为用户，我需要浏览器层面看到智能体生成过程，以便确认 UI 链路可用。",
+      "acceptanceCriteria": [
+        "使用 Playwright 打开本地前端页面",
+        "通过 mock API 和 mock SSE 选择智能体并提交生成",
+        "页面出现初稿生成卡",
+        "页面出现审核卡，且包含轮次、evidence 和 fix_hint",
+        "页面出现至少一轮 AI 修改内容卡",
+        "页面最终出现下载入口",
+        "页面无控制台错误",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-016",
+      "title": "知识包与回归验证更新",
+      "description": "作为后续维护者，我需要长期知识包记录新生成方式、SSE 例外和会话草稿规则，以便后续需求不再次漂移。",
+      "acceptanceCriteria": [
+        "asset/shared_runtime_word_skill_knowledge_pack.md 记录 generation_mode、host_agent、agent_step SSE、失败策略和验证入口",
+        "asset/tender_type_identity_session_knowledge_pack.md 记录 generation_mode 草稿字段、默认 workflow 和不影响 tender identity 的边界",
+        "asset/README.md 更新索引和使用路由",
+        "文档只记录已经落地的当前事实，不把未实现目标写成事实",
+        "git diff --check passes",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    }
+  ]
+}
