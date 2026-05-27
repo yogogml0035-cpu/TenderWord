@@ -78,6 +78,27 @@ function getBorderColor(status: Message['status']) {
   }
 }
 
+function getContentTitle(message: Message) {
+  if (message.metadata?.messageKind === 'agent-step') {
+    switch (message.metadata.agentStepType) {
+      case 'draft':
+        return 'AI 初稿内容';
+      case 'audit':
+        return '智能体审核意见';
+      case 'revision':
+        return 'AI 修改内容';
+      default:
+        return '智能体过程';
+    }
+  }
+
+  if (message.metadata?.taskKind === 'rewrite' || message.metadata?.taskKind === 'edit') {
+    return 'AI 修改内容';
+  }
+
+  return 'AI 生成内容';
+}
+
 export function TaskContentMessage({
   message,
   onRetry,
@@ -89,7 +110,7 @@ export function TaskContentMessage({
   const content = typeof message.content === 'string' ? message.content : '';
   const progressText = message.metadata?.progressText;
   const progressPercent = message.metadata?.progressPercent;
-  const isRewriteTask = message.metadata?.taskKind === 'rewrite';
+  const contentTitle = getContentTitle(message);
   const retryDisabledByLocalReason = message.metadata?.localTaskReason === 'backend_restart';
 
   const handleScroll = useCallback(() => {
@@ -122,7 +143,7 @@ export function TaskContentMessage({
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 text-gray-500" />
           <span className="text-sm font-medium text-gray-700">
-            {isRewriteTask ? 'AI 修改内容' : 'AI 生成内容'}
+            {contentTitle}
           </span>
           <div className="ml-1 flex items-center gap-1.5 text-xs text-gray-500">
             {getStatusIcon(message.status)}

@@ -230,7 +230,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     }
 
     const kind = message.metadata?.messageKind;
-    if (kind === 'task-download') {
+    if (kind === 'task-download' || kind === 'agent-step') {
       return message;
     }
 

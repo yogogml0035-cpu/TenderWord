@@ -18,6 +18,7 @@ Source: prd.json
 - Host agent runtime tests should drive a deterministic phase sequence (`generate` -> `verify` -> `revise`) through the fake runner payloads; this locks workflow order without invoking real DeepAgents or LLMs.
 - LangGraph conditional edges cannot be attached directly to a list-based join; add a lightweight gate node after the join and have it return `{}` so it does not concurrently rewrite existing state keys.
 - 新增 SSE 事件必须双侧补契约：后端 `backend/models/sse.py` / `SSEManager` 负责模型、缓冲与重放，前端 `frontend/types/api.ts` 必须同步事件 union 和 payload interface，并用独立类型测试锁定。
+- 智能体过程卡不要复用旧 `task-content` 单卡；使用独立 `agent-step` messageKind 持久化 draft/audit/revision，避免 `ChatPanel` 的运行时 `aiText` 合并覆盖历史过程卡。
 
 ## 2026-05-27 13:58 - US-001
 - 实现了 generate-only `generation_mode` 契约：后端 `GenerateRequest` 新增 `workflow | agent` 默认 `workflow`，`DocumentService._build_initial_state()` 写入 generate state，rewrite/edit 初始 state 保持不包含该字段。
@@ -99,4 +100,16 @@ Source: prd.json
   - `TenderFormShared` 的高级设置位于右侧工作台窄面板，新增 segmented control 时不要用固定 `sm:grid-cols-2` 假设宽度；用内容最小宽度约束防止按钮覆盖。
   - `generation_mode` 是全局 generate 草稿字段，不像 `gngk_generation_styles` 那样按 `tender_lx` 分桶。
   - rewrite/edit 回归可以在聊天草稿中故意放 `generation_mode: "agent"`，再断言 `streamUserMessage` / `createEditTask` payload 没有该字段。
+---
+
+## 2026-05-27 19:22 - US-008
+- 实现了前端 `agent_step` 事件解析与会话历史保留：`useChatSSE` 现在消费 draft/audit/revision 事件，store 以独立 `agent-step` 消息保存初稿、按轮次聚合审核意见，并为每轮 revision 保留可区分的 AI 修改内容卡。
+- 更新渲染链路：`MessageList` 支持 `agent-step` 卡，`TaskContentMessage` 根据步骤显示“AI 初稿内容 / 智能体审核意见 / AI 修改内容”，`ChatPanel` 不再用运行时 `aiText` 覆盖 agent 过程卡；done 事件仍追加原下载卡。
+- 更改的文件：`frontend/types/chat.ts`、`frontend/stores/chatStore.ts`、`frontend/hooks/useChatSSE.ts`、`frontend/components/chat/ChatPanel.tsx`、`frontend/components/chat/MessageList.tsx`、`frontend/components/chat/TaskContentMessage.tsx`、`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`、`tasks/deepagents-generation-mode-refactor/prd.json`、`tasks/deepagents-generation-mode-refactor/progress.txt`。
+- 浏览器证据：复用本地 `http://localhost:8502`，截图保存到 `tasks/deepagents-generation-mode-refactor/screenshots/us-008-agent-step-cards.png`，console 日志保存到 `tasks/deepagents-generation-mode-refactor/logs/us-008-browser-console.log`。
+- 验证：`npm run test -- --runTestsByPath __tests__\unit\hooks\test_use_chat_sse.test.tsx __tests__\unit\stores\test_chat_store_task_messages.test.ts --runInBand`、`npm run type-check`、`npm run lint`、`npm run test -- --runInBand` 均通过；浏览器页面显示初稿、审核 evidence/fix_hint、revision 和下载入口，console 0 error / 0 warning。
+- **未来迭代的学习：**
+  - `agent-step` 是持久化消息类型，不纳入 `taskMessageMap` 主三卡分组；主分组继续只管理进度日志、旧 AI 内容卡和下载卡。
+  - 审核卡应按 `agentStepAuditRounds` 聚合轮次并重算 content，避免断线重放或同轮更新时追加重复审核块。
+  - `ChatPanel` 会把 `task-content` 内容替换成 `useChatStreamStore.streams[taskId].aiText`；新增长期过程卡时必须显式排除运行时流覆盖。
 ---

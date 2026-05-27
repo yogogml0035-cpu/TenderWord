@@ -275,6 +275,139 @@ describe('useChatSSE', () => {
     expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
   });
 
+  it('keeps agent_step draft, audit, revision cards after done', async () => {
+    mockGetTaskStatus.mockResolvedValue({
+      ...createRunningTaskStatus(),
+      progress: {
+        ...createRunningTaskStatus().progress,
+        running_nodes: ['host_agent'],
+        current_node: 'host_agent',
+      },
+    });
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'draft',
+          round: 0,
+          node: 'generate_agent',
+          is_complete: true,
+          content: '智能体初稿正文',
+          findings: [],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'audit',
+          round: 0,
+          node: 'verify_agent',
+          is_complete: true,
+          findings: [
+            {
+              evidence: '交付地点缺失',
+              fix_hint: '补充交付地点',
+            },
+          ],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '3',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'revision',
+          round: 1,
+          node: 'host_agent',
+          is_complete: true,
+          content: '第一轮 AI 修改内容',
+          findings: [
+            {
+              evidence: '交付地点缺失',
+              fix_hint: '补充交付地点',
+            },
+          ],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '4',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'audit',
+          round: 1,
+          node: 'verify_agent',
+          is_complete: true,
+          findings: [
+            {
+              evidence: '验收标准不明确',
+              fix_hint: '补充验收标准',
+            },
+          ],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'done',
+        id: '5',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          success: true,
+          message: '任务完成',
+          output_file: 'D:/UploadFiles/output.docx',
+          processing_time: 12.5,
+        },
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+    const auditMessage = agentMessages?.find(
+      (message) => message.metadata?.agentStepType === 'audit'
+    );
+    const revisionMessage = agentMessages?.find(
+      (message) => message.metadata?.agentStepType === 'revision'
+    );
+    const group = getTaskGroup();
+
+    expect(agentMessages).toHaveLength(3);
+    expect(agentMessages?.[0].content).toBe('智能体初稿正文');
+    expect(auditMessage?.content).toContain('evidence: 交付地点缺失');
+    expect(auditMessage?.content).toContain('fix_hint: 补充验收标准');
+    expect(auditMessage?.metadata?.agentStepAuditRounds).toHaveLength(2);
+    expect(revisionMessage?.content).toBe('第一轮 AI 修改内容');
+    expect(group?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
+    expect(group?.contentMessage).toBeUndefined();
+    expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
+  });
+
   it('keeps SSE disconnected while queued and creates task-log only when running', async () => {
     setQueueOnlyTaskState();
 

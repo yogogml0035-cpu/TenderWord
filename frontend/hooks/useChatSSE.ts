@@ -6,6 +6,7 @@ import { generateLogEntryId } from '@/lib/chat-utils';
 import type {
   SSEDoneEvent,
   SSEErrorEvent,
+  SSEAgentStepEvent,
   SSELLMEvent,
   SSEProgressEvent,
   StyleWritebackSummary,
@@ -110,6 +111,7 @@ export function useChatSSE({
   const ensureTaskLogMessage = useChatStore((state) => state.ensureTaskLogMessage);
   const ensureTaskContentMessage = useChatStore((state) => state.ensureTaskContentMessage);
   const markTaskContentReady = useChatStore((state) => state.markTaskContentReady);
+  const upsertAgentStepMessage = useChatStore((state) => state.upsertAgentStepMessage);
   const discardStaleTask = useChatStore((state) => state.discardStaleTask);
   const upsertTaskSummary = useChatStore((state) => state.upsertTaskSummary);
   const [connectionTaskId, setConnectionTaskId] = useState<string | null>(null);
@@ -337,6 +339,32 @@ export function useChatSSE({
           }
           break;
 
+        case 'agent_step':
+          if (data && typeof data === 'object') {
+            const agentStepData = data as SSEAgentStepEvent;
+            if (agentStepData.task_id && agentStepData.task_id !== taskId) {
+              break;
+            }
+
+            const taskKind = resolveTaskKind(taskId, agentStepData.task_kind);
+            upsertTaskSummary(taskId, {
+              task_kind: taskKind,
+              status: 'running',
+              current_node: agentStepData.node,
+              current_node_display: agentStepData.node,
+            });
+            upsertAgentStepMessage(taskId, {
+              ...agentStepData,
+              task_id: taskId,
+              task_kind: taskKind,
+              content:
+                typeof agentStepData.content === 'string'
+                  ? normalizeAIContent(agentStepData.content)
+                  : agentStepData.content,
+            });
+          }
+          break;
+
         case 'progress':
           if (data && typeof data === 'object') {
             const progressData = data as SSEProgressEvent;
@@ -446,6 +474,7 @@ export function useChatSSE({
       normalizeLogLevel,
       parseTimestamp,
       rememberEventId,
+      upsertAgentStepMessage,
       upsertTaskSummary,
     ]
   );

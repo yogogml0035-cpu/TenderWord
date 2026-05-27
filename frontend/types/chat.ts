@@ -21,9 +21,20 @@ export type MessageStatus =
   | 'error'
   | 'cancelled';
 
-export type TaskMessageKind = 'task-log' | 'task-content' | 'task-download';
+export type TaskMessageKind = 'task-log' | 'task-content' | 'task-download' | 'agent-step';
 export type ChatMessageKind = 'normal' | 'rewrite' | 'edit' | 'task-notice';
 export type LocalTaskReason = 'backend_restart';
+export type AgentStepType = 'draft' | 'audit' | 'revision';
+
+export interface AgentStepFinding {
+  evidence: string;
+  fix_hint: string;
+}
+
+export interface AgentAuditRound {
+  round: number;
+  findings: AgentStepFinding[];
+}
 
 // ============================================
 // Dual Column Content Types
@@ -74,6 +85,11 @@ export interface Message {
     outputFile?: string;
     fileName?: string;
     taskKind?: TaskKind;
+    agentStepType?: AgentStepType;
+    agentStepRound?: number;
+    agentStepNode?: string;
+    agentStepFindings?: AgentStepFinding[];
+    agentStepAuditRounds?: AgentAuditRound[];
     progressPercent?: number;
     progressText?: string;
     currentNode?: string;
@@ -184,7 +200,12 @@ export function isDualColumnContent(content: unknown): content is DualColumnCont
  * Check if value is a task message kind
  */
 export function isTaskMessageKind(value: unknown): value is TaskMessageKind {
-  return value === 'task-log' || value === 'task-content' || value === 'task-download';
+  return (
+    value === 'task-log' ||
+    value === 'task-content' ||
+    value === 'task-download' ||
+    value === 'agent-step'
+  );
 }
 
 // ============================================

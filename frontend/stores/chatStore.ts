@@ -4,6 +4,7 @@ import type { TenderType, FundLx, TenderLx } from '@/types';
 import type {
   GenerationMode,
   GenerationStyle,
+  SSEAgentStepEvent,
   StyleWritebackMode,
   StyleWritebackSummary,
   TaskKind,
@@ -16,6 +17,9 @@ import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
 import {
   isDualColumnContent,
+  type AgentAuditRound,
+  type AgentStepFinding,
+  type AgentStepType,
   type Conversation,
   type LocalTaskReason,
   type LogEntry,
@@ -33,6 +37,7 @@ import { syncBrowserUrlToConversation } from '@/utils/tenderTypeMapper';
 const TASK_LOG_KIND: TaskMessageKind = 'task-log';
 const TASK_CONTENT_KIND: TaskMessageKind = 'task-content';
 const TASK_DOWNLOAD_KIND: TaskMessageKind = 'task-download';
+const TASK_AGENT_STEP_KIND: TaskMessageKind = 'agent-step';
 const BACKEND_RESTART_LOCAL_REASON: LocalTaskReason = 'backend_restart';
 const BACKEND_RESTART_TASK_MESSAGE = '服务已重启，任务已中断，可重试';
 
@@ -469,10 +474,99 @@ function getLatestActiveTaskIdFromState(state: TaskScopeState): string | null {
 
 function getTaskMessageKind(message: Message): TaskMessageKind | undefined {
   const kind = message.metadata?.messageKind;
-  if (kind === TASK_LOG_KIND || kind === TASK_CONTENT_KIND || kind === TASK_DOWNLOAD_KIND) {
+  if (
+    kind === TASK_LOG_KIND ||
+    kind === TASK_CONTENT_KIND ||
+    kind === TASK_DOWNLOAD_KIND ||
+    kind === TASK_AGENT_STEP_KIND
+  ) {
     return kind;
   }
   return undefined;
+}
+
+function normalizeAgentStepFindings(findings: unknown): AgentStepFinding[] {
+  if (!Array.isArray(findings)) {
+    return [];
+  }
+
+  return findings
+    .map((item) => {
+      if (typeof item !== 'object' || item === null) {
+        return null;
+      }
+      const finding = item as Partial<AgentStepFinding>;
+      return {
+        evidence: String(finding.evidence || ''),
+        fix_hint: String(finding.fix_hint || ''),
+      };
+    })
+    .filter((finding): finding is AgentStepFinding => {
+      return !!finding && (!!finding.evidence || !!finding.fix_hint);
+    });
+}
+
+function normalizeAgentAuditRounds(rounds: unknown): AgentAuditRound[] {
+  if (!Array.isArray(rounds)) {
+    return [];
+  }
+
+  return rounds
+    .map((item) => {
+      if (typeof item !== 'object' || item === null) {
+        return null;
+      }
+      const round = (item as Partial<AgentAuditRound>).round;
+      if (typeof round !== 'number') {
+        return null;
+      }
+      return {
+        round,
+        findings: normalizeAgentStepFindings((item as Partial<AgentAuditRound>).findings),
+      };
+    })
+    .filter((round): round is AgentAuditRound => !!round)
+    .sort((a, b) => a.round - b.round);
+}
+
+function formatAgentAuditContent(rounds: AgentAuditRound[]): string {
+  return rounds
+    .map((round) => {
+      const lines = [`第 ${round.round} 轮审核`];
+
+      if (round.findings.length === 0) {
+        lines.push('未发现需要修复的问题');
+        return lines.join('\n');
+      }
+
+      for (const [index, finding] of round.findings.entries()) {
+        lines.push(`${index + 1}. evidence: ${finding.evidence}`);
+        lines.push(`   fix_hint: ${finding.fix_hint}`);
+      }
+
+      return lines.join('\n');
+    })
+    .join('\n\n');
+}
+
+function findAgentStepMessage(
+  messages: Message[],
+  taskId: string,
+  stepType: AgentStepType,
+  round: number
+): Message | undefined {
+  return messages.find((message) => {
+    if (message.taskId !== taskId || message.metadata?.messageKind !== TASK_AGENT_STEP_KIND) {
+      return false;
+    }
+    if (message.metadata.agentStepType !== stepType) {
+      return false;
+    }
+    if (stepType === 'audit' || stepType === 'draft') {
+      return true;
+    }
+    return message.metadata.agentStepRound === round;
+  });
 }
 
 function getMessageById(messages: Message[], messageId?: string): Message | undefined {
@@ -655,6 +749,7 @@ interface ChatStore {
     }
   ) => string | null;
   markTaskContentReady: (taskId: string, aiText?: string) => void;
+  upsertAgentStepMessage: (taskId: string, step: SSEAgentStepEvent) => string | null;
   completeTask: (
     taskId: string,
     outputFile?: string,
@@ -1101,6 +1196,64 @@ export const useChatStore = create<ChatStore>()(
               messageKind: TASK_CONTENT_KIND,
               taskKind: get().taskSummaries[taskId]?.task_kind,
             },
+          });
+        },
+
+        upsertAgentStepMessage: (taskId, step) => {
+          get().ensureTaskLogMessage(taskId, { status: 'generating' });
+          const conversation = findConversationByTaskIdFromState(get(), taskId);
+          if (!conversation) {
+            return null;
+          }
+
+          const stepType = step.step_type;
+          const stepRound = step.round;
+          const findings = normalizeAgentStepFindings(step.findings);
+          const taskKind = step.task_kind || get().taskSummaries[taskId]?.task_kind;
+          const status: Message['status'] = step.is_complete ? 'completed' : 'generating';
+          const existing = findAgentStepMessage(conversation.messages, taskId, stepType, stepRound);
+
+          let content = typeof step.content === 'string' ? step.content : '';
+          let auditRounds: AgentAuditRound[] | undefined;
+
+          if (stepType === 'audit') {
+            const existingRounds = normalizeAgentAuditRounds(
+              existing?.metadata?.agentStepAuditRounds
+            );
+            const nextRound: AgentAuditRound = { round: stepRound, findings };
+            auditRounds = [
+              ...existingRounds.filter((round) => round.round !== stepRound),
+              nextRound,
+            ].sort((a, b) => a.round - b.round);
+            content = formatAgentAuditContent(auditRounds);
+          }
+
+          const metadata = {
+            messageKind: TASK_AGENT_STEP_KIND,
+            ...(taskKind ? { taskKind } : {}),
+            agentStepType: stepType,
+            agentStepRound: stepRound,
+            agentStepNode: step.node,
+            agentStepFindings: findings,
+            ...(auditRounds ? { agentStepAuditRounds: auditRounds } : {}),
+          };
+
+          if (existing) {
+            get().updateMessage(conversation.id, existing.id, {
+              content,
+              status,
+              error: undefined,
+              metadata,
+            });
+            return existing.id;
+          }
+
+          return get().addMessage(conversation.id, {
+            type: 'ai',
+            content,
+            status,
+            taskId,
+            metadata,
           });
         },
 
