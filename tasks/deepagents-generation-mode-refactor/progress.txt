@@ -195,3 +195,14 @@ Source: prd.json
   - E2E 可以通过 sessionStorage 预置完整 `conversationDrafts` 的文件和招标数据，绕开真实上传、后端和 Word COM，专注验证用户可见链路。
   - `agent-step` 过程卡完成后不进入旧 `task-content` 分组；done 事件只负责追加下载入口，测试应分别断言过程卡和下载卡。
 ---
+
+## 2026-05-27 23:44 - US-016
+- 更新长期知识包，记录已落地的 `generation_mode` generate-only 契约、DeepAgents host_agent 运行时、审核修复失败策略、`agent_step` SSE 缓冲/重放链路、前端草稿字段和智能体过程卡保留规则。
+- 更新 `asset/README.md` 的知识包索引与使用路由，明确后续改 generation mode / host_agent / agent_step / 智能体过程卡时应读取哪个知识包。
+- 更改的文件：`asset/shared_runtime_word_skill_knowledge_pack.md`、`asset/tender_type_identity_session_knowledge_pack.md`、`asset/README.md`、`tasks/deepagents-generation-mode-refactor/prd.json`、`tasks/deepagents-generation-mode-refactor/progress.txt`。
+- 验证：`git diff --check`、`backend\.venv\Scripts\python.exe -m pytest backend\tests -q`、`npm run type-check`、`npm run lint`、`npm run test -- --runInBand` 均通过。
+- **未来迭代的学习：**
+  - `generation_mode` 和 `generation_style` 同属 generate-only，但前者是会话级全局草稿字段，不按 `gngk` 标的类型分桶。
+  - host agent 的长期边界应记录在共享运行时知识包；前端草稿和过程卡持久化边界应记录在类型身份/会话知识包。
+  - 更新 `agent_step` 相关行为时要同时检查后端 SSE 模型/manager、`frontend/lib/sse.ts` named event 注册、`useChatSSE` 和 chat store 消息持久化。
+---

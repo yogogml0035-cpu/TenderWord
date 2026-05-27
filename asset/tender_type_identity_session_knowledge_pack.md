@@ -15,7 +15,7 @@
 - 表单到后端请求转换：`frontend/lib/formDataConverter.ts`
 - chat/edit 任务创建：`frontend/components/chat/ChatPanel.tsx`
 - 表单注册与默认锚点：`frontend/components/chat/tenderFormRegistry.ts`、`frontend/components/forms/tenderFormConfig.ts`、`frontend/components/forms/TenderFormShared.tsx`
-- 当前页面会话与任务恢复：`frontend/stores/chatStore.ts`、`frontend/app/tender/page.tsx`
+- 当前页面会话、智能体过程卡与任务恢复：`frontend/stores/chatStore.ts`、`frontend/hooks/useChatSSE.ts`、`frontend/components/chat/TaskContentMessage.tsx`、`frontend/app/tender/page.tsx`
 
 ## 类型身份矩阵
 
@@ -160,6 +160,9 @@
 - 服务模式默认锚点为 `第三章 招标内容及要求` -> `第四章 投标文件有关格式`（若命中上一条服务合同条款规则，则改为 `第四章 合同条款`）。
 - 财政货物默认锚点为 `第四章  招标需求` -> `第五章  评标方法与程序`；若“获取信息”成功且接口返回类型为“货物 + 财政 + ifzgcg = 2”，当次回填按货物自筹默认锚点 `第三章 招标内容及要求` -> `第四章 投标文件有关格式` 显示，且 generate / edit 走 `gngk_hw_zc_tender` graph。用户后续切出再切回“货物 + 财政”时，不再继续受 `ifzgcg` 影响，恢复财政货物默认锚点，除非该组合已被用户手动编辑锁定。
 - `generation_style` 是 generate 表单态：货物、工程、服务默认都为 `template`；后端只在 generate runtime 使用该字段。
+- `generation_mode` 是全局 generate 表单态，不参与 tender identity，也不按 `gngk` 的 `tender_lx` / `fund_lx` 分桶。新会话和旧草稿缺省值都是 `workflow`，用户在高级设置切换到 `agent` 后写入当前 `ConversationFormDraft.generation_mode`。
+- `TenderFormShared` 的“生成方式”控件位于高级设置，选项为“工作流”和“智能体”；提交 generate 时 `BaseTenderFormData.generation_mode` 进入 `formDataConverter`，未显式选择时 converter 也要兜底为 `workflow`。
+- rewrite / edit 请求 payload 不包含 `generation_mode`。如果聊天草稿中保留 `generation_mode: "agent"`，`ChatPanel` 创建 rewrite / edit 任务时也不能透传它。
 
 ## 当前页面会话生命周期
 
@@ -168,6 +171,9 @@
 - 左侧栏展开态由 `selectedTenderType` 控制；若为空，回退到当前会话所属类型。
 - 点击类型头时，若该类型已有会话则切到 `updatedAt` 最新的一条，否则立即创建新会话。
 - 删除当前会话时，优先回退到同类型最新会话；同类型为空再回退到全局剩余会话。
+- 智能体过程卡是会话历史消息，不是运行时临时 stream。`agent_step` 会在 `chat-storage` 里保存为 `metadata.messageKind = "agent-step"` 的 AI 消息，刷新后随会话消息恢复。
+- `agent-step` 消息不纳入旧 `taskMessageMap` 的 `task-log` / `task-content` / `task-download` 三卡分组；done 事件仍只负责生成下载入口卡。
+- 审核卡按轮次聚合在同一 audit 消息的 `agentStepAuditRounds` 中；revision 按轮次生成或更新可区分的“AI 修改内容”卡；draft 显示为“AI 初稿内容”。
 
 ## 聊天输入与排队恢复
 
@@ -196,6 +202,8 @@
 - 前端映射与注册：`frontend/__tests__/unit/utils/test_tender_type_mapper.test.ts`、`frontend/__tests__/unit/lib/test_form_data_converter.test.ts`、`frontend/__tests__/unit/components/chat/test_tender_form_registry.test.tsx`
 - 前端会话与表单：`frontend/__tests__/unit/stores/test_chat_store_conversation_scope.test.ts`、`frontend/__tests__/unit/components/forms/test_tender_form_shared.test.tsx`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
 - 前端任务消息恢复：`frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`
+- 前端 SSE 与智能体过程卡：`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/lib/test_sse.test.ts`、`frontend/__tests__/unit/types/test_api_sse_agent_step.test.ts`
+- 智能体用户可见闭环 E2E：`frontend/e2e/test_generation_mode_agent.spec.ts`
 - URL E2E：`frontend/e2e/test_url_conversation.spec.ts`
 
 ## 回归风险
@@ -209,3 +217,5 @@
 - `gngk_fw_cz` 当前没有像 `gngk_fw_zc` 那样在 skill runtime 专门分发；若业务希望两者一致，必须显式改代码与测试。
 - 绕过 canonical URL helper 手工 patch 参数，容易留下与当前会话不一致的残余 URL。
 - 反转 `TenderFormShared` 的 `draft > URL > default` 优先级，会破坏已有会话草稿恢复与深链创建的约定。
+- 把 `generation_mode` 做成 `gngk_generation_styles` 那样的分桶字段会改变当前会话草稿语义；它当前是会话级全局选择，只影响下一次初次 generate。
+- 新增或改名 SSE named event 时，除了 `useChatSSE`，还必须更新 `frontend/lib/sse.ts` 的 `EventSource.addEventListener` 注册，否则真实浏览器不会收到该事件。
