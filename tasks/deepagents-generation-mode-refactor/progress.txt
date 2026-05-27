@@ -19,6 +19,7 @@ Source: prd.json
 - LangGraph conditional edges cannot be attached directly to a list-based join; add a lightweight gate node after the join and have it return `{}` so it does not concurrently rewrite existing state keys.
 - 新增 SSE 事件必须双侧补契约：后端 `backend/models/sse.py` / `SSEManager` 负责模型、缓冲与重放，前端 `frontend/types/api.ts` 必须同步事件 union 和 payload interface，并用独立类型测试锁定。
 - 智能体过程卡不要复用旧 `task-content` 单卡；使用独立 `agent-step` messageKind 持久化 draft/audit/revision，避免 `ChatPanel` 的运行时 `aiText` 合并覆盖历史过程卡。
+- 逐类型 graph agent 分支验证可复用真实 graph 类，通过 monkeypatch 类级 `NODE_*` callable 替换 Word/LLM 节点，并用 `set_generation_agent_runner()` 注入 fake runner；这样能验证真实 mode gate 和后续 `update_word` 接收的 `polished_text`。
 
 ## 2026-05-27 13:58 - US-001
 - 实现了 generate-only `generation_mode` 契约：后端 `GenerateRequest` 新增 `workflow | agent` 默认 `workflow`，`DocumentService._build_initial_state()` 写入 generate state，rewrite/edit 初始 state 保持不包含该字段。
@@ -112,4 +113,14 @@ Source: prd.json
   - `agent-step` 是持久化消息类型，不纳入 `taskMessageMap` 主三卡分组；主分组继续只管理进度日志、旧 AI 内容卡和下载卡。
   - 审核卡应按 `agentStepAuditRounds` 聚合轮次并重算 content，避免断线重放或同轮更新时追加重复审核块。
   - `ChatPanel` 会把 `task-content` 内容替换成 `useChatStreamStore.streams[taskId].aiText`；新增长期过程卡时必须显式排除运行时流覆盖。
+---
+
+## 2026-05-27 20:05 - US-009
+- 为 `xjcg_tender` 新增 agent / workflow 分支闭环验证：agent 分支使用 fake DeepAgents runner 产出非空 `polished_text`，并断言后续 `update_word` 接收到该正文；workflow 分支断言仍走旧 `generate_polished_text`，不会调用 `host_agent`。
+- 更改的文件：`backend/tests/graphs/test_xjcg_generation_mode_agent.py`、`tasks/deepagents-generation-mode-refactor/prd.json`、`tasks/deepagents-generation-mode-refactor/progress.txt`。
+- 验证：`backend\.venv\Scripts\python.exe -m pytest backend\tests\graphs\test_xjcg_generation_mode_agent.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend\tests\graphs\test_xjcg_generation_mode_agent.py backend\tests\graphs\test_generation_mode_branching.py backend\tests\nodes\test_host_agent_generate.py backend\tests\agents\test_generation_host_agent.py -q`、`backend\.venv\Scripts\python.exe -m pytest backend\tests -q`、`npm run type-check`、`npm run lint`、`npm run test -- --runInBand`、`git diff --check` 均通过。
+- **未来迭代的学习：**
+  - 逐类型 graph 闭环测试应尽量保留真实 graph 类和真实基类分流，只替换昂贵的 Word/LLM 节点，避免把 mode gate 测成纯单元 fake。
+  - agent 分支测试除了检查最终 `state.polished_text`，还要在 fake `update_word` 中记录入参，确认后续写回节点真实接收同一正文。
+  - workflow 回归可以把 `NODE_HOST_AGENT_GENERATE` 替换成会抛错的 callable，确保默认旧路径不会误触智能体节点。
 ---
