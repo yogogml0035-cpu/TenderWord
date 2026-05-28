@@ -81,3 +81,5 @@ tasks/*/screenshots/
 tasks/*/logs/
 .agents/
 .playwright-mcp/
+frontend/.playwright-cli/
+
