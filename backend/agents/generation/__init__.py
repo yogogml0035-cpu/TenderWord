@@ -1,4 +1,4 @@
-from backend.agents.generation.host_agent import (
+from backend.agents.generation.content_agents import (
     GENERATE_AGENT_NODE,
     HOST_AGENT_NODE,
     HOST_AGENT_SYSTEM_PROMPT,

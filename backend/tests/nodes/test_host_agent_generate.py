@@ -5,7 +5,7 @@ import importlib
 from backend.agents.generation import HostAgentFinalOutput
 
 
-def test_host_agent_generate_returns_standard_polished_text_contract(monkeypatch) -> None:
+def test_content_generate_returns_standard_polished_text_contract(monkeypatch) -> None:
     captured: dict[str, object] = {}
     node_module = importlib.import_module(
         "backend.nodes.common_word_nodes.host_agent_generate"

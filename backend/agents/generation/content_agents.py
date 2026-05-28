@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
@@ -30,32 +31,36 @@ from backend.util.log_util.prompt_log import (
 
 
 MAX_REVISION_ROUNDS = 3
-HOST_AGENT_NODE = "host_agent"
-GENERATE_AGENT_NODE = "generate_agent"
-VERIFY_AGENT_NODE = "verify_agent"
+HOST_AGENT_NODE = "content"
+GENERATE_AGENT_NODE = "content_generate_agent"
+VERIFY_AGENT_NODE = "content_verify_agent"
 HOST_AGENT_SYSTEM_PROMPT = (
-    "你是采购需求生成主智能体（host_agent）。系统会通过 agent_phase 字段指定当前阶段。"
-    "当 agent_phase=generate 时，必须调用 generate_agent，并且只输出包含 draft_text "
-    "字段的 JSON 对象；当 agent_phase=verify 时，必须调用 verify_agent，并且只输出 "
+    "你是采购需求生成主智能体（content）。系统会通过 agent_phase 字段指定当前阶段。"
+    "当 agent_phase=generate 时，必须调用 content_generate_agent，并且只输出包含 draft_text "
+    "字段的 JSON 对象；当 agent_phase=verify 时，必须调用 content_verify_agent，并且只输出 "
     "JSON 数组；当 agent_phase=revise 时，必须根据 audit_findings 修复 current_text，"
     "并且逐项读取 JSON 字段 evidence 和 fix_hint：只修复 evidence 指向且 fix_hint 要求的内容，"
     "不得新增、删除、润色或改写其它无关内容；如果 evidence 表示审核输出格式异常，"
     "或 fix_hint 要求保持原文不变，必须原样返回 current_text。"
     "revise 只输出包含 polished_text 字段的 JSON 对象。不要自动回退到非工具调用模式。"
-    "不得要求用户补充信息，不得声称将重新调用 generate_agent 或 verify_agent，"
+    "不得要求用户补充信息，不得声称将重新调用 content_generate_agent 或 content_verify_agent，"
     "不得输出工具过程说明。"
 )
 
 
 class GenerationAgentRunner(Protocol):
-    def invoke(self, payload: dict[str, Any]) -> dict[str, Any] | str:
+    def invoke(
+        self,
+        payload: dict[str, Any],
+        config: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | str:
         ...
 
 
 @dataclass(frozen=True)
 class GenerationSubAgents:
-    generate_agent: CompiledSubAgent
-    verify_agent: CompiledSubAgent
+    content_generate_agent: CompiledSubAgent
+    content_verify_agent: CompiledSubAgent
 
 
 _fake_runner: GenerationAgentRunner | None = None
@@ -67,17 +72,20 @@ def set_generation_agent_runner(runner: GenerationAgentRunner | None) -> None:
 
 
 def build_generation_subagents() -> GenerationSubAgents:
-    generate_agent: CompiledSubAgent = {
+    content_generate_agent: CompiledSubAgent = {
         "name": GENERATE_AGENT_NODE,
         "description": "生成采购需求初稿。",
         "runnable": create_generate_agent_graph(),
     }
-    verify_agent: CompiledSubAgent = {
+    content_verify_agent: CompiledSubAgent = {
         "name": VERIFY_AGENT_NODE,
         "description": "审核采购需求正文，并返回 JSON 数组；数组元素必须包含 evidence 和 fix_hint 字段。",
         "runnable": create_verify_agent_graph(),
     }
-    return GenerationSubAgents(generate_agent=generate_agent, verify_agent=verify_agent)
+    return GenerationSubAgents(
+        content_generate_agent=content_generate_agent,
+        content_verify_agent=content_verify_agent,
+    )
 
 
 def create_host_agent_runner(model_provider: str) -> GenerationAgentRunner:
@@ -86,7 +94,7 @@ def create_host_agent_runner(model_provider: str) -> GenerationAgentRunner:
         model=create_generation_chat_model(model_provider),
         tools=[],
         system_prompt=HOST_AGENT_SYSTEM_PROMPT,
-        subagents=[subagents.generate_agent, subagents.verify_agent],
+        subagents=[subagents.content_generate_agent, subagents.content_verify_agent],
         name=HOST_AGENT_NODE,
     )
 
@@ -189,8 +197,11 @@ def _is_tool_call_unsupported(error: BaseException) -> bool:
 def _invoke_runner(
     runner: GenerationAgentRunner,
     payload: dict[str, Any],
+    config: dict[str, Any] | None = None,
 ) -> dict[str, Any] | str:
     try:
+        if config is not None and _runner_accepts_config(runner):
+            return runner.invoke(payload, config)
         return runner.invoke(payload)
     except Exception as exc:
         if _is_tool_call_unsupported(exc):
@@ -198,6 +209,25 @@ def _invoke_runner(
                 "当前模型或 DeepAgents runner 不支持工具调用，无法使用智能体生成"
             ) from exc
         raise
+
+
+def _runner_accepts_config(runner: GenerationAgentRunner) -> bool:
+    try:
+        signature = inspect.signature(runner.invoke)
+    except (TypeError, ValueError):
+        return True
+
+    parameters = list(signature.parameters.values())
+    if any(parameter.kind == inspect.Parameter.VAR_POSITIONAL for parameter in parameters):
+        return True
+    if "config" in signature.parameters:
+        return True
+    positional_count = sum(
+        parameter.kind
+        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        for parameter in parameters
+    )
+    return positional_count >= 2
 
 
 def _coerce_draft_text(value: Any) -> str | None:
@@ -246,7 +276,7 @@ def _parse_draft_output(output: dict[str, Any] | str) -> str:
     normalized = str(draft_text or "").strip()
     if not normalized:
         raise GenerationAgentProtocolError(
-            "generate_agent 必须返回包含非空 draft_text 的 JSON 对象"
+            "content_generate_agent 必须返回包含非空 draft_text 的 JSON 对象"
         )
     return normalized
 
@@ -322,6 +352,26 @@ def _build_generation_payload(
     }
 
 
+def _build_generation_context_config(
+    config: dict[str, Any] | None,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    next_config = {**config} if isinstance(config, dict) else {}
+    existing_configurable = next_config.get("configurable", {})
+    configurable = (
+        {**existing_configurable} if isinstance(existing_configurable, dict) else {}
+    )
+    configurable["generation_agent_context"] = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"messages", "agent_phase", "audit_findings"}
+        and not (key == "current_text" and not str(value or "").strip())
+        and not (key == "revision_round" and int(value or 0) == 0)
+    }
+    next_config["configurable"] = configurable
+    return next_config
+
+
 def _build_phase_payload(
     base_payload: dict[str, Any],
     phase: str,
@@ -341,20 +391,21 @@ def _build_phase_payload(
     if phase == "generate":
         instruction = (
             "当前 agent_phase=generate。你必须调用 task 工具，subagent_type 必须为 "
-            "generate_agent。不要自己生成正文，不要解释 generate_agent 的结果。"
-            "generate_agent 返回后，只输出严格 JSON 对象：{\"draft_text\":\"<generate_agent 返回的完整正文>\"}。"
-            "draft_text 必须逐字使用 generate_agent 的正文，不得改写，不得要求用户补充信息。"
+            "content_generate_agent。不要自己生成正文，不要解释 content_generate_agent 的结果。"
+            "content_generate_agent 返回后，只输出严格 JSON 对象："
+            "{\"draft_text\":\"<content_generate_agent 返回的完整正文>\"}。"
+            "draft_text 必须逐字使用 content_generate_agent 的正文，不得改写，不得要求用户补充信息。"
         )
     elif phase == "verify":
         instruction = (
             "当前 agent_phase=verify。你必须调用 task 工具，subagent_type 必须为 "
-            "verify_agent，审核 current_text。不要自己审核，不要解释 verify_agent 的结果。"
-            "verify_agent 返回后，只输出严格 JSON 数组，数组内容必须逐项来自 verify_agent。"
+            "content_verify_agent，审核 current_text。不要自己审核，不要解释 content_verify_agent 的结果。"
+            "content_verify_agent 返回后，只输出严格 JSON 数组，数组内容必须逐项来自 content_verify_agent。"
             "没有问题时输出 []。"
         )
     else:
         instruction = (
-            "当前 agent_phase=revise。禁止调用 generate_agent 或 verify_agent。"
+            "当前 agent_phase=revise。禁止调用 content_generate_agent 或 content_verify_agent。"
             "根据 audit_findings 修复 current_text，并只输出 JSON 对象 polished_text。"
             "只能修改 audit_findings[].evidence 指向且 fix_hint 要求的内容，其它内容逐字保留。"
             "如果 audit_findings 表示审核输出格式异常，或 fix_hint 要求保持原文不变，"
@@ -380,14 +431,14 @@ def _write_host_artifact(
     try:
         write_agent_log_artifact(
             get_host_agent_log_dir(__file__),
-            prefix="host",
+            prefix="content",
             task_id=task_id,
             phase=phase,
             round_index=round_index,
             content=content,
         )
     except Exception as exc:
-        progress_log.debug(f"警告: 保存 host_agent 日志失败: {exc}")
+        progress_log.debug(f"警告: 保存 content 日志失败: {exc}")
 
 
 def _write_verify_artifact(
@@ -412,7 +463,7 @@ def _write_verify_artifact(
             content=json.dumps(payload, ensure_ascii=False, indent=2),
         )
     except Exception as exc:
-        progress_log.debug(f"警告: 保存 verify_agent 日志失败: {exc}")
+        progress_log.debug(f"警告: 保存 content_verify_agent 日志失败: {exc}")
 
 
 def run_host_agent_generation(
@@ -429,7 +480,7 @@ def run_host_agent_generation(
     base_payload = _build_generation_payload(state, model_provider)
 
     progress_log.info(
-        "[host_agent] 开始智能体生成: task_id=%s, tender_type=%s, model=%s",
+        "[content] 开始智能体生成: task_id=%s, tender_type=%s, model=%s",
         task_id,
         base_payload["tender_type"],
         model_provider,
@@ -437,7 +488,8 @@ def run_host_agent_generation(
     draft_text = _parse_draft_output(
         _invoke_runner(
             selected_runner,
-            _build_phase_payload(base_payload, "generate"),
+            (generate_payload := _build_phase_payload(base_payload, "generate")),
+            _build_generation_context_config(config, generate_payload),
         )
     )
     _write_host_artifact(
@@ -447,7 +499,7 @@ def run_host_agent_generation(
         content=draft_text,
     )
     progress_log.info(
-        "[host_agent] 初稿生成完成: task_id=%s, chars=%d",
+        "[content] 初稿生成完成: task_id=%s, chars=%d",
         task_id,
         len(draft_text),
     )
@@ -470,12 +522,13 @@ def run_host_agent_generation(
         findings = _parse_verify_output(
             _invoke_runner(
                 selected_runner,
-                _build_phase_payload(
+                (verify_payload := _build_phase_payload(
                     base_payload,
                     "verify",
                     current_text=current_text,
                     revision_round=revision_rounds,
-                ),
+                )),
+                _build_generation_context_config(config, verify_payload),
             )
         )
         last_findings = findings
@@ -486,7 +539,7 @@ def run_host_agent_generation(
             round_index=revision_rounds,
         )
         progress_log.info(
-            "[host_agent] 第 %d 轮审核完成: task_id=%s, findings=%d",
+            "[content] 第 %d 轮审核完成: task_id=%s, findings=%d",
             revision_rounds,
             task_id,
             len(findings),
@@ -509,7 +562,7 @@ def run_host_agent_generation(
                 content=current_text,
             )
             progress_log.info(
-                "[host_agent] 审核无问题，智能体生成完成: task_id=%s, revision_rounds=%d",
+                "[content] 审核无问题，智能体生成完成: task_id=%s, revision_rounds=%d",
                 task_id,
                 revision_rounds,
             )
@@ -521,7 +574,7 @@ def run_host_agent_generation(
 
         revision_rounds += 1
         progress_log.info(
-            "[host_agent] 开始第 %d 轮修复: task_id=%s, findings=%d",
+            "[content] 开始第 %d 轮修复: task_id=%s, findings=%d",
             revision_rounds,
             task_id,
             len(findings),
@@ -532,13 +585,14 @@ def run_host_agent_generation(
             next_text = _parse_revision_output(
                 _invoke_runner(
                     selected_runner,
-                    _build_phase_payload(
+                    (revision_payload := _build_phase_payload(
                         base_payload,
                         "revise",
                         current_text=current_text,
                         findings=findings,
                         revision_round=revision_rounds,
-                    ),
+                    )),
+                    _build_generation_context_config(config, revision_payload),
                 )
             )
         current_text = next_text
@@ -549,7 +603,7 @@ def run_host_agent_generation(
             content=current_text,
         )
         progress_log.info(
-            "[host_agent] 第 %d 轮修复完成: task_id=%s, chars=%d",
+            "[content] 第 %d 轮修复完成: task_id=%s, chars=%d",
             revision_rounds,
             task_id,
             len(current_text),
@@ -573,7 +627,7 @@ def run_host_agent_generation(
                 content=current_text,
             )
             progress_log.info(
-                "[host_agent] 达到最大修复轮次后放行: task_id=%s, revision_rounds=%d, remaining_findings=%d",
+                "[content] 达到最大修复轮次后放行: task_id=%s, revision_rounds=%d, remaining_findings=%d",
                 task_id,
                 revision_rounds,
                 len(last_findings),

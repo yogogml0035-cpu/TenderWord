@@ -280,8 +280,8 @@ describe('useChatSSE', () => {
       ...createRunningTaskStatus(),
       progress: {
         ...createRunningTaskStatus().progress,
-        running_nodes: ['host_agent'],
-        current_node: 'host_agent',
+        running_nodes: ['content'],
+        current_node: 'content',
       },
     });
 
@@ -306,7 +306,7 @@ describe('useChatSSE', () => {
           task_kind: 'generate',
           step_type: 'draft',
           round: 0,
-          node: 'generate_agent',
+          node: 'content_generate_agent',
           is_complete: true,
           content: '智能体初稿正文',
           findings: [],
@@ -321,7 +321,7 @@ describe('useChatSSE', () => {
           task_kind: 'generate',
           step_type: 'audit',
           round: 0,
-          node: 'verify_agent',
+          node: 'content_verify_agent',
           is_complete: true,
           findings: [
             {
@@ -340,7 +340,7 @@ describe('useChatSSE', () => {
           task_kind: 'generate',
           step_type: 'revision',
           round: 1,
-          node: 'host_agent',
+          node: 'content',
           is_complete: true,
           content: '第一轮 AI 修改内容',
           findings: [
@@ -360,7 +360,7 @@ describe('useChatSSE', () => {
           task_kind: 'generate',
           step_type: 'audit',
           round: 1,
-          node: 'verify_agent',
+          node: 'content_verify_agent',
           is_complete: true,
           findings: [
             {

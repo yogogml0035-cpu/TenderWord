@@ -35,15 +35,17 @@
 - `/api/user/stream` 在已有 rewrite history 且最新消息具备明确修改意图时，应优先走确定性 rewrite fast-path，再进入 rewrite task 创建；普通闲聊、能力询问和不确定语义仍走 LLM 路由/回复。前端构造 user stream `messages` 时必须过滤空内容气泡，避免历史空 AI 消息触发后端请求体验证失败。
 - `generation_mode`、`generation_style` 与 `style_writeback_mode` 都是 generate-only 字段：`DocumentService._build_initial_state()` 可写入 generate state，edit / rewrite 请求模型和初始 state 不得注入这些字段。
 - `generation_mode` 当前只允许 `workflow` 与 `agent`，默认 `workflow`。`workflow` 继续走 `generate_polished_text`，保留 `render_generate_prompt()`、`stream_llm_completion()` 和旧 `llm` snapshot 事件；`agent` 只影响初次 generate 的生成节点选择，最终仍必须产出 `polished_text` 给批注、样式回写、Word 写回和下载主干。
-- 标准生成 graph 的分流只在 `StandardTenderWorkflowGraph` 基类实现：`generation_mode_gate` 后按 `_select_generation_node()` 进入 `generate_polished_text` 或 `host_agent`，两个分支都继续接入 `generate_comments` / `comments_branch_done` 再进入 `update_word`。类型 graph 不应复制这段分流。
+- 标准生成 graph 的分流只在 `StandardTenderWorkflowGraph` 基类实现：`generation_mode_gate` 后按 `_select_generation_node()` 进入 `generate_polished_text` 或 `content`，两个分支都继续接入 `generate_comments` / `comments_branch_done` 再进入 `update_word`。类型 graph 不应复制这段分流。
 
 ### DeepAgents 初次生成
 
 - 智能体生成入口是公共节点 `backend/nodes/common_word_nodes/host_agent_generate.py`，节点调用 `run_host_agent_generation()` 后只向 graph state 写回标准契约：`polished_text` 与 `generate_polished_done=True`。
-- `backend/agents/generation/host_agent.py` 是 host agent 编排真源。`generate_agent` 与 `verify_agent` 通过 `build_generation_subagents()` 包装为 DeepAgents `CompiledSubAgent`，底层 runnable 分别来自已 `compile()` 的 `StateGraph`。
-- DeepAgents subagent 调用拓扑是契约：`host_agent` 必须通过 `task` subagent 调用 `generate_agent` 与 `verify_agent`，不能把两者绕到 host 编排之外直连。解析层必须优先读取 subagent 的结构化响应、合并回父输出的 `draft_text` / `findings` / `polished_text`，以及 DeepAgents ToolMessage 中的 JSON；`generate` 阶段不能把 host 对工具结果的自然语言总结误当成正文，缺少非空 `draft_text` 时必须按协议错误失败。
-- `generate_agent` 复用 `backend/prompts/generate_prompt.py` 的 `render_generate_prompt()` 与当前 state/model 配置生成初稿；`verify_agent` 必须返回 JSON 数组，每项包含非空 `evidence` 与 `fix_hint`。审核输出先做严格解析；失败后按错误类型走本地 JSON 修复 / 低温 JSON repair prompt 重试 / fallback finding，最终给 host agent 的 `findings` 必须保持合法数组形状。
-- 智能体生成链路里面向模型的自然语言提示词必须使用中文，包括 host agent system prompt、subagent description、generate prompt 的章节标题与步骤说明；但 `host_agent`、`generate_agent`、`verify_agent`、`agent_phase`、`draft_text`、`polished_text`、`current_text`、`audit_findings`、`evidence`、`fix_hint` 等节点名、工具名、状态字段和 JSON 字段属于机器契约，不能为了中文化而改名。
+- `backend/agents/generation/content_agents.py` 是 content agent 编排真源。`content_generate_agent` 与 `content_verify_agent` 通过 `build_generation_subagents()` 包装为 DeepAgents `CompiledSubAgent`，底层 runnable 分别来自已 `compile()` 的 `StateGraph`。
+- DeepAgents subagent 调用拓扑是契约：`content` 必须通过 `task` subagent 调用 `content_generate_agent` 与 `content_verify_agent`，不能把两者绕到 host 编排之外直连。解析层必须优先读取 subagent 的结构化响应、合并回父输出的 `draft_text` / `findings` / `polished_text`，以及 DeepAgents ToolMessage 中的 JSON；`generate` 阶段不能把 host 对工具结果的自然语言总结误当成正文，缺少非空 `draft_text` 时必须按协议错误失败。
+- DeepAgents compiled subagent 不应依赖父 agent state 自动保留业务字段；`content_generate_agent` 和 `content_verify_agent` 的 `generation_style`、`project_info`、`tender_params`、`origin_tender_params`、`current_text`、`model_provider` 必须通过 `config.configurable.generation_agent_context` 显式传入并在子图入口读取。否则子图只收到 `task.description`，会退化为静态泛化提示词并把三类信息源视为空。
+- `content_generate_agent` 复用 `backend/prompts/generate_prompt.py` 的 `render_generate_prompt()` 与当前 state/model 配置生成初稿；`content_verify_agent` 必须返回 JSON 数组，每项包含非空 `evidence` 与 `fix_hint`。审核输出先做严格解析；失败后按错误类型走本地 JSON 修复 / 低温 JSON repair prompt 重试 / fallback finding，最终给 host agent 的 `findings` 必须保持合法数组形状。
+- `content_generate_agent` 使用 `stream_llm_completion()` 时要复用 graph config 中的 `llm_stream_callback`，继续产生既有 `llm` snapshot 流；同时可用未完成的 `agent_step` draft snapshot 支撑智能体过程卡流式展示，最终完整 draft 仍由 `run_host_agent_generation()` 统一发完成态 `agent_step`。
+- 智能体生成链路里面向模型的自然语言提示词必须使用中文，包括 host agent system prompt、subagent description、generate prompt 的章节标题与步骤说明；但 `content`、`content_generate_agent`、`content_verify_agent`、`agent_phase`、`draft_text`、`polished_text`、`current_text`、`audit_findings`、`evidence`、`fix_hint` 等节点名、工具名、状态字段和 JSON 字段属于机器契约，不能为了中文化而改名。
 - host agent 阶段顺序固定为 `generate -> verify -> revise`。审核意见非空时进入修复，修复时只能逐项依据 `audit_findings[].evidence` 与 `audit_findings[].fix_hint` 做最小必要修改，不能自行新增、删除、润色或改写其它无关内容。修复后继续审核，最多修复 3 轮；第 3 轮修复完成后直接放行最终 `polished_text`，即使仍有审核意见也不再阻塞后续写回。
 - 智能体失败不自动回退 workflow。审核 JSON 格式异常不得硬失败，应收敛成合法 `findings`；最终输出不是包含非空 `polished_text` 的 JSON 对象，或模型 / DeepAgents runner 不支持工具调用时，任务必须失败并进入既有 `error` 终态。
 - `set_generation_agent_runner()` 是测试用 fake runner 注入点；生产路径默认通过 `create_host_agent_runner()` 构造 DeepAgents runner，并复用 `MODEL_CONFIGS` 与 `settings.get_llm_config()`。
@@ -59,7 +61,7 @@
 
 - `backend/` 内直接调用 LLM 的能力默认收敛到 `backend/prompts/`；Prompt Layer 只做纯渲染，不做日志、副作用、Word COM 或会话状态变更。
 - generate prompt 路由当前由 `backend/prompts/generate_prompt.py` 分派到 template / param builder。
-- `generate_agent` 会复用同一个 generate prompt builder，因此 template / param builder 中的自然语言说明会同时影响 workflow 与 agent 两条初次生成链路；改这些 prompt 时必须同时跑 prompt 路由测试和 DeepAgents host agent 相关测试。
+- `content_generate_agent` 会复用同一个 generate prompt builder，因此 template / param builder 中的自然语言说明会同时影响 workflow 与 agent 两条初次生成链路；改这些 prompt 时必须同时跑 prompt 路由测试和 DeepAgents host agent 相关测试。
 - generate prompt 的 builder 路由除了要返回对应文案外，还要保留可观察的模式标识；`generation_style=param` 的渲染结果必须在 prompt 文本里显式表明“参数优先模式”，避免测试、日志或排障时只能回看请求模型才能分辨当前走的是哪条 builder。
 - `backend/prompts/generate_by_param_prompt.py` 必须把“参考内容里的引导句”视为可删除内容而非默认骨架：像“设备用途 / 适用范围 / 项目背景 / 服务目标 / 功能概述”这类句子，只有在 `project_info` 或 `tender_params` 明确提供等价新事实时才能保留或重写；若新材料缺失，必须删除，并把当前章节保留下来的一级条目从 `1` 重新顺排。
 - param builder 里源材料常见的 `2.技术参数 / 2.1 / 2.2` 只代表原始容器层级，不是最终成稿编号真值；Prompt 必须明确要求模型保留相对层级与物理顺序，但按删减后的存活兄弟项重编号，避免删除旧引导段后正文仍从 `2` 起号。
@@ -162,7 +164,7 @@
 
 - 改 skill workflow、dispatch 或 task result 时，容易出现 generate/rewrite/edit 某一条链路漏同步。
 - 改招标详情模型或外部接口解析时，容易把上游字段类型波动误报为编号不存在或数据格式错误；需要覆盖数字预算、缺失可选字段和类型路由三类回归。
-- 改 `generation_mode`、host agent 或标准 graph 分流时，必须证明默认 `workflow` 不触发 `host_agent`，同时证明 `agent` 分支的 `polished_text` 会继续进入各类型既有 delete / replacement / update / post-update 主干。
+- 改 `generation_mode`、host agent 或标准 graph 分流时，必须证明默认 `workflow` 不触发 `content`，同时证明 `agent` 分支的 `polished_text` 会继续进入各类型既有 delete / replacement / update / post-update 主干。
 - 改智能体输出协议时，必须同步检查 `backend/agents/generation/json_utils.py`、`backend/agents/generation/types.py`、`host_agent_generate`、`AgentStepEventData` 与前端 `agent-step` 消息格式；审核阶段可以用合法 fallback finding 兜底格式异常，但不要把纯文本最终输出当作成功兜底。
 - 改受保护字段规则时，必须同时检查 `tender_config.py`、`protected_fields.py`、三条 update 路径和严格匹配测试。
 - 改样式回填或 SSE 结果结构时，必须同步检查后端 `DoneEventData` / `AgentStepEventData`、任务结果 payload、`frontend/hooks/useChatSSE.ts`、`frontend/lib/sse.ts` 和 chat store metadata。

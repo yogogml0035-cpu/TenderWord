@@ -17,7 +17,7 @@ async def test_send_agent_step_buffers_event_for_replay() -> None:
         task_kind="generate",
         step_type="audit",
         round=1,
-        node="verify_agent",
+        node="content_verify_agent",
         findings=[
             {
                 "evidence": "缺少交付周期",
@@ -37,7 +37,7 @@ async def test_send_agent_step_buffers_event_for_replay() -> None:
     assert event.data["task_kind"] == "generate"
     assert event.data["step_type"] == "audit"
     assert event.data["round"] == 1
-    assert event.data["node"] == "verify_agent"
+    assert event.data["node"] == "content_verify_agent"
     assert event.data["is_complete"] is True
     assert event.data["timestamp"]
     assert event.data["findings"] == [
@@ -56,7 +56,7 @@ async def test_event_stream_replays_agent_step_then_done_terminal() -> None:
         task_kind="generate",
         step_type="revision",
         round=1,
-        node="host_agent",
+        node="content",
         content="修复后的正文",
         is_complete=True,
     )

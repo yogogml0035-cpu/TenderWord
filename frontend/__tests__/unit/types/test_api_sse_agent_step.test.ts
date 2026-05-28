@@ -22,7 +22,7 @@ describe('SSE agent_step API types', () => {
       task_kind: 'generate',
       step_type: 'audit',
       round: 1,
-      node: 'verify_agent',
+      node: 'content_verify_agent',
       is_complete: true,
       findings: [finding],
     };
@@ -32,7 +32,7 @@ describe('SSE agent_step API types', () => {
       task_kind: 'generate',
       step_type: 'audit',
       round: 1,
-      node: 'verify_agent',
+      node: 'content_verify_agent',
       is_complete: true,
       findings: [finding],
     });
@@ -45,7 +45,7 @@ describe('SSE agent_step API types', () => {
       task_kind: 'generate',
       step_type: 'revision',
       round: 2,
-      node: 'host_agent',
+      node: 'content',
       is_complete: true,
       content: '修复后的采购需求正文',
       findings: [],

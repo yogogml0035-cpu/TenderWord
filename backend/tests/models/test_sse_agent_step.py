@@ -9,7 +9,7 @@ def test_agent_step_event_data_contains_audit_findings_contract() -> None:
         task_kind="generate",
         step_type="audit",
         round=1,
-        node="verify_agent",
+        node="content_verify_agent",
         findings=[
             {
                 "evidence": "缺少交付周期",
@@ -26,7 +26,7 @@ def test_agent_step_event_data_contains_audit_findings_contract() -> None:
     assert payload["task_kind"] == "generate"
     assert payload["step_type"] == "audit"
     assert payload["round"] == 1
-    assert payload["node"] == "verify_agent"
+    assert payload["node"] == "content_verify_agent"
     assert payload["is_complete"] is True
     assert payload["timestamp"]
     assert payload["findings"] == [
@@ -43,7 +43,7 @@ def test_agent_step_revision_event_can_carry_content_snapshot() -> None:
         task_kind="generate",
         step_type="revision",
         round=2,
-        node="host_agent",
+        node="content",
         content="修复后的采购需求正文",
         is_complete=True,
     )

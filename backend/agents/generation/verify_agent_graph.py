@@ -1,9 +1,9 @@
-from __future__ import annotations
-
 import asyncio
 import json
+from typing import Any
 
 from langchain_core.messages import AIMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
 from backend.agents.generation.json_utils import (
@@ -46,6 +46,29 @@ def _run_async(coro):
         finally:
             loop.close()
     raise RuntimeError("verify_agent cannot run inside an active event loop")
+
+
+def _get_generation_context(config: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(config, dict):
+        return {}
+    configurable = config.get("configurable", {})
+    if not isinstance(configurable, dict):
+        return {}
+    context = configurable.get("generation_agent_context")
+    return context if isinstance(context, dict) else {}
+
+
+def _context_value(
+    state: GenerationAgentState,
+    config: dict[str, Any] | None,
+    key: str,
+    default: Any = "",
+) -> Any:
+    context = _get_generation_context(config)
+    value = context.get(key)
+    if value is not None:
+        return value
+    return state.get(key, default)
 
 
 def _contract_error_needs_retry(error: BaseException) -> bool:
@@ -127,15 +150,22 @@ def _parse_or_repair_audit_findings(
 
     return build_audit_findings_fallback(last_error)
 
-def _verify_text(state: GenerationAgentState) -> GenerationAgentState:
-    current_text = str(state.get("current_text") or state.get("draft_text") or "")
-    model_provider = str(state.get("model_provider") or "deepseek")
+def _verify_text(
+    state: GenerationAgentState,
+    config: RunnableConfig | None = None,
+) -> GenerationAgentState:
+    current_text = str(
+        _context_value(state, config, "current_text")
+        or _context_value(state, config, "draft_text")
+        or ""
+    )
+    model_provider = str(_context_value(state, config, "model_provider", "deepseek") or "deepseek")
     user_prompt = (
         "请审核以下采购需求正文是否存在明显缺漏、矛盾或不符合技术参数的问题。\n\n"
         "输出必须是严格 JSON 数组：[] 或 "
         '[{"evidence":"...","fix_hint":"..."}]。'
         "不要输出解释、Markdown、代码块或其它字段。\n\n"
-        f"技术参数：{state.get('origin_tender_params') or ''}\n\n"
+        f"技术参数：{_context_value(state, config, 'origin_tender_params') or ''}\n\n"
         f"待审核正文：\n{current_text}"
     )
     raw_content = _run_async(

@@ -173,7 +173,7 @@
 - 删除当前会话时，优先回退到同类型最新会话；同类型为空再回退到全局剩余会话。
 - 智能体过程卡是会话历史消息，不是运行时临时 stream。`agent_step` 会在 `chat-storage` 里保存为 `metadata.messageKind = "agent-step"` 的 AI 消息，刷新后随会话消息恢复。
 - `agent-step` 消息不纳入旧 `taskMessageMap` 的 `task-log` / `task-content` / `task-download` 三卡分组；done 事件仍只负责生成下载入口卡。
-- 审核卡按轮次聚合在同一 audit 消息的 `agentStepAuditRounds` 中；revision 按轮次生成或更新可区分的消息。智能体过程卡标题以 `metadata.agentStepNode` 为准，分别显示 `generate_agent`、`verify_agent`、`host_agent`，不要再用“AI 初稿内容 / 智能体审核意见 / AI 修改内容”这类按 step_type 推导的标题。
+- 审核卡按轮次聚合在同一 audit 消息的 `agentStepAuditRounds` 中；revision 按轮次生成或更新可区分的消息。智能体过程卡标题以 `metadata.agentStepNode` 为准，分别显示 `content_generate_agent`、`content_verify_agent`、`content`，不要再用“AI 初稿内容 / 智能体审核意见 / AI 修改内容”这类按 step_type 推导的标题。
 
 ## 聊天输入与排队恢复
 

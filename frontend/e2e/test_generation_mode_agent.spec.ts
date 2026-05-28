@@ -16,9 +16,9 @@ function taskStatus(status: 'running' | 'completed' = 'running') {
     created_at: '2026-05-27T14:30:00Z',
     progress: {
       completed_nodes: [],
-      running_nodes: status === 'running' ? ['host_agent'] : [],
-      current_node: status === 'running' ? 'host_agent' : '',
-      current_node_display: status === 'running' ? 'host_agent' : '',
+      running_nodes: status === 'running' ? ['content'] : [],
+      current_node: status === 'running' ? 'content' : '',
+      current_node_display: status === 'running' ? 'content' : '',
       progress_text: status === 'running' ? '智能体生成中' : '已完成',
       completed_count: status === 'running' ? 3 : 8,
       total_nodes: 8,
@@ -208,7 +208,7 @@ test.describe('Generation mode agent flow', () => {
           task_kind: 'generate',
           step_type: 'draft',
           round: 0,
-          node: 'generate_agent',
+          node: 'content_generate_agent',
           is_complete: true,
           content: '这是智能体初稿正文。',
           findings: [],
@@ -219,7 +219,7 @@ test.describe('Generation mode agent flow', () => {
           task_kind: 'generate',
           step_type: 'audit',
           round: 1,
-          node: 'verify_agent',
+          node: 'content_verify_agent',
           is_complete: true,
           content: null,
           findings: [
@@ -235,7 +235,7 @@ test.describe('Generation mode agent flow', () => {
           task_kind: 'generate',
           step_type: 'revision',
           round: 1,
-          node: 'host_agent',
+          node: 'content',
           is_complete: true,
           content: '这是第 1 轮 AI 修改内容，已补充验收标准。',
           findings: [],
@@ -271,13 +271,13 @@ test.describe('Generation mode agent flow', () => {
 
     await expect.poll(() => generatePayload?.generation_mode).toBe('agent');
 
-    await expect(page.getByText('generate_agent')).toBeVisible();
+    await expect(page.getByText('content_generate_agent')).toBeVisible();
     await expect(page.getByText('这是智能体初稿正文。')).toBeVisible();
-    await expect(page.getByText('verify_agent')).toBeVisible();
+    await expect(page.getByText('content_verify_agent')).toBeVisible();
     await expect(page.getByText('第 1 轮审核')).toBeVisible();
     await expect(page.getByText('evidence: 交付范围缺少验收标准')).toBeVisible();
     await expect(page.getByText('fix_hint: 补充设备验收和交付要求')).toBeVisible();
-    await expect(page.getByText('host_agent')).toBeVisible();
+    await expect(page.getByText('content', { exact: true })).toBeVisible();
     await expect(page.getByText('这是第 1 轮 AI 修改内容，已补充验收标准。')).toBeVisible();
     await expect(page.getByRole('button', { name: '下载文件' })).toBeVisible();
 

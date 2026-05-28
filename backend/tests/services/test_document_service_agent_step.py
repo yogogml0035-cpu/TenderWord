@@ -13,7 +13,7 @@ def test_sse_callback_push_agent_step_keeps_json_payload_contract() -> None:
             task_kind="generate",
             step_type="audit",
             round=1,
-            node="verify_agent",
+            node="content_verify_agent",
             findings=[
                 {
                     "evidence": "缺少交付周期",

@@ -23,13 +23,13 @@ describe('TaskContentMessage', () => {
             messageKind: 'agent-step',
             taskKind: 'generate',
             agentStepType: 'draft',
-            agentStepNode: 'generate_agent',
+            agentStepNode: 'content_generate_agent',
           },
         })}
       />
     );
 
-    expect(screen.getByText('generate_agent')).toBeInTheDocument();
+    expect(screen.getByText('content_generate_agent')).toBeInTheDocument();
     expect(screen.queryByText('AI 初稿内容')).not.toBeInTheDocument();
   });
 });
