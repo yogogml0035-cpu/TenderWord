@@ -42,6 +42,8 @@ HOST_AGENT_SYSTEM_PROMPT = (
     "不得新增、删除、润色或改写其它无关内容；如果 evidence 表示审核输出格式异常，"
     "或 fix_hint 要求保持原文不变，必须原样返回 current_text。"
     "revise 只输出包含 polished_text 字段的 JSON 对象。不要自动回退到非工具调用模式。"
+    "不得要求用户补充信息，不得声称将重新调用 generate_agent 或 verify_agent，"
+    "不得输出工具过程说明。"
 )
 
 
@@ -171,8 +173,20 @@ def _coerce_draft_text(value: Any) -> str | None:
     return None
 
 
+def _coerce_polished_text(value: Any) -> str | None:
+    if isinstance(value, dict):
+        return value.get("polished_text")
+    if isinstance(value, HostAgentFinalOutput):
+        return value.polished_text
+    if hasattr(value, "polished_text"):
+        return getattr(value, "polished_text")
+    return None
+
+
 def _parse_draft_output(output: dict[str, Any] | str) -> str:
     draft_text = _coerce_draft_text(_extract_structured_response(output))
+    if draft_text is None:
+        draft_text = _coerce_draft_text(output)
     if draft_text is None:
         raw_text = _extract_message_text(output)
         try:
@@ -186,6 +200,13 @@ def _parse_draft_output(output: dict[str, Any] | str) -> str:
 
 
 def _parse_verify_output(output: dict[str, Any] | str) -> list[AuditFinding]:
+    if isinstance(output, dict):
+        for key in ("findings", "audit_findings"):
+            if key in output:
+                return coerce_audit_findings(
+                    json.dumps(output.get(key), ensure_ascii=False, default=str),
+                    fallback_on_error=True,
+                )
     return coerce_audit_findings(
         _extract_text_from_runner_output(output),
         fallback_on_error=True,
@@ -193,8 +214,25 @@ def _parse_verify_output(output: dict[str, Any] | str) -> list[AuditFinding]:
 
 
 def _parse_revision_output(output: dict[str, Any] | str) -> str:
+    polished_text = _coerce_polished_text(_extract_structured_response(output))
+    if polished_text is None:
+        polished_text = _coerce_polished_text(output)
+    normalized = str(polished_text or "").strip()
+    if normalized:
+        return normalized
+
     final_output = parse_host_agent_final_output(_extract_text_from_runner_output(output))
     return final_output.polished_text
+
+
+def _findings_request_current_text_only(findings: list[AuditFinding]) -> bool:
+    if not findings:
+        return False
+    return all(
+        "审核智能体输出格式异常" in finding.evidence
+        and "保持 current_text 原文不变" in finding.fix_hint
+        for finding in findings
+    )
 
 
 def _emit_step(
@@ -237,12 +275,26 @@ def _build_phase_payload(
         "revision_round": revision_round,
     }
     if phase == "generate":
-        instruction = "调用 generate_agent 生成采购需求初稿，并只输出 JSON 对象 draft_text。"
+        instruction = (
+            "当前 agent_phase=generate。你必须调用 task 工具，subagent_type 必须为 "
+            "generate_agent。不要自己生成正文，不要解释 generate_agent 的结果。"
+            "generate_agent 返回后，只输出严格 JSON 对象：{\"draft_text\":\"<generate_agent 返回的完整正文>\"}。"
+            "draft_text 必须逐字使用 generate_agent 的正文，不得改写，不得要求用户补充信息。"
+        )
     elif phase == "verify":
-        instruction = "调用 verify_agent 审核 current_text，并只输出 JSON 数组。"
+        instruction = (
+            "当前 agent_phase=verify。你必须调用 task 工具，subagent_type 必须为 "
+            "verify_agent，审核 current_text。不要自己审核，不要解释 verify_agent 的结果。"
+            "verify_agent 返回后，只输出严格 JSON 数组，数组内容必须逐项来自 verify_agent。"
+            "没有问题时输出 []。"
+        )
     else:
         instruction = (
+            "当前 agent_phase=revise。禁止调用 generate_agent 或 verify_agent。"
             "根据 audit_findings 修复 current_text，并只输出 JSON 对象 polished_text。"
+            "只能修改 audit_findings[].evidence 指向且 fix_hint 要求的内容，其它内容逐字保留。"
+            "如果 audit_findings 表示审核输出格式异常，或 fix_hint 要求保持原文不变，"
+            "必须原样返回 current_text。不得要求用户补充信息。"
         )
     phase_payload["messages"] = [{"role": "user", "content": instruction}]
     return phase_payload
@@ -410,18 +462,22 @@ def run_host_agent_generation(
             task_id,
             len(findings),
         )
-        current_text = _parse_revision_output(
-            _invoke_runner(
-                selected_runner,
-                _build_phase_payload(
-                    base_payload,
-                    "revise",
-                    current_text=current_text,
-                    findings=findings,
-                    revision_round=revision_rounds,
-                ),
+        if _findings_request_current_text_only(findings):
+            next_text = current_text
+        else:
+            next_text = _parse_revision_output(
+                _invoke_runner(
+                    selected_runner,
+                    _build_phase_payload(
+                        base_payload,
+                        "revise",
+                        current_text=current_text,
+                        findings=findings,
+                        revision_round=revision_rounds,
+                    ),
+                )
             )
-        )
+        current_text = next_text
         _write_host_artifact(
             task_id=task_id,
             phase="revision",

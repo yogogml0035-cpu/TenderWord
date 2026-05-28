@@ -61,12 +61,40 @@ def _draft_output(text: str) -> dict:
     return {"structured_response": {"draft_text": text}}
 
 
+def _deepagent_subagent_draft_output(text: str) -> dict:
+    return {
+        "draft_text": text,
+        "messages": [
+            {
+                "content": (
+                    "generate_agent 返回的结果显示，已生成初稿。"
+                    f"请参考：{text}"
+                )
+            }
+        ],
+    }
+
+
 def _audit_output(items: list[dict[str, str]]) -> dict:
     return {"structured_response": items}
 
 
+def _deepagent_subagent_audit_output(items: list[dict[str, str]]) -> dict:
+    return {
+        "findings": items,
+        "messages": [{"content": "verify_agent 返回了结构化审核意见。"}],
+    }
+
+
 def _revision_output(text: str) -> dict:
     return {"structured_response": {"polished_text": text}}
+
+
+def _deepagent_subagent_revision_output(text: str) -> dict:
+    return {
+        "polished_text": text,
+        "messages": [{"content": "host_agent 已根据审核意见完成修复。"}],
+    }
 
 
 def test_build_generation_subagents_wraps_compiled_state_graphs() -> None:
@@ -290,6 +318,54 @@ def test_host_agent_accepts_structured_json_with_non_empty_polished_text() -> No
     assert events[2].is_complete is True
 
 
+def test_host_agent_prefers_subagent_state_over_host_summary_text() -> None:
+    runner = FakeRunner(
+        [
+            _deepagent_subagent_draft_output("真正的 generate_agent 初稿正文"),
+            _deepagent_subagent_audit_output(
+                [{"evidence": "缺少验收标准", "fix_hint": "补充验收标准"}]
+            ),
+            _deepagent_subagent_revision_output("host_agent 修改后的正文"),
+            _deepagent_subagent_audit_output([]),
+        ]
+    )
+    events = []
+
+    result = run_host_agent_generation({}, runner=runner, step_callback=events.append)
+
+    assert result.polished_text == "host_agent 修改后的正文"
+    assert events[0].node == "generate_agent"
+    assert events[0].content == "真正的 generate_agent 初稿正文"
+    assert events[1].node == "verify_agent"
+    assert events[1].findings[0].evidence == "缺少验收标准"
+    assert events[2].node == "host_agent"
+    assert events[2].content == "host_agent 修改后的正文"
+    assert "真正的 generate_agent 初稿正文" in runner.payloads[1]["current_text"]
+
+
+def test_host_agent_preserves_current_text_when_verify_json_fallback_requests_it() -> None:
+    runner = FakeRunner(
+        [
+            _draft_output("draft text"),
+            "not json",
+            _audit_output([]),
+        ]
+    )
+    events = []
+
+    result = run_host_agent_generation({}, runner=runner, step_callback=events.append)
+
+    assert result.polished_text == "draft text"
+    assert [payload["agent_phase"] for payload in runner.payloads] == [
+        "generate",
+        "verify",
+        "verify",
+    ]
+    assert [event.step_type for event in events] == ["draft", "audit", "revision", "audit"]
+    assert events[2].node == "host_agent"
+    assert events[2].content == "draft text"
+
+
 def test_host_agent_writes_host_verify_logs_and_progress(
     monkeypatch,
     _redirect_agent_log_dirs,
@@ -352,7 +428,6 @@ def test_host_agent_coerces_invalid_audit_json_to_fallback_finding() -> None:
         [
             _draft_output("draft text"),
             "not json",
-            _revision_output("draft text"),
             _audit_output([]),
         ]
     )
@@ -363,12 +438,9 @@ def test_host_agent_coerces_invalid_audit_json_to_fallback_finding() -> None:
     assert [payload["agent_phase"] for payload in runner.payloads] == [
         "generate",
         "verify",
-        "revise",
         "verify",
     ]
-    fallback = runner.payloads[2]["audit_findings"][0]
-    assert "审核智能体输出格式异常" in fallback["evidence"]
-    assert "保持 current_text 原文不变" in fallback["fix_hint"]
+    assert runner.payloads[2]["current_text"] == "draft text"
 
 
 def test_host_agent_releases_after_third_revision_with_findings() -> None:

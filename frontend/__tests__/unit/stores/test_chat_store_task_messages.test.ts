@@ -239,12 +239,15 @@ describe('chatStore task message grouping', () => {
 
     expect(agentMessages).toHaveLength(3);
     expect(draftMessage?.content).toBe('智能体初稿');
+    expect(draftMessage?.metadata?.agentStepNode).toBe('generate_agent');
     expect(auditMessage?.content).toContain('第 0 轮审核');
     expect(auditMessage?.content).toContain('evidence: 缺少供货范围');
     expect(auditMessage?.content).toContain('fix_hint: 补充供货范围说明');
     expect(auditMessage?.content).toContain('第 1 轮审核');
+    expect(auditMessage?.metadata?.agentStepNode).toBe('verify_agent');
     expect(auditMessage?.metadata?.agentStepAuditRounds).toHaveLength(2);
     expect(revisionMessage?.content).toBe('第一轮 AI 修改内容');
+    expect(revisionMessage?.metadata?.agentStepNode).toBe('host_agent');
     expect(revisionMessage?.metadata?.agentStepRound).toBe(1);
   });
 

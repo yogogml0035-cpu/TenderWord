@@ -79,16 +79,11 @@ function getBorderColor(status: Message['status']) {
 
 function getContentTitle(message: Message) {
   if (message.metadata?.messageKind === 'agent-step') {
-    switch (message.metadata.agentStepType) {
-      case 'draft':
-        return 'AI 初稿内容';
-      case 'audit':
-        return '智能体审核意见';
-      case 'revision':
-        return 'AI 修改内容';
-      default:
-        return '智能体过程';
+    const node = message.metadata.agentStepNode;
+    if (typeof node === 'string' && node.trim()) {
+      return node.trim();
     }
+    return '智能体过程';
   }
 
   if (message.metadata?.taskKind === 'rewrite' || message.metadata?.taskKind === 'edit') {

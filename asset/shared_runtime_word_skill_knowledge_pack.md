@@ -41,6 +41,7 @@
 
 - 智能体生成入口是公共节点 `backend/nodes/common_word_nodes/host_agent_generate.py`，节点调用 `run_host_agent_generation()` 后只向 graph state 写回标准契约：`polished_text` 与 `generate_polished_done=True`。
 - `backend/agents/generation/host_agent.py` 是 host agent 编排真源。`generate_agent` 与 `verify_agent` 通过 `build_generation_subagents()` 包装为 DeepAgents `CompiledSubAgent`，底层 runnable 分别来自已 `compile()` 的 `StateGraph`。
+- DeepAgents subagent 调用拓扑是契约：`host_agent` 必须通过 `task` subagent 调用 `generate_agent` 与 `verify_agent`，不能把两者绕到 host 编排之外直连。DeepAgents 会把 subagent 返回的 `draft_text`、`findings`、`polished_text` 等 state 字段合并回父输出；解析层必须优先读取这些结构化字段，再考虑 host 最后一条消息，避免把 host 对工具结果的自然语言总结误当成正文。
 - `generate_agent` 复用 `backend/prompts/generate_prompt.py` 的 `render_generate_prompt()` 与当前 state/model 配置生成初稿；`verify_agent` 必须返回 JSON 数组，每项包含非空 `evidence` 与 `fix_hint`。审核输出先做严格解析；失败后按错误类型走本地 JSON 修复 / 低温 JSON repair prompt 重试 / fallback finding，最终给 host agent 的 `findings` 必须保持合法数组形状。
 - 智能体生成链路里面向模型的自然语言提示词必须使用中文，包括 host agent system prompt、subagent description、generate prompt 的章节标题与步骤说明；但 `host_agent`、`generate_agent`、`verify_agent`、`agent_phase`、`draft_text`、`polished_text`、`current_text`、`audit_findings`、`evidence`、`fix_hint` 等节点名、工具名、状态字段和 JSON 字段属于机器契约，不能为了中文化而改名。
 - host agent 阶段顺序固定为 `generate -> verify -> revise`。审核意见非空时进入修复，修复时只能逐项依据 `audit_findings[].evidence` 与 `audit_findings[].fix_hint` 做最小必要修改，不能自行新增、删除、润色或改写其它无关内容。修复后继续审核，最多修复 3 轮；第 3 轮修复完成后直接放行最终 `polished_text`，即使仍有审核意见也不再阻塞后续写回。
