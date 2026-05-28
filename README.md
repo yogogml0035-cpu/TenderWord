@@ -84,8 +84,7 @@ cd /home/<your-user>/path/to/TenderWord
 
 ### 4. 访问地址
 
-- 前端首页：<http://localhost:8502>
-- 前端工作台：<http://localhost:8502/tender>
+- 前端入口 / 工作台：<http://localhost:8502/tender>
 - 后端健康检查：<http://localhost:8000/health>
 
 ## 方案 B：仓库直接克隆在 Windows 中
@@ -134,8 +133,7 @@ cd <repo>
 
 ### 4. 访问地址
 
-- 前端首页：<http://localhost:8502>
-- 前端工作台：<http://localhost:8502/tender>
+- 前端入口 / 工作台：<http://localhost:8502/tender>
 - 后端健康检查：<http://localhost:8000/health>
 
 ## 常见问题

@@ -364,7 +364,7 @@ Write-Host "  Backend PID : $($backendProcess.Id)" -ForegroundColor Green
 if ($launchFrontend) {
     Write-Host "  Frontend PID: $($frontendProcess.Id)" -ForegroundColor Green
     Write-Host "  Frontend Run: $frontendSummary" -ForegroundColor Green
-    Write-Host "  Frontend URL: http://localhost:8502" -ForegroundColor Green
+    Write-Host "  Frontend URL: http://localhost:8502/tender" -ForegroundColor Green
 }
 Write-Host "  Backend URL : http://localhost:8000" -ForegroundColor Green
 Write-Host "  Health URL  : http://localhost:8000/health" -ForegroundColor Green

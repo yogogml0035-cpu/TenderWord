@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from deepagents import CompiledSubAgent
 
@@ -14,6 +16,25 @@ from backend.agents.generation import (
 from backend.agents.generation import host_agent as host_agent_module
 from backend.agents.generation.model_factory import create_generation_chat_model
 from backend.prompts.types import GeneratePromptInput, RenderedPrompt
+
+
+@pytest.fixture(autouse=True)
+def _redirect_agent_log_dirs(tmp_path, monkeypatch):
+    host_dir = tmp_path / "host_log"
+    verify_dir = tmp_path / "verify_log"
+    host_dir.mkdir()
+    verify_dir.mkdir()
+    monkeypatch.setattr(
+        host_agent_module,
+        "get_host_agent_log_dir",
+        lambda _anchor: host_dir,
+    )
+    monkeypatch.setattr(
+        host_agent_module,
+        "get_verify_agent_log_dir",
+        lambda _anchor: verify_dir,
+    )
+    return host_dir, verify_dir
 
 
 class FakeRunner:
@@ -168,6 +189,63 @@ def test_host_agent_accepts_structured_json_with_non_empty_polished_text() -> No
     assert [event.round for event in events] == [0, 0, 1, 1]
     assert events[2].content == "final text"
     assert events[2].is_complete is True
+
+
+def test_host_agent_writes_host_verify_logs_and_progress(
+    monkeypatch,
+    _redirect_agent_log_dirs,
+) -> None:
+    host_dir, verify_dir = _redirect_agent_log_dirs
+    progress_messages: list[str] = []
+    runner = FakeRunner(
+        [
+            _draft_output("draft text"),
+            _audit_output([{"evidence": "missing warranty", "fix_hint": "add it"}]),
+            _revision_output("final text"),
+            _audit_output([]),
+        ]
+    )
+    monkeypatch.setattr(
+        host_agent_module.progress_log,
+        "info",
+        lambda message, *args: progress_messages.append(
+            message % args if args else str(message)
+        ),
+    )
+
+    result = run_host_agent_generation(
+        {"task_id": "task-agent-42", "tender_type": "xjcg"},
+        {"configurable": {"model_provider": "deepseek"}},
+        runner=runner,
+    )
+
+    host_files = sorted(host_dir.glob("host_task-agent-42_*.txt"))
+    verify_files = sorted(verify_dir.glob("verify_task-agent-42_*.txt"))
+
+    assert result.polished_text == "final text"
+    assert len(host_files) == 3
+    assert any(path.name.endswith("_round0_draft.txt") for path in host_files)
+    assert any(path.name.endswith("_round1_revision.txt") for path in host_files)
+    assert any(path.name.endswith("_round1_final.txt") for path in host_files)
+    host_content = "\n".join(path.read_text(encoding="utf-8") for path in host_files)
+    assert "draft text" in host_content
+    assert "final text" in host_content
+    assert len(verify_files) == 2
+
+    first_verify = json.loads(
+        next(path for path in verify_files if "_round0_" in path.name).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert first_verify["current_text"] == "draft text"
+    assert first_verify["findings"] == [
+        {"evidence": "missing warranty", "fix_hint": "add it"}
+    ]
+    assert any("开始智能体生成" in message for message in progress_messages)
+    assert any("第 0 轮审核完成" in message for message in progress_messages)
+    assert any("开始第 1 轮修复" in message for message in progress_messages)
+    assert any("第 1 轮修复完成" in message for message in progress_messages)
+    assert any("审核无问题，智能体生成完成" in message for message in progress_messages)
 
 
 def test_host_agent_rejects_invalid_audit_json() -> None:

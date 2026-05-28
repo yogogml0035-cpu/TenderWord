@@ -21,6 +21,12 @@ from backend.agents.generation.types import (
 )
 from backend.agents.generation.verify_agent_graph import create_verify_agent_graph
 from backend.states import TenderGraphStateBase
+from backend.util.log_util.progress_log import progress_log
+from backend.util.log_util.prompt_log import (
+    get_host_agent_log_dir,
+    get_verify_agent_log_dir,
+    write_agent_log_artifact,
+)
 
 
 MAX_REVISION_ROUNDS = 3
@@ -239,6 +245,57 @@ def _build_phase_payload(
     return phase_payload
 
 
+def _get_task_id(state: TenderGraphStateBase, configurable: dict[str, Any]) -> str:
+    return str(
+        configurable.get("task_id") or state.get("task_id") or "host-agent"
+    ).strip()
+
+
+def _write_host_artifact(
+    *,
+    task_id: str,
+    phase: str,
+    content: str,
+    round_index: int | None = None,
+) -> None:
+    try:
+        write_agent_log_artifact(
+            get_host_agent_log_dir(__file__),
+            prefix="host",
+            task_id=task_id,
+            phase=phase,
+            round_index=round_index,
+            content=content,
+        )
+    except Exception as exc:
+        progress_log.debug(f"警告: 保存 host_agent 日志失败: {exc}")
+
+
+def _write_verify_artifact(
+    *,
+    task_id: str,
+    current_text: str,
+    findings: list[AuditFinding],
+    round_index: int,
+) -> None:
+    try:
+        payload = {
+            "round": round_index,
+            "current_text": current_text,
+            "findings": [finding.model_dump(mode="json") for finding in findings],
+        }
+        write_agent_log_artifact(
+            get_verify_agent_log_dir(__file__),
+            prefix="verify",
+            task_id=task_id,
+            phase="audit_findings",
+            round_index=round_index,
+            content=json.dumps(payload, ensure_ascii=False, indent=2),
+        )
+    except Exception as exc:
+        progress_log.debug(f"警告: 保存 verify_agent 日志失败: {exc}")
+
+
 def run_host_agent_generation(
     state: TenderGraphStateBase,
     config: dict[str, Any] | None = None,
@@ -248,14 +305,32 @@ def run_host_agent_generation(
 ) -> HostAgentFinalOutput:
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     model_provider = str(configurable.get("model_provider") or "deepseek")
+    task_id = _get_task_id(state, configurable)
     selected_runner = runner or _fake_runner or create_host_agent_runner(model_provider)
     base_payload = _build_generation_payload(state, model_provider)
 
+    progress_log.info(
+        "[host_agent] 开始智能体生成: task_id=%s, tender_type=%s, model=%s",
+        task_id,
+        base_payload["tender_type"],
+        model_provider,
+    )
     draft_text = _parse_draft_output(
         _invoke_runner(
             selected_runner,
             _build_phase_payload(base_payload, "generate"),
         )
+    )
+    _write_host_artifact(
+        task_id=task_id,
+        phase="draft",
+        round_index=0,
+        content=draft_text,
+    )
+    progress_log.info(
+        "[host_agent] 初稿生成完成: task_id=%s, chars=%d",
+        task_id,
+        len(draft_text),
     )
     _emit_step(
         step_callback,
@@ -285,6 +360,18 @@ def run_host_agent_generation(
             )
         )
         last_findings = findings
+        _write_verify_artifact(
+            task_id=task_id,
+            current_text=current_text,
+            findings=findings,
+            round_index=revision_rounds,
+        )
+        progress_log.info(
+            "[host_agent] 第 %d 轮审核完成: task_id=%s, findings=%d",
+            revision_rounds,
+            task_id,
+            len(findings),
+        )
         _emit_step(
             step_callback,
             AgentStepPayload(
@@ -296,6 +383,17 @@ def run_host_agent_generation(
             ),
         )
         if not findings:
+            _write_host_artifact(
+                task_id=task_id,
+                phase="final",
+                round_index=revision_rounds,
+                content=current_text,
+            )
+            progress_log.info(
+                "[host_agent] 审核无问题，智能体生成完成: task_id=%s, revision_rounds=%d",
+                task_id,
+                revision_rounds,
+            )
             return HostAgentFinalOutput(
                 polished_text=current_text,
                 audit_findings=[],
@@ -303,6 +401,12 @@ def run_host_agent_generation(
             )
 
         revision_rounds += 1
+        progress_log.info(
+            "[host_agent] 开始第 %d 轮修复: task_id=%s, findings=%d",
+            revision_rounds,
+            task_id,
+            len(findings),
+        )
         current_text = _parse_revision_output(
             _invoke_runner(
                 selected_runner,
@@ -314,6 +418,18 @@ def run_host_agent_generation(
                     revision_round=revision_rounds,
                 ),
             )
+        )
+        _write_host_artifact(
+            task_id=task_id,
+            phase="revision",
+            round_index=revision_rounds,
+            content=current_text,
+        )
+        progress_log.info(
+            "[host_agent] 第 %d 轮修复完成: task_id=%s, chars=%d",
+            revision_rounds,
+            task_id,
+            len(current_text),
         )
         _emit_step(
             step_callback,
@@ -327,6 +443,18 @@ def run_host_agent_generation(
             ),
         )
         if revision_rounds >= MAX_REVISION_ROUNDS:
+            _write_host_artifact(
+                task_id=task_id,
+                phase="final",
+                round_index=revision_rounds,
+                content=current_text,
+            )
+            progress_log.info(
+                "[host_agent] 达到最大修复轮次后放行: task_id=%s, revision_rounds=%d, remaining_findings=%d",
+                task_id,
+                revision_rounds,
+                len(last_findings),
+            )
             return HostAgentFinalOutput(
                 polished_text=current_text,
                 audit_findings=last_findings,

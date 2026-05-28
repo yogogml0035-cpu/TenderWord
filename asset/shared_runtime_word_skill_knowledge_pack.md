@@ -45,6 +45,7 @@
 - host agent 阶段顺序固定为 `generate -> verify -> revise`。审核意见非空时进入修复，修复后继续审核，最多修复 3 轮；第 3 轮修复完成后直接放行最终 `polished_text`，即使仍有审核意见也不再阻塞后续写回。
 - 智能体失败不自动回退 workflow。审核输出无法解析为 JSON 数组、最终输出不是包含非空 `polished_text` 的 JSON 对象、或模型 / DeepAgents runner 不支持工具调用时，任务必须失败并进入既有 `error` 终态。
 - `set_generation_agent_runner()` 是测试用 fake runner 注入点；生产路径默认通过 `create_host_agent_runner()` 构造 DeepAgents runner，并复用 `MODEL_CONFIGS` 与 `settings.get_llm_config()`。
+- host agent 产物必须可审计落盘：初稿、每轮修复稿和最终稿写入 `backend/prompts_log/host_log/`，每轮 verify 的被审核正文与结构化 `evidence` / `fix_hint` 写入 `backend/prompts_log/verify_log/`。`backend/logs/progress-YYYYMMDD.log` 只记录智能体开始、初稿完成、每轮审核完成、每轮修复开始/完成、无问题放行或达到最大轮次放行等用户可理解进度，不写完整正文。
 
 ### Skill 声明
 
