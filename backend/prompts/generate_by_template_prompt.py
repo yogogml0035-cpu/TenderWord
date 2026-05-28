@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from backend.config.tender_config import get_tender_type_family
 from backend.prompts.types import GeneratePromptInput, RenderedPrompt
+from backend.prompts.prompt_values import format_prompt_value
 
 TEMPLATE_POLISH_SYSTEM_PROMPT = """
 # 角色
@@ -252,9 +253,9 @@ def render_generate_by_template_prompt(data: GeneratePromptInput) -> RenderedPro
     return RenderedPrompt(
         system_prompt=system_prompt,
         user_prompt=user_prompt.format(
-            project_info=data.project_info,
-            tender_params=data.tender_params,
-            origin_tender_params=data.origin_tender_params,
+            project_info=format_prompt_value(data.project_info),
+            tender_params=format_prompt_value(data.tender_params),
+            origin_tender_params=format_prompt_value(data.origin_tender_params),
         ),
     )
 

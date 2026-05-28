@@ -314,6 +314,7 @@ try {
     # 只监听实际源码子目录，避免 watchfiles 扫到 .venv-linux 等开发环境目录。
     $backendReloadArgsText = @(
         "--reload"
+        "--reload-dir agents"
         "--reload-dir api"
         "--reload-dir config"
         "--reload-dir core"

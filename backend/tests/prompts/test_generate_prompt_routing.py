@@ -71,3 +71,16 @@ def test_render_generate_by_template_prompt_blocks_reference_symbol_inheritance(
         in rendered.system_prompt
     )
     assert "条款行首符号不是正文语义" in rendered.system_prompt
+
+def test_generate_prompt_renders_none_inputs_as_empty_text() -> None:
+    data = GeneratePromptInput(
+        tender_type="xjcg",
+        generation_style="template",
+        project_info=None,
+        tender_params=None,
+        origin_tender_params=None,
+    )
+
+    rendered = render_generate_prompt(data)
+
+    assert "None" not in rendered.user_prompt

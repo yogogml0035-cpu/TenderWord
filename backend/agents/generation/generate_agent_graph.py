@@ -129,19 +129,48 @@ def _build_stream_callbacks(config: dict[str, Any] | None) -> StreamCallbacks:
     return StreamCallbacks(on_chunk=_log_chunk, on_update=_on_update)
 
 
+def _text_length(value: Any) -> int:
+    return len(str(value or ""))
+
+
 def _generate_draft(
     state: GenerationAgentState,
     config: RunnableConfig | None = None,
 ) -> GenerationAgentState:
+    tender_type = str(_context_value(state, config, "tender_type", "xjcg") or "xjcg")
+    generation_style = str(
+        _context_value(state, config, "generation_style", "template") or "template"
+    )
+    project_info = str(_context_value(state, config, "project_info", "") or "")
+    tender_params = _context_value(state, config, "tender_params")
+    origin_tender_params = _context_value(state, config, "origin_tender_params")
+    log_summary = (
+        "[content_generate_agent] prompt 输入摘要: tender_type=%s, generation_style=%s, "
+        "project_info_chars=%d, origin_tender_params_chars=%d, tender_params_chars=%d"
+    )
+    log_args = (
+        tender_type,
+        generation_style,
+        _text_length(project_info),
+        _text_length(origin_tender_params),
+        _text_length(tender_params),
+    )
+    all_inputs_empty = (
+        _text_length(project_info) == 0
+        and _text_length(origin_tender_params) == 0
+        and _text_length(tender_params) == 0
+    )
+    if all_inputs_empty:
+        progress_log.warning(log_summary, *log_args)
+    else:
+        progress_log.debug(log_summary, *log_args)
     rendered_prompt = render_generate_prompt(
         GeneratePromptInput(
-            tender_type=str(_context_value(state, config, "tender_type", "xjcg") or "xjcg"),
-            generation_style=str(
-                _context_value(state, config, "generation_style", "template") or "template"
-            ),
-            project_info=str(_context_value(state, config, "project_info", "") or ""),
-            tender_params=_context_value(state, config, "tender_params"),
-            origin_tender_params=_context_value(state, config, "origin_tender_params"),
+            tender_type=tender_type,
+            generation_style=generation_style,
+            project_info=project_info,
+            tender_params=tender_params,
+            origin_tender_params=origin_tender_params,
         )
     )
     content = _run_async(

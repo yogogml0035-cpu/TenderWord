@@ -121,6 +121,14 @@ def _deepagent_subagent_revision_output(text: str) -> dict:
         "messages": [{"content": "content 已根据审核意见完成修复。"}],
     }
 
+def _deepagent_tool_message_revision_output(text: str) -> dict:
+    return {
+        "messages": [
+            {"content": json.dumps({"polished_text": text}, ensure_ascii=False)},
+            {"content": "content 已根据审核意见完成修复。"},
+        ],
+    }
+
 
 def test_build_generation_subagents_wraps_compiled_state_graphs() -> None:
     subagents = build_generation_subagents()
@@ -547,6 +555,24 @@ def test_content_reads_draft_and_audit_from_deepagent_tool_messages() -> None:
     assert events[1].findings[0].evidence == "缺少付款方式"
     assert runner.payloads[1]["current_text"] == "ToolMessage 中的 content_generate_agent 初稿"
 
+def test_content_reads_revision_from_deepagent_tool_message_before_summary() -> None:
+    runner = FakeRunner(
+        [
+            _draft_output("draft text"),
+            _audit_output([{"evidence": "缺少付款方式", "fix_hint": "补充付款方式"}]),
+            _deepagent_tool_message_revision_output("ToolMessage 中的修复正文"),
+            _audit_output([]),
+        ]
+    )
+    events = []
+
+    result = run_host_agent_generation({}, runner=runner, step_callback=events.append)
+
+    assert result.polished_text == "ToolMessage 中的修复正文"
+    assert events[2].node == "content"
+    assert events[2].content == "ToolMessage 中的修复正文"
+    assert runner.payloads[3]["current_text"] == "ToolMessage 中的修复正文"
+
 
 def test_content_rejects_plain_generate_summary_as_draft() -> None:
     runner = FakeRunner(
@@ -588,6 +614,47 @@ def test_content_preserves_current_text_when_verify_json_fallback_requests_it() 
     ]
     assert [event.step_type for event in events] == ["draft", "audit", "revision", "audit"]
     assert events[2].node == "content"
+    assert events[2].content == "draft text"
+
+
+def test_content_accepts_plain_document_text_from_revision() -> None:
+    revised_text = "一、项目概述\n1、项目名称：细胞自动计数仪\n\n二、技术要求\n1、细胞直径测量范围。"
+    runner = FakeRunner(
+        [
+            _draft_output("draft text"),
+            _audit_output([{"evidence": "项目名称错误", "fix_hint": "修正项目名称"}]),
+            revised_text,
+            _audit_output([]),
+        ]
+    )
+
+    result = run_host_agent_generation({}, runner=runner)
+
+    assert result.polished_text == revised_text
+    assert result.revision_rounds == 1
+
+
+def test_content_preserves_current_text_when_revision_returns_only_summary() -> None:
+    runner = FakeRunner(
+        [
+            _draft_output("draft text"),
+            _audit_output([{"evidence": "项目名称错误", "fix_hint": "修正项目名称"}]),
+            "已根据审核意见完成修复。",
+            _audit_output([]),
+        ]
+    )
+    events = []
+
+    result = run_host_agent_generation({}, runner=runner, step_callback=events.append)
+
+    assert result.polished_text == "draft text"
+    assert [payload["agent_phase"] for payload in runner.payloads] == [
+        "generate",
+        "verify",
+        "revise",
+        "verify",
+    ]
+    assert runner.payloads[3]["current_text"] == "draft text"
     assert events[2].content == "draft text"
 
 

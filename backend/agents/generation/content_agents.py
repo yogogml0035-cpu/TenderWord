@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import inspect
+import re
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
@@ -264,6 +265,17 @@ def _extract_draft_text_from_messages(output: dict[str, Any] | str) -> str | Non
             return draft_text
     return None
 
+def _extract_polished_text_from_messages(output: dict[str, Any] | str) -> str | None:
+    for text in _iter_message_texts(output) or []:
+        try:
+            final_output = parse_host_agent_final_output(text)
+            return final_output.polished_text
+        except GenerationAgentProtocolError:
+            polished_text = _coerce_from_json_text(text, _coerce_polished_text)
+            if polished_text:
+                return polished_text
+    return None
+
 
 def _parse_draft_output(output: dict[str, Any] | str) -> str:
     draft_text = _coerce_draft_text(_extract_structured_response(output))
@@ -307,16 +319,75 @@ def _parse_verify_output(output: dict[str, Any] | str) -> list[AuditFinding]:
     )
 
 
-def _parse_revision_output(output: dict[str, Any] | str) -> str:
+def _parse_revision_output(
+    output: dict[str, Any] | str,
+    *,
+    current_text: str,
+) -> str:
     polished_text = _coerce_polished_text(_extract_structured_response(output))
     if polished_text is None:
         polished_text = _coerce_polished_text(output)
+    if polished_text is None:
+        polished_text = _extract_polished_text_from_messages(output)
     normalized = str(polished_text or "").strip()
     if normalized:
         return normalized
 
-    final_output = parse_host_agent_final_output(_extract_text_from_runner_output(output))
-    return final_output.polished_text
+    raw_text = _extract_text_from_runner_output(output)
+    try:
+        final_output = parse_host_agent_final_output(raw_text)
+        return final_output.polished_text
+    except GenerationAgentProtocolError:
+        revision_text = _coerce_plain_revision_text(raw_text)
+        if revision_text:
+            return revision_text
+        if _is_revision_summary_text(raw_text):
+            progress_log.warning(
+                "[content] 修复阶段只返回摘要，保留当前正文继续审核: chars=%d",
+                len(current_text),
+            )
+            return current_text
+        raise
+
+def _is_revision_summary_text(raw_text: str) -> bool:
+    text = str(raw_text or "").strip()
+    if not text:
+        return False
+    meta_markers = (
+        "已根据审核意见",
+        "修复完成",
+        "已完成修复",
+        "返回的结果显示",
+        "content 已",
+    )
+    return any(marker in text for marker in meta_markers)
+
+def _coerce_plain_revision_text(raw_text: str) -> str | None:
+    text = str(raw_text or "").strip()
+    if not text:
+        return None
+    meta_markers = (
+        "content_generate_agent",
+        "content_verify_agent",
+        "已根据审核意见",
+        "修复完成",
+        "返回的结果显示",
+    )
+    if any(marker in text for marker in meta_markers):
+        return None
+    document_markers = (
+        "项目概述",
+        "采购需求",
+        "技术要求",
+        "技术规格",
+        "招标内容",
+    )
+    has_section_heading = bool(
+        re.search(r"(^|\n)\s*(?:[一二三四五六七八九十]+、|\d+[、.．])", text)
+    )
+    if "\n" in text and (has_section_heading or any(marker in text for marker in document_markers)):
+        return text
+    return None
 
 
 def _findings_request_current_text_only(findings: list[AuditFinding]) -> bool:
@@ -370,6 +441,36 @@ def _build_generation_context_config(
     }
     next_config["configurable"] = configurable
     return next_config
+
+
+def _text_length(value: Any) -> int:
+    return len(str(value or ""))
+
+
+def _log_generation_input_summary(
+    *,
+    task_id: str,
+    generation_style: str,
+    payload: dict[str, Any],
+) -> None:
+    project_info_chars = _text_length(payload.get("project_info"))
+    origin_chars = _text_length(payload.get("origin_tender_params"))
+    tender_chars = _text_length(payload.get("tender_params"))
+    message = (
+        "[content] 生成上下文摘要: task_id=%s, generation_style=%s, "
+        "project_info_chars=%d, origin_tender_params_chars=%d, tender_params_chars=%d"
+    )
+    args = (
+        task_id,
+        generation_style,
+        project_info_chars,
+        origin_chars,
+        tender_chars,
+    )
+    if project_info_chars == 0 and origin_chars == 0 and tender_chars == 0:
+        progress_log.warning(message, *args)
+        return
+    progress_log.debug(message, *args)
 
 
 def _build_phase_payload(
@@ -485,6 +586,11 @@ def run_host_agent_generation(
         base_payload["tender_type"],
         model_provider,
     )
+    _log_generation_input_summary(
+        task_id=task_id,
+        generation_style=str(base_payload.get("generation_style") or "template"),
+        payload=base_payload,
+    )
     draft_text = _parse_draft_output(
         _invoke_runner(
             selected_runner,
@@ -593,7 +699,8 @@ def run_host_agent_generation(
                         revision_round=revision_rounds,
                     )),
                     _build_generation_context_config(config, revision_payload),
-                )
+                ),
+                current_text=current_text,
             )
         current_text = next_text
         _write_host_artifact(
