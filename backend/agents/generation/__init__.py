@@ -1,6 +1,7 @@
 from backend.agents.generation.host_agent import (
     GENERATE_AGENT_NODE,
     HOST_AGENT_NODE,
+    HOST_AGENT_SYSTEM_PROMPT,
     MAX_REVISION_ROUNDS,
     VERIFY_AGENT_NODE,
     GenerationSubAgents,
@@ -26,6 +27,7 @@ __all__ = [
     "GenerationSubAgents",
     "GENERATE_AGENT_NODE",
     "HOST_AGENT_NODE",
+    "HOST_AGENT_SYSTEM_PROMPT",
     "HostAgentFinalOutput",
     "MAX_REVISION_ROUNDS",
     "VERIFY_AGENT_NODE",

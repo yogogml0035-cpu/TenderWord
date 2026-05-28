@@ -68,7 +68,7 @@ def host_agent_generate(
     state: TenderGraphStateBase,
     config=None,
 ) -> TenderGraphStateBase:
-    """Run the DeepAgents generation branch and expose the standard text contract."""
+    """运行 DeepAgents 生成分支，并暴露标准正文契约。"""
     result = run_host_agent_generation(
         state,
         config,

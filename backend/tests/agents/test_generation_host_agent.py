@@ -8,12 +8,14 @@ from deepagents import CompiledSubAgent
 from backend.agents.generation import (
     GenerationAgentProtocolError,
     GenerationAgentToolCallUnsupportedError,
+    HOST_AGENT_SYSTEM_PROMPT,
     build_generation_subagents,
     parse_verify_agent_output,
     run_host_agent_generation,
     set_generation_agent_runner,
 )
 from backend.agents.generation import host_agent as host_agent_module
+from backend.agents.generation import verify_agent_graph as verify_agent_graph_module
 from backend.agents.generation.model_factory import create_generation_chat_model
 from backend.prompts.types import GeneratePromptInput, RenderedPrompt
 
@@ -78,6 +80,18 @@ def test_build_generation_subagents_wraps_compiled_state_graphs() -> None:
     assert set(subagents.verify_agent) == set(CompiledSubAgent.__annotations__)
     assert hasattr(subagents.generate_agent["runnable"], "invoke")
     assert hasattr(subagents.verify_agent["runnable"], "invoke")
+    assert subagents.generate_agent["description"] == "生成采购需求初稿。"
+    assert "审核采购需求正文" in subagents.verify_agent["description"]
+
+
+def test_host_agent_prompts_use_chinese_natural_language() -> None:
+    subagents = build_generation_subagents()
+
+    assert "采购需求生成主智能体" in HOST_AGENT_SYSTEM_PROMPT
+    assert "evidence 和 fix_hint" in HOST_AGENT_SYSTEM_PROMPT
+    assert "不得新增、删除、润色" in HOST_AGENT_SYSTEM_PROMPT
+    assert "Generate the first draft" not in subagents.generate_agent["description"]
+    assert "Audit procurement requirement" not in subagents.verify_agent["description"]
 
 
 def test_generate_agent_reuses_generate_prompt_and_model_config(monkeypatch) -> None:
@@ -126,8 +140,87 @@ def test_generate_agent_reuses_generate_prompt_and_model_config(monkeypatch) -> 
     assert captured_stream["user_prompt"] == "user"
     assert result["structured_response"] == {"draft_text": "draft text"}
 
+def test_verify_agent_repairs_missing_fields_with_retry(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
 
-def test_verify_agent_output_must_be_json_array_with_evidence_and_fix_hint() -> None:
+    async def fake_stream_llm_completion(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return '[{"evidence": "缺少质保期限"}]'
+        return '[{"evidence": "缺少质保期限", "fix_hint": "补充质保期限，保持其它内容不变"}]'
+
+    monkeypatch.setattr(
+        verify_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    graph = verify_agent_graph_module.create_verify_agent_graph()
+    result = graph.invoke(
+        {
+            "current_text": "采购需求正文",
+            "origin_tender_params": "质保期限：3年",
+            "model_provider": "deepseek",
+        }
+    )
+
+    expected = [{"evidence": "缺少质保期限", "fix_hint": "补充质保期限，保持其它内容不变"}]
+    assert len(calls) == 2
+    assert calls[1]["extra_params_override"] == {"temperature": 0.1}
+    assert "严格合法的 JSON 数组" in str(calls[1]["user_prompt"])
+    assert result["structured_response"] == expected
+    assert json.loads(result["messages"][-1].content) == expected
+
+def test_verify_agent_repairs_common_json_issues_without_retry(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fake_stream_llm_completion(**kwargs):
+        calls.append(kwargs)
+        return (
+            "```json\n"
+            + r'[{"evidence": "路径 C:\Temp", "fix_hint": "补充路径说明",}]'
+            + "\n```"
+        )
+
+    monkeypatch.setattr(
+        verify_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    result = verify_agent_graph_module.create_verify_agent_graph().invoke(
+        {"current_text": "采购需求正文", "model_provider": "deepseek"}
+    )
+
+    assert len(calls) == 1
+    assert result["structured_response"] == [
+        {"evidence": r"路径 C:\Temp", "fix_hint": "补充路径说明"}
+    ]
+
+def test_verify_agent_falls_back_to_valid_json_after_repair_failure(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fake_stream_llm_completion(**kwargs):
+        calls.append(kwargs)
+        return "not json"
+
+    monkeypatch.setattr(
+        verify_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    result = verify_agent_graph_module.create_verify_agent_graph().invoke(
+        {"current_text": "采购需求正文", "model_provider": "deepseek"}
+    )
+
+    assert len(calls) == 2
+    fallback = result["structured_response"][0]
+    assert "审核智能体输出格式异常" in fallback["evidence"]
+    assert "保持 current_text 原文不变" in fallback["fix_hint"]
+    assert json.loads(result["messages"][-1].content) == result["structured_response"]
+
+def test_verify_agent_output_is_coerced_to_json_schema() -> None:
     findings = parse_verify_agent_output(
         '[{"evidence": "missing warranty", "fix_hint": "add warranty"}]'
     )
@@ -135,10 +228,16 @@ def test_verify_agent_output_must_be_json_array_with_evidence_and_fix_hint() -> 
     assert findings[0].evidence == "missing warranty"
     assert findings[0].fix_hint == "add warranty"
 
-    with pytest.raises(GenerationAgentProtocolError, match="JSON 数组"):
-        parse_verify_agent_output('{"evidence": "bad"}')
-    with pytest.raises(GenerationAgentProtocolError, match="evidence"):
-        parse_verify_agent_output('[{"fix_hint": "add"}]')
+    single_object = parse_verify_agent_output('{"evidence": "bad"}')
+    assert single_object[0].evidence == "bad"
+    assert "最小必要修复" in single_object[0].fix_hint
+
+    missing_evidence = parse_verify_agent_output('[{"fix_hint": "add"}]')
+    assert "未提供 evidence" in missing_evidence[0].evidence
+    assert missing_evidence[0].fix_hint == "add"
+
+    fallback = parse_verify_agent_output("not json")
+    assert "审核智能体输出格式异常" in fallback[0].evidence
 
 
 def test_host_agent_accepts_structured_json_with_non_empty_polished_text() -> None:
@@ -248,11 +347,28 @@ def test_host_agent_writes_host_verify_logs_and_progress(
     assert any("审核无问题，智能体生成完成" in message for message in progress_messages)
 
 
-def test_host_agent_rejects_invalid_audit_json() -> None:
-    runner = FakeRunner([_draft_output("draft text"), "not json"])
+def test_host_agent_coerces_invalid_audit_json_to_fallback_finding() -> None:
+    runner = FakeRunner(
+        [
+            _draft_output("draft text"),
+            "not json",
+            _revision_output("draft text"),
+            _audit_output([]),
+        ]
+    )
 
-    with pytest.raises(GenerationAgentProtocolError, match="JSON"):
-        run_host_agent_generation({}, runner=runner)
+    result = run_host_agent_generation({}, runner=runner)
+
+    assert result.polished_text == "draft text"
+    assert [payload["agent_phase"] for payload in runner.payloads] == [
+        "generate",
+        "verify",
+        "revise",
+        "verify",
+    ]
+    fallback = runner.payloads[2]["audit_findings"][0]
+    assert "审核智能体输出格式异常" in fallback["evidence"]
+    assert "保持 current_text 原文不变" in fallback["fix_hint"]
 
 
 def test_host_agent_releases_after_third_revision_with_findings() -> None:

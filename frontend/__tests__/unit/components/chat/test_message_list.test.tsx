@@ -200,7 +200,7 @@ describe('MessageList', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows retry action on failed task content card and invokes callback', () => {
+  it('does not show retry action on failed task content card', () => {
     const onRetry = jest.fn();
     const messages = createTaskMessages();
     messages[1] = {
@@ -215,9 +215,8 @@ describe('MessageList', () => {
 
     render(<MessageList messages={messages} onRetry={onRetry} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '重试' }));
-
-    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+    expect(onRetry).not.toHaveBeenCalled();
   });
 
   it('renders user messages in a content-sized bubble capped above half of the chat width', () => {

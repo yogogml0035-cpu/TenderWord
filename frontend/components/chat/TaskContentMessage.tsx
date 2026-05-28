@@ -1,12 +1,11 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Bot, CheckCircle2, Copy, Loader2, RefreshCw, XCircle } from 'lucide-react';
+import { Bot, CheckCircle2, Copy, Loader2, XCircle } from 'lucide-react';
 import type { Message } from '@/types/chat';
 
 interface TaskContentMessageProps {
   message: Message;
-  onRetry?: () => void;
   maxHeight?: number;
   disabled?: boolean;
 }
@@ -101,7 +100,6 @@ function getContentTitle(message: Message) {
 
 export function TaskContentMessage({
   message,
-  onRetry,
   maxHeight = 320,
   disabled = false,
 }: TaskContentMessageProps) {
@@ -111,7 +109,6 @@ export function TaskContentMessage({
   const progressText = message.metadata?.progressText;
   const progressPercent = message.metadata?.progressPercent;
   const contentTitle = getContentTitle(message);
-  const retryDisabledByLocalReason = message.metadata?.localTaskReason === 'backend_restart';
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -152,16 +149,6 @@ export function TaskContentMessage({
         </div>
 
         <div className="flex items-center gap-2">
-          {message.status === 'error' && onRetry && !retryDisabledByLocalReason && (
-            <button
-              onClick={onRetry}
-              disabled={disabled}
-              className="flex items-center gap-1 rounded bg-blue-50 px-2.5 py-1 text-xs text-blue-600 transition-colors duration-200 hover:bg-blue-100"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              重试
-            </button>
-          )}
           <button
             type="button"
             aria-label="复制AI内容"

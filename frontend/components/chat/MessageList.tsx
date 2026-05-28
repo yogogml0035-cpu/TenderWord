@@ -265,14 +265,12 @@ function MessageItem({ message, interactionDisabled = false, onDownload, onRetry
             <TaskContentMessage
               message={message}
               disabled={interactionDisabled}
-              onRetry={onRetry ? () => onRetry(message) : undefined}
             />
           )}
           {messageKind === 'agent-step' && (
             <TaskContentMessage
               message={message}
               disabled={interactionDisabled}
-              onRetry={onRetry ? () => onRetry(message) : undefined}
             />
           )}
           {messageKind === 'task-download' && (

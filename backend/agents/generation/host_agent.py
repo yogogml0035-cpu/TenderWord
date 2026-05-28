@@ -8,7 +8,7 @@ from deepagents import CompiledSubAgent, create_deep_agent
 
 from backend.agents.generation.generate_agent_graph import create_generate_agent_graph
 from backend.agents.generation.json_utils import (
-    parse_audit_findings,
+    coerce_audit_findings,
     parse_host_agent_final_output,
 )
 from backend.agents.generation.model_factory import create_generation_chat_model
@@ -33,6 +33,16 @@ MAX_REVISION_ROUNDS = 3
 HOST_AGENT_NODE = "host_agent"
 GENERATE_AGENT_NODE = "generate_agent"
 VERIFY_AGENT_NODE = "verify_agent"
+HOST_AGENT_SYSTEM_PROMPT = (
+    "你是采购需求生成主智能体（host_agent）。系统会通过 agent_phase 字段指定当前阶段。"
+    "当 agent_phase=generate 时，必须调用 generate_agent，并且只输出包含 draft_text "
+    "字段的 JSON 对象；当 agent_phase=verify 时，必须调用 verify_agent，并且只输出 "
+    "JSON 数组；当 agent_phase=revise 时，必须根据 audit_findings 修复 current_text，"
+    "并且逐项读取 JSON 字段 evidence 和 fix_hint：只修复 evidence 指向且 fix_hint 要求的内容，"
+    "不得新增、删除、润色或改写其它无关内容；如果 evidence 表示审核输出格式异常，"
+    "或 fix_hint 要求保持原文不变，必须原样返回 current_text。"
+    "revise 只输出包含 polished_text 字段的 JSON 对象。不要自动回退到非工具调用模式。"
+)
 
 
 class GenerationAgentRunner(Protocol):
@@ -57,15 +67,12 @@ def set_generation_agent_runner(runner: GenerationAgentRunner | None) -> None:
 def build_generation_subagents() -> GenerationSubAgents:
     generate_agent: CompiledSubAgent = {
         "name": GENERATE_AGENT_NODE,
-        "description": "Generate the first draft procurement requirement text.",
+        "description": "生成采购需求初稿。",
         "runnable": create_generate_agent_graph(),
     }
     verify_agent: CompiledSubAgent = {
         "name": VERIFY_AGENT_NODE,
-        "description": (
-            "Audit procurement requirement text and return a JSON array of "
-            "objects with evidence and fix_hint."
-        ),
+        "description": "审核采购需求正文，并返回 JSON 数组；数组元素必须包含 evidence 和 fix_hint 字段。",
         "runnable": create_verify_agent_graph(),
     }
     return GenerationSubAgents(generate_agent=generate_agent, verify_agent=verify_agent)
@@ -76,14 +83,7 @@ def create_host_agent_runner(model_provider: str) -> GenerationAgentRunner:
     return create_deep_agent(
         model=create_generation_chat_model(model_provider),
         tools=[],
-        system_prompt=(
-            "你是采购需求生成 host_agent。系统会用 agent_phase 指定当前阶段。"
-            "agent_phase=generate 时必须调用 generate_agent 并只输出 "
-            "{\"draft_text\":\"...\"}；agent_phase=verify 时必须调用 "
-            "verify_agent 并只输出 JSON 数组；agent_phase=revise 时按 "
-            "audit_findings 修复 current_text，并只输出 "
-            "{\"polished_text\":\"...\"}。不要自动回退到非工具调用模式。"
-        ),
+        system_prompt=HOST_AGENT_SYSTEM_PROMPT,
         subagents=[subagents.generate_agent, subagents.verify_agent],
         name=HOST_AGENT_NODE,
     )
@@ -186,7 +186,10 @@ def _parse_draft_output(output: dict[str, Any] | str) -> str:
 
 
 def _parse_verify_output(output: dict[str, Any] | str) -> list[AuditFinding]:
-    return parse_audit_findings(_extract_text_from_runner_output(output))
+    return coerce_audit_findings(
+        _extract_text_from_runner_output(output),
+        fallback_on_error=True,
+    )
 
 
 def _parse_revision_output(output: dict[str, Any] | str) -> str:
@@ -463,12 +466,13 @@ def run_host_agent_generation(
 
 
 def parse_verify_agent_output(raw_content: str) -> list[AuditFinding]:
-    return parse_audit_findings(raw_content)
+    return coerce_audit_findings(raw_content, fallback_on_error=True)
 
 
 __all__ = [
     "GENERATE_AGENT_NODE",
     "HOST_AGENT_NODE",
+    "HOST_AGENT_SYSTEM_PROMPT",
     "MAX_REVISION_ROUNDS",
     "VERIFY_AGENT_NODE",
     "GenerationSubAgents",
