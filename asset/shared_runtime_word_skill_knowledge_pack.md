@@ -41,7 +41,7 @@
 
 - 智能体生成入口是公共节点 `backend/nodes/common_word_nodes/host_agent_generate.py`，节点调用 `run_host_agent_generation()` 后只向 graph state 写回标准契约：`polished_text` 与 `generate_polished_done=True`。
 - `backend/agents/generation/host_agent.py` 是 host agent 编排真源。`generate_agent` 与 `verify_agent` 通过 `build_generation_subagents()` 包装为 DeepAgents `CompiledSubAgent`，底层 runnable 分别来自已 `compile()` 的 `StateGraph`。
-- DeepAgents subagent 调用拓扑是契约：`host_agent` 必须通过 `task` subagent 调用 `generate_agent` 与 `verify_agent`，不能把两者绕到 host 编排之外直连。DeepAgents 会把 subagent 返回的 `draft_text`、`findings`、`polished_text` 等 state 字段合并回父输出；解析层必须优先读取这些结构化字段，再考虑 host 最后一条消息，避免把 host 对工具结果的自然语言总结误当成正文。
+- DeepAgents subagent 调用拓扑是契约：`host_agent` 必须通过 `task` subagent 调用 `generate_agent` 与 `verify_agent`，不能把两者绕到 host 编排之外直连。解析层必须优先读取 subagent 的结构化响应、合并回父输出的 `draft_text` / `findings` / `polished_text`，以及 DeepAgents ToolMessage 中的 JSON；`generate` 阶段不能把 host 对工具结果的自然语言总结误当成正文，缺少非空 `draft_text` 时必须按协议错误失败。
 - `generate_agent` 复用 `backend/prompts/generate_prompt.py` 的 `render_generate_prompt()` 与当前 state/model 配置生成初稿；`verify_agent` 必须返回 JSON 数组，每项包含非空 `evidence` 与 `fix_hint`。审核输出先做严格解析；失败后按错误类型走本地 JSON 修复 / 低温 JSON repair prompt 重试 / fallback finding，最终给 host agent 的 `findings` 必须保持合法数组形状。
 - 智能体生成链路里面向模型的自然语言提示词必须使用中文，包括 host agent system prompt、subagent description、generate prompt 的章节标题与步骤说明；但 `host_agent`、`generate_agent`、`verify_agent`、`agent_phase`、`draft_text`、`polished_text`、`current_text`、`audit_findings`、`evidence`、`fix_hint` 等节点名、工具名、状态字段和 JSON 字段属于机器契约，不能为了中文化而改名。
 - host agent 阶段顺序固定为 `generate -> verify -> revise`。审核意见非空时进入修复，修复时只能逐项依据 `audit_findings[].evidence` 与 `audit_findings[].fix_hint` 做最小必要修改，不能自行新增、删除、润色或改写其它无关内容。修复后继续审核，最多修复 3 轮；第 3 轮修复完成后直接放行最终 `polished_text`，即使仍有审核意见也不再阻塞后续写回。
@@ -69,6 +69,7 @@
 - template generate prompt 必须把参考内容行首符号视为不可继承的脏标记：抽取标题壳、编号范式、表格形态或商务框架前先剔除参考里的 `★/▲/*/#` 等符号；凡正文由原材料替换或灌注的输出行，行首符号只能来自对应原材料原子条款，最终输出前要按原材料做逐行符号审计。
 - template generate prompt 必须先把原材料拆成原子条款：物理换行、表格行、Markdown 列表行、显式编号边界都是硬边界；“冒号引导句 + 后续编号列表”要生成父项和下钻子项，不能被枚举保护或长句压缩合并成一行。
 - LLM 流式调用统一经 `backend/util/common_util/llm_stream_utils.py` 的 `stream_llm_completion()`，默认超时使用 `backend/config/settings.py` 的 `LLM_STREAM_TIMEOUT_SECONDS`。
+- LangSmith 配置真源是 `backend/.env` 与 `backend/config/settings.py`。后端启动时会把 `.env` 中的 `LANGSMITH_TRACING`、`LANGSMITH_ENDPOINT`、`LANGSMITH_API_KEY`、`LANGSMITH_PROJECT` 注入 `os.environ`，供 LangChain / LangGraph / DeepAgents SDK 自动上报 tracing；`backend/.env.example` 只保留占位 key，不写真实密钥。
 - DeepSeek 提供商默认使用 `deepseek-v4-flash`，并通过 OpenAI 兼容请求的 `extra_body={"thinking": {"type": "disabled"}}` 固定为非思考模式；新增调用点不得硬编码其它 DeepSeek 模型名。
 - `generate_comments` 的批注 JSON 属于严格机器契约：节点必须先尝试本地提取数组、移除代码块包裹、修正常见尾逗号/非法反斜杠；仍失败时只允许再走一次 Prompt Layer 定义的 JSON 修复调用，然后再决定是否降级为空数组。原始批注输出与修复输出应继续落到 `backend/prompts_log/generate_log/` 便于排障。
 - 批注生成 prompt 的 `reference_text` 必须要求连续、逐字、可精确搜索且尽量唯一；短词或高频词风险要扩展到同句、同分句或同单元格内的连续原文，不能跨行/跨段/跨单元格拼接。无法形成唯一可回填锚点时应输出空数组或删除该条。

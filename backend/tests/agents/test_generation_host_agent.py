@@ -75,6 +75,20 @@ def _deepagent_subagent_draft_output(text: str) -> dict:
     }
 
 
+def _deepagent_tool_message_draft_output(text: str) -> dict:
+    return {
+        "messages": [
+            {"content": json.dumps({"draft_text": text}, ensure_ascii=False)},
+            {
+                "content": (
+                    "generate_agent 返回的结果显示，已生成初稿。"
+                    "请参考工具返回内容。"
+                )
+            },
+        ],
+    }
+
+
 def _audit_output(items: list[dict[str, str]]) -> dict:
     return {"structured_response": items}
 
@@ -83,6 +97,15 @@ def _deepagent_subagent_audit_output(items: list[dict[str, str]]) -> dict:
     return {
         "findings": items,
         "messages": [{"content": "verify_agent 返回了结构化审核意见。"}],
+    }
+
+
+def _deepagent_tool_message_audit_output(items: list[dict[str, str]]) -> dict:
+    return {
+        "messages": [
+            {"content": json.dumps(items, ensure_ascii=False)},
+            {"content": "verify_agent 返回了结构化审核意见。"},
+        ],
     }
 
 
@@ -341,6 +364,49 @@ def test_host_agent_prefers_subagent_state_over_host_summary_text() -> None:
     assert events[2].node == "host_agent"
     assert events[2].content == "host_agent 修改后的正文"
     assert "真正的 generate_agent 初稿正文" in runner.payloads[1]["current_text"]
+
+
+def test_host_agent_reads_draft_and_audit_from_deepagent_tool_messages() -> None:
+    runner = FakeRunner(
+        [
+            _deepagent_tool_message_draft_output("ToolMessage 中的 generate_agent 初稿"),
+            _deepagent_tool_message_audit_output(
+                [{"evidence": "缺少付款方式", "fix_hint": "补充付款方式"}]
+            ),
+            _revision_output("host_agent 根据意见修改后的正文"),
+            _deepagent_tool_message_audit_output([]),
+        ]
+    )
+    events = []
+
+    result = run_host_agent_generation({}, runner=runner, step_callback=events.append)
+
+    assert result.polished_text == "host_agent 根据意见修改后的正文"
+    assert events[0].node == "generate_agent"
+    assert events[0].content == "ToolMessage 中的 generate_agent 初稿"
+    assert events[1].node == "verify_agent"
+    assert events[1].findings[0].evidence == "缺少付款方式"
+    assert runner.payloads[1]["current_text"] == "ToolMessage 中的 generate_agent 初稿"
+
+
+def test_host_agent_rejects_plain_generate_summary_as_draft() -> None:
+    runner = FakeRunner(
+        [
+            {
+                "messages": [
+                    {
+                        "content": (
+                            "generate_agent 返回的结果显示，由于没有提供项目基础信息，"
+                            "无法生成具体的采购需求内容。请提供上述信息，我将重新调用 generate_agent。"
+                        )
+                    }
+                ]
+            }
+        ]
+    )
+
+    with pytest.raises(GenerationAgentProtocolError, match="draft_text"):
+        run_host_agent_generation({}, runner=runner)
 
 
 def test_host_agent_preserves_current_text_when_verify_json_fallback_requests_it() -> None:

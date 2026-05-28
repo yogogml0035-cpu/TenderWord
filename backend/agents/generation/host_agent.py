@@ -121,6 +121,43 @@ def _extract_message_text(output: dict[str, Any] | str) -> str:
     return ""
 
 
+def _iter_message_texts(output: dict[str, Any] | str):
+    if not isinstance(output, dict):
+        return
+    messages = output.get("messages")
+    if not isinstance(messages, list):
+        return
+    for message in reversed(messages):
+        content = getattr(message, "content", None)
+        if content is None and isinstance(message, dict):
+            content = message.get("content")
+        yield from _iter_text_parts(content)
+
+
+def _iter_text_parts(content: Any):
+    if content is None:
+        return
+    if isinstance(content, str):
+        normalized = content.strip()
+        if normalized:
+            yield normalized
+        return
+    if isinstance(content, list):
+        for item in content:
+            yield from _iter_text_parts(item)
+        return
+    if isinstance(content, dict):
+        for key in ("text", "content"):
+            value = content.get(key)
+            if value:
+                yield from _iter_text_parts(value)
+                return
+        return
+    normalized = str(content or "").strip()
+    if normalized:
+        yield normalized
+
+
 def _extract_text_from_runner_output(output: dict[str, Any] | str) -> str:
     if isinstance(output, str):
         return output
@@ -183,20 +220,44 @@ def _coerce_polished_text(value: Any) -> str | None:
     return None
 
 
+def _coerce_from_json_text(raw_text: str, coerce: Callable[[Any], str | None]) -> str | None:
+    try:
+        return coerce(json.loads(raw_text))
+    except json.JSONDecodeError:
+        return None
+
+
+def _extract_draft_text_from_messages(output: dict[str, Any] | str) -> str | None:
+    for text in _iter_message_texts(output) or []:
+        draft_text = _coerce_from_json_text(text, _coerce_draft_text)
+        if draft_text:
+            return draft_text
+    return None
+
+
 def _parse_draft_output(output: dict[str, Any] | str) -> str:
     draft_text = _coerce_draft_text(_extract_structured_response(output))
     if draft_text is None:
         draft_text = _coerce_draft_text(output)
     if draft_text is None:
-        raw_text = _extract_message_text(output)
-        try:
-            draft_text = _coerce_draft_text(json.loads(raw_text))
-        except json.JSONDecodeError:
-            draft_text = raw_text
+        draft_text = _extract_draft_text_from_messages(output)
+    if draft_text is None and isinstance(output, str):
+        draft_text = _coerce_from_json_text(output, _coerce_draft_text)
     normalized = str(draft_text or "").strip()
     if not normalized:
-        raise GenerationAgentProtocolError("generate_agent 必须返回非空初稿正文")
+        raise GenerationAgentProtocolError(
+            "generate_agent 必须返回包含非空 draft_text 的 JSON 对象"
+        )
     return normalized
+
+
+def _extract_verify_findings_from_messages(output: dict[str, Any] | str) -> list[AuditFinding] | None:
+    for text in _iter_message_texts(output) or []:
+        try:
+            return coerce_audit_findings(text, fallback_on_error=False)
+        except GenerationAgentProtocolError:
+            continue
+    return None
 
 
 def _parse_verify_output(output: dict[str, Any] | str) -> list[AuditFinding]:
@@ -207,6 +268,9 @@ def _parse_verify_output(output: dict[str, Any] | str) -> list[AuditFinding]:
                     json.dumps(output.get(key), ensure_ascii=False, default=str),
                     fallback_on_error=True,
                 )
+    message_findings = _extract_verify_findings_from_messages(output)
+    if message_findings is not None:
+        return message_findings
     return coerce_audit_findings(
         _extract_text_from_runner_output(output),
         fallback_on_error=True,
