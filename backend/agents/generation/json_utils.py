@@ -20,6 +20,18 @@ AUDIT_JSON_FALLBACK_FIX_HINT = (
 AUDIT_FINDING_DEFAULT_FIX_HINT = (
     "根据 evidence 定位问题并作最小必要修复，保持其它内容不变。"
 )
+CONTRACT_PLACEHOLDER_PATTERN = re.compile(
+    r"^[<＜]\s*(?:修复后|修复后的|最终)?\s*(?:完整|完整的)?\s*"
+    r"(?:采购需求|需求)?\s*(?:正文|内容|draft_text|polished_text)\s*[>＞]$",
+    re.IGNORECASE,
+)
+
+
+def is_contract_placeholder_text(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text or "\n" in text:
+        return False
+    return bool(CONTRACT_PLACEHOLDER_PATTERN.fullmatch(text))
 
 
 def _strip_code_fence_wrappers(text: str) -> str:
@@ -336,6 +348,7 @@ def parse_content_agent_final_output(raw_content: str) -> ContentAgentFinalOutpu
 __all__ = [
     "build_audit_findings_fallback",
     "coerce_audit_findings",
+    "is_contract_placeholder_text",
     "parse_audit_findings",
     "parse_content_agent_final_output",
 ]

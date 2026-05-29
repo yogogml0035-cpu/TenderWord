@@ -149,8 +149,12 @@ def test_content_prompts_use_chinese_natural_language() -> None:
     subagents = build_generation_subagents()
 
     assert "采购需求生成主智能体" in CONTENT_AGENT_SYSTEM_PROMPT
+    assert "两个工作" in CONTENT_AGENT_SYSTEM_PROMPT
+    assert "generation_style" in CONTENT_AGENT_SYSTEM_PROMPT
+    assert "不得复制、复述、改写或重新包装完整正文" in CONTENT_AGENT_SYSTEM_PROMPT
     assert "evidence 和 fix_hint" in CONTENT_AGENT_SYSTEM_PROMPT
     assert "不得新增、删除、润色" in CONTENT_AGENT_SYSTEM_PROMPT
+    assert "最多修复 3 轮" in CONTENT_AGENT_SYSTEM_PROMPT
     assert "Generate the first draft" not in subagents.content_generate_agent["description"]
     assert "Audit procurement requirement" not in subagents.content_verify_agent["description"]
 
@@ -370,6 +374,24 @@ def test_content_verify_agent_reads_current_text_from_config(monkeypatch) -> Non
     assert "不要用技术参数中的设备标题覆盖项目基础信息" in system_prompt
 
 
+def test_content_verify_agent_flags_placeholder_current_text_without_llm(monkeypatch) -> None:
+    monkeypatch.setattr(
+        verify_agent_graph_module,
+        "stream_llm_completion",
+        lambda **_kwargs: pytest.fail("placeholder current_text should not call LLM"),
+    )
+
+    result = verify_agent_graph_module.create_verify_agent_graph().invoke(
+        {"current_text": "<完整采购需求正文>", "model_provider": "deepseek"}
+    )
+
+    finding = result["structured_response"][0]
+    assert "占位符" in finding["evidence"]
+    assert "不是实际采购需求正文" in finding["evidence"]
+    assert "不得输出尖括号占位符" in finding["fix_hint"]
+    assert json.loads(result["messages"][-1].content) == result["structured_response"]
+
+
 def test_content_verify_agent_repairs_common_json_issues_without_retry(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
 
@@ -507,6 +529,7 @@ def test_content_passes_generation_context_to_deepagents_subgraphs() -> None:
     assert result.polished_text == "draft text"
     generate_context = runner.configs[0]["configurable"]["generation_agent_context"]
     verify_context = runner.configs[1]["configurable"]["generation_agent_context"]
+    generate_instruction = runner.payloads[0]["messages"][0]["content"]
     assert generate_context == {
         "tender_type": "gngk_hw_zc",
         "generation_style": "param",
@@ -519,6 +542,9 @@ def test_content_passes_generation_context_to_deepagents_subgraphs() -> None:
         **generate_context,
         "current_text": "draft text",
     }
+    assert "根据当前 generation_style 选择对应生成风格提示词" in generate_instruction
+    assert "不要在最终消息中复制、复述、改写或重新包装完整 draft_text" in generate_instruction
+    assert '{"draft_text":"<content_generate_agent 返回的完整正文>"}' not in generate_instruction
     assert runner.configs[0]["configurable"]["task_id"] == "task-agent-context"
 
 
@@ -670,6 +696,34 @@ def test_content_preserves_current_text_when_revision_returns_only_summary() -> 
     ]
     assert runner.payloads[3]["current_text"] == "draft text"
     assert events[2].content == "draft text"
+
+
+def test_content_preserves_current_text_when_revision_returns_placeholder() -> None:
+    runner = FakeRunner(
+        [
+            _draft_output("draft text"),
+            _audit_output([{"evidence": "项目名称错误", "fix_hint": "修正项目名称"}]),
+            _revision_output("<完整采购需求正文>"),
+            _audit_output([]),
+        ]
+    )
+    events = []
+
+    result = run_content_agent_generation({}, runner=runner, step_callback=events.append)
+
+    revision_instruction = runner.payloads[2]["messages"][0]["content"]
+    assert result.polished_text == "draft text"
+    assert [payload["agent_phase"] for payload in runner.payloads] == [
+        "generate",
+        "verify",
+        "revise",
+        "verify",
+    ]
+    assert runner.payloads[3]["current_text"] == "draft text"
+    assert events[2].content == "draft text"
+    assert "<完整采购需求正文>" not in revision_instruction
+    assert "尖括号" in revision_instruction
+
 
 def test_content_preserves_current_text_when_revision_returns_empty_output() -> None:
     runner = FakeRunner(

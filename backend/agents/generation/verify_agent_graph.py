@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from backend.agents.generation.json_utils import (
     build_audit_findings_fallback,
     coerce_audit_findings,
+    is_contract_placeholder_text,
     parse_audit_findings,
 )
 from backend.agents.generation.types import (
@@ -212,6 +213,21 @@ def _parse_or_repair_audit_findings(
 
     return build_audit_findings_fallback(last_error)
 
+
+def _build_placeholder_text_findings(current_text: str) -> list[AuditFinding]:
+    return [
+        AuditFinding(
+            evidence=(
+                f"待审核正文只有占位符 `{current_text}`，不是实际采购需求正文。"
+            ),
+            fix_hint=(
+                "返回上一轮真实采购需求正文并按审核意见做最小修复；"
+                "不得输出尖括号占位符。"
+            ),
+        )
+    ]
+
+
 def _verify_text(
     state: GenerationAgentState,
     config: RunnableConfig | None = None,
@@ -222,25 +238,28 @@ def _verify_text(
         or ""
     )
     model_provider = str(_context_value(state, config, "model_provider", "deepseek") or "deepseek")
-    user_prompt = _render_verify_user_prompt(
-        project_info=_context_value(state, config, "project_info"),
-        origin_tender_params=_context_value(state, config, "origin_tender_params"),
-        tender_params=_context_value(state, config, "tender_params"),
-        current_text=current_text,
-    )
-    raw_content = _run_async(
-        stream_llm_completion(
-            model_provider=model_provider,
-            system_prompt=VERIFY_SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            callbacks=StreamCallbacks(),
-            check_interval=CHECK_INTERVAL,
+    if is_contract_placeholder_text(current_text):
+        findings = _build_placeholder_text_findings(current_text)
+    else:
+        user_prompt = _render_verify_user_prompt(
+            project_info=_context_value(state, config, "project_info"),
+            origin_tender_params=_context_value(state, config, "origin_tender_params"),
+            tender_params=_context_value(state, config, "tender_params"),
+            current_text=current_text,
         )
-    )
-    findings = _parse_or_repair_audit_findings(
-        str(raw_content),
-        model_provider=model_provider,
-    )
+        raw_content = _run_async(
+            stream_llm_completion(
+                model_provider=model_provider,
+                system_prompt=VERIFY_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                callbacks=StreamCallbacks(),
+                check_interval=CHECK_INTERVAL,
+            )
+        )
+        findings = _parse_or_repair_audit_findings(
+            str(raw_content),
+            model_provider=model_provider,
+        )
     findings_payload = [finding.model_dump() for finding in findings]
     findings_json = json.dumps(findings_payload, ensure_ascii=False)
     return {

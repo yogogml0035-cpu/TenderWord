@@ -11,6 +11,7 @@ from deepagents import CompiledSubAgent, create_deep_agent
 from backend.agents.generation.generate_agent_graph import create_generate_agent_graph
 from backend.agents.generation.json_utils import (
     coerce_audit_findings,
+    is_contract_placeholder_text,
     parse_content_agent_final_output,
 )
 from backend.agents.generation.model_factory import create_generation_chat_model
@@ -36,14 +37,17 @@ CONTENT_AGENT_NODE = "content_agent"
 GENERATE_AGENT_NODE = "content_generate_agent"
 VERIFY_AGENT_NODE = "content_verify_agent"
 CONTENT_AGENT_SYSTEM_PROMPT = (
-    "你是采购需求生成主智能体（content_agent）。系统会通过 agent_phase 字段指定当前阶段。"
-    "当 agent_phase=generate 时，必须调用 content_generate_agent，并且只输出包含 draft_text "
-    "字段的 JSON 对象；当 agent_phase=verify 时，必须调用 content_verify_agent，并且只输出 "
-    "JSON 数组；当 agent_phase=revise 时，必须根据 audit_findings 修复 current_text，"
-    "并且逐项读取 JSON 字段 evidence 和 fix_hint：只修复 evidence 指向且 fix_hint 要求的内容，"
-    "不得新增、删除、润色或改写其它无关内容；如果 evidence 表示审核输出格式异常，"
-    "或 fix_hint 要求保持原文不变，必须原样返回 current_text。"
-    "revise 只输出包含 polished_text 字段的 JSON 对象。不要自动回退到非工具调用模式。"
+    "你是采购需求生成主智能体（content_agent），只负责按 agent_phase 编排两个工作。"
+    "工作一：当 agent_phase=generate 时，必须通过 task 工具唤醒 content_generate_agent 生成初稿。"
+    "content_generate_agent 会根据 generation_style 读取对应生成风格的提示词；"
+    "工具返回的 draft_text 就是初稿真源，你不得复制、复述、改写或重新包装完整正文。"
+    "随后当 agent_phase=verify 时，必须通过 task 工具唤醒 content_verify_agent 审核当前正文，"
+    "并以其返回的 JSON 数组作为 audit_findings。"
+    "工作二：当 agent_phase=revise 时，你必须根据 audit_findings 中每一项 evidence 和 fix_hint "
+    "只修改 evidence 指向且 fix_hint 要求的指定位置；不得新增、删除、润色或改写其它无关内容。"
+    "如果 evidence 表示审核输出格式异常，或 fix_hint 要求保持原文不变，必须原样返回 current_text。"
+    "修复后系统会再次进入 verify；最多修复 3 轮，达到上限后由程序放行当前正文。"
+    "revise 阶段只输出包含 polished_text 字段的 JSON 对象。不要自动回退到非工具调用模式。"
     "不得要求用户补充信息，不得声称将重新调用 content_generate_agent 或 content_verify_agent，"
     "不得输出工具过程说明。"
 )
@@ -290,6 +294,10 @@ def _parse_draft_output(output: dict[str, Any] | str) -> str:
         raise GenerationAgentProtocolError(
             "content_generate_agent 必须返回包含非空 draft_text 的 JSON 对象"
         )
+    if is_contract_placeholder_text(normalized):
+        raise GenerationAgentProtocolError(
+            "content_generate_agent 返回了占位符 draft_text，必须返回实际采购需求正文"
+        )
     return normalized
 
 
@@ -352,6 +360,12 @@ def _parse_revision_output(
         polished_text = _extract_polished_text_from_messages(output)
     normalized = str(polished_text or "").strip()
     if normalized:
+        if is_contract_placeholder_text(normalized):
+            progress_log.warning(
+                "[content_agent] 修复阶段返回占位符，保留当前正文继续审核: chars=%d",
+                len(current_text),
+            )
+            return current_text
         return normalized
 
     raw_text = _extract_text_from_runner_output(output)
@@ -361,8 +375,20 @@ def _parse_revision_output(
             len(current_text),
         )
         return current_text
+    if is_contract_placeholder_text(raw_text):
+        progress_log.warning(
+            "[content_agent] 修复阶段返回占位符正文，保留当前正文继续审核: chars=%d",
+            len(current_text),
+        )
+        return current_text
     try:
         final_output = parse_content_agent_final_output(raw_text)
+        if is_contract_placeholder_text(final_output.polished_text):
+            progress_log.warning(
+                "[content_agent] 修复阶段 JSON polished_text 是占位符，保留当前正文继续审核: chars=%d",
+                len(current_text),
+            )
+            return current_text
         return final_output.polished_text
     except GenerationAgentProtocolError:
         revision_text = _coerce_plain_revision_text(raw_text)
@@ -396,6 +422,8 @@ def _is_revision_summary_text(raw_text: str) -> bool:
 def _coerce_plain_revision_text(raw_text: str) -> str | None:
     text = str(raw_text or "").strip()
     if not text:
+        return None
+    if is_contract_placeholder_text(text):
         return None
     meta_markers = (
         "content_generate_agent",
@@ -524,17 +552,20 @@ def _build_phase_payload(
     if phase == "generate":
         instruction = (
             "当前 agent_phase=generate。你必须调用 task 工具，subagent_type 必须为 "
-            "content_generate_agent。不要自己生成正文，不要解释 content_generate_agent 的结果。"
-            "content_generate_agent 返回后，只输出严格 JSON 对象："
-            "{\"draft_text\":\"<content_generate_agent 返回的完整正文>\"}。"
-            "draft_text 必须逐字使用 content_generate_agent 的正文，不得改写，不得要求用户补充信息。"
+            "content_generate_agent。task 描述中要明确：根据当前 generation_style 选择对应生成风格提示词，"
+            "并基于项目基础信息、参考内容和技术参数生成采购需求初稿。"
+            "不要自己生成正文，不要解释 content_generate_agent 的结果。"
+            "content_generate_agent 返回后，以工具返回的 draft_text 为初稿真源；"
+            "不要在最终消息中复制、复述、改写或重新包装完整 draft_text。"
+            "如果必须输出最终消息，只输出简短确认：content_generate_agent 已完成，draft_text 以工具返回为准。"
         )
     elif phase == "verify":
         instruction = (
             "当前 agent_phase=verify。你必须调用 task 工具，subagent_type 必须为 "
             "content_verify_agent，审核 current_text。不要自己审核，不要解释 content_verify_agent 的结果。"
-            "content_verify_agent 返回后，只输出严格 JSON 数组，数组内容必须逐项来自 content_verify_agent。"
-            "没有问题时输出 []。"
+            "content_verify_agent 返回后，以工具返回的 JSON 数组作为 audit_findings，"
+            "数组内容必须逐项来自 content_verify_agent；不要新增、删除或改写审核意见。"
+            "如果必须输出最终消息，只输出简短确认：content_verify_agent 已完成，audit_findings 以工具返回为准。"
         )
     else:
         instruction = (
@@ -545,7 +576,10 @@ def _build_phase_payload(
             "如果某项 fix_hint 表示无需修改，应忽略该项，不要为了该项改写正文。"
             "如果 audit_findings 表示审核输出格式异常，或 fix_hint 要求保持原文不变，"
             "必须原样返回 current_text。不得要求用户补充信息。"
-            "输出示例：{\"polished_text\":\"<完整采购需求正文>\"}。"
+            "本阶段属于 content_agent 的第二个工作：按 content_verify_agent 的 JSON 修改提示，"
+            "只修复指定 evidence 对应位置；修复后会再次交给 content_verify_agent 审核，最多修复 3 轮。"
+            "输出 JSON 对象时，polished_text 的值必须直接填入修复后的完整正文；"
+            "禁止输出把“完整正文”或“采购需求正文”放进尖括号里的占位文字。"
         )
     phase_payload["messages"] = [{"role": "user", "content": instruction}]
     return phase_payload
