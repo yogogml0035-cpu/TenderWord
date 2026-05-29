@@ -279,7 +279,7 @@ describe('useChatSSE', () => {
     expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
   });
 
-  it('keeps agent_step draft, audit, revision cards after done', async () => {
+  it('keeps node-based agent_step stream cards after done', async () => {
     mockGetTaskStatus.mockResolvedValue({
       ...createRunningTaskStatus(),
       progress: {
@@ -308,7 +308,7 @@ describe('useChatSSE', () => {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
           task_kind: 'generate',
-          step_type: 'draft',
+          step_type: 'stream',
           round: 0,
           node: 'content_generate_agent',
           is_complete: true,
@@ -323,10 +323,11 @@ describe('useChatSSE', () => {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
           task_kind: 'generate',
-          step_type: 'audit',
-          round: 0,
+          step_type: 'stream',
+          round: 1,
           node: 'content_verify_agent',
           is_complete: true,
+          content: '[{"evidence":"交付地点缺失","fix_hint":"补充交付地点"}]',
           findings: [
             {
               evidence: '交付地点缺失',
@@ -342,9 +343,9 @@ describe('useChatSSE', () => {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
           task_kind: 'generate',
-          step_type: 'revision',
+          step_type: 'stream',
           round: 1,
-          node: 'content_agent',
+          node: 'content_revise_agent',
           is_complete: true,
           content: '第一轮 AI 修改内容',
           findings: [
@@ -362,10 +363,11 @@ describe('useChatSSE', () => {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
           task_kind: 'generate',
-          step_type: 'audit',
-          round: 1,
+          step_type: 'stream',
+          round: 2,
           node: 'content_verify_agent',
           is_complete: true,
+          content: '[{"evidence":"验收标准不明确","fix_hint":"补充验收标准"}]',
           findings: [
             {
               evidence: '验收标准不明确',
@@ -393,31 +395,25 @@ describe('useChatSSE', () => {
     const agentMessages = conversation?.messages.filter(
       (message) => message.metadata?.messageKind === 'agent-step'
     );
-    const auditMessages = agentMessages?.filter(
-      (message) => message.metadata?.agentStepType === 'audit'
+    const auditMessage = agentMessages?.find(
+      (message) => message.metadata?.agentStepNode === 'content_verify_agent'
     );
     const revisionMessage = agentMessages?.find(
-      (message) => message.metadata?.agentStepType === 'revision'
+      (message) => message.metadata?.agentStepNode === 'content_revise_agent'
     );
     const group = getTaskGroup();
 
-    expect(agentMessages).toHaveLength(4);
+    expect(agentMessages).toHaveLength(3);
     expect(agentMessages?.map((message) => message.metadata?.agentStepNode)).toEqual([
       'content_generate_agent',
       'content_verify_agent',
-      'content_agent',
-      'content_verify_agent',
+      'content_revise_agent',
     ]);
     expect(agentMessages?.[0].content).toBe('智能体初稿正文');
-    expect(auditMessages?.[0].content).toContain('第 1 轮审核');
-    expect(auditMessages?.[0].content).toContain('evidence: 交付地点缺失');
-    expect(auditMessages?.[0].content).toContain('fix_hint: 补充交付地点');
-    expect(auditMessages?.[0].metadata?.agentStepAuditRounds).toHaveLength(1);
+    expect(auditMessage?.content).toBe('[{"evidence":"验收标准不明确","fix_hint":"补充验收标准"}]');
+    expect(auditMessage?.metadata?.agentStepAuditRounds).toHaveLength(2);
+    expect(auditMessage?.metadata?.agentStepRound).toBe(2);
     expect(revisionMessage?.content).toBe('第一轮 AI 修改内容');
-    expect(auditMessages?.[1].content).toContain('第 2 轮审核');
-    expect(auditMessages?.[1].content).toContain('evidence: 验收标准不明确');
-    expect(auditMessages?.[1].content).toContain('fix_hint: 补充验收标准');
-    expect(auditMessages?.[1].metadata?.agentStepAuditRounds).toHaveLength(1);
     expect(group?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
     expect(group?.contentMessage).toBeUndefined();
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
@@ -462,7 +458,7 @@ describe('useChatSSE', () => {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
           task_kind: 'generate',
-          step_type: 'draft',
+          step_type: 'stream',
           round: 0,
           node: 'content_generate_agent',
           is_complete: true,
@@ -1011,7 +1007,7 @@ describe('useChatSSE', () => {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
           task_kind: 'generate',
-          step_type: 'draft',
+          step_type: 'stream',
           round: 0,
           node: 'content_generate_agent',
           is_complete: true,

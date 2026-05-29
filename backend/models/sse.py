@@ -148,7 +148,7 @@ class AgentStepEventData(BaseModel):
 
     task_id: str = Field(..., description="任务ID")
     task_kind: TaskKind = Field(default=TaskKind.GENERATE, description="任务类别")
-    step_type: Literal["draft", "audit", "revision"] = Field(..., description="步骤类型")
+    step_type: str = Field(..., description="步骤/流类型")
     round: int = Field(..., ge=0, description="审核/修复轮次")
     node: str = Field(..., description="当前智能体节点")
     is_complete: bool = Field(default=False, description="是否完成")

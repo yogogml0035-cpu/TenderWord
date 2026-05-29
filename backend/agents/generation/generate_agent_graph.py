@@ -7,6 +7,13 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
 from backend.agents.generation.types import GenerationAgentState
+from backend.agents.generation.workspace import (
+    DRAFT_PATH,
+    context_value,
+    get_workspace_backend,
+    read_generation_context,
+    write_backend_text,
+)
 from backend.models import AgentStepEventData
 from backend.prompts.generate_prompt import render_generate_prompt
 from backend.prompts.types import GeneratePromptInput
@@ -44,11 +51,7 @@ def _context_value(
     key: str,
     default: Any = "",
 ) -> Any:
-    context = _get_generation_context(config)
-    value = context.get(key)
-    if value is not None:
-        return value
-    return state.get(key, default)
+    return context_value(state, config, key, default)
 
 
 def _emit_agent_step_snapshot(
@@ -65,7 +68,7 @@ def _emit_agent_step_snapshot(
     event_data = AgentStepEventData(
         task_id=task_id,
         task_kind=task_kind,
-        step_type="draft",
+        step_type="stream",
         round=0,
         node=GENERATE_AGENT_NODE,
         content=content,
@@ -137,13 +140,16 @@ def _generate_draft(
     state: GenerationAgentState,
     config: RunnableConfig | None = None,
 ) -> GenerationAgentState:
-    tender_type = str(_context_value(state, config, "tender_type", "xjcg") or "xjcg")
+    backend = get_workspace_backend(config)
+    file_context: dict[str, Any] = read_generation_context(backend) if backend else {}
+    merged_state: GenerationAgentState = {**file_context, **state}
+    tender_type = str(_context_value(merged_state, config, "tender_type", "xjcg") or "xjcg")
     generation_style = str(
-        _context_value(state, config, "generation_style", "template") or "template"
+        _context_value(merged_state, config, "generation_style", "template") or "template"
     )
-    project_info = str(_context_value(state, config, "project_info", "") or "")
-    tender_params = _context_value(state, config, "tender_params")
-    origin_tender_params = _context_value(state, config, "origin_tender_params")
+    project_info = str(_context_value(merged_state, config, "project_info", "") or "")
+    tender_params = _context_value(merged_state, config, "tender_params")
+    origin_tender_params = _context_value(merged_state, config, "origin_tender_params")
     log_summary = (
         "[content_generate_agent] prompt 输入摘要: tender_type=%s, generation_style=%s, "
         "project_info_chars=%d, origin_tender_params_chars=%d, tender_params_chars=%d"
@@ -176,7 +182,7 @@ def _generate_draft(
     content = _run_async(
         stream_llm_completion(
             model_provider=str(
-                _context_value(state, config, "model_provider", "deepseek") or "deepseek"
+                _context_value(merged_state, config, "model_provider", "deepseek") or "deepseek"
             ),
             system_prompt=rendered_prompt.system_prompt,
             user_prompt=rendered_prompt.user_prompt,
@@ -184,11 +190,62 @@ def _generate_draft(
             check_interval=3.0,
         )
     )
+    if backend:
+        write_backend_text(backend, DRAFT_PATH, str(content))
+        _emit_agent_step_snapshot(config, str(content))
+        _emit_agent_step_complete(config, str(content))
+        structured_response = {"draft_path": DRAFT_PATH}
+    else:
+        structured_response = {"draft_text": str(content)}
     return {
-        "messages": [AIMessage(content=str(content))],
-        "structured_response": {"draft_text": str(content)},
-        "draft_text": str(content),
+        "messages": [AIMessage(content=f"已生成初稿并写入 {DRAFT_PATH}")],
+        "structured_response": structured_response,
+        **({"draft_path": DRAFT_PATH} if backend else {"draft_text": str(content)}),
     }
+
+
+def _emit_agent_step_complete(
+    config: dict[str, Any] | None,
+    content: str,
+) -> None:
+    configurable = _get_configurable(config)
+    task_id = str(configurable.get("task_id") or "").strip()
+    if not task_id:
+        return
+
+    task_kind = str(configurable.get("task_kind") or "generate")
+    callback = configurable.get("agent_step_callback")
+    event_data = AgentStepEventData(
+        task_id=task_id,
+        task_kind=task_kind,
+        step_type="stream",
+        round=0,
+        node=GENERATE_AGENT_NODE,
+        content=content,
+        is_complete=True,
+    )
+    if callable(callback):
+        try:
+            callback(event_data)
+        except Exception as exc:
+            progress_log.debug(f"警告: content_generate_agent 完成回调失败: {exc}")
+
+    try:
+        from backend.core.sse_manager import sse_manager
+
+        if getattr(sse_manager, "_loop", None) is not None:
+            sse_manager.send_agent_step_threadsafe(
+                task_id=task_id,
+                task_kind=task_kind,
+                step_type=event_data.step_type,
+                round=event_data.round,
+                node=event_data.node,
+                content=event_data.content,
+                findings=[],
+                is_complete=True,
+            )
+    except Exception:
+        pass
 
 
 def create_generate_agent_graph():

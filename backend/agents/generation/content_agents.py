@@ -1,56 +1,70 @@
 from __future__ import annotations
 
-import json
 import inspect
+import json
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from pathlib import Path
+from typing import Any, Callable, Iterable, Protocol
 
 from deepagents import CompiledSubAgent, create_deep_agent
+from deepagents.backends.protocol import BackendProtocol
 
 from backend.agents.generation.generate_agent_graph import create_generate_agent_graph
 from backend.agents.generation.json_utils import (
     coerce_audit_findings,
     is_contract_placeholder_text,
-    parse_content_agent_final_output,
 )
 from backend.agents.generation.model_factory import create_generation_chat_model
+from backend.agents.generation.revise_agent_graph import create_revise_agent_graph
 from backend.agents.generation.types import (
     AgentStepPayload,
     AuditFinding,
+    ContentAgentFinalOutput,
     GenerationAgentProtocolError,
     GenerationAgentToolCallUnsupportedError,
-    ContentAgentFinalOutput,
 )
 from backend.agents.generation.verify_agent_graph import create_verify_agent_graph
+from backend.agents.generation.workspace import (
+    DRAFT_PATH,
+    FINAL_POLISHED_TEXT_PATH,
+    GENERATION_CONTEXT_PATH,
+    MAX_REVISION_ROUNDS,
+    audit_path,
+    create_workspace_backend,
+    create_workspace_dir,
+    read_backend_text,
+    read_backend_text_optional,
+    validate_round_protocol,
+    write_generation_context,
+)
 from backend.states import TenderGraphStateBase
 from backend.util.log_util.progress_log import progress_log
-from backend.util.log_util.prompt_log import (
-    get_content_agent_log_dir,
-    get_verify_agent_log_dir,
-    write_agent_log_artifact,
-)
 
 
-MAX_REVISION_ROUNDS = 3
 CONTENT_AGENT_NODE = "content_agent"
 GENERATE_AGENT_NODE = "content_generate_agent"
 VERIFY_AGENT_NODE = "content_verify_agent"
-CONTENT_AGENT_SYSTEM_PROMPT = (
-    "你是采购需求生成主智能体（content_agent），只负责按 agent_phase 编排两个工作。"
-    "工作一：当 agent_phase=generate 时，必须通过 task 工具唤醒 content_generate_agent 生成初稿。"
-    "content_generate_agent 会根据 generation_style 读取对应生成风格的提示词；"
-    "工具返回的 draft_text 就是初稿真源，你不得复制、复述、改写或重新包装完整正文。"
-    "随后当 agent_phase=verify 时，必须通过 task 工具唤醒 content_verify_agent 审核当前正文，"
-    "并以其返回的 JSON 数组作为 audit_findings。"
-    "工作二：当 agent_phase=revise 时，你必须根据 audit_findings 中每一项 evidence 和 fix_hint "
-    "只修改 evidence 指向且 fix_hint 要求的指定位置；不得新增、删除、润色或改写其它无关内容。"
-    "如果 evidence 表示审核输出格式异常，或 fix_hint 要求保持原文不变，必须原样返回 current_text。"
-    "修复后系统会再次进入 verify；最多修复 3 轮，达到上限后由程序放行当前正文。"
-    "revise 阶段只输出包含 polished_text 字段的 JSON 对象。不要自动回退到非工具调用模式。"
-    "不得要求用户补充信息，不得声称将重新调用 content_generate_agent 或 content_verify_agent，"
-    "不得输出工具过程说明。"
-)
+REVISE_AGENT_NODE = "content_revise_agent"
+
+CONTENT_AGENT_SYSTEM_PROMPT = f"""
+你是采购需求生成主智能体（content_agent），负责自主调度初次生成流程。
+
+你必须使用 TodoList 维护计划，并通过 task 工具调用这些子智能体：
+- content_generate_agent：读取 {GENERATION_CONTEXT_PATH}，写 {DRAFT_PATH}。
+- content_verify_agent：读取上下文和当前正文文件，写 /audits/round-N.json。
+- content_revise_agent：读取当前正文和 /audits/round-N.json，只修复审核指定位置，写 /revisions/round-N.md。
+
+硬性协议：
+1. 所有输入、草稿、审核、修订和最终正文都只通过文件系统路径交接，不要把完整正文塞进 task 描述。
+2. 先调用 content_generate_agent 生成初稿，再调用 content_verify_agent 审核；审核最多 3 轮，路径只能是 /audits/round-1.json 到 /audits/round-3.json。
+3. 如果审核 JSON 是 []，不要调用 content_revise_agent，直接把当前正文完整写入 {FINAL_POLISHED_TEXT_PATH}。
+4. 如果审核 JSON 非空，调用 content_revise_agent 写 /revisions/round-N.md，然后继续下一轮审核；修订路径只能是 /revisions/round-1.md 到 /revisions/round-3.md。
+5. 只有 content_agent 可以写 {FINAL_POLISHED_TEXT_PATH}；子智能体不得写 final。
+6. 第 3 轮修订后必须停止返修，并把当前修订正文写入 {FINAL_POLISHED_TEXT_PATH}。
+7. 最终回复只输出简短验收说明，不要重复最终正文，不要展示隐藏 reasoning。
+8. 不得要求用户补充信息，不得自动回退 workflow。
+""".strip()
 
 
 class GenerationAgentRunner(Protocol):
@@ -66,6 +80,7 @@ class GenerationAgentRunner(Protocol):
 class GenerationSubAgents:
     content_generate_agent: CompiledSubAgent
     content_verify_agent: CompiledSubAgent
+    content_revise_agent: CompiledSubAgent
 
 
 _fake_runner: GenerationAgentRunner | None = None
@@ -79,109 +94,43 @@ def set_generation_agent_runner(runner: GenerationAgentRunner | None) -> None:
 def build_generation_subagents() -> GenerationSubAgents:
     content_generate_agent: CompiledSubAgent = {
         "name": GENERATE_AGENT_NODE,
-        "description": "生成采购需求初稿。",
+        "description": f"读取 {GENERATION_CONTEXT_PATH} 并生成采购需求初稿，写入 {DRAFT_PATH}。",
         "runnable": create_generate_agent_graph(),
     }
     content_verify_agent: CompiledSubAgent = {
         "name": VERIFY_AGENT_NODE,
-        "description": "审核采购需求正文，并返回 JSON 数组；数组元素必须包含 evidence 和 fix_hint 字段。",
+        "description": "读取上下文和当前正文文件，按审核规则输出原始 JSON 数组并写入 /audits/round-N.json。",
         "runnable": create_verify_agent_graph(),
+    }
+    content_revise_agent: CompiledSubAgent = {
+        "name": REVISE_AGENT_NODE,
+        "description": "读取当前正文与 /audits/round-N.json，只修复审核指定位置并写入 /revisions/round-N.md。",
+        "runnable": create_revise_agent_graph(),
     }
     return GenerationSubAgents(
         content_generate_agent=content_generate_agent,
         content_verify_agent=content_verify_agent,
+        content_revise_agent=content_revise_agent,
     )
 
 
-def create_content_agent_runner(model_provider: str) -> GenerationAgentRunner:
+def create_content_agent_runner(
+    model_provider: str,
+    backend: BackendProtocol | None = None,
+) -> GenerationAgentRunner:
     subagents = build_generation_subagents()
     return create_deep_agent(
         model=create_generation_chat_model(model_provider),
         tools=[],
         system_prompt=CONTENT_AGENT_SYSTEM_PROMPT,
-        subagents=[subagents.content_generate_agent, subagents.content_verify_agent],
+        subagents=[
+            subagents.content_generate_agent,
+            subagents.content_verify_agent,
+            subagents.content_revise_agent,
+        ],
+        backend=backend,
         name=CONTENT_AGENT_NODE,
     )
-
-
-def _jsonable(value: Any) -> Any:
-    if hasattr(value, "model_dump"):
-        return value.model_dump()
-    if isinstance(value, list):
-        return [_jsonable(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _jsonable(item) for key, item in value.items()}
-    return value
-
-
-def _extract_structured_response(output: dict[str, Any] | str) -> Any:
-    if not isinstance(output, dict):
-        return None
-    return output.get("structured_response")
-
-
-def _extract_message_text(output: dict[str, Any] | str) -> str:
-    if not isinstance(output, dict):
-        return str(output or "")
-    messages = output.get("messages")
-    if isinstance(messages, list):
-        for message in reversed(messages):
-            content = getattr(message, "content", None)
-            if content is None and isinstance(message, dict):
-                content = message.get("content")
-            if str(content or "").strip():
-                return str(content)
-    return ""
-
-
-def _iter_message_texts(output: dict[str, Any] | str):
-    if not isinstance(output, dict):
-        return
-    messages = output.get("messages")
-    if not isinstance(messages, list):
-        return
-    for message in reversed(messages):
-        content = getattr(message, "content", None)
-        if content is None and isinstance(message, dict):
-            content = message.get("content")
-        yield from _iter_text_parts(content)
-
-
-def _iter_text_parts(content: Any):
-    if content is None:
-        return
-    if isinstance(content, str):
-        normalized = content.strip()
-        if normalized:
-            yield normalized
-        return
-    if isinstance(content, list):
-        for item in content:
-            yield from _iter_text_parts(item)
-        return
-    if isinstance(content, dict):
-        for key in ("text", "content"):
-            value = content.get(key)
-            if value:
-                yield from _iter_text_parts(value)
-                return
-        return
-    normalized = str(content or "").strip()
-    if normalized:
-        yield normalized
-
-
-def _extract_text_from_runner_output(output: dict[str, Any] | str) -> str:
-    if isinstance(output, str):
-        return output
-    structured = _extract_structured_response(output)
-    if structured is not None:
-        if isinstance(structured, ContentAgentFinalOutput):
-            return structured.model_dump_json(ensure_ascii=False)
-        if hasattr(structured, "model_dump_json"):
-            return structured.model_dump_json()
-        return json.dumps(_jsonable(structured), ensure_ascii=False)
-    return _extract_message_text(output)
 
 
 def _is_tool_call_unsupported(error: BaseException) -> bool:
@@ -197,23 +146,6 @@ def _is_tool_call_unsupported(error: BaseException) -> bool:
         "not support tools",
     )
     return any(marker in message for marker in markers)
-
-
-def _invoke_runner(
-    runner: GenerationAgentRunner,
-    payload: dict[str, Any],
-    config: dict[str, Any] | None = None,
-) -> dict[str, Any] | str:
-    try:
-        if config is not None and _runner_accepts_config(runner):
-            return runner.invoke(payload, config)
-        return runner.invoke(payload)
-    except Exception as exc:
-        if _is_tool_call_unsupported(exc):
-            raise GenerationAgentToolCallUnsupportedError(
-                "当前模型或 DeepAgents runner 不支持工具调用，无法使用智能体生成"
-            ) from exc
-        raise
 
 
 def _runner_accepts_config(runner: GenerationAgentRunner) -> bool:
@@ -235,272 +167,88 @@ def _runner_accepts_config(runner: GenerationAgentRunner) -> bool:
     return positional_count >= 2
 
 
-def _coerce_draft_text(value: Any) -> str | None:
-    if isinstance(value, dict):
-        return value.get("draft_text") or value.get("polished_text")
-    if isinstance(value, ContentAgentFinalOutput):
-        return value.polished_text
-    if hasattr(value, "draft_text"):
-        return getattr(value, "draft_text")
-    return None
-
-
-def _coerce_polished_text(value: Any) -> str | None:
-    if isinstance(value, dict):
-        return value.get("polished_text")
-    if isinstance(value, ContentAgentFinalOutput):
-        return value.polished_text
-    if hasattr(value, "polished_text"):
-        return getattr(value, "polished_text")
-    return None
-
-
-def _coerce_from_json_text(raw_text: str, coerce: Callable[[Any], str | None]) -> str | None:
+def _invoke_runner(
+    runner: GenerationAgentRunner,
+    payload: dict[str, Any],
+    config: dict[str, Any],
+) -> dict[str, Any] | str:
     try:
-        return coerce(json.loads(raw_text))
-    except json.JSONDecodeError:
-        return None
-
-
-def _extract_draft_text_from_messages(output: dict[str, Any] | str) -> str | None:
-    for text in _iter_message_texts(output) or []:
-        draft_text = _coerce_from_json_text(text, _coerce_draft_text)
-        if draft_text:
-            return draft_text
-    return None
-
-def _extract_polished_text_from_messages(output: dict[str, Any] | str) -> str | None:
-    for text in _iter_message_texts(output) or []:
-        try:
-            final_output = parse_content_agent_final_output(text)
-            return final_output.polished_text
-        except GenerationAgentProtocolError:
-            polished_text = _coerce_from_json_text(text, _coerce_polished_text)
-            if polished_text:
-                return polished_text
-    return None
-
-
-def _parse_draft_output(output: dict[str, Any] | str) -> str:
-    draft_text = _coerce_draft_text(_extract_structured_response(output))
-    if draft_text is None:
-        draft_text = _coerce_draft_text(output)
-    if draft_text is None:
-        draft_text = _extract_draft_text_from_messages(output)
-    if draft_text is None and isinstance(output, str):
-        draft_text = _coerce_from_json_text(output, _coerce_draft_text)
-    normalized = str(draft_text or "").strip()
-    if not normalized:
-        raise GenerationAgentProtocolError(
-            "content_generate_agent 必须返回包含非空 draft_text 的 JSON 对象"
-        )
-    if is_contract_placeholder_text(normalized):
-        raise GenerationAgentProtocolError(
-            "content_generate_agent 返回了占位符 draft_text，必须返回实际采购需求正文"
-        )
-    return normalized
-
-
-def _extract_verify_findings_from_messages(output: dict[str, Any] | str) -> list[AuditFinding] | None:
-    for text in _iter_message_texts(output) or []:
-        try:
-            return _filter_actionable_findings(
-                coerce_audit_findings(text, fallback_on_error=False)
-            )
-        except GenerationAgentProtocolError:
-            continue
-    return None
-
-
-def _is_noop_audit_finding(finding: AuditFinding) -> bool:
-    evidence = finding.evidence.strip()
-    fix_hint = finding.fix_hint.strip()
-    return (
-        "无需修改" in fix_hint
-        or "不需要修改" in fix_hint
-        or "不视为问题" in evidence
-        or "不算问题" in evidence
-    )
-
-
-def _filter_actionable_findings(findings: list[AuditFinding]) -> list[AuditFinding]:
-    return [finding for finding in findings if not _is_noop_audit_finding(finding)]
-
-
-def _parse_verify_output(output: dict[str, Any] | str) -> list[AuditFinding]:
-    if isinstance(output, dict):
-        for key in ("findings", "audit_findings"):
-            if key in output:
-                return _filter_actionable_findings(
-                    coerce_audit_findings(
-                        json.dumps(output.get(key), ensure_ascii=False, default=str),
-                        fallback_on_error=True,
-                    )
-                )
-    message_findings = _extract_verify_findings_from_messages(output)
-    if message_findings is not None:
-        return message_findings
-    return _filter_actionable_findings(
-        coerce_audit_findings(
-            _extract_text_from_runner_output(output),
-            fallback_on_error=True,
-        )
-    )
-
-
-def _parse_revision_output(
-    output: dict[str, Any] | str,
-    *,
-    current_text: str,
-) -> str:
-    polished_text = _coerce_polished_text(_extract_structured_response(output))
-    if polished_text is None:
-        polished_text = _coerce_polished_text(output)
-    if polished_text is None:
-        polished_text = _extract_polished_text_from_messages(output)
-    normalized = str(polished_text or "").strip()
-    if normalized:
-        if is_contract_placeholder_text(normalized):
-            progress_log.warning(
-                "[content_agent] 修复阶段返回占位符，保留当前正文继续审核: chars=%d",
-                len(current_text),
-            )
-            return current_text
-        return normalized
-
-    raw_text = _extract_text_from_runner_output(output)
-    if not str(raw_text or "").strip():
-        progress_log.warning(
-            "[content_agent] 修复阶段未返回正文，保留当前正文继续审核: chars=%d",
-            len(current_text),
-        )
-        return current_text
-    if is_contract_placeholder_text(raw_text):
-        progress_log.warning(
-            "[content_agent] 修复阶段返回占位符正文，保留当前正文继续审核: chars=%d",
-            len(current_text),
-        )
-        return current_text
-    try:
-        final_output = parse_content_agent_final_output(raw_text)
-        if is_contract_placeholder_text(final_output.polished_text):
-            progress_log.warning(
-                "[content_agent] 修复阶段 JSON polished_text 是占位符，保留当前正文继续审核: chars=%d",
-                len(current_text),
-            )
-            return current_text
-        return final_output.polished_text
-    except GenerationAgentProtocolError:
-        revision_text = _coerce_plain_revision_text(raw_text)
-        if revision_text:
-            return revision_text
-        if _is_revision_summary_text(raw_text):
-            progress_log.warning(
-                "[content_agent] 修复阶段只返回摘要，保留当前正文继续审核: chars=%d",
-                len(current_text),
-            )
-            return current_text
+        if _runner_accepts_config(runner):
+            return runner.invoke(payload, config)
+        return runner.invoke(payload)
+    except Exception as exc:
+        if _is_tool_call_unsupported(exc):
+            raise GenerationAgentToolCallUnsupportedError(
+                "当前模型或 DeepAgents runner 不支持工具调用，无法使用智能体生成"
+            ) from exc
         raise
 
-def _is_revision_summary_text(raw_text: str) -> bool:
-    text = str(raw_text or "").strip()
-    if not text:
-        return False
-    meta_markers = (
-        "已根据审核意见",
-        "修复完成",
-        "已完成修复",
-        "已修正",
-        "已修改",
-        "修订完成",
-        "处理完成",
-        "返回的结果显示",
-        "content_agent 已",
-    )
-    return any(marker in text for marker in meta_markers)
 
-def _coerce_plain_revision_text(raw_text: str) -> str | None:
-    text = str(raw_text or "").strip()
-    if not text:
-        return None
-    if is_contract_placeholder_text(text):
-        return None
-    meta_markers = (
-        "content_generate_agent",
-        "content_verify_agent",
-        "已根据审核意见",
-        "修复完成",
-        "修订完成",
-        "返回的结果显示",
-    )
-    if any(marker in text for marker in meta_markers):
-        return None
-    document_markers = (
-        "项目概述",
-        "采购需求",
-        "技术要求",
-        "技术规格",
-        "招标内容",
-    )
-    has_section_heading = bool(
-        re.search(r"(^|\n)\s*(?:[一二三四五六七八九十]+、|\d+[、.．])", text)
-    )
-    if "\n" in text and (has_section_heading or any(marker in text for marker in document_markers)):
-        return text
-    return None
+def _runner_supports_stream(runner: GenerationAgentRunner) -> bool:
+    return callable(getattr(runner, "stream", None))
 
 
-def _findings_request_current_text_only(findings: list[AuditFinding]) -> bool:
-    if not findings:
-        return False
-    return all(
-        "审核智能体输出格式异常" in finding.evidence
-        and "保持 current_text 原文不变" in finding.fix_hint
-        for finding in findings
-    )
-
-
-def _emit_step(
-    callback: Callable[[AgentStepPayload], None] | None,
-    payload: AgentStepPayload,
-) -> None:
-    if callback is None:
-        return
-    callback(payload)
+def _stream_runner(
+    runner: GenerationAgentRunner,
+    payload: dict[str, Any],
+    config: dict[str, Any],
+) -> Iterable[Any]:
+    try:
+        return runner.stream(  # type: ignore[attr-defined]
+            payload,
+            config,
+            stream_mode=["messages", "updates", "tasks"],
+            subgraphs=True,
+        )
+    except TypeError:
+        return runner.stream(payload, config)  # type: ignore[attr-defined]
+    except Exception as exc:
+        if _is_tool_call_unsupported(exc):
+            raise GenerationAgentToolCallUnsupportedError(
+                "当前模型或 DeepAgents runner 不支持工具调用，无法使用智能体生成"
+            ) from exc
+        raise
 
 
 def _build_generation_payload(
     state: TenderGraphStateBase,
     model_provider: str,
+    task_id: str,
 ) -> dict[str, Any]:
     return {
+        "task_id": task_id,
         "tender_type": str(state.get("tender_type") or "xjcg"),
         "generation_style": str(state.get("generation_style") or "template"),
         "project_info": str(state.get("project_content") or ""),
-        "tender_params": state.get("tender_params"),
         "origin_tender_params": state.get("origin_tender_params"),
+        "tender_params": state.get("tender_params"),
         "model_provider": model_provider,
     }
 
 
-def _build_generation_context_config(
+def _build_runner_config(
     config: dict[str, Any] | None,
+    *,
     payload: dict[str, Any],
+    backend: BackendProtocol,
+    workspace_dir: Path,
 ) -> dict[str, Any]:
     next_config = {**config} if isinstance(config, dict) else {}
     existing_configurable = next_config.get("configurable", {})
     configurable = (
         {**existing_configurable} if isinstance(existing_configurable, dict) else {}
     )
-    configurable["generation_agent_context"] = {
-        key: value
-        for key, value in payload.items()
-        if key not in {"messages", "agent_phase", "audit_findings"}
-        and not (key == "current_text" and not str(value or "").strip())
-        and not (key == "revision_round" and int(value or 0) == 0)
-    }
+    configurable["generation_agent_context"] = dict(payload)
+    configurable["content_agent_backend"] = backend
+    configurable["content_agent_workspace_dir"] = str(workspace_dir)
     next_config["configurable"] = configurable
     return next_config
+
+
+def _get_task_id(state: TenderGraphStateBase, configurable: dict[str, Any]) -> str:
+    return str(
+        configurable.get("task_id") or state.get("task_id") or "content-agent"
+    ).strip()
 
 
 def _text_length(value: Any) -> int:
@@ -533,107 +281,257 @@ def _log_generation_input_summary(
     progress_log.debug(message, *args)
 
 
-def _build_phase_payload(
-    base_payload: dict[str, Any],
-    phase: str,
-    *,
-    current_text: str = "",
-    findings: list[AuditFinding] | None = None,
-    revision_round: int = 0,
-) -> dict[str, Any]:
-    audit_findings = [finding.model_dump() for finding in findings or []]
-    phase_payload = {
-        **base_payload,
-        "agent_phase": phase,
-        "current_text": current_text,
-        "audit_findings": audit_findings,
-        "revision_round": revision_round,
-    }
-    if phase == "generate":
-        instruction = (
-            "当前 agent_phase=generate。你必须调用 task 工具，subagent_type 必须为 "
-            "content_generate_agent。task 描述中要明确：根据当前 generation_style 选择对应生成风格提示词，"
-            "并基于项目基础信息、参考内容和技术参数生成采购需求初稿。"
-            "不要自己生成正文，不要解释 content_generate_agent 的结果。"
-            "content_generate_agent 返回后，以工具返回的 draft_text 为初稿真源；"
-            "不要在最终消息中复制、复述、改写或重新包装完整 draft_text。"
-            "如果必须输出最终消息，只输出简短确认：content_generate_agent 已完成，draft_text 以工具返回为准。"
-        )
-    elif phase == "verify":
-        instruction = (
-            "当前 agent_phase=verify。你必须调用 task 工具，subagent_type 必须为 "
-            "content_verify_agent，审核 current_text。不要自己审核，不要解释 content_verify_agent 的结果。"
-            "content_verify_agent 返回后，以工具返回的 JSON 数组作为 audit_findings，"
-            "数组内容必须逐项来自 content_verify_agent；不要新增、删除或改写审核意见。"
-            "如果必须输出最终消息，只输出简短确认：content_verify_agent 已完成，audit_findings 以工具返回为准。"
-        )
-    else:
-        instruction = (
-            "当前 agent_phase=revise。禁止调用 content_generate_agent 或 content_verify_agent。"
-            "根据 audit_findings 修复 current_text，并只输出 JSON 对象 polished_text。"
-            "只能修改 audit_findings[].evidence 指向且 fix_hint 要求的内容，其它内容逐字保留。"
-            "polished_text 必须是修复后的完整正文，不是摘要；禁止输出解释、Markdown 或代码块。"
-            "如果某项 fix_hint 表示无需修改，应忽略该项，不要为了该项改写正文。"
-            "如果 audit_findings 表示审核输出格式异常，或 fix_hint 要求保持原文不变，"
-            "必须原样返回 current_text。不得要求用户补充信息。"
-            "本阶段属于 content_agent 的第二个工作：按 content_verify_agent 的 JSON 修改提示，"
-            "只修复指定 evidence 对应位置；修复后会再次交给 content_verify_agent 审核，最多修复 3 轮。"
-            "输出 JSON 对象时，polished_text 的值必须直接填入修复后的完整正文；"
-            "禁止输出把“完整正文”或“采购需求正文”放进尖括号里的占位文字。"
-        )
-    phase_payload["messages"] = [{"role": "user", "content": instruction}]
-    return phase_payload
+def _build_main_agent_user_prompt() -> str:
+    return f"""
+请按文件协议自主完成采购需求生成。
+
+固定路径：
+- 输入上下文：{GENERATION_CONTEXT_PATH}
+- 初稿：{DRAFT_PATH}
+- 审核：/audits/round-1.json 至 /audits/round-3.json
+- 修订：/revisions/round-1.md 至 /revisions/round-3.md
+- 最终正文：{FINAL_POLISHED_TEXT_PATH}
+
+执行要求：
+1. 先用 TodoList 写出 generate、verify、revise/final 的计划。
+2. 调用 content_generate_agent 生成初稿。
+3. 第 N 轮审核时调用 content_verify_agent，让它读取当前正文文件并写 /audits/round-N.json。
+4. 如果审核 JSON 为 []，由你读取当前正文并写入 {FINAL_POLISHED_TEXT_PATH}。
+5. 如果审核 JSON 非空且 N <= 3，调用 content_revise_agent 写 /revisions/round-N.md；然后继续下一轮审核。
+6. 第 3 轮修订后直接把 /revisions/round-3.md 写入 {FINAL_POLISHED_TEXT_PATH}。
+7. 最终只回复简短验收说明，不重复正文。
+""".strip()
 
 
-def _get_task_id(state: TenderGraphStateBase, configurable: dict[str, Any]) -> str:
-    return str(
-        configurable.get("task_id") or state.get("task_id") or "content-agent"
-    ).strip()
-
-
-def _write_content_agent_artifact(
-    *,
-    task_id: str,
-    phase: str,
-    content: str,
-    round_index: int | None = None,
+def _emit_step(
+    callback: Callable[[AgentStepPayload], None] | None,
+    payload: AgentStepPayload,
 ) -> None:
-    try:
-        write_agent_log_artifact(
-            get_content_agent_log_dir(__file__),
-            prefix="content",
-            task_id=task_id,
-            phase=phase,
-            round_index=round_index,
-            content=content,
-        )
-    except Exception as exc:
-        progress_log.debug(f"警告: 保存 content_agent 日志失败: {exc}")
+    if callback is None:
+        return
+    callback(payload)
 
 
-def _write_verify_artifact(
+def _infer_round_from_text(value: Any) -> int:
+    match = re.search(r"round-(\d+)", str(value or ""))
+    if not match:
+        return 0
+    return int(match.group(1))
+
+
+def _message_text(message: Any) -> str:
+    if message is None:
+        return ""
+    if hasattr(message, "text"):
+        try:
+            return str(message.text or "")
+        except Exception:
+            pass
+    content = getattr(message, "content", None)
+    if content is None and isinstance(message, dict):
+        content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+        return "".join(parts)
+    return str(content or "")
+
+
+def _normalize_stream_chunk(chunk: Any) -> tuple[tuple[str, ...], str, Any] | None:
+    if isinstance(chunk, tuple):
+        if len(chunk) == 3 and isinstance(chunk[0], tuple) and isinstance(chunk[1], str):
+            return chunk
+        if len(chunk) == 2 and isinstance(chunk[0], str):
+            return (), chunk[0], chunk[1]
+    return None
+
+
+def _emit_task_start_if_needed(
     *,
-    task_id: str,
-    current_text: str,
-    findings: list[AuditFinding],
-    round_index: int,
+    data: Any,
+    step_callback: Callable[[AgentStepPayload], None] | None,
 ) -> None:
-    try:
-        payload = {
-            "round": round_index,
-            "current_text": current_text,
-            "findings": [finding.model_dump(mode="json") for finding in findings],
-        }
-        write_agent_log_artifact(
-            get_verify_agent_log_dir(__file__),
-            prefix="verify",
-            task_id=task_id,
-            phase="audit_findings",
-            round_index=round_index,
-            content=json.dumps(payload, ensure_ascii=False, indent=2),
+    if not isinstance(data, dict) or data.get("name") != "tools" or "result" in data:
+        return
+    for tool_call in _iter_task_tool_calls(data):
+        tool_name = str(tool_call.get("name") or "").strip()
+        if tool_name != "task":
+            continue
+        args = tool_call.get("args") or tool_call.get("input") or {}
+        subagent_type = str(args.get("subagent_type") or "").strip()
+        if subagent_type not in {GENERATE_AGENT_NODE, VERIFY_AGENT_NODE, REVISE_AGENT_NODE}:
+            continue
+        description = str(args.get("description") or "")
+        _emit_step(
+            step_callback,
+            AgentStepPayload(
+                step_type="stream",
+                round=_infer_round_from_text(description),
+                node=subagent_type,
+                content="",
+                is_complete=False,
+            ),
         )
+
+
+def _iter_task_tool_calls(data: dict[str, Any]) -> Iterable[dict[str, Any]]:
+    direct_tool_calls = data.get("tool_calls")
+    if isinstance(direct_tool_calls, list):
+        for tool_call in direct_tool_calls:
+            if isinstance(tool_call, dict):
+                yield tool_call
+
+    input_value = data.get("input")
+    if isinstance(input_value, list):
+        for item in input_value:
+            if isinstance(item, dict):
+                yield item
+        return
+
+    if not isinstance(input_value, dict):
+        return
+
+    input_tool_calls = input_value.get("tool_calls")
+    if isinstance(input_tool_calls, list):
+        for tool_call in input_tool_calls:
+            if isinstance(tool_call, dict):
+                yield tool_call
+
+    messages = input_value.get("messages")
+    if not isinstance(messages, list):
+        return
+    for message in messages:
+        message_tool_calls = getattr(message, "tool_calls", None)
+        if message_tool_calls is None and isinstance(message, dict):
+            message_tool_calls = message.get("tool_calls")
+        if not isinstance(message_tool_calls, list):
+            continue
+        for tool_call in message_tool_calls:
+            if isinstance(tool_call, dict):
+                yield tool_call
+
+
+def _emit_main_message_if_needed(
+    *,
+    namespace: tuple[str, ...],
+    data: Any,
+    step_callback: Callable[[AgentStepPayload], None] | None,
+) -> None:
+    if not isinstance(data, tuple) or len(data) != 2:
+        return
+    message, metadata = data
+    if namespace:
+        return
+    if isinstance(metadata, dict) and metadata.get("langgraph_node") != "model":
+        return
+    text = _message_text(message)
+    if not text.strip():
+        return
+    _emit_step(
+        step_callback,
+        AgentStepPayload(
+            step_type="stream",
+            round=0,
+            node=CONTENT_AGENT_NODE,
+            content=text,
+            is_complete=False,
+        ),
+    )
+
+
+def _relay_runner_stream(
+    runner: GenerationAgentRunner,
+    payload: dict[str, Any],
+    config: dict[str, Any],
+    step_callback: Callable[[AgentStepPayload], None] | None,
+) -> None:
+    if not _runner_supports_stream(runner):
+        _invoke_runner(runner, payload, config)
+        return
+
+    try:
+        for chunk in _stream_runner(runner, payload, config):
+            if isinstance(chunk, AgentStepPayload):
+                _emit_step(step_callback, chunk)
+                continue
+            if isinstance(chunk, dict) and {"node", "content"}.issubset(chunk):
+                _emit_step(
+                    step_callback,
+                    AgentStepPayload(
+                        step_type=str(chunk.get("step_type") or "stream"),
+                        round=int(chunk.get("round") or 0),
+                        node=str(chunk.get("node") or CONTENT_AGENT_NODE),
+                        content=str(chunk.get("content") or ""),
+                        findings=coerce_audit_findings(
+                            json.dumps(chunk.get("findings") or [], ensure_ascii=False),
+                            fallback_on_error=True,
+                        ) if chunk.get("findings") else [],
+                        is_complete=bool(chunk.get("is_complete")),
+                    ),
+                )
+                continue
+
+            normalized = _normalize_stream_chunk(chunk)
+            if normalized is None:
+                continue
+            namespace, mode, data = normalized
+            if mode == "tasks":
+                _emit_task_start_if_needed(data=data, step_callback=step_callback)
+            elif mode == "messages":
+                _emit_main_message_if_needed(
+                    namespace=namespace,
+                    data=data,
+                    step_callback=step_callback,
+                )
     except Exception as exc:
-        progress_log.debug(f"警告: 保存 content_verify_agent 日志失败: {exc}")
+        if _is_tool_call_unsupported(exc):
+            raise GenerationAgentToolCallUnsupportedError(
+                "当前模型或 DeepAgents runner 不支持工具调用，无法使用智能体生成"
+            ) from exc
+        raise
+
+
+def _validate_final_text(final_text: str) -> str:
+    normalized = str(final_text or "").strip()
+    if (
+        not normalized
+        or normalized == "System reminder: File exists but has empty contents"
+    ):
+        raise GenerationAgentProtocolError(f"{FINAL_POLISHED_TEXT_PATH} 为空")
+    if is_contract_placeholder_text(normalized):
+        raise GenerationAgentProtocolError(f"{FINAL_POLISHED_TEXT_PATH} 是占位符，不是实际正文")
+    return normalized
+
+
+def _read_optional_audit_findings(backend: BackendProtocol) -> tuple[list[AuditFinding], int]:
+    last_findings: list[AuditFinding] = []
+    last_round = 0
+    for round_index in range(1, MAX_REVISION_ROUNDS + 1):
+        try:
+            raw = read_backend_text(backend, audit_path(round_index))
+        except GenerationAgentProtocolError:
+            continue
+        last_round = round_index
+        last_findings = coerce_audit_findings(raw, fallback_on_error=True)
+    return last_findings, last_round
+
+
+def _count_revision_rounds(workspace_dir: Path) -> int:
+    rounds = []
+    revisions_dir = workspace_dir / "revisions"
+    if not revisions_dir.exists():
+        return 0
+    for path in revisions_dir.iterdir():
+        match = re.fullmatch(r"round-(\d+)\.md", path.name)
+        if match:
+            rounds.append(int(match.group(1)))
+    return max(rounds, default=0)
 
 
 def run_content_agent_generation(
@@ -646,173 +544,73 @@ def run_content_agent_generation(
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     model_provider = str(configurable.get("model_provider") or "deepseek")
     task_id = _get_task_id(state, configurable)
-    selected_runner = runner or _fake_runner or create_content_agent_runner(model_provider)
-    base_payload = _build_generation_payload(state, model_provider)
+    workspace_dir = create_workspace_dir(task_id)
+    backend = create_workspace_backend(workspace_dir)
+    base_payload = _build_generation_payload(state, model_provider, task_id)
+    runner_config = _build_runner_config(
+        config,
+        payload=base_payload,
+        backend=backend,
+        workspace_dir=workspace_dir,
+    )
+    selected_runner = runner or _fake_runner or create_content_agent_runner(
+        model_provider,
+        backend=backend,
+    )
+
+    write_generation_context(backend, base_payload)
 
     progress_log.info(
-        "[content_agent] 开始智能体生成: task_id=%s, tender_type=%s, model=%s",
+        "[content_agent] 开始智能体生成: task_id=%s, tender_type=%s, model=%s, workspace=%s",
         task_id,
         base_payload["tender_type"],
         model_provider,
+        workspace_dir,
     )
     _log_generation_input_summary(
         task_id=task_id,
         generation_style=str(base_payload.get("generation_style") or "template"),
         payload=base_payload,
     )
-    draft_text = _parse_draft_output(
-        _invoke_runner(
-            selected_runner,
-            (generate_payload := _build_phase_payload(base_payload, "generate")),
-            _build_generation_context_config(config, generate_payload),
-        )
+
+    _relay_runner_stream(
+        selected_runner,
+        {"messages": [{"role": "user", "content": _build_main_agent_user_prompt()}]},
+        runner_config,
+        step_callback,
     )
-    _write_content_agent_artifact(
-        task_id=task_id,
-        phase="draft",
-        round_index=0,
-        content=draft_text,
-    )
-    progress_log.info(
-        "[content_agent] 初稿生成完成: task_id=%s, chars=%d",
-        task_id,
-        len(draft_text),
-    )
+
+    validate_round_protocol(workspace_dir)
+    raw_final_text = read_backend_text_optional(backend, FINAL_POLISHED_TEXT_PATH)
+    if raw_final_text is None:
+        raw_final_text = read_backend_text(backend, FINAL_POLISHED_TEXT_PATH)
+    final_text = _validate_final_text(raw_final_text)
+    findings, last_audit_round = _read_optional_audit_findings(backend)
+    revision_rounds = _count_revision_rounds(workspace_dir)
+
     _emit_step(
         step_callback,
         AgentStepPayload(
-            step_type="draft",
-            round=0,
-            node=GENERATE_AGENT_NODE,
-            content=draft_text,
+            step_type="stream",
+            round=max(last_audit_round, revision_rounds),
+            node=CONTENT_AGENT_NODE,
+            content="智能体生成完成，最终正文已通过文件协议写入 final。",
             is_complete=True,
         ),
     )
-
-    current_text = draft_text
-    revision_rounds = 0
-    last_findings: list[AuditFinding] = []
-
-    while True:
-        findings = _parse_verify_output(
-            _invoke_runner(
-                selected_runner,
-                (verify_payload := _build_phase_payload(
-                    base_payload,
-                    "verify",
-                    current_text=current_text,
-                    revision_round=revision_rounds,
-                )),
-                _build_generation_context_config(config, verify_payload),
-            )
-        )
-        last_findings = findings
-        _write_verify_artifact(
-            task_id=task_id,
-            current_text=current_text,
-            findings=findings,
-            round_index=revision_rounds,
-        )
-        progress_log.info(
-            "[content_agent] 第 %d 轮审核完成: task_id=%s, findings=%d",
-            revision_rounds,
-            task_id,
-            len(findings),
-        )
-        _emit_step(
-            step_callback,
-            AgentStepPayload(
-                step_type="audit",
-                round=revision_rounds,
-                node=VERIFY_AGENT_NODE,
-                findings=findings,
-                is_complete=True,
-            ),
-        )
-        if not findings:
-            _write_content_agent_artifact(
-                task_id=task_id,
-                phase="final",
-                round_index=revision_rounds,
-                content=current_text,
-            )
-            progress_log.info(
-                "[content_agent] 审核无问题，智能体生成完成: task_id=%s, revision_rounds=%d",
-                task_id,
-                revision_rounds,
-            )
-            return ContentAgentFinalOutput(
-                polished_text=current_text,
-                audit_findings=[],
-                revision_rounds=revision_rounds,
-            )
-
-        revision_rounds += 1
-        progress_log.info(
-            "[content_agent] 开始第 %d 轮修复: task_id=%s, findings=%d",
-            revision_rounds,
-            task_id,
-            len(findings),
-        )
-        if _findings_request_current_text_only(findings):
-            next_text = current_text
-        else:
-            next_text = _parse_revision_output(
-                _invoke_runner(
-                    selected_runner,
-                    (revision_payload := _build_phase_payload(
-                        base_payload,
-                        "revise",
-                        current_text=current_text,
-                        findings=findings,
-                        revision_round=revision_rounds,
-                    )),
-                    _build_generation_context_config(config, revision_payload),
-                ),
-                current_text=current_text,
-            )
-        current_text = next_text
-        _write_content_agent_artifact(
-            task_id=task_id,
-            phase="revision",
-            round_index=revision_rounds,
-            content=current_text,
-        )
-        progress_log.info(
-            "[content_agent] 第 %d 轮修复完成: task_id=%s, chars=%d",
-            revision_rounds,
-            task_id,
-            len(current_text),
-        )
-        _emit_step(
-            step_callback,
-            AgentStepPayload(
-                step_type="revision",
-                round=revision_rounds,
-                node=CONTENT_AGENT_NODE,
-                content=current_text,
-                findings=findings,
-                is_complete=True,
-            ),
-        )
-        if revision_rounds >= MAX_REVISION_ROUNDS:
-            _write_content_agent_artifact(
-                task_id=task_id,
-                phase="final",
-                round_index=revision_rounds,
-                content=current_text,
-            )
-            progress_log.info(
-                "[content_agent] 达到最大修复轮次后放行: task_id=%s, revision_rounds=%d, remaining_findings=%d",
-                task_id,
-                revision_rounds,
-                len(last_findings),
-            )
-            return ContentAgentFinalOutput(
-                polished_text=current_text,
-                audit_findings=last_findings,
-                revision_rounds=revision_rounds,
-            )
+    progress_log.info(
+        "[content_agent] 智能体生成完成: task_id=%s, revision_rounds=%d, final_chars=%d, workspace=%s",
+        task_id,
+        revision_rounds,
+        len(final_text),
+        workspace_dir,
+    )
+    return ContentAgentFinalOutput(
+        polished_text=final_text,
+        audit_findings=findings,
+        revision_rounds=revision_rounds,
+        workspace_dir=workspace_dir,
+    )
 
 
 def parse_verify_agent_output(raw_content: str) -> list[AuditFinding]:
@@ -824,6 +622,7 @@ __all__ = [
     "CONTENT_AGENT_NODE",
     "CONTENT_AGENT_SYSTEM_PROMPT",
     "MAX_REVISION_ROUNDS",
+    "REVISE_AGENT_NODE",
     "VERIFY_AGENT_NODE",
     "GenerationSubAgents",
     "build_generation_subagents",

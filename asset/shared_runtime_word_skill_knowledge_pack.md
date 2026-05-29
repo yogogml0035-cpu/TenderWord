@@ -40,22 +40,18 @@
 ### DeepAgents 初次生成
 
 - 智能体生成入口是公共节点 `backend/nodes/common_word_nodes/content_agent_generate.py`，节点调用 `run_content_agent_generation()` 后只向 graph state 写回标准契约：`polished_text` 与 `generate_polished_done=True`。
-- `backend/agents/generation/content_agents.py` 是 content_agent 编排真源。`content_generate_agent` 与 `content_verify_agent` 通过 `build_generation_subagents()` 包装为 DeepAgents `CompiledSubAgent`，底层 runnable 分别来自已 `compile()` 的 `StateGraph`。
-- DeepAgents subagent 调用拓扑是契约：`content_agent` 必须通过 `task` subagent 调用 `content_generate_agent` 与 `content_verify_agent`，不能把两者绕到 content_agent 编排之外直连。解析层必须优先读取 subagent 的结构化响应、合并回父输出的 `draft_text` / `findings` / `polished_text`，以及 DeepAgents ToolMessage 中的 JSON；`generate` 阶段父 agent 不得复制、复述或重新包装完整 `draft_text`，也不能把 content_agent 对工具结果的自然语言总结误当成正文，缺少非空 `draft_text` 时必须按协议错误失败。
-- DeepAgents compiled subagent 不应依赖父 agent state 自动保留业务字段；`content_generate_agent` 和 `content_verify_agent` 的 `generation_style`、`project_info`、`tender_params`、`origin_tender_params`、`current_text`、`model_provider` 必须通过 `config.configurable.generation_agent_context` 显式传入并在子图入口读取。否则子图只收到 `task.description`，会退化为静态泛化提示词并把三类信息源视为空。
-- 本地开发热重载必须监听 `backend/agents/`。否则修改 `content_agents.py`、`generate_agent_graph.py`、`verify_agent_graph.py` 后，前端仍可能命中旧进程中的 agent 代码；这类现象常表现为 prompt 文件已更新，但 `content_generate_agent` 仍拿不到 `generation_agent_context`。
-- `content_generate_agent` 复用 `backend/prompts/generate_prompt.py` 的 `render_generate_prompt()` 与当前 state/model 配置生成初稿；`content_verify_agent` 必须返回 JSON 数组，每项包含非空 `evidence` 与 `fix_hint`，不得输出“第 N 轮审核”、Markdown、解释或中文字段名。审核输出先做严格解析；失败后按错误类型走本地 JSON 修复 / 低温 JSON repair prompt 重试 / fallback finding，最终给 content_agent 的 `findings` 必须保持合法数组形状。
+- `backend/agents/generation/content_agents.py` 是 DeepAgents 主 runner 真源。生产路径用 `create_deep_agent(..., backend=FilesystemBackend(root_dir=workspace_dir, virtual_mode=True))` 创建单次任务工作区，工作区位于 `backend/prompts_log/content_agent_workspace/{task_id}_{YYYYMMDD-HHMMSS}/`，长期保留完整输入、草稿、审核、修订和最终正文。
+- 工作区虚拟路径是硬协议：`/inputs/generation_context.md`、`/drafts/round-0.md`、`/audits/round-1.json` 至 `/audits/round-3.json`、`/revisions/round-1.md` 至 `/revisions/round-3.md`、`/final/polished_text.md`。`generation_context.md` 是 Markdown，内部 JSON code block 至少包含 `task_id`、`tender_type`、`generation_style`、`project_info`、`origin_tender_params`、`tender_params`、`model_provider`。
+- `content_agent` 是唯一主调度者。它必须用 TodoList 展示计划，通过 task 工具自主调用 `content_generate_agent`、`content_verify_agent`、`content_revise_agent`，最多 3 轮审核 / 修订；只有 `content_agent` 可以写 `/final/polished_text.md`，子 agent 不得写 final。
+- 子 agent 不通过 task prompt 传完整正文，只通过文件读写交接。`content_generate_agent` 读取 `/inputs/generation_context.md`，复用 `backend/prompts/generate_prompt.py` 的 `render_generate_prompt()` 和当前 `generation_style` 写 `/drafts/round-0.md`；`content_verify_agent` 读取上下文和当前正文文件，输出原始 JSON 数组并写 `/audits/round-N.json`；`content_revise_agent` 读取当前正文与对应 audit，只修复 `evidence` / `fix_hint` 指定位置并写 `/revisions/round-N.md`。
 - `content_verify_agent` 的事实真源必须与 `generate_by_template_prompt.py` 保持一致：`project_info` 是项目名称、数量、交付和付款等基础事实；`tender_params` 是技术参数、★/▲指标、包件数量和业务要求的原材料事实真源；`origin_tender_params` 只作章节、编号、表格和语气参考，不得被当成技术参数审计依据。审核必须检查技术参数中 ★/▲ 指标不能缺漏或额外增加，且多包件/多标段原材料不能只生成一个包件。
-- 审核 findings 只允许携带需要修复的问题；模型若输出“无需修改”“不视为问题”这类非问题项，content_agent 编排层应过滤后再进入 revise。revise 阶段如果父 agent 只返回摘要或空输出，不应让任务硬失败；应保留当前正文继续下一轮审核，并依赖最大轮次保护避免无限循环。
+- `content_verify_agent` 必须返回 JSON 数组，每项包含非空 `evidence` 与 `fix_hint`，不得输出“第 N 轮审核”、Markdown、解释或中文字段名。审核输出先做严格解析；失败后按错误类型走本地 JSON 修复 / 低温 JSON repair prompt 重试 / fallback finding，最终写入工作区的 audit 必须保持合法数组形状。
 - Prompt builder 渲染 `project_info`、`origin_tender_params`、`tender_params` 时不得把 Python `None` 字面量塞进模型提示词；缺失值应渲染为空文本，真实是否缺失通过进度日志中的字符数摘要排查。
-- `content_generate_agent` 使用 `stream_llm_completion()` 时要复用 graph config 中的 `llm_stream_callback`，继续产生既有 `llm` snapshot 流；同时可用未完成的 `agent_step` draft snapshot 支撑智能体过程卡流式展示，最终完整 draft 仍由 `run_content_agent_generation()` 统一发完成态 `agent_step`。
-- 智能体生成链路里面向模型的自然语言提示词必须使用中文，包括 content_agent system prompt、subagent description、generate prompt 的章节标题与步骤说明；但 `content_agent`、`content_generate_agent`、`content_verify_agent`、`agent_phase`、`draft_text`、`polished_text`、`current_text`、`audit_findings`、`evidence`、`fix_hint` 等节点名、工具名、状态字段和 JSON 字段属于机器契约，不能为了中文化而改名。
-- content_agent 阶段顺序固定为 `generate -> verify -> revise`。父 agent 的两个工作是：先唤醒 `content_generate_agent` 生成初稿并交给 `content_verify_agent` 输出 JSON 审核意见；再按 `audit_findings[].evidence` 与 `audit_findings[].fix_hint` 对指定位置做最小必要修改。修复阶段不能自行新增、删除、润色或改写其它无关内容。修复后继续审核，最多修复 3 轮；第 3 轮修复完成后直接放行最终 `polished_text`，即使仍有审核意见也不再阻塞后续写回。
-- revise 阶段优先解析 `{"polished_text": "..."}` JSON 合约，并且要扫描 DeepAgents ToolMessage 中的 JSON，不能只看最后一条 content_agent 摘要。若模型只返回纯采购需求正文，可在文本看起来像完整正文（含章节/编号/采购需求类标识）时接收为修复稿；只包含“已根据审核意见完成修复”等过程说明，或只返回尖括号包裹的正文占位符时，不得误写回 Word，应保留当前正文继续下一轮审核；`content_verify_agent` 收到这类占位符正文时必须返回 finding，不能输出空数组。
-- 智能体失败不自动回退 workflow。审核 JSON 格式异常不得硬失败，应收敛成合法 `findings`；修复阶段只有过程摘要时不得硬失败，应保留当前正文继续审核；模型 / DeepAgents runner 不支持工具调用时，任务必须失败并进入既有 `error` 终态。
-- `set_generation_agent_runner()` 是测试用 fake runner 注入点；生产路径默认通过 `create_content_agent_runner()` 构造 DeepAgents runner，并复用 `MODEL_CONFIGS` 与 `settings.get_llm_config()`。
-- content_agent 产物必须可审计落盘：初稿、每轮修复稿和最终稿写入 `backend/prompts_log/content_agent_log/`，每轮 verify 的被审核正文与结构化 `evidence` / `fix_hint` 写入 `backend/prompts_log/verify_log/`。`backend/logs/progress-YYYYMMDD.log` 只记录智能体开始、初稿完成、每轮审核完成、每轮修复开始/完成、无问题放行或达到最大轮次放行等用户可理解进度，不写完整正文。
-- `content_agent` 与 `content_generate_agent` 的运行期日志只记录 `project_info_chars`、`origin_tender_params_chars`、`tender_params_chars` 等摘要，不写完整客户正文；三者全为 0 时应优先检查前端请求文件、`extract_tender_params` 输出、DeepAgents context 透传和服务是否已重载。
+- `content_generate_agent` 使用 `stream_llm_completion()` 时要复用 graph config 中的 `llm_stream_callback`，继续产生既有 `llm` snapshot 流；同时通过 `agent_step` 发送 `node=content_generate_agent` 的流式过程卡。
+- 智能体生成链路里面向模型的自然语言提示词必须使用中文，包括 content_agent system prompt、subagent description、generate / verify / revise prompt 的章节标题与步骤说明；但 `content_agent`、`content_generate_agent`、`content_verify_agent`、`content_revise_agent`、`polished_text`、`evidence`、`fix_hint` 等节点名、工具名、状态字段和 JSON 字段属于机器契约，不能为了中文化而改名。
+- 后端 finalizer 不自动返修、不自动兜底写 final。`/final/polished_text.md` 缺失、为空、是占位符、存在 round 4 或非法 audit / revision 路径、或 Word 写回前校验失败时，任务必须失败并进入既有 `error` 终态；保留 workspace 与 agent 过程卡供用户和排障查看。模型 / DeepAgents runner 不支持工具调用时同样失败，不回退 workflow。
+- `set_generation_agent_runner()` 是测试用 fake runner 注入点；fake runner 必须模拟流式事件和 workspace final 文件。生产路径默认通过 `create_content_agent_runner()` 构造 DeepAgents runner，并复用 `MODEL_CONFIGS` 与 `settings.get_llm_config()`。
+- `content_agent` 与 `content_generate_agent` 的运行期日志只记录 `project_info_chars`、`origin_tender_params_chars`、`tender_params_chars` 等摘要，不写完整客户正文；完整输入和正文以 `backend/prompts_log/content_agent_workspace/` 为审计真源。三者全为 0 时应优先检查前端请求文件、`extract_tender_params` 输出、DeepAgents context 透传和服务是否已重载。
 
 ### Skill 声明
 
@@ -143,8 +139,8 @@
 - `progress_log` 只写用户可理解的进度和状态；排障堆栈、候选打分、淘汰原因、阈值与诊断 marker 留在 `execution_log` 或 debug log。
 - `/api/stream/{task_id}` 是任务 SSE 主入口，支持 `Last-Event-ID` 断线续传。
 - 用户态实时展示依赖 `log`、`llm`、`progress`、`done`、`error`。
-- `agent_step` 是智能体 generate 的用户态 SSE 显式例外，用于展示初稿、审核和修复过程，不替代 `done` / `error` 终态。
-- 后端 `AgentStepEventData` 字段包括 `task_id`、`task_kind`、`step_type`、`round`、`node`、`timestamp`、`is_complete`、可选 `content` 与 `findings`。`audit` 事件携带 findings；`draft` 与 `revision` 事件携带正文快照。
+- `agent_step` 是智能体 generate 的用户态 SSE 显式例外，用于展示主 agent 计划 / 调用决策 / 验收说明，以及 generate / verify / revise 子 agent 原始流，不替代 `done` / `error` 终态。
+- 后端 `AgentStepEventData` 字段包括 `task_id`、`task_kind`、`step_type`、`round`、`node`、`timestamp`、`is_complete`、可选 `content` 与 `findings`。`step_type` 是通用字符串，当前智能体流统一使用 `stream`；前端按 `node` upsert 同一张过程卡。`content_verify_agent` 卡展示原始 JSON streaming，不做后端格式化，也不额外创建文件产物卡。
 - `DocumentService` 在 graph config 中注入 `agent_step_callback`，`content_agent_generate` 同时通过 callback 与 `SSEManager.send_agent_step_threadsafe()` 发送事件；`SSEManager.send_agent_step()` 会进入缓冲，断线续传时可重放。
 - `frontend/hooks/useChatSSE.ts` 负责接收 done metadata；下载卡片是否展示摘要属于 UI 决策，不能影响任务结果透传契约。
 

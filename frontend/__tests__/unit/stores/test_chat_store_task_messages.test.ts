@@ -158,7 +158,7 @@ describe('chatStore task message grouping', () => {
     expect(group?.contentMessage?.content).toBe('节点完成内容');
   });
 
-  it('upserts agent-step draft, audit rounds, and revision cards', () => {
+  it('upserts agent-step cards by node and keeps verify JSON raw', () => {
     act(() => {
       useChatStore.getState().startTask('conv-1', 'task-1', {
         task_kind: 'generate',
@@ -168,7 +168,7 @@ describe('chatStore task message grouping', () => {
         timestamp: new Date().toISOString(),
         task_id: 'task-1',
         task_kind: 'generate',
-        step_type: 'draft',
+        step_type: 'stream',
         round: 0,
         node: 'content_generate_agent',
         is_complete: true,
@@ -179,10 +179,11 @@ describe('chatStore task message grouping', () => {
         timestamp: new Date().toISOString(),
         task_id: 'task-1',
         task_kind: 'generate',
-        step_type: 'audit',
-        round: 0,
+        step_type: 'stream',
+        round: 1,
         node: 'content_verify_agent',
         is_complete: true,
+        content: '[{"evidence":"缺少供货范围","fix_hint":"补充供货范围说明"}]',
         findings: [
           {
             evidence: '缺少供货范围',
@@ -194,9 +195,9 @@ describe('chatStore task message grouping', () => {
         timestamp: new Date().toISOString(),
         task_id: 'task-1',
         task_kind: 'generate',
-        step_type: 'revision',
+        step_type: 'stream',
         round: 1,
-        node: 'content_agent',
+        node: 'content_revise_agent',
         is_complete: true,
         content: '第一轮 AI 修改内容',
         findings: [
@@ -210,10 +211,11 @@ describe('chatStore task message grouping', () => {
         timestamp: new Date().toISOString(),
         task_id: 'task-1',
         task_kind: 'generate',
-        step_type: 'audit',
-        round: 1,
+        step_type: 'stream',
+        round: 2,
         node: 'content_verify_agent',
         is_complete: true,
+        content: '[{"evidence":"质保期未明确","fix_hint":"补充质保期"}]',
         findings: [
           {
             evidence: '质保期未明确',
@@ -228,36 +230,30 @@ describe('chatStore task message grouping', () => {
       (message) => message.metadata?.messageKind === 'agent-step'
     );
     const draftMessage = agentMessages?.find(
-      (message) => message.metadata?.agentStepType === 'draft'
+      (message) => message.metadata?.agentStepNode === 'content_generate_agent'
     );
-    const auditMessages = agentMessages?.filter(
-      (message) => message.metadata?.agentStepType === 'audit'
+    const auditMessage = agentMessages?.find(
+      (message) => message.metadata?.agentStepNode === 'content_verify_agent'
     );
     const revisionMessage = agentMessages?.find(
-      (message) => message.metadata?.agentStepType === 'revision'
+      (message) => message.metadata?.agentStepNode === 'content_revise_agent'
     );
 
-    expect(agentMessages).toHaveLength(4);
+    expect(agentMessages).toHaveLength(3);
     expect(agentMessages?.map((message) => message.metadata?.agentStepNode)).toEqual([
       'content_generate_agent',
       'content_verify_agent',
-      'content_agent',
-      'content_verify_agent',
+      'content_revise_agent',
     ]);
     expect(agentMessages?.[0].content).toBe('智能体初稿');
     expect(draftMessage?.content).toBe('智能体初稿');
     expect(draftMessage?.metadata?.agentStepNode).toBe('content_generate_agent');
-    expect(auditMessages?.[0].content).toContain('第 1 轮审核');
-    expect(auditMessages?.[0].content).toContain('evidence: 缺少供货范围');
-    expect(auditMessages?.[0].content).toContain('fix_hint: 补充供货范围说明');
-    expect(auditMessages?.[0].metadata?.agentStepNode).toBe('content_verify_agent');
-    expect(auditMessages?.[0].metadata?.agentStepAuditRounds).toHaveLength(1);
-    expect(auditMessages?.[1].content).toContain('第 2 轮审核');
-    expect(auditMessages?.[1].content).toContain('evidence: 质保期未明确');
-    expect(auditMessages?.[1].metadata?.agentStepNode).toBe('content_verify_agent');
-    expect(auditMessages?.[1].metadata?.agentStepAuditRounds).toHaveLength(1);
+    expect(auditMessage?.content).toBe('[{"evidence":"质保期未明确","fix_hint":"补充质保期"}]');
+    expect(auditMessage?.metadata?.agentStepNode).toBe('content_verify_agent');
+    expect(auditMessage?.metadata?.agentStepRound).toBe(2);
+    expect(auditMessage?.metadata?.agentStepAuditRounds).toHaveLength(2);
     expect(revisionMessage?.content).toBe('第一轮 AI 修改内容');
-    expect(revisionMessage?.metadata?.agentStepNode).toBe('content_agent');
+    expect(revisionMessage?.metadata?.agentStepNode).toBe('content_revise_agent');
     expect(revisionMessage?.metadata?.agentStepRound).toBe(1);
   });
 
@@ -276,7 +272,7 @@ describe('chatStore task message grouping', () => {
         timestamp: new Date().toISOString(),
         task_id: 'task-1',
         task_kind: 'generate',
-        step_type: 'draft',
+        step_type: 'stream',
         round: 0,
         node: 'content_generate_agent',
         is_complete: true,
@@ -365,7 +361,7 @@ describe('chatStore task message grouping', () => {
         timestamp: new Date().toISOString(),
         task_id: 'task-1',
         task_kind: 'generate',
-        step_type: 'draft',
+        step_type: 'stream',
         round: 0,
         node: 'content_generate_agent',
         is_complete: true,
@@ -376,9 +372,9 @@ describe('chatStore task message grouping', () => {
         timestamp: new Date().toISOString(),
         task_id: 'task-1',
         task_kind: 'generate',
-        step_type: 'revision',
+        step_type: 'stream',
         round: 1,
-        node: 'content_agent',
+        node: 'content_revise_agent',
         is_complete: true,
         content: '修复后的正文',
         findings: [],
@@ -421,7 +417,7 @@ describe('chatStore task message grouping', () => {
         timestamp: new Date().toISOString(),
         task_id: 'task-1',
         task_kind: 'generate',
-        step_type: 'draft',
+        step_type: 'stream',
         round: 0,
         node: 'content_generate_agent',
         is_complete: true,
@@ -472,7 +468,7 @@ describe('chatStore task message grouping', () => {
         timestamp: new Date().toISOString(),
         task_id: 'task-1',
         task_kind: 'generate',
-        step_type: 'draft',
+        step_type: 'stream',
         round: 0,
         node: 'content_generate_agent',
         is_complete: true,

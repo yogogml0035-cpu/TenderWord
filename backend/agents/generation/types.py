@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from pathlib import Path
+from typing import Any, TypedDict
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -30,6 +31,7 @@ class ContentAgentFinalOutput(BaseModel):
     polished_text: str = Field(..., min_length=1)
     audit_findings: list[AuditFinding] = Field(default_factory=list)
     revision_rounds: int = Field(default=0, ge=0)
+    workspace_dir: Path | None = None
 
     @field_validator("polished_text")
     @classmethod
@@ -50,12 +52,19 @@ class GenerationAgentState(TypedDict, total=False):
     origin_tender_params: Any
     model_provider: str
     draft_text: str
+    draft_path: str
     current_text: str
+    current_text_path: str
     findings: list[dict[str, str]]
+    audit_findings: list[dict[str, str]]
+    audit_path: str
+    revision_round: int
+    revision_path: str
+    polished_text: str
 
 
 class AgentStepPayload(BaseModel):
-    step_type: Literal["draft", "audit", "revision"]
+    step_type: str
     round: int = Field(..., ge=0)
     node: str
     content: str | None = None
@@ -66,7 +75,7 @@ class AgentStepPayload(BaseModel):
     def _validate_step_payload(self) -> "AgentStepPayload":
         if self.step_type == "audit" and self.content:
             self.content = self.content.strip()
-        if self.step_type in {"draft", "revision"} and not str(self.content or "").strip():
+        if self.step_type in {"draft", "revision", "final"} and not str(self.content or "").strip():
             raise ValueError(f"{self.step_type} step requires content")
         if self.step_type == "audit" and self.content is None:
             self.content = ""

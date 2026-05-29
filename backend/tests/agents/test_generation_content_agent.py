@@ -1,42 +1,51 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 
 import pytest
 from deepagents import CompiledSubAgent
 
 from backend.agents.generation import (
+    CONTENT_AGENT_SYSTEM_PROMPT,
     GenerationAgentProtocolError,
     GenerationAgentToolCallUnsupportedError,
-    CONTENT_AGENT_SYSTEM_PROMPT,
     build_generation_subagents,
     parse_verify_agent_output,
     run_content_agent_generation,
     set_generation_agent_runner,
 )
 from backend.agents.generation import content_agents as content_agent_module
+from backend.agents.generation import revise_agent_graph as revise_agent_graph_module
 from backend.agents.generation import verify_agent_graph as verify_agent_graph_module
 from backend.agents.generation.model_factory import create_generation_chat_model
+from backend.agents.generation.workspace import (
+    FINAL_POLISHED_TEXT_PATH,
+    GENERATION_CONTEXT_PATH,
+    read_backend_text,
+)
 from backend.prompts.types import GeneratePromptInput, RenderedPrompt
 
 
 @pytest.fixture(autouse=True)
-def _redirect_agent_log_dirs(tmp_path, monkeypatch):
-    content_agent_dir = tmp_path / "content_agent_log"
-    verify_dir = tmp_path / "verify_log"
-    content_agent_dir.mkdir()
-    verify_dir.mkdir()
+def _redirect_content_agent_workspace(tmp_path, monkeypatch) -> Path:
+    workspace_root = tmp_path / "content_agent_workspace"
+    def fake_create_workspace_dir(task_id: str) -> Path:
+        workspace_dir = workspace_root / f"{task_id}_20260529-153000"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        return workspace_dir
+
     monkeypatch.setattr(
-        content_agent_module,
-        "get_content_agent_log_dir",
-        lambda _anchor: content_agent_dir,
+        "backend.agents.generation.workspace.CONTENT_AGENT_WORKSPACE_ROOT",
+        workspace_root,
     )
     monkeypatch.setattr(
         content_agent_module,
-        "get_verify_agent_log_dir",
-        lambda _anchor: verify_dir,
+        "create_workspace_dir",
+        fake_create_workspace_dir,
     )
-    return content_agent_dir, verify_dir
+    return workspace_root
 
 
 class FakeRunner:
@@ -46,88 +55,84 @@ class FakeRunner:
         self.configs: list[dict | None] = []
 
     def invoke(self, payload: dict, config: dict | None = None):
-        index = len(self.payloads)
-        if index >= len(self.outputs):
-            raise AssertionError(f"unexpected runner invocation {index + 1}")
+        raise AssertionError("workspace runner should stream, not invoke")
+
+    def stream(self, payload: dict, config: dict | None = None, **_kwargs):
         self.payloads.append(payload)
         self.configs.append(config)
-        return self.outputs[index]
+        backend = config["configurable"]["content_agent_backend"]
+        for output in self.outputs:
+            if "main" in output:
+                yield {
+                    "node": "content_agent",
+                    "content": output["main"],
+                    "is_complete": bool(output.get("is_complete", False)),
+                }
+            elif "draft" in output:
+                backend.write("/drafts/round-0.md", output["draft"])
+                yield {
+                    "node": "content_generate_agent",
+                    "content": output["draft"],
+                    "is_complete": True,
+                }
+            elif "audit" in output:
+                round_index = output.get("round", 1)
+                content = json.dumps(output["audit"], ensure_ascii=False)
+                backend.write(f"/audits/round-{round_index}.json", content)
+                yield {
+                    "node": "content_verify_agent",
+                    "round": round_index,
+                    "content": content,
+                    "is_complete": True,
+                }
+            elif "revision" in output:
+                round_index = output.get("round", 1)
+                backend.write(f"/revisions/round-{round_index}.md", output["revision"])
+                yield {
+                    "node": "content_revise_agent",
+                    "round": round_index,
+                    "content": output["revision"],
+                    "is_complete": True,
+                }
+            elif "final" in output:
+                backend.write(FINAL_POLISHED_TEXT_PATH, output["final"])
+                if output.get("raw_physical") is not None:
+                    final_path = Path(
+                        config["configurable"]["content_agent_workspace_dir"]
+                    ) / "final" / "polished_text.md"
+                    final_path.parent.mkdir(parents=True, exist_ok=True)
+                    final_path.write_text(output["raw_physical"], encoding="utf-8")
+                yield {
+                    "node": "content_agent",
+                    "content": "final written",
+                    "is_complete": True,
+                }
+
+
+class InvokeOnlyFakeRunner:
+    def __init__(self, callback):
+        self.payloads: list[dict] = []
+        self.configs: list[dict | None] = []
+        self.callback = callback
+
+    def invoke(self, payload: dict, config: dict | None = None):
+        self.payloads.append(payload)
+        self.configs.append(config)
+        self.callback(config["configurable"]["content_agent_backend"])
+        return {"messages": []}
 
 
 class ToolCallUnsupportedRunner:
-    def invoke(self, payload: dict):
+    def invoke(self, payload: dict, config: dict | None = None):
         raise RuntimeError("model does not support tools or tool calls")
 
 
-def _draft_output(text: str) -> dict:
-    return {"structured_response": {"draft_text": text}}
-
-
-def _deepagent_subagent_draft_output(text: str) -> dict:
-    return {
-        "draft_text": text,
-        "messages": [
-            {
-                "content": (
-                    "content_generate_agent 返回的结果显示，已生成初稿。"
-                    f"请参考：{text}"
-                )
-            }
-        ],
-    }
-
-
-def _deepagent_tool_message_draft_output(text: str) -> dict:
-    return {
-        "messages": [
-            {"content": json.dumps({"draft_text": text}, ensure_ascii=False)},
-            {
-                "content": (
-                    "content_generate_agent 返回的结果显示，已生成初稿。"
-                    "请参考工具返回内容。"
-                )
-            },
-        ],
-    }
-
-
-def _audit_output(items: list[dict[str, str]]) -> dict:
-    return {"structured_response": items}
-
-
-def _deepagent_subagent_audit_output(items: list[dict[str, str]]) -> dict:
-    return {
-        "findings": items,
-        "messages": [{"content": "content_verify_agent 返回了结构化审核意见。"}],
-    }
-
-
-def _deepagent_tool_message_audit_output(items: list[dict[str, str]]) -> dict:
-    return {
-        "messages": [
-            {"content": json.dumps(items, ensure_ascii=False)},
-            {"content": "content_verify_agent 返回了结构化审核意见。"},
-        ],
-    }
-
-
-def _revision_output(text: str) -> dict:
-    return {"structured_response": {"polished_text": text}}
-
-
-def _deepagent_subagent_revision_output(text: str) -> dict:
-    return {
-        "polished_text": text,
-        "messages": [{"content": "content_agent 已根据审核意见完成修复。"}],
-    }
-
-def _deepagent_tool_message_revision_output(text: str) -> dict:
-    return {
-        "messages": [
-            {"content": json.dumps({"polished_text": text}, ensure_ascii=False)},
-            {"content": "content_agent 已根据审核意见完成修复。"},
-        ],
-    }
+def _read_generation_context_from_runner(runner: FakeRunner) -> dict:
+    backend = runner.configs[0]["configurable"]["content_agent_backend"]
+    markdown = read_backend_text(backend, GENERATION_CONTEXT_PATH)
+    match = re.search(r"```json\s*(.*?)\s*```", markdown, re.DOTALL)
+    assert match is not None
+    return json.loads(match.group(1))
 
 
 def test_build_generation_subagents_wraps_compiled_state_graphs() -> None:
@@ -135,26 +140,32 @@ def test_build_generation_subagents_wraps_compiled_state_graphs() -> None:
 
     assert isinstance(subagents.content_generate_agent, dict)
     assert isinstance(subagents.content_verify_agent, dict)
+    assert isinstance(subagents.content_revise_agent, dict)
     assert subagents.content_generate_agent["name"] == "content_generate_agent"
     assert subagents.content_verify_agent["name"] == "content_verify_agent"
+    assert subagents.content_revise_agent["name"] == "content_revise_agent"
     assert set(subagents.content_generate_agent) == set(CompiledSubAgent.__annotations__)
     assert set(subagents.content_verify_agent) == set(CompiledSubAgent.__annotations__)
+    assert set(subagents.content_revise_agent) == set(CompiledSubAgent.__annotations__)
     assert hasattr(subagents.content_generate_agent["runnable"], "invoke")
     assert hasattr(subagents.content_verify_agent["runnable"], "invoke")
-    assert subagents.content_generate_agent["description"] == "生成采购需求初稿。"
-    assert "审核采购需求正文" in subagents.content_verify_agent["description"]
+    assert hasattr(subagents.content_revise_agent["runnable"], "invoke")
+    assert "/inputs/generation_context.md" in subagents.content_generate_agent["description"]
+    assert "/audits/round-N.json" in subagents.content_verify_agent["description"]
+    assert "/revisions/round-N.md" in subagents.content_revise_agent["description"]
 
 
-def test_content_prompts_use_chinese_natural_language() -> None:
+def test_content_prompts_use_workspace_file_protocol() -> None:
     subagents = build_generation_subagents()
 
     assert "采购需求生成主智能体" in CONTENT_AGENT_SYSTEM_PROMPT
-    assert "两个工作" in CONTENT_AGENT_SYSTEM_PROMPT
-    assert "generation_style" in CONTENT_AGENT_SYSTEM_PROMPT
-    assert "不得复制、复述、改写或重新包装完整正文" in CONTENT_AGENT_SYSTEM_PROMPT
-    assert "evidence 和 fix_hint" in CONTENT_AGENT_SYSTEM_PROMPT
-    assert "不得新增、删除、润色" in CONTENT_AGENT_SYSTEM_PROMPT
-    assert "最多修复 3 轮" in CONTENT_AGENT_SYSTEM_PROMPT
+    assert "TodoList" in CONTENT_AGENT_SYSTEM_PROMPT
+    assert "content_generate_agent" in CONTENT_AGENT_SYSTEM_PROMPT
+    assert "content_verify_agent" in CONTENT_AGENT_SYSTEM_PROMPT
+    assert "content_revise_agent" in CONTENT_AGENT_SYSTEM_PROMPT
+    assert "/final/polished_text.md" in CONTENT_AGENT_SYSTEM_PROMPT
+    assert "只有 content_agent 可以写" in CONTENT_AGENT_SYSTEM_PROMPT
+    assert "最多 3 轮" in CONTENT_AGENT_SYSTEM_PROMPT
     assert "Generate the first draft" not in subagents.content_generate_agent["description"]
     assert "Audit procurement requirement" not in subagents.content_verify_agent["description"]
 
@@ -296,6 +307,7 @@ def test_content_generate_agent_streams_snapshots_to_existing_callback(monkeypat
     assert all(event.node == "content_generate_agent" for event in agent_steps)
     assert result["structured_response"] == {"draft_text": "部分正文"}
 
+
 def test_content_verify_agent_repairs_missing_fields_with_retry(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
 
@@ -418,6 +430,7 @@ def test_content_verify_agent_repairs_common_json_issues_without_retry(monkeypat
         {"evidence": r"路径 C:\Temp", "fix_hint": "补充路径说明"}
     ]
 
+
 def test_content_verify_agent_falls_back_to_valid_json_after_repair_failure(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
 
@@ -441,6 +454,7 @@ def test_content_verify_agent_falls_back_to_valid_json_after_repair_failure(monk
     assert "保持 current_text 原文不变" in fallback["fix_hint"]
     assert json.loads(result["messages"][-1].content) == result["structured_response"]
 
+
 def test_content_verify_agent_output_is_coerced_to_json_schema() -> None:
     findings = parse_verify_agent_output(
         '[{"evidence": "missing warranty", "fix_hint": "add warranty"}]'
@@ -461,13 +475,96 @@ def test_content_verify_agent_output_is_coerced_to_json_schema() -> None:
     assert "审核智能体输出格式异常" in fallback[0].evidence
 
 
-def test_content_accepts_structured_json_with_non_empty_polished_text() -> None:
+def test_content_verify_agent_streams_raw_json_snapshots(monkeypatch) -> None:
+    agent_steps: list[object] = []
+
+    async def fake_stream_llm_completion(**kwargs):
+        kwargs["callbacks"].on_update('[{"evidence":"缺')
+        kwargs["callbacks"].on_update('[{"evidence":"缺少质保期限","fix_hint":"补充质保期限"}]')
+        return '[{"evidence":"缺少质保期限","fix_hint":"补充质保期限"}]'
+
+    monkeypatch.setattr(
+        verify_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    result = verify_agent_graph_module.create_verify_agent_graph().invoke(
+        {
+            "current_text": "采购需求正文",
+            "model_provider": "deepseek",
+        },
+        {
+            "configurable": {
+                "task_id": "task-agent-verify-stream",
+                "agent_step_callback": agent_steps.append,
+            }
+        },
+    )
+
+    assert result["structured_response"] == [
+        {"evidence": "缺少质保期限", "fix_hint": "补充质保期限"}
+    ]
+    assert [event.content for event in agent_steps] == [
+        '[{"evidence":"缺',
+        '[{"evidence":"缺少质保期限","fix_hint":"补充质保期限"}]',
+    ]
+    assert all(event.node == "content_verify_agent" for event in agent_steps)
+    assert all(event.step_type == "stream" for event in agent_steps)
+    assert all(event.is_complete is False for event in agent_steps)
+
+
+def test_content_revise_agent_streams_revision_snapshots(monkeypatch) -> None:
+    agent_steps: list[object] = []
+
+    async def fake_stream_llm_completion(**kwargs):
+        kwargs["callbacks"].on_update("修订中")
+        kwargs["callbacks"].on_update("修订后的正文")
+        return "修订后的正文"
+
+    monkeypatch.setattr(
+        revise_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    result = revise_agent_graph_module.create_revise_agent_graph().invoke(
+        {
+            "current_text": "原正文",
+            "audit_findings": [{"evidence": "缺少字段", "fix_hint": "补充字段"}],
+            "revision_round": 1,
+            "model_provider": "deepseek",
+        },
+        {
+            "configurable": {
+                "task_id": "task-agent-revise-stream",
+                "agent_step_callback": agent_steps.append,
+            }
+        },
+    )
+
+    assert result["structured_response"] == {"revision_path": "/revisions/round-1.md"}
+    assert result["polished_text"] == "修订后的正文"
+    assert [event.content for event in agent_steps] == [
+        "修订中",
+        "修订后的正文",
+    ]
+    assert all(event.node == "content_revise_agent" for event in agent_steps)
+    assert all(event.step_type == "stream" for event in agent_steps)
+    assert all(event.is_complete is False for event in agent_steps)
+
+
+def test_content_runner_creates_workspace_and_reads_final_file(
+    _redirect_content_agent_workspace,
+) -> None:
     runner = FakeRunner(
         [
-            _draft_output("draft text"),
-            _audit_output([{"evidence": "missing warranty", "fix_hint": "add it"}]),
-            _revision_output("final text"),
-            _audit_output([]),
+            {"main": "计划：生成、审核、验收"},
+            {"draft": "draft text"},
+            {"audit": [{"evidence": "missing warranty", "fix_hint": "add it"}], "round": 1},
+            {"revision": "revised text", "round": 1},
+            {"audit": [], "round": 2},
+            {"final": "final text"},
         ]
     )
     events = []
@@ -480,435 +577,108 @@ def test_content_accepts_structured_json_with_non_empty_polished_text() -> None:
             "tender_params": "params",
             "origin_tender_params": "origin",
         },
-        {"configurable": {"model_provider": "deepseek"}},
+        {"configurable": {"model_provider": "deepseek", "task_id": "task-agent-42"}},
         runner=runner,
         step_callback=events.append,
     )
 
+    workspace_dir = result.workspace_dir
+    assert workspace_dir == _redirect_content_agent_workspace / "task-agent-42_20260529-153000"
+    assert (workspace_dir / "inputs" / "generation_context.md").exists()
+    assert (workspace_dir / "drafts" / "round-0.md").read_text(encoding="utf-8") == "draft text"
+    assert (workspace_dir / "audits" / "round-1.json").exists()
+    assert (workspace_dir / "revisions" / "round-1.md").read_text(encoding="utf-8") == "revised text"
+    assert (workspace_dir / "final" / "polished_text.md").read_text(encoding="utf-8") == "final text"
     assert result.polished_text == "final text"
     assert result.audit_findings == []
     assert result.revision_rounds == 1
-    assert [payload["agent_phase"] for payload in runner.payloads] == [
-        "generate",
-        "verify",
-        "revise",
-        "verify",
+    assert [event.node for event in events] == [
+        "content_agent",
+        "content_generate_agent",
+        "content_verify_agent",
+        "content_revise_agent",
+        "content_verify_agent",
+        "content_agent",
+        "content_agent",
     ]
-    assert runner.payloads[0]["project_info"] == "project"
-    assert runner.payloads[1]["current_text"] == "draft text"
-    assert runner.payloads[2]["audit_findings"] == [
-        {"evidence": "missing warranty", "fix_hint": "add it"}
-    ]
-    assert runner.payloads[3]["current_text"] == "final text"
-    assert [event.step_type for event in events] == [
-        "draft",
-        "audit",
-        "revision",
-        "audit",
-    ]
-    assert [event.round for event in events] == [0, 0, 1, 1]
-    assert events[2].content == "final text"
-    assert events[2].is_complete is True
+    assert all(event.step_type == "stream" for event in events)
 
 
-def test_content_passes_generation_context_to_deepagents_subgraphs() -> None:
-    runner = FakeRunner([_draft_output("draft text"), _audit_output([])])
+def test_content_runner_writes_complete_generation_context() -> None:
+    runner = FakeRunner([{"draft": "draft text"}, {"audit": [], "round": 1}, {"final": "draft text"}])
 
     result = run_content_agent_generation(
         {
             "tender_type": "gngk_hw_zc",
             "generation_style": "param",
             "project_content": "project",
-            "tender_params": "params",
+            "tender_params": {"name": "params"},
             "origin_tender_params": "origin",
         },
         {"configurable": {"model_provider": "qwen", "task_id": "task-agent-context"}},
         runner=runner,
     )
 
-    assert result.polished_text == "draft text"
-    generate_context = runner.configs[0]["configurable"]["generation_agent_context"]
-    verify_context = runner.configs[1]["configurable"]["generation_agent_context"]
-    generate_instruction = runner.payloads[0]["messages"][0]["content"]
-    assert generate_context == {
+    context = _read_generation_context_from_runner(runner)
+    assert context == {
+        "task_id": "task-agent-context",
         "tender_type": "gngk_hw_zc",
         "generation_style": "param",
         "project_info": "project",
-        "tender_params": "params",
         "origin_tender_params": "origin",
+        "tender_params": {"name": "params"},
         "model_provider": "qwen",
     }
-    assert verify_context == {
-        **generate_context,
-        "current_text": "draft text",
-    }
-    assert "根据当前 generation_style 选择对应生成风格提示词" in generate_instruction
-    assert "不要在最终消息中复制、复述、改写或重新包装完整 draft_text" in generate_instruction
-    assert '{"draft_text":"<content_generate_agent 返回的完整正文>"}' not in generate_instruction
-    assert runner.configs[0]["configurable"]["task_id"] == "task-agent-context"
+    assert result.polished_text == "draft text"
+    assert result.workspace_dir.name == "task-agent-context_20260529-153000"
+    assert runner.payloads[0]["messages"][0]["content"].startswith("请按文件协议自主完成采购需求生成")
+    assert runner.configs[0]["configurable"]["generation_agent_context"] == context
 
 
-def test_content_prefers_subagent_state_over_content_agent_summary_text() -> None:
-    runner = FakeRunner(
-        [
-            _deepagent_subagent_draft_output("真正的 content_generate_agent 初稿正文"),
-            _deepagent_subagent_audit_output(
-                [{"evidence": "缺少验收标准", "fix_hint": "补充验收标准"}]
-            ),
-            _deepagent_subagent_revision_output("content_agent 修改后的正文"),
-            _deepagent_subagent_audit_output([]),
-        ]
-    )
-    events = []
+def test_content_runner_fails_when_final_file_missing() -> None:
+    runner = FakeRunner([{"draft": "draft text"}, {"audit": [], "round": 1}])
 
-    result = run_content_agent_generation({}, runner=runner, step_callback=events.append)
-
-    assert result.polished_text == "content_agent 修改后的正文"
-    assert events[0].node == "content_generate_agent"
-    assert events[0].content == "真正的 content_generate_agent 初稿正文"
-    assert events[1].node == "content_verify_agent"
-    assert events[1].findings[0].evidence == "缺少验收标准"
-    assert events[2].node == "content_agent"
-    assert events[2].content == "content_agent 修改后的正文"
-    assert "真正的 content_generate_agent 初稿正文" in runner.payloads[1]["current_text"]
-
-
-def test_content_reads_draft_and_audit_from_deepagent_tool_messages() -> None:
-    runner = FakeRunner(
-        [
-            _deepagent_tool_message_draft_output("ToolMessage 中的 content_generate_agent 初稿"),
-            _deepagent_tool_message_audit_output(
-                [{"evidence": "缺少付款方式", "fix_hint": "补充付款方式"}]
-            ),
-            _revision_output("content_agent 根据意见修改后的正文"),
-            _deepagent_tool_message_audit_output([]),
-        ]
-    )
-    events = []
-
-    result = run_content_agent_generation({}, runner=runner, step_callback=events.append)
-
-    assert result.polished_text == "content_agent 根据意见修改后的正文"
-    assert events[0].node == "content_generate_agent"
-    assert events[0].content == "ToolMessage 中的 content_generate_agent 初稿"
-    assert events[1].node == "content_verify_agent"
-    assert events[1].findings[0].evidence == "缺少付款方式"
-    assert runner.payloads[1]["current_text"] == "ToolMessage 中的 content_generate_agent 初稿"
-
-def test_content_reads_revision_from_deepagent_tool_message_before_summary() -> None:
-    runner = FakeRunner(
-        [
-            _draft_output("draft text"),
-            _audit_output([{"evidence": "缺少付款方式", "fix_hint": "补充付款方式"}]),
-            _deepagent_tool_message_revision_output("ToolMessage 中的修复正文"),
-            _audit_output([]),
-        ]
-    )
-    events = []
-
-    result = run_content_agent_generation({}, runner=runner, step_callback=events.append)
-
-    assert result.polished_text == "ToolMessage 中的修复正文"
-    assert events[2].node == "content_agent"
-    assert events[2].content == "ToolMessage 中的修复正文"
-    assert runner.payloads[3]["current_text"] == "ToolMessage 中的修复正文"
-
-
-def test_content_rejects_plain_generate_summary_as_draft() -> None:
-    runner = FakeRunner(
-        [
-            {
-                "messages": [
-                    {
-                        "content": (
-                            "content_generate_agent 返回的结果显示，由于没有提供项目基础信息，"
-                            "无法生成具体的采购需求内容。请提供上述信息，我将重新调用 content_generate_agent。"
-                        )
-                    }
-                ]
-            }
-        ]
-    )
-
-    with pytest.raises(GenerationAgentProtocolError, match="draft_text"):
+    with pytest.raises(GenerationAgentProtocolError, match="/final/polished_text.md"):
         run_content_agent_generation({}, runner=runner)
 
 
-def test_content_preserves_current_text_when_verify_json_fallback_requests_it() -> None:
-    runner = FakeRunner(
-        [
-            _draft_output("draft text"),
-            "not json",
-            _audit_output([]),
-        ]
-    )
-    events = []
+def test_content_runner_fails_when_final_file_empty() -> None:
+    runner = FakeRunner([{"final": "non-empty", "raw_physical": "   "}])
 
-    result = run_content_agent_generation({}, runner=runner, step_callback=events.append)
-
-    assert result.polished_text == "draft text"
-    assert [payload["agent_phase"] for payload in runner.payloads] == [
-        "generate",
-        "verify",
-        "verify",
-    ]
-    assert [event.step_type for event in events] == ["draft", "audit", "revision", "audit"]
-    assert events[2].node == "content_agent"
-    assert events[2].content == "draft text"
-
-
-def test_content_accepts_plain_document_text_from_revision() -> None:
-    revised_text = "一、项目概述\n1、项目名称：细胞自动计数仪\n\n二、技术要求\n1、细胞直径测量范围。"
-    runner = FakeRunner(
-        [
-            _draft_output("draft text"),
-            _audit_output([{"evidence": "项目名称错误", "fix_hint": "修正项目名称"}]),
-            revised_text,
-            _audit_output([]),
-        ]
-    )
-
-    result = run_content_agent_generation({}, runner=runner)
-
-    assert result.polished_text == revised_text
-    assert result.revision_rounds == 1
-
-
-def test_content_preserves_current_text_when_revision_returns_only_summary() -> None:
-    runner = FakeRunner(
-        [
-            _draft_output("draft text"),
-            _audit_output([{"evidence": "项目名称错误", "fix_hint": "修正项目名称"}]),
-            "已根据审核意见完成修复。",
-            _audit_output([]),
-        ]
-    )
-    events = []
-
-    result = run_content_agent_generation({}, runner=runner, step_callback=events.append)
-
-    assert result.polished_text == "draft text"
-    assert [payload["agent_phase"] for payload in runner.payloads] == [
-        "generate",
-        "verify",
-        "revise",
-        "verify",
-    ]
-    assert runner.payloads[3]["current_text"] == "draft text"
-    assert events[2].content == "draft text"
-
-
-def test_content_preserves_current_text_when_revision_returns_placeholder() -> None:
-    runner = FakeRunner(
-        [
-            _draft_output("draft text"),
-            _audit_output([{"evidence": "项目名称错误", "fix_hint": "修正项目名称"}]),
-            _revision_output("<完整采购需求正文>"),
-            _audit_output([]),
-        ]
-    )
-    events = []
-
-    result = run_content_agent_generation({}, runner=runner, step_callback=events.append)
-
-    revision_instruction = runner.payloads[2]["messages"][0]["content"]
-    assert result.polished_text == "draft text"
-    assert [payload["agent_phase"] for payload in runner.payloads] == [
-        "generate",
-        "verify",
-        "revise",
-        "verify",
-    ]
-    assert runner.payloads[3]["current_text"] == "draft text"
-    assert events[2].content == "draft text"
-    assert "<完整采购需求正文>" not in revision_instruction
-    assert "尖括号" in revision_instruction
-
-
-def test_content_preserves_current_text_when_revision_returns_empty_output() -> None:
-    runner = FakeRunner(
-        [
-            _draft_output("draft text"),
-            _audit_output([{"evidence": "项目名称错误", "fix_hint": "修正项目名称"}]),
-            "",
-            _audit_output([]),
-        ]
-    )
-
-    result = run_content_agent_generation({}, runner=runner)
-
-    assert result.polished_text == "draft text"
-    assert [payload["agent_phase"] for payload in runner.payloads] == [
-        "generate",
-        "verify",
-        "revise",
-        "verify",
-    ]
-    assert runner.payloads[3]["current_text"] == "draft text"
-
-def test_content_filters_noop_audit_findings_before_revision() -> None:
-    runner = FakeRunner(
-        [
-            _draft_output("draft text"),
-            _audit_output(
-                [
-                    {
-                        "evidence": "正文缺少质保期限",
-                        "fix_hint": "补充质保期限，保持其它内容不变",
-                    },
-                    {
-                        "evidence": "表格参数实质一致，不视为问题。",
-                        "fix_hint": "无需修改。",
-                    },
-                ]
-            ),
-            _revision_output("final text"),
-            _audit_output([]),
-        ]
-    )
-    events = []
-
-    result = run_content_agent_generation({}, runner=runner, step_callback=events.append)
-
-    assert result.polished_text == "final text"
-    assert runner.payloads[2]["audit_findings"] == [
-        {"evidence": "正文缺少质保期限", "fix_hint": "补充质保期限，保持其它内容不变"}
-    ]
-    assert [finding.evidence for finding in events[1].findings] == ["正文缺少质保期限"]
-
-
-def test_content_writes_content_agent_verify_logs_and_progress(
-    monkeypatch,
-    _redirect_agent_log_dirs,
-) -> None:
-    content_agent_dir, verify_dir = _redirect_agent_log_dirs
-    progress_messages: list[str] = []
-    runner = FakeRunner(
-        [
-            _draft_output("draft text"),
-            _audit_output([{"evidence": "missing warranty", "fix_hint": "add it"}]),
-            _revision_output("final text"),
-            _audit_output([]),
-        ]
-    )
-    monkeypatch.setattr(
-        content_agent_module.progress_log,
-        "info",
-        lambda message, *args: progress_messages.append(
-            message % args if args else str(message)
-        ),
-    )
-
-    result = run_content_agent_generation(
-        {"task_id": "task-agent-42", "tender_type": "xjcg"},
-        {"configurable": {"model_provider": "deepseek"}},
-        runner=runner,
-    )
-
-    content_agent_files = sorted(content_agent_dir.glob("content_task-agent-42_*.txt"))
-    verify_files = sorted(verify_dir.glob("verify_task-agent-42_*.txt"))
-
-    assert result.polished_text == "final text"
-    assert len(content_agent_files) == 3
-    assert any(path.name.endswith("_round0_draft.txt") for path in content_agent_files)
-    assert any(path.name.endswith("_round1_revision.txt") for path in content_agent_files)
-    assert any(path.name.endswith("_round1_final.txt") for path in content_agent_files)
-    content_agent_content = "\n".join(path.read_text(encoding="utf-8") for path in content_agent_files)
-    assert "draft text" in content_agent_content
-    assert "final text" in content_agent_content
-    assert len(verify_files) == 2
-
-    first_verify = json.loads(
-        next(path for path in verify_files if "_round0_" in path.name).read_text(
-            encoding="utf-8"
-        )
-    )
-    assert first_verify["current_text"] == "draft text"
-    assert first_verify["findings"] == [
-        {"evidence": "missing warranty", "fix_hint": "add it"}
-    ]
-    assert any("开始智能体生成" in message for message in progress_messages)
-    assert any("第 0 轮审核完成" in message for message in progress_messages)
-    assert any("开始第 1 轮修复" in message for message in progress_messages)
-    assert any("第 1 轮修复完成" in message for message in progress_messages)
-    assert any("审核无问题，智能体生成完成" in message for message in progress_messages)
-
-
-def test_content_coerces_invalid_audit_json_to_fallback_finding() -> None:
-    runner = FakeRunner(
-        [
-            _draft_output("draft text"),
-            "not json",
-            _audit_output([]),
-        ]
-    )
-
-    result = run_content_agent_generation({}, runner=runner)
-
-    assert result.polished_text == "draft text"
-    assert [payload["agent_phase"] for payload in runner.payloads] == [
-        "generate",
-        "verify",
-        "verify",
-    ]
-    assert runner.payloads[2]["current_text"] == "draft text"
-
-
-def test_content_releases_after_third_revision_with_findings() -> None:
-    runner = FakeRunner(
-        [
-            _draft_output("draft"),
-            _audit_output([{"evidence": "e1", "fix_hint": "f1"}]),
-            _revision_output("revision 1"),
-            _audit_output([{"evidence": "e2", "fix_hint": "f2"}]),
-            _revision_output("revision 2"),
-            _audit_output([{"evidence": "e3", "fix_hint": "f3"}]),
-            _revision_output("revision 3"),
-        ]
-    )
-    events = []
-
-    result = run_content_agent_generation(
-        {},
-        runner=runner,
-        step_callback=events.append,
-    )
-
-    assert result.polished_text == "revision 3"
-    assert result.revision_rounds == 3
-    assert result.audit_findings[0].evidence == "e3"
-    assert [payload["agent_phase"] for payload in runner.payloads] == [
-        "generate",
-        "verify",
-        "revise",
-        "verify",
-        "revise",
-        "verify",
-        "revise",
-    ]
-    assert [event.step_type for event in events] == [
-        "draft",
-        "audit",
-        "revision",
-        "audit",
-        "revision",
-        "audit",
-        "revision",
-    ]
-    assert events[-1].round == 3
-
-
-def test_content_rejects_plain_text_final_output() -> None:
-    runner = FakeRunner(
-        [
-            _draft_output("draft text"),
-            _audit_output([{"evidence": "missing", "fix_hint": "fix"}]),
-            "plain final text",
-        ]
-    )
-
-    with pytest.raises(GenerationAgentProtocolError, match="JSON"):
+    with pytest.raises(GenerationAgentProtocolError, match="为空"):
         run_content_agent_generation({}, runner=runner)
+
+
+def test_content_runner_fails_when_final_file_is_placeholder() -> None:
+    runner = FakeRunner([{"final": "<完整采购需求正文>"}])
+
+    with pytest.raises(GenerationAgentProtocolError, match="占位符"):
+        run_content_agent_generation({}, runner=runner)
+
+
+def test_content_runner_rejects_round_four_artifacts() -> None:
+    runner = FakeRunner(
+        [
+            {"draft": "draft"},
+            {"audit": [{"evidence": "e4", "fix_hint": "f4"}], "round": 4},
+            {"final": "final"},
+        ]
+    )
+
+    with pytest.raises(GenerationAgentProtocolError, match="超出协议轮次"):
+        run_content_agent_generation({}, runner=runner)
+
+
+def test_content_runner_accepts_invoke_only_test_runner() -> None:
+    def write_final(backend):
+        backend.write(FINAL_POLISHED_TEXT_PATH, "invoke final")
+
+    runner = InvokeOnlyFakeRunner(write_final)
+
+    result = run_content_agent_generation({}, runner=runner)
+
+    assert result.polished_text == "invoke final"
+    assert len(runner.payloads) == 1
 
 
 def test_content_rejects_tool_call_unsupported_errors() -> None:
@@ -917,13 +687,11 @@ def test_content_rejects_tool_call_unsupported_errors() -> None:
 
 
 def test_fake_runner_injection_point(monkeypatch) -> None:
-    set_generation_agent_runner(
-        FakeRunner([_draft_output("injected text"), _audit_output([])])
-    )
+    set_generation_agent_runner(FakeRunner([{"final": "injected text"}]))
     monkeypatch.setattr(
         content_agent_module,
         "create_content_agent_runner",
-        lambda _model_provider: pytest.fail("real runner should not be created"),
+        lambda _model_provider, backend=None: pytest.fail("real runner should not be created"),
     )
     try:
         result = run_content_agent_generation({})

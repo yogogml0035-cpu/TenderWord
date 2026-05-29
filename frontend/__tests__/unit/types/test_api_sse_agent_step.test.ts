@@ -11,7 +11,7 @@ describe('SSE agent_step API types', () => {
     expect(eventType).toBe('agent_step');
   });
 
-  it('models audit findings with evidence and fix hints', () => {
+  it('models generic agent stream payloads with raw verify JSON', () => {
     const finding: SSEAgentStepFinding = {
       evidence: '缺少交付周期',
       fix_hint: '补充合同签订后的交付时间',
@@ -20,32 +20,34 @@ describe('SSE agent_step API types', () => {
       timestamp: '2026-05-27T17:10:00',
       task_id: 'task-agent-1',
       task_kind: 'generate',
-      step_type: 'audit',
+      step_type: 'stream',
       round: 1,
       node: 'content_verify_agent',
       is_complete: true,
+      content: '[{"evidence":"缺少交付周期","fix_hint":"补充合同签订后的交付时间"}]',
       findings: [finding],
     };
 
     expect(event).toMatchObject({
       task_id: 'task-agent-1',
       task_kind: 'generate',
-      step_type: 'audit',
+      step_type: 'stream',
       round: 1,
       node: 'content_verify_agent',
       is_complete: true,
+      content: '[{"evidence":"缺少交付周期","fix_hint":"补充合同签订后的交付时间"}]',
       findings: [finding],
     });
   });
 
-  it('models revision content snapshots', () => {
+  it('models revise subagent content snapshots', () => {
     const event: SSEAgentStepEvent = {
       timestamp: '2026-05-27T17:11:00',
       task_id: 'task-agent-1',
       task_kind: 'generate',
-      step_type: 'revision',
+      step_type: 'stream',
       round: 2,
-      node: 'content_agent',
+      node: 'content_revise_agent',
       is_complete: true,
       content: '修复后的采购需求正文',
       findings: [],

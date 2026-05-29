@@ -123,7 +123,7 @@ async function seedConversation(page: Page) {
 }
 
 test.describe('Generation mode agent flow', () => {
-  test('renders draft, audit, revision, and download cards from mocked agent SSE', async ({
+  test('renders node-based agent stream and download cards from mocked agent SSE', async ({
     page,
   }) => {
     const consoleErrors: string[] = [];
@@ -206,7 +206,7 @@ test.describe('Generation mode agent flow', () => {
           timestamp: now,
           task_id: taskId,
           task_kind: 'generate',
-          step_type: 'draft',
+          step_type: 'stream',
           round: 0,
           node: 'content_generate_agent',
           is_complete: true,
@@ -217,11 +217,11 @@ test.describe('Generation mode agent flow', () => {
           timestamp: now,
           task_id: taskId,
           task_kind: 'generate',
-          step_type: 'audit',
-          round: 0,
+          step_type: 'stream',
+          round: 1,
           node: 'content_verify_agent',
           is_complete: true,
-          content: null,
+          content: '[{"evidence":"交付范围缺少验收标准","fix_hint":"补充设备验收和交付要求"}]',
           findings: [
             {
               evidence: '交付范围缺少验收标准',
@@ -233,9 +233,9 @@ test.describe('Generation mode agent flow', () => {
           timestamp: now,
           task_id: taskId,
           task_kind: 'generate',
-          step_type: 'revision',
+          step_type: 'stream',
           round: 1,
-          node: 'content_agent',
+          node: 'content_revise_agent',
           is_complete: true,
           content: '这是第 1 轮 AI 修改内容，已补充验收标准。',
           findings: [],
@@ -244,11 +244,11 @@ test.describe('Generation mode agent flow', () => {
           timestamp: now,
           task_id: taskId,
           task_kind: 'generate',
-          step_type: 'audit',
-          round: 1,
+          step_type: 'stream',
+          round: 2,
           node: 'content_verify_agent',
           is_complete: true,
-          content: null,
+          content: '[]',
           findings: [],
         }),
         sseEvent('done', '5', {
@@ -284,17 +284,12 @@ test.describe('Generation mode agent flow', () => {
 
     await expect(page.getByText('content_generate_agent')).toBeVisible();
     await expect(page.getByText('这是智能体初稿正文。')).toBeVisible();
-    const verifyAgentCards = page.getByText('content_verify_agent', { exact: true });
-    await expect(verifyAgentCards).toHaveCount(2);
-    await expect(verifyAgentCards.first()).toBeVisible();
-    await expect(verifyAgentCards.nth(1)).toBeVisible();
-    await expect(page.getByText('第 1 轮审核')).toBeVisible();
-    await expect(page.getByText('evidence: 交付范围缺少验收标准')).toBeVisible();
-    await expect(page.getByText('fix_hint: 补充设备验收和交付要求')).toBeVisible();
-    await expect(page.getByText('content_agent', { exact: true })).toBeVisible();
+    await expect(page.getByText('content_verify_agent', { exact: true })).toHaveCount(1);
+    await expect(page.getByText('[]')).toBeVisible();
+    await expect(page.getByText('第 1 轮审核')).toHaveCount(0);
+    await expect(page.getByText('evidence: 交付范围缺少验收标准')).toHaveCount(0);
+    await expect(page.getByText('content_revise_agent', { exact: true })).toBeVisible();
     await expect(page.getByText('这是第 1 轮 AI 修改内容，已补充验收标准。')).toBeVisible();
-    await expect(page.getByText('第 2 轮审核')).toBeVisible();
-    await expect(page.getByText('未发现需要修复的问题')).toBeVisible();
     await expect(page.getByText('AI 生成内容')).toHaveCount(0);
     await expect(page.getByRole('button', { name: '下载文件' })).toBeVisible();
 

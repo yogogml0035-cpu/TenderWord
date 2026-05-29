@@ -17,7 +17,18 @@ from backend.agents.generation.types import (
     GenerationAgentProtocolError,
     GenerationAgentState,
 )
+from backend.agents.generation.workspace import (
+    audit_path,
+    context_value,
+    get_workspace_backend,
+    infer_current_text_path,
+    infer_next_audit_round,
+    read_backend_text,
+    read_generation_context,
+    write_backend_text,
+)
 from backend.util.common_util import StreamCallbacks, stream_llm_completion
+from backend.util.log_util.progress_log import progress_log
 
 
 CHECK_INTERVAL = 3.0
@@ -70,6 +81,70 @@ VERIFY_JSON_REPAIR_SYSTEM_PROMPT = (
 )
 
 
+def _get_configurable(config: dict[str, Any] | None) -> dict[str, Any]:
+    return config.get("configurable", {}) if isinstance(config, dict) else {}
+
+
+def _emit_verify_agent_step_snapshot(
+    config: dict[str, Any] | None,
+    *,
+    content: str,
+    round_index: int,
+    is_complete: bool,
+) -> None:
+    configurable = _get_configurable(config)
+    task_id = str(configurable.get("task_id") or "").strip()
+    if not task_id:
+        return
+
+    task_kind = str(configurable.get("task_kind") or "generate")
+    callback = configurable.get("agent_step_callback")
+    event_data = {
+        "task_id": task_id,
+        "task_kind": task_kind,
+        "step_type": "stream",
+        "round": round_index,
+        "node": "content_verify_agent",
+        "content": content,
+        "findings": [],
+        "is_complete": is_complete,
+    }
+    if callable(callback):
+        try:
+            from backend.models import AgentStepEventData
+
+            callback(AgentStepEventData(**event_data))
+        except Exception as exc:
+            progress_log.debug(f"警告: content_verify_agent 过程回调失败: {exc}")
+
+    try:
+        from backend.core.sse_manager import sse_manager
+
+        if getattr(sse_manager, "_loop", None) is not None:
+            sse_manager.send_agent_step_threadsafe(**event_data)
+    except Exception:
+        pass
+
+
+def _build_stream_callbacks(
+    config: dict[str, Any] | None,
+    *,
+    round_index: int,
+) -> StreamCallbacks:
+    def _on_update(text: str) -> None:
+        snapshot = str(text or "")
+        if not snapshot:
+            return
+        _emit_verify_agent_step_snapshot(
+            config,
+            content=snapshot,
+            round_index=round_index,
+            is_complete=False,
+        )
+
+    return StreamCallbacks(on_update=_on_update)
+
+
 def _run_async(coro):
     try:
         asyncio.get_running_loop()
@@ -98,11 +173,7 @@ def _context_value(
     key: str,
     default: Any = "",
 ) -> Any:
-    context = _get_generation_context(config)
-    value = context.get(key)
-    if value is not None:
-        return value
-    return state.get(key, default)
+    return context_value(state, config, key, default)
 
 
 def _contract_error_needs_retry(error: BaseException) -> bool:
@@ -232,19 +303,34 @@ def _verify_text(
     state: GenerationAgentState,
     config: RunnableConfig | None = None,
 ) -> GenerationAgentState:
-    current_text = str(
-        _context_value(state, config, "current_text")
-        or _context_value(state, config, "draft_text")
-        or ""
-    )
-    model_provider = str(_context_value(state, config, "model_provider", "deepseek") or "deepseek")
+    backend = get_workspace_backend(config)
+    file_context: dict[str, Any] = read_generation_context(backend) if backend else {}
+    merged_state: GenerationAgentState = {**file_context, **state}
+    if backend:
+        current_text_path = str(
+            _context_value(merged_state, config, "current_text_path")
+            or infer_current_text_path(backend)
+        )
+        current_text = read_backend_text(backend, current_text_path)
+        round_index = int(
+            _context_value(merged_state, config, "revision_round", 0)
+            or infer_next_audit_round(backend)
+        )
+    else:
+        round_index = int(_context_value(state, config, "revision_round", 0) or 0)
+        current_text = str(
+            _context_value(state, config, "current_text")
+            or _context_value(state, config, "draft_text")
+            or ""
+        )
+    model_provider = str(_context_value(merged_state, config, "model_provider", "deepseek") or "deepseek")
     if is_contract_placeholder_text(current_text):
         findings = _build_placeholder_text_findings(current_text)
     else:
         user_prompt = _render_verify_user_prompt(
-            project_info=_context_value(state, config, "project_info"),
-            origin_tender_params=_context_value(state, config, "origin_tender_params"),
-            tender_params=_context_value(state, config, "tender_params"),
+            project_info=_context_value(merged_state, config, "project_info"),
+            origin_tender_params=_context_value(merged_state, config, "origin_tender_params"),
+            tender_params=_context_value(merged_state, config, "tender_params"),
             current_text=current_text,
         )
         raw_content = _run_async(
@@ -252,7 +338,7 @@ def _verify_text(
                 model_provider=model_provider,
                 system_prompt=VERIFY_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
-                callbacks=StreamCallbacks(),
+                callbacks=_build_stream_callbacks(config, round_index=round_index),
                 check_interval=CHECK_INTERVAL,
             )
         )
@@ -262,10 +348,19 @@ def _verify_text(
         )
     findings_payload = [finding.model_dump() for finding in findings]
     findings_json = json.dumps(findings_payload, ensure_ascii=False)
+    if backend:
+        write_backend_text(backend, audit_path(round_index), findings_json)
+        _emit_verify_agent_step_snapshot(
+            config,
+            content=findings_json,
+            round_index=round_index,
+            is_complete=True,
+        )
     return {
         "messages": [AIMessage(content=findings_json)],
         "structured_response": findings_payload,
         "findings": findings_payload,
+        **({"audit_path": audit_path(round_index)} if backend else {}),
     }
 
 

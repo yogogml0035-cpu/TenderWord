@@ -19,7 +19,6 @@ import {
   isDualColumnContent,
   type AgentAuditRound,
   type AgentStepFinding,
-  type AgentStepType,
   type Conversation,
   type LocalTaskReason,
   type LogEntry,
@@ -554,43 +553,20 @@ function normalizeAgentAuditRounds(rounds: unknown): AgentAuditRound[] {
     .sort((a, b) => a.round - b.round);
 }
 
-function formatAgentAuditContent(rounds: AgentAuditRound[]): string {
-  return rounds
-    .map((round) => {
-      const lines = [`第 ${round.round + 1} 轮审核`];
-
-      if (round.findings.length === 0) {
-        lines.push('未发现需要修复的问题');
-        return lines.join('\n');
-      }
-
-      for (const [index, finding] of round.findings.entries()) {
-        lines.push(`${index + 1}. evidence: ${finding.evidence}`);
-        lines.push(`   fix_hint: ${finding.fix_hint}`);
-      }
-
-      return lines.join('\n');
-    })
-    .join('\n\n');
+function formatAgentFindingsJson(findings: AgentStepFinding[]): string {
+  return JSON.stringify(findings, null, 2);
 }
 
 function findAgentStepMessage(
   messages: Message[],
   taskId: string,
-  stepType: AgentStepType,
-  round: number
+  node: string
 ): Message | undefined {
   return messages.find((message) => {
     if (message.taskId !== taskId || message.metadata?.messageKind !== TASK_AGENT_STEP_KIND) {
       return false;
     }
-    if (message.metadata.agentStepType !== stepType) {
-      return false;
-    }
-    if (stepType === 'draft') {
-      return true;
-    }
-    return message.metadata.agentStepRound === round;
+    return message.metadata.agentStepNode === node;
   });
 }
 
@@ -1288,24 +1264,28 @@ export const useChatStore = create<ChatStore>()(
             return null;
           }
 
-          const stepType = step.step_type;
+          const stepType = step.step_type || 'stream';
           const stepRound = step.round;
           const findings = normalizeAgentStepFindings(step.findings);
           const taskKind = step.task_kind || get().taskSummaries[taskId]?.task_kind;
           const status: Message['status'] = step.is_complete ? 'completed' : 'generating';
-          const existing = findAgentStepMessage(conversation.messages, taskId, stepType, stepRound);
+          const node = step.node || 'content_agent';
+          const existing = findAgentStepMessage(conversation.messages, taskId, node);
 
           let content = typeof step.content === 'string' ? step.content : '';
           let auditRounds: AgentAuditRound[] | undefined;
 
-          if (stepType === 'audit') {
+          if (node === 'content_verify_agent') {
             const existingRounds = normalizeAgentAuditRounds(existing?.metadata?.agentStepAuditRounds);
             const nextRound: AgentAuditRound = { round: stepRound, findings };
             auditRounds = [
               ...existingRounds.filter((round) => round.round !== stepRound),
               nextRound,
             ].sort((a, b) => a.round - b.round);
-            content = formatAgentAuditContent(auditRounds);
+            content =
+              typeof step.content === 'string' && step.content.length > 0
+                ? step.content
+                : formatAgentFindingsJson(findings);
           }
 
           const metadata = {
@@ -1313,7 +1293,7 @@ export const useChatStore = create<ChatStore>()(
             ...(taskKind ? { taskKind } : {}),
             agentStepType: stepType,
             agentStepRound: stepRound,
-            agentStepNode: step.node,
+            agentStepNode: node,
             agentStepFindings: findings,
             ...(auditRounds ? { agentStepAuditRounds: auditRounds } : {}),
           };

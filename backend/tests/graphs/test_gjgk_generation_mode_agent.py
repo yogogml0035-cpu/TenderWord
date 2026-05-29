@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from backend.agents.generation import set_generation_agent_runner
 from backend.graphs.gjgk_tender_graph import GjgkTenderGraph
 from backend.nodes.common_word_nodes import replace_content
@@ -14,13 +16,36 @@ class FakeGenerationAgentRunner:
     def __init__(self, outputs: list[dict]):
         self.outputs = outputs
         self.payloads: list[dict] = []
+        self.configs: list[dict] = []
 
-    def invoke(self, payload: dict):
-        index = len(self.payloads)
-        if index >= len(self.outputs):
-            raise AssertionError(f"unexpected runner invocation {index + 1}")
+    def invoke(self, payload: dict, config: dict | None = None):
+        raise AssertionError("agent mode should use workspace streaming")
+
+    def stream(self, payload: dict, config: dict | None = None, **_kwargs):
         self.payloads.append(payload)
-        return self.outputs[index]
+        self.configs.append(config or {})
+        backend = config["configurable"]["content_agent_backend"]
+        current_text = ""
+        audit_round = 1
+        for output in self.outputs:
+            structured = output.get("structured_response")
+            if isinstance(structured, dict) and "draft_text" in structured:
+                current_text = structured["draft_text"]
+                backend.write("/drafts/round-0.md", current_text)
+                yield {"node": "content_generate_agent", "content": current_text, "is_complete": True}
+            elif isinstance(structured, list):
+                raw_audit = json.dumps(structured, ensure_ascii=False)
+                backend.write(f"/audits/round-{audit_round}.json", raw_audit)
+                yield {
+                    "node": "content_verify_agent",
+                    "round": audit_round,
+                    "content": raw_audit,
+                    "is_complete": True,
+                }
+                if structured == []:
+                    backend.write("/final/polished_text.md", current_text)
+                    yield {"node": "content_agent", "content": "final written", "is_complete": True}
+                audit_round += 1
 
 
 def _draft_output(text: str) -> dict:
@@ -156,11 +181,8 @@ def test_gjgk_agent_branch_produces_polished_text_for_gjgk_update_and_post_hook(
     assert calls.index("gjgk_delete_tender_param") < calls.index("gjgk_update_word")
     assert calls.index("gjgk_get_replacements") < calls.index("gjgk_update_word")
     assert calls.index("gjgk_update_word") < calls.index("replace_content")
-    assert [payload["agent_phase"] for payload in runner.payloads] == [
-        "generate",
-        "verify",
-    ]
-    assert runner.payloads[0]["tender_type"] == "gjgk"
+    assert len(runner.payloads) == 1
+    assert runner.configs[0]["configurable"]["generation_agent_context"]["tender_type"] == "gjgk"
 
 
 def test_gjgk_workflow_branch_still_uses_old_generation_node_and_post_hook(

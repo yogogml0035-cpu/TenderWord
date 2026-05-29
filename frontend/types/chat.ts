@@ -24,7 +24,7 @@ export type MessageStatus =
 export type TaskMessageKind = 'task-log' | 'task-content' | 'task-download' | 'agent-step';
 export type ChatMessageKind = 'normal' | 'rewrite' | 'edit' | 'task-notice';
 export type LocalTaskReason = 'backend_restart';
-export type AgentStepType = 'draft' | 'audit' | 'revision';
+export type AgentStepType = string;
 
 export interface AgentStepFinding {
   evidence: string;

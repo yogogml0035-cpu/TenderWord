@@ -458,7 +458,7 @@ export interface SSEAgentStepEvent {
   timestamp: string;
   task_id: string;
   task_kind: TaskKind;
-  step_type: 'draft' | 'audit' | 'revision';
+  step_type: string;
   round: number;
   node: string;
   is_complete: boolean;
