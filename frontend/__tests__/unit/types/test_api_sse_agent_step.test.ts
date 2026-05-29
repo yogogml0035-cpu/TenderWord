@@ -45,7 +45,7 @@ describe('SSE agent_step API types', () => {
       task_kind: 'generate',
       step_type: 'revision',
       round: 2,
-      node: 'content',
+      node: 'content_agent',
       is_complete: true,
       content: '修复后的采购需求正文',
       findings: [],

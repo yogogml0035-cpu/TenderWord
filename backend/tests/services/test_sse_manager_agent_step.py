@@ -56,7 +56,7 @@ async def test_event_stream_replays_agent_step_then_done_terminal() -> None:
         task_kind="generate",
         step_type="revision",
         round=1,
-        node="content",
+        node="content_agent",
         content="修复后的正文",
         is_complete=True,
     )

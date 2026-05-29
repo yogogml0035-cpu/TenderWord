@@ -43,7 +43,7 @@ def test_agent_step_revision_event_can_carry_content_snapshot() -> None:
         task_kind="generate",
         step_type="revision",
         round=2,
-        node="content",
+        node="content_agent",
         content="修复后的采购需求正文",
         is_complete=True,
     )

@@ -26,7 +26,7 @@ class AuditFinding(BaseModel):
         return normalized
 
 
-class HostAgentFinalOutput(BaseModel):
+class ContentAgentFinalOutput(BaseModel):
     polished_text: str = Field(..., min_length=1)
     audit_findings: list[AuditFinding] = Field(default_factory=list)
     revision_rounds: int = Field(default=0, ge=0)
@@ -79,5 +79,5 @@ __all__ = [
     "GenerationAgentProtocolError",
     "GenerationAgentState",
     "GenerationAgentToolCallUnsupportedError",
-    "HostAgentFinalOutput",
+    "ContentAgentFinalOutput",
 ]

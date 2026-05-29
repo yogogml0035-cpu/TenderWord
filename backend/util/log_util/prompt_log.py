@@ -16,8 +16,8 @@ def get_generate_prompt_log_dir(anchor_file: str) -> Path:
     return _get_prompt_log_dir(anchor_file, "generate_log")
 
 
-def get_host_agent_log_dir(anchor_file: str) -> Path:
-    return _get_prompt_log_dir(anchor_file, "host_log")
+def get_content_agent_log_dir(anchor_file: str) -> Path:
+    return _get_prompt_log_dir(anchor_file, "content_agent_log")
 
 
 def get_verify_agent_log_dir(anchor_file: str) -> Path:
@@ -87,7 +87,7 @@ def write_agent_log_artifact(
 
 __all__ = [
     "get_generate_prompt_log_dir",
-    "get_host_agent_log_dir",
+    "get_content_agent_log_dir",
     "get_verify_agent_log_dir",
     "write_agent_log_artifact",
     "write_edit_generate_log_artifacts",

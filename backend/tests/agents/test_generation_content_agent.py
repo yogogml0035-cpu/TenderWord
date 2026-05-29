@@ -8,13 +8,13 @@ from deepagents import CompiledSubAgent
 from backend.agents.generation import (
     GenerationAgentProtocolError,
     GenerationAgentToolCallUnsupportedError,
-    HOST_AGENT_SYSTEM_PROMPT,
+    CONTENT_AGENT_SYSTEM_PROMPT,
     build_generation_subagents,
     parse_verify_agent_output,
-    run_host_agent_generation,
+    run_content_agent_generation,
     set_generation_agent_runner,
 )
-from backend.agents.generation import content_agents as host_agent_module
+from backend.agents.generation import content_agents as content_agent_module
 from backend.agents.generation import verify_agent_graph as verify_agent_graph_module
 from backend.agents.generation.model_factory import create_generation_chat_model
 from backend.prompts.types import GeneratePromptInput, RenderedPrompt
@@ -22,21 +22,21 @@ from backend.prompts.types import GeneratePromptInput, RenderedPrompt
 
 @pytest.fixture(autouse=True)
 def _redirect_agent_log_dirs(tmp_path, monkeypatch):
-    host_dir = tmp_path / "host_log"
+    content_agent_dir = tmp_path / "content_agent_log"
     verify_dir = tmp_path / "verify_log"
-    host_dir.mkdir()
+    content_agent_dir.mkdir()
     verify_dir.mkdir()
     monkeypatch.setattr(
-        host_agent_module,
-        "get_host_agent_log_dir",
-        lambda _anchor: host_dir,
+        content_agent_module,
+        "get_content_agent_log_dir",
+        lambda _anchor: content_agent_dir,
     )
     monkeypatch.setattr(
-        host_agent_module,
+        content_agent_module,
         "get_verify_agent_log_dir",
         lambda _anchor: verify_dir,
     )
-    return host_dir, verify_dir
+    return content_agent_dir, verify_dir
 
 
 class FakeRunner:
@@ -118,14 +118,14 @@ def _revision_output(text: str) -> dict:
 def _deepagent_subagent_revision_output(text: str) -> dict:
     return {
         "polished_text": text,
-        "messages": [{"content": "content 已根据审核意见完成修复。"}],
+        "messages": [{"content": "content_agent 已根据审核意见完成修复。"}],
     }
 
 def _deepagent_tool_message_revision_output(text: str) -> dict:
     return {
         "messages": [
             {"content": json.dumps({"polished_text": text}, ensure_ascii=False)},
-            {"content": "content 已根据审核意见完成修复。"},
+            {"content": "content_agent 已根据审核意见完成修复。"},
         ],
     }
 
@@ -148,9 +148,9 @@ def test_build_generation_subagents_wraps_compiled_state_graphs() -> None:
 def test_content_prompts_use_chinese_natural_language() -> None:
     subagents = build_generation_subagents()
 
-    assert "采购需求生成主智能体" in HOST_AGENT_SYSTEM_PROMPT
-    assert "evidence 和 fix_hint" in HOST_AGENT_SYSTEM_PROMPT
-    assert "不得新增、删除、润色" in HOST_AGENT_SYSTEM_PROMPT
+    assert "采购需求生成主智能体" in CONTENT_AGENT_SYSTEM_PROMPT
+    assert "evidence 和 fix_hint" in CONTENT_AGENT_SYSTEM_PROMPT
+    assert "不得新增、删除、润色" in CONTENT_AGENT_SYSTEM_PROMPT
     assert "Generate the first draft" not in subagents.content_generate_agent["description"]
     assert "Audit procurement requirement" not in subagents.content_verify_agent["description"]
 
@@ -436,7 +436,7 @@ def test_content_accepts_structured_json_with_non_empty_polished_text() -> None:
     )
     events = []
 
-    result = run_host_agent_generation(
+    result = run_content_agent_generation(
         {
             "tender_type": "xjcg",
             "generation_style": "template",
@@ -478,7 +478,7 @@ def test_content_accepts_structured_json_with_non_empty_polished_text() -> None:
 def test_content_passes_generation_context_to_deepagents_subgraphs() -> None:
     runner = FakeRunner([_draft_output("draft text"), _audit_output([])])
 
-    result = run_host_agent_generation(
+    result = run_content_agent_generation(
         {
             "tender_type": "gngk_hw_zc",
             "generation_style": "param",
@@ -508,28 +508,28 @@ def test_content_passes_generation_context_to_deepagents_subgraphs() -> None:
     assert runner.configs[0]["configurable"]["task_id"] == "task-agent-context"
 
 
-def test_content_prefers_subagent_state_over_host_summary_text() -> None:
+def test_content_prefers_subagent_state_over_content_agent_summary_text() -> None:
     runner = FakeRunner(
         [
             _deepagent_subagent_draft_output("真正的 content_generate_agent 初稿正文"),
             _deepagent_subagent_audit_output(
                 [{"evidence": "缺少验收标准", "fix_hint": "补充验收标准"}]
             ),
-            _deepagent_subagent_revision_output("content 修改后的正文"),
+            _deepagent_subagent_revision_output("content_agent 修改后的正文"),
             _deepagent_subagent_audit_output([]),
         ]
     )
     events = []
 
-    result = run_host_agent_generation({}, runner=runner, step_callback=events.append)
+    result = run_content_agent_generation({}, runner=runner, step_callback=events.append)
 
-    assert result.polished_text == "content 修改后的正文"
+    assert result.polished_text == "content_agent 修改后的正文"
     assert events[0].node == "content_generate_agent"
     assert events[0].content == "真正的 content_generate_agent 初稿正文"
     assert events[1].node == "content_verify_agent"
     assert events[1].findings[0].evidence == "缺少验收标准"
-    assert events[2].node == "content"
-    assert events[2].content == "content 修改后的正文"
+    assert events[2].node == "content_agent"
+    assert events[2].content == "content_agent 修改后的正文"
     assert "真正的 content_generate_agent 初稿正文" in runner.payloads[1]["current_text"]
 
 
@@ -540,15 +540,15 @@ def test_content_reads_draft_and_audit_from_deepagent_tool_messages() -> None:
             _deepagent_tool_message_audit_output(
                 [{"evidence": "缺少付款方式", "fix_hint": "补充付款方式"}]
             ),
-            _revision_output("content 根据意见修改后的正文"),
+            _revision_output("content_agent 根据意见修改后的正文"),
             _deepagent_tool_message_audit_output([]),
         ]
     )
     events = []
 
-    result = run_host_agent_generation({}, runner=runner, step_callback=events.append)
+    result = run_content_agent_generation({}, runner=runner, step_callback=events.append)
 
-    assert result.polished_text == "content 根据意见修改后的正文"
+    assert result.polished_text == "content_agent 根据意见修改后的正文"
     assert events[0].node == "content_generate_agent"
     assert events[0].content == "ToolMessage 中的 content_generate_agent 初稿"
     assert events[1].node == "content_verify_agent"
@@ -566,10 +566,10 @@ def test_content_reads_revision_from_deepagent_tool_message_before_summary() -> 
     )
     events = []
 
-    result = run_host_agent_generation({}, runner=runner, step_callback=events.append)
+    result = run_content_agent_generation({}, runner=runner, step_callback=events.append)
 
     assert result.polished_text == "ToolMessage 中的修复正文"
-    assert events[2].node == "content"
+    assert events[2].node == "content_agent"
     assert events[2].content == "ToolMessage 中的修复正文"
     assert runner.payloads[3]["current_text"] == "ToolMessage 中的修复正文"
 
@@ -591,7 +591,7 @@ def test_content_rejects_plain_generate_summary_as_draft() -> None:
     )
 
     with pytest.raises(GenerationAgentProtocolError, match="draft_text"):
-        run_host_agent_generation({}, runner=runner)
+        run_content_agent_generation({}, runner=runner)
 
 
 def test_content_preserves_current_text_when_verify_json_fallback_requests_it() -> None:
@@ -604,7 +604,7 @@ def test_content_preserves_current_text_when_verify_json_fallback_requests_it() 
     )
     events = []
 
-    result = run_host_agent_generation({}, runner=runner, step_callback=events.append)
+    result = run_content_agent_generation({}, runner=runner, step_callback=events.append)
 
     assert result.polished_text == "draft text"
     assert [payload["agent_phase"] for payload in runner.payloads] == [
@@ -613,7 +613,7 @@ def test_content_preserves_current_text_when_verify_json_fallback_requests_it() 
         "verify",
     ]
     assert [event.step_type for event in events] == ["draft", "audit", "revision", "audit"]
-    assert events[2].node == "content"
+    assert events[2].node == "content_agent"
     assert events[2].content == "draft text"
 
 
@@ -628,7 +628,7 @@ def test_content_accepts_plain_document_text_from_revision() -> None:
         ]
     )
 
-    result = run_host_agent_generation({}, runner=runner)
+    result = run_content_agent_generation({}, runner=runner)
 
     assert result.polished_text == revised_text
     assert result.revision_rounds == 1
@@ -645,7 +645,7 @@ def test_content_preserves_current_text_when_revision_returns_only_summary() -> 
     )
     events = []
 
-    result = run_host_agent_generation({}, runner=runner, step_callback=events.append)
+    result = run_content_agent_generation({}, runner=runner, step_callback=events.append)
 
     assert result.polished_text == "draft text"
     assert [payload["agent_phase"] for payload in runner.payloads] == [
@@ -658,11 +658,11 @@ def test_content_preserves_current_text_when_revision_returns_only_summary() -> 
     assert events[2].content == "draft text"
 
 
-def test_content_writes_host_verify_logs_and_progress(
+def test_content_writes_content_agent_verify_logs_and_progress(
     monkeypatch,
     _redirect_agent_log_dirs,
 ) -> None:
-    host_dir, verify_dir = _redirect_agent_log_dirs
+    content_agent_dir, verify_dir = _redirect_agent_log_dirs
     progress_messages: list[str] = []
     runner = FakeRunner(
         [
@@ -673,30 +673,30 @@ def test_content_writes_host_verify_logs_and_progress(
         ]
     )
     monkeypatch.setattr(
-        host_agent_module.progress_log,
+        content_agent_module.progress_log,
         "info",
         lambda message, *args: progress_messages.append(
             message % args if args else str(message)
         ),
     )
 
-    result = run_host_agent_generation(
+    result = run_content_agent_generation(
         {"task_id": "task-agent-42", "tender_type": "xjcg"},
         {"configurable": {"model_provider": "deepseek"}},
         runner=runner,
     )
 
-    host_files = sorted(host_dir.glob("content_task-agent-42_*.txt"))
+    content_agent_files = sorted(content_agent_dir.glob("content_task-agent-42_*.txt"))
     verify_files = sorted(verify_dir.glob("verify_task-agent-42_*.txt"))
 
     assert result.polished_text == "final text"
-    assert len(host_files) == 3
-    assert any(path.name.endswith("_round0_draft.txt") for path in host_files)
-    assert any(path.name.endswith("_round1_revision.txt") for path in host_files)
-    assert any(path.name.endswith("_round1_final.txt") for path in host_files)
-    host_content = "\n".join(path.read_text(encoding="utf-8") for path in host_files)
-    assert "draft text" in host_content
-    assert "final text" in host_content
+    assert len(content_agent_files) == 3
+    assert any(path.name.endswith("_round0_draft.txt") for path in content_agent_files)
+    assert any(path.name.endswith("_round1_revision.txt") for path in content_agent_files)
+    assert any(path.name.endswith("_round1_final.txt") for path in content_agent_files)
+    content_agent_content = "\n".join(path.read_text(encoding="utf-8") for path in content_agent_files)
+    assert "draft text" in content_agent_content
+    assert "final text" in content_agent_content
     assert len(verify_files) == 2
 
     first_verify = json.loads(
@@ -724,7 +724,7 @@ def test_content_coerces_invalid_audit_json_to_fallback_finding() -> None:
         ]
     )
 
-    result = run_host_agent_generation({}, runner=runner)
+    result = run_content_agent_generation({}, runner=runner)
 
     assert result.polished_text == "draft text"
     assert [payload["agent_phase"] for payload in runner.payloads] == [
@@ -749,7 +749,7 @@ def test_content_releases_after_third_revision_with_findings() -> None:
     )
     events = []
 
-    result = run_host_agent_generation(
+    result = run_content_agent_generation(
         {},
         runner=runner,
         step_callback=events.append,
@@ -789,12 +789,12 @@ def test_content_rejects_plain_text_final_output() -> None:
     )
 
     with pytest.raises(GenerationAgentProtocolError, match="JSON"):
-        run_host_agent_generation({}, runner=runner)
+        run_content_agent_generation({}, runner=runner)
 
 
 def test_content_rejects_tool_call_unsupported_errors() -> None:
     with pytest.raises(GenerationAgentToolCallUnsupportedError, match="不支持工具调用"):
-        run_host_agent_generation({}, runner=ToolCallUnsupportedRunner())
+        run_content_agent_generation({}, runner=ToolCallUnsupportedRunner())
 
 
 def test_fake_runner_injection_point(monkeypatch) -> None:
@@ -802,12 +802,12 @@ def test_fake_runner_injection_point(monkeypatch) -> None:
         FakeRunner([_draft_output("injected text"), _audit_output([])])
     )
     monkeypatch.setattr(
-        host_agent_module,
-        "create_host_agent_runner",
+        content_agent_module,
+        "create_content_agent_runner",
         lambda _model_provider: pytest.fail("real runner should not be created"),
     )
     try:
-        result = run_host_agent_generation({})
+        result = run_content_agent_generation({})
     finally:
         set_generation_agent_runner(None)
 

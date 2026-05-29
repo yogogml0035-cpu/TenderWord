@@ -8,7 +8,7 @@ from typing import Any
 from backend.agents.generation.types import (
     AuditFinding,
     GenerationAgentProtocolError,
-    HostAgentFinalOutput,
+    ContentAgentFinalOutput,
 )
 
 AUDIT_JSON_FALLBACK_EVIDENCE = (
@@ -319,17 +319,17 @@ def coerce_audit_findings(
             raise first_error from exc
 
 
-def parse_host_agent_final_output(raw_content: str) -> HostAgentFinalOutput:
+def parse_content_agent_final_output(raw_content: str) -> ContentAgentFinalOutput:
     parsed = _load_json_value(raw_content, "{", "}")
     if not isinstance(parsed, dict):
         raise GenerationAgentProtocolError(
-            f"host_agent 最终输出必须是 JSON 对象，实际为 {type(parsed).__name__}"
+            f"content_agent 最终输出必须是 JSON 对象，实际为 {type(parsed).__name__}"
         )
     try:
-        return HostAgentFinalOutput.model_validate(parsed)
+        return ContentAgentFinalOutput.model_validate(parsed)
     except ValueError as exc:
         raise GenerationAgentProtocolError(
-            "host_agent 最终输出必须包含非空 polished_text"
+            "content_agent 最终输出必须包含非空 polished_text"
         ) from exc
 
 
@@ -337,5 +337,5 @@ __all__ = [
     "build_audit_findings_fallback",
     "coerce_audit_findings",
     "parse_audit_findings",
-    "parse_host_agent_final_output",
+    "parse_content_agent_final_output",
 ]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from backend.agents.generation import AgentStepPayload, run_host_agent_generation
+from backend.agents.generation import AgentStepPayload, run_content_agent_generation
 from backend.models import AgentStepEventData
 from backend.states.base_state import TenderGraphStateBase
 
@@ -64,12 +64,12 @@ def _make_agent_step_callback(
     return emit
 
 
-def host_agent_generate(
+def content_agent_generate(
     state: TenderGraphStateBase,
     config=None,
 ) -> TenderGraphStateBase:
     """运行 DeepAgents 生成分支，并暴露标准正文契约。"""
-    result = run_host_agent_generation(
+    result = run_content_agent_generation(
         state,
         config,
         step_callback=_make_agent_step_callback(state, config),
@@ -80,4 +80,4 @@ def host_agent_generate(
     )
 
 
-__all__ = ["host_agent_generate"]
+__all__ = ["content_agent_generate"]

@@ -280,8 +280,8 @@ describe('useChatSSE', () => {
       ...createRunningTaskStatus(),
       progress: {
         ...createRunningTaskStatus().progress,
-        running_nodes: ['content'],
-        current_node: 'content',
+        running_nodes: ['content_agent'],
+        current_node: 'content_agent',
       },
     });
 
@@ -340,7 +340,7 @@ describe('useChatSSE', () => {
           task_kind: 'generate',
           step_type: 'revision',
           round: 1,
-          node: 'content',
+          node: 'content_agent',
           is_complete: true,
           content: '第一轮 AI 修改内容',
           findings: [

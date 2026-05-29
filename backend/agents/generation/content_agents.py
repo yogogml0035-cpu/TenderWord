@@ -11,7 +11,7 @@ from deepagents import CompiledSubAgent, create_deep_agent
 from backend.agents.generation.generate_agent_graph import create_generate_agent_graph
 from backend.agents.generation.json_utils import (
     coerce_audit_findings,
-    parse_host_agent_final_output,
+    parse_content_agent_final_output,
 )
 from backend.agents.generation.model_factory import create_generation_chat_model
 from backend.agents.generation.types import (
@@ -19,24 +19,24 @@ from backend.agents.generation.types import (
     AuditFinding,
     GenerationAgentProtocolError,
     GenerationAgentToolCallUnsupportedError,
-    HostAgentFinalOutput,
+    ContentAgentFinalOutput,
 )
 from backend.agents.generation.verify_agent_graph import create_verify_agent_graph
 from backend.states import TenderGraphStateBase
 from backend.util.log_util.progress_log import progress_log
 from backend.util.log_util.prompt_log import (
-    get_host_agent_log_dir,
+    get_content_agent_log_dir,
     get_verify_agent_log_dir,
     write_agent_log_artifact,
 )
 
 
 MAX_REVISION_ROUNDS = 3
-HOST_AGENT_NODE = "content"
+CONTENT_AGENT_NODE = "content_agent"
 GENERATE_AGENT_NODE = "content_generate_agent"
 VERIFY_AGENT_NODE = "content_verify_agent"
-HOST_AGENT_SYSTEM_PROMPT = (
-    "你是采购需求生成主智能体（content）。系统会通过 agent_phase 字段指定当前阶段。"
+CONTENT_AGENT_SYSTEM_PROMPT = (
+    "你是采购需求生成主智能体（content_agent）。系统会通过 agent_phase 字段指定当前阶段。"
     "当 agent_phase=generate 时，必须调用 content_generate_agent，并且只输出包含 draft_text "
     "字段的 JSON 对象；当 agent_phase=verify 时，必须调用 content_verify_agent，并且只输出 "
     "JSON 数组；当 agent_phase=revise 时，必须根据 audit_findings 修复 current_text，"
@@ -89,14 +89,14 @@ def build_generation_subagents() -> GenerationSubAgents:
     )
 
 
-def create_host_agent_runner(model_provider: str) -> GenerationAgentRunner:
+def create_content_agent_runner(model_provider: str) -> GenerationAgentRunner:
     subagents = build_generation_subagents()
     return create_deep_agent(
         model=create_generation_chat_model(model_provider),
         tools=[],
-        system_prompt=HOST_AGENT_SYSTEM_PROMPT,
+        system_prompt=CONTENT_AGENT_SYSTEM_PROMPT,
         subagents=[subagents.content_generate_agent, subagents.content_verify_agent],
-        name=HOST_AGENT_NODE,
+        name=CONTENT_AGENT_NODE,
     )
 
 
@@ -172,7 +172,7 @@ def _extract_text_from_runner_output(output: dict[str, Any] | str) -> str:
         return output
     structured = _extract_structured_response(output)
     if structured is not None:
-        if isinstance(structured, HostAgentFinalOutput):
+        if isinstance(structured, ContentAgentFinalOutput):
             return structured.model_dump_json(ensure_ascii=False)
         if hasattr(structured, "model_dump_json"):
             return structured.model_dump_json()
@@ -234,7 +234,7 @@ def _runner_accepts_config(runner: GenerationAgentRunner) -> bool:
 def _coerce_draft_text(value: Any) -> str | None:
     if isinstance(value, dict):
         return value.get("draft_text") or value.get("polished_text")
-    if isinstance(value, HostAgentFinalOutput):
+    if isinstance(value, ContentAgentFinalOutput):
         return value.polished_text
     if hasattr(value, "draft_text"):
         return getattr(value, "draft_text")
@@ -244,7 +244,7 @@ def _coerce_draft_text(value: Any) -> str | None:
 def _coerce_polished_text(value: Any) -> str | None:
     if isinstance(value, dict):
         return value.get("polished_text")
-    if isinstance(value, HostAgentFinalOutput):
+    if isinstance(value, ContentAgentFinalOutput):
         return value.polished_text
     if hasattr(value, "polished_text"):
         return getattr(value, "polished_text")
@@ -268,7 +268,7 @@ def _extract_draft_text_from_messages(output: dict[str, Any] | str) -> str | Non
 def _extract_polished_text_from_messages(output: dict[str, Any] | str) -> str | None:
     for text in _iter_message_texts(output) or []:
         try:
-            final_output = parse_host_agent_final_output(text)
+            final_output = parse_content_agent_final_output(text)
             return final_output.polished_text
         except GenerationAgentProtocolError:
             polished_text = _coerce_from_json_text(text, _coerce_polished_text)
@@ -335,7 +335,7 @@ def _parse_revision_output(
 
     raw_text = _extract_text_from_runner_output(output)
     try:
-        final_output = parse_host_agent_final_output(raw_text)
+        final_output = parse_content_agent_final_output(raw_text)
         return final_output.polished_text
     except GenerationAgentProtocolError:
         revision_text = _coerce_plain_revision_text(raw_text)
@@ -343,7 +343,7 @@ def _parse_revision_output(
             return revision_text
         if _is_revision_summary_text(raw_text):
             progress_log.warning(
-                "[content] 修复阶段只返回摘要，保留当前正文继续审核: chars=%d",
+                "[content_agent] 修复阶段只返回摘要，保留当前正文继续审核: chars=%d",
                 len(current_text),
             )
             return current_text
@@ -358,7 +358,7 @@ def _is_revision_summary_text(raw_text: str) -> bool:
         "修复完成",
         "已完成修复",
         "返回的结果显示",
-        "content 已",
+        "content_agent 已",
     )
     return any(marker in text for marker in meta_markers)
 
@@ -457,7 +457,7 @@ def _log_generation_input_summary(
     origin_chars = _text_length(payload.get("origin_tender_params"))
     tender_chars = _text_length(payload.get("tender_params"))
     message = (
-        "[content] 生成上下文摘要: task_id=%s, generation_style=%s, "
+        "[content_agent] 生成上下文摘要: task_id=%s, generation_style=%s, "
         "project_info_chars=%d, origin_tender_params_chars=%d, tender_params_chars=%d"
     )
     args = (
@@ -518,11 +518,11 @@ def _build_phase_payload(
 
 def _get_task_id(state: TenderGraphStateBase, configurable: dict[str, Any]) -> str:
     return str(
-        configurable.get("task_id") or state.get("task_id") or "host-agent"
+        configurable.get("task_id") or state.get("task_id") or "content-agent"
     ).strip()
 
 
-def _write_host_artifact(
+def _write_content_agent_artifact(
     *,
     task_id: str,
     phase: str,
@@ -531,7 +531,7 @@ def _write_host_artifact(
 ) -> None:
     try:
         write_agent_log_artifact(
-            get_host_agent_log_dir(__file__),
+            get_content_agent_log_dir(__file__),
             prefix="content",
             task_id=task_id,
             phase=phase,
@@ -539,7 +539,7 @@ def _write_host_artifact(
             content=content,
         )
     except Exception as exc:
-        progress_log.debug(f"警告: 保存 content 日志失败: {exc}")
+        progress_log.debug(f"警告: 保存 content_agent 日志失败: {exc}")
 
 
 def _write_verify_artifact(
@@ -567,21 +567,21 @@ def _write_verify_artifact(
         progress_log.debug(f"警告: 保存 content_verify_agent 日志失败: {exc}")
 
 
-def run_host_agent_generation(
+def run_content_agent_generation(
     state: TenderGraphStateBase,
     config: dict[str, Any] | None = None,
     *,
     runner: GenerationAgentRunner | None = None,
     step_callback: Callable[[AgentStepPayload], None] | None = None,
-) -> HostAgentFinalOutput:
+) -> ContentAgentFinalOutput:
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     model_provider = str(configurable.get("model_provider") or "deepseek")
     task_id = _get_task_id(state, configurable)
-    selected_runner = runner or _fake_runner or create_host_agent_runner(model_provider)
+    selected_runner = runner or _fake_runner or create_content_agent_runner(model_provider)
     base_payload = _build_generation_payload(state, model_provider)
 
     progress_log.info(
-        "[content] 开始智能体生成: task_id=%s, tender_type=%s, model=%s",
+        "[content_agent] 开始智能体生成: task_id=%s, tender_type=%s, model=%s",
         task_id,
         base_payload["tender_type"],
         model_provider,
@@ -598,14 +598,14 @@ def run_host_agent_generation(
             _build_generation_context_config(config, generate_payload),
         )
     )
-    _write_host_artifact(
+    _write_content_agent_artifact(
         task_id=task_id,
         phase="draft",
         round_index=0,
         content=draft_text,
     )
     progress_log.info(
-        "[content] 初稿生成完成: task_id=%s, chars=%d",
+        "[content_agent] 初稿生成完成: task_id=%s, chars=%d",
         task_id,
         len(draft_text),
     )
@@ -645,7 +645,7 @@ def run_host_agent_generation(
             round_index=revision_rounds,
         )
         progress_log.info(
-            "[content] 第 %d 轮审核完成: task_id=%s, findings=%d",
+            "[content_agent] 第 %d 轮审核完成: task_id=%s, findings=%d",
             revision_rounds,
             task_id,
             len(findings),
@@ -661,18 +661,18 @@ def run_host_agent_generation(
             ),
         )
         if not findings:
-            _write_host_artifact(
+            _write_content_agent_artifact(
                 task_id=task_id,
                 phase="final",
                 round_index=revision_rounds,
                 content=current_text,
             )
             progress_log.info(
-                "[content] 审核无问题，智能体生成完成: task_id=%s, revision_rounds=%d",
+                "[content_agent] 审核无问题，智能体生成完成: task_id=%s, revision_rounds=%d",
                 task_id,
                 revision_rounds,
             )
-            return HostAgentFinalOutput(
+            return ContentAgentFinalOutput(
                 polished_text=current_text,
                 audit_findings=[],
                 revision_rounds=revision_rounds,
@@ -680,7 +680,7 @@ def run_host_agent_generation(
 
         revision_rounds += 1
         progress_log.info(
-            "[content] 开始第 %d 轮修复: task_id=%s, findings=%d",
+            "[content_agent] 开始第 %d 轮修复: task_id=%s, findings=%d",
             revision_rounds,
             task_id,
             len(findings),
@@ -703,14 +703,14 @@ def run_host_agent_generation(
                 current_text=current_text,
             )
         current_text = next_text
-        _write_host_artifact(
+        _write_content_agent_artifact(
             task_id=task_id,
             phase="revision",
             round_index=revision_rounds,
             content=current_text,
         )
         progress_log.info(
-            "[content] 第 %d 轮修复完成: task_id=%s, chars=%d",
+            "[content_agent] 第 %d 轮修复完成: task_id=%s, chars=%d",
             revision_rounds,
             task_id,
             len(current_text),
@@ -720,26 +720,26 @@ def run_host_agent_generation(
             AgentStepPayload(
                 step_type="revision",
                 round=revision_rounds,
-                node=HOST_AGENT_NODE,
+                node=CONTENT_AGENT_NODE,
                 content=current_text,
                 findings=findings,
                 is_complete=True,
             ),
         )
         if revision_rounds >= MAX_REVISION_ROUNDS:
-            _write_host_artifact(
+            _write_content_agent_artifact(
                 task_id=task_id,
                 phase="final",
                 round_index=revision_rounds,
                 content=current_text,
             )
             progress_log.info(
-                "[content] 达到最大修复轮次后放行: task_id=%s, revision_rounds=%d, remaining_findings=%d",
+                "[content_agent] 达到最大修复轮次后放行: task_id=%s, revision_rounds=%d, remaining_findings=%d",
                 task_id,
                 revision_rounds,
                 len(last_findings),
             )
-            return HostAgentFinalOutput(
+            return ContentAgentFinalOutput(
                 polished_text=current_text,
                 audit_findings=last_findings,
                 revision_rounds=revision_rounds,
@@ -752,14 +752,14 @@ def parse_verify_agent_output(raw_content: str) -> list[AuditFinding]:
 
 __all__ = [
     "GENERATE_AGENT_NODE",
-    "HOST_AGENT_NODE",
-    "HOST_AGENT_SYSTEM_PROMPT",
+    "CONTENT_AGENT_NODE",
+    "CONTENT_AGENT_SYSTEM_PROMPT",
     "MAX_REVISION_ROUNDS",
     "VERIFY_AGENT_NODE",
     "GenerationSubAgents",
     "build_generation_subagents",
-    "create_host_agent_runner",
+    "create_content_agent_runner",
     "parse_verify_agent_output",
-    "run_host_agent_generation",
+    "run_content_agent_generation",
     "set_generation_agent_runner",
 ]

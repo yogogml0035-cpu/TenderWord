@@ -1,14 +1,14 @@
 from backend.agents.generation.content_agents import (
     GENERATE_AGENT_NODE,
-    HOST_AGENT_NODE,
-    HOST_AGENT_SYSTEM_PROMPT,
+    CONTENT_AGENT_NODE,
+    CONTENT_AGENT_SYSTEM_PROMPT,
     MAX_REVISION_ROUNDS,
     VERIFY_AGENT_NODE,
     GenerationSubAgents,
     build_generation_subagents,
-    create_host_agent_runner,
+    create_content_agent_runner,
     parse_verify_agent_output,
-    run_host_agent_generation,
+    run_content_agent_generation,
     set_generation_agent_runner,
 )
 from backend.agents.generation.types import (
@@ -16,7 +16,7 @@ from backend.agents.generation.types import (
     AuditFinding,
     GenerationAgentProtocolError,
     GenerationAgentToolCallUnsupportedError,
-    HostAgentFinalOutput,
+    ContentAgentFinalOutput,
 )
 
 __all__ = [
@@ -26,14 +26,14 @@ __all__ = [
     "GenerationAgentToolCallUnsupportedError",
     "GenerationSubAgents",
     "GENERATE_AGENT_NODE",
-    "HOST_AGENT_NODE",
-    "HOST_AGENT_SYSTEM_PROMPT",
-    "HostAgentFinalOutput",
+    "CONTENT_AGENT_NODE",
+    "CONTENT_AGENT_SYSTEM_PROMPT",
+    "ContentAgentFinalOutput",
     "MAX_REVISION_ROUNDS",
     "VERIFY_AGENT_NODE",
     "build_generation_subagents",
-    "create_host_agent_runner",
+    "create_content_agent_runner",
     "parse_verify_agent_output",
-    "run_host_agent_generation",
+    "run_content_agent_generation",
     "set_generation_agent_runner",
 ]

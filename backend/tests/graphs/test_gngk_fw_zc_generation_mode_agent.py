@@ -161,12 +161,12 @@ def test_gngk_fw_zc_workflow_branch_still_uses_old_generation_node(
     update_seen: dict[str, object] = {}
 
     def _content_should_not_run(state, config=None):
-        raise AssertionError("content should not run for workflow generation mode")
+        raise AssertionError("content_agent should not run for workflow generation mode")
 
     _stub_gngk_fw_zc_nodes(monkeypatch, calls, update_seen)
     monkeypatch.setattr(
         GngkFwZcTenderGraph,
-        "NODE_HOST_AGENT_GENERATE",
+        "NODE_CONTENT_AGENT_GENERATE",
         _content_should_not_run,
         raising=False,
     )

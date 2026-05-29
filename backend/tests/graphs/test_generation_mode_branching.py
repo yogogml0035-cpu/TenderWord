@@ -22,7 +22,7 @@ def _build_graph(calls: list[str]) -> StandardTenderWorkflowGraph:
         return {"polished_text": "workflow text", "generate_polished_done": True}
 
     def _content_node(state, config=None):
-        calls.append("content")
+        calls.append("content_agent")
         return {"polished_text": "agent text", "generate_polished_done": True}
 
     def _comments_node(state, config=None):
@@ -43,7 +43,7 @@ def _build_graph(calls: list[str]) -> StandardTenderWorkflowGraph:
         NODE_GET_REPLACEMENTS = _word_node
         NODE_REPLACE_CONTENT = _word_node
         NODE_GENERATE_POLISHED_TEXT = _generate_node
-        NODE_HOST_AGENT_GENERATE = _content_node
+        NODE_CONTENT_AGENT_GENERATE = _content_node
         NODE_GENERATE_COMMENTS = _comments_node
         NODE_UPDATE_WORD = _update_node
 
@@ -68,7 +68,7 @@ def test_workflow_branch_uses_generate_polished_text_and_skips_content() -> None
     result, calls = _run_graph("workflow")
 
     assert "generate_polished_text" in calls
-    assert "content" not in calls
+    assert "content_agent" not in calls
     assert "word_operation" in calls
     assert calls[-1] == "update_word"
     assert result["polished_text"] == "workflow text"
@@ -78,7 +78,7 @@ def test_workflow_branch_uses_generate_polished_text_and_skips_content() -> None
 def test_agent_branch_uses_content_and_skips_generate_polished_text() -> None:
     result, calls = _run_graph("agent")
 
-    assert "content" in calls
+    assert "content_agent" in calls
     assert "generate_polished_text" not in calls
     assert "word_operation" in calls
     assert calls[-1] == "update_word"
@@ -98,7 +98,7 @@ def test_generation_branches_continue_to_comments_when_origin_tender_exists() ->
         }
     )
 
-    assert "content" in calls
+    assert "content_agent" in calls
     assert "generate_comments" in calls
     assert calls[-1] == "update_word"
     assert result["polished_text"] == "agent text"

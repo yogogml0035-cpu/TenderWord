@@ -196,7 +196,7 @@ describe('chatStore task message grouping', () => {
         task_kind: 'generate',
         step_type: 'revision',
         round: 1,
-        node: 'content',
+        node: 'content_agent',
         is_complete: true,
         content: '第一轮 AI 修改内容',
         findings: [
@@ -247,7 +247,7 @@ describe('chatStore task message grouping', () => {
     expect(auditMessage?.metadata?.agentStepNode).toBe('content_verify_agent');
     expect(auditMessage?.metadata?.agentStepAuditRounds).toHaveLength(2);
     expect(revisionMessage?.content).toBe('第一轮 AI 修改内容');
-    expect(revisionMessage?.metadata?.agentStepNode).toBe('content');
+    expect(revisionMessage?.metadata?.agentStepNode).toBe('content_agent');
     expect(revisionMessage?.metadata?.agentStepRound).toBe(1);
   });
 
@@ -325,7 +325,7 @@ describe('chatStore task message grouping', () => {
         task_kind: 'generate',
         step_type: 'revision',
         round: 1,
-        node: 'content',
+        node: 'content_agent',
         is_complete: true,
         content: '修复后的正文',
         findings: [],

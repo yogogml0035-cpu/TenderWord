@@ -176,12 +176,12 @@ def test_gjgk_workflow_branch_still_uses_old_generation_node_and_post_hook(
     post_update_seen: dict[str, object] = {}
 
     def _content_should_not_run(state, config=None):
-        raise AssertionError("content should not run for workflow generation mode")
+        raise AssertionError("content_agent should not run for workflow generation mode")
 
     _stub_gjgk_nodes(monkeypatch, calls, update_seen, post_update_seen)
     monkeypatch.setattr(
         GjgkTenderGraph,
-        "NODE_HOST_AGENT_GENERATE",
+        "NODE_CONTENT_AGENT_GENERATE",
         _content_should_not_run,
         raising=False,
     )
