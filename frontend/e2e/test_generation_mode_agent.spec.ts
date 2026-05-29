@@ -218,7 +218,7 @@ test.describe('Generation mode agent flow', () => {
           task_id: taskId,
           task_kind: 'generate',
           step_type: 'audit',
-          round: 1,
+          round: 0,
           node: 'content_verify_agent',
           is_complete: true,
           content: null,
@@ -240,7 +240,18 @@ test.describe('Generation mode agent flow', () => {
           content: '这是第 1 轮 AI 修改内容，已补充验收标准。',
           findings: [],
         }),
-        sseEvent('done', '4', {
+        sseEvent('agent_step', '4', {
+          timestamp: now,
+          task_id: taskId,
+          task_kind: 'generate',
+          step_type: 'audit',
+          round: 1,
+          node: 'content_verify_agent',
+          is_complete: true,
+          content: null,
+          findings: [],
+        }),
+        sseEvent('done', '5', {
           timestamp: now,
           task_id: taskId,
           task_kind: 'generate',
@@ -273,12 +284,18 @@ test.describe('Generation mode agent flow', () => {
 
     await expect(page.getByText('content_generate_agent')).toBeVisible();
     await expect(page.getByText('这是智能体初稿正文。')).toBeVisible();
-    await expect(page.getByText('content_verify_agent')).toBeVisible();
+    const verifyAgentCards = page.getByText('content_verify_agent', { exact: true });
+    await expect(verifyAgentCards).toHaveCount(2);
+    await expect(verifyAgentCards.first()).toBeVisible();
+    await expect(verifyAgentCards.nth(1)).toBeVisible();
     await expect(page.getByText('第 1 轮审核')).toBeVisible();
     await expect(page.getByText('evidence: 交付范围缺少验收标准')).toBeVisible();
     await expect(page.getByText('fix_hint: 补充设备验收和交付要求')).toBeVisible();
     await expect(page.getByText('content_agent', { exact: true })).toBeVisible();
     await expect(page.getByText('这是第 1 轮 AI 修改内容，已补充验收标准。')).toBeVisible();
+    await expect(page.getByText('第 2 轮审核')).toBeVisible();
+    await expect(page.getByText('未发现需要修复的问题')).toBeVisible();
+    await expect(page.getByText('AI 生成内容')).toHaveCount(0);
     await expect(page.getByRole('button', { name: '下载文件' })).toBeVisible();
 
     fs.mkdirSync(screenshotsDir, { recursive: true });

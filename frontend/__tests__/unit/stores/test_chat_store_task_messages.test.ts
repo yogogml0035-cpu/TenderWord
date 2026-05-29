@@ -230,25 +230,71 @@ describe('chatStore task message grouping', () => {
     const draftMessage = agentMessages?.find(
       (message) => message.metadata?.agentStepType === 'draft'
     );
-    const auditMessage = agentMessages?.find(
+    const auditMessages = agentMessages?.filter(
       (message) => message.metadata?.agentStepType === 'audit'
     );
     const revisionMessage = agentMessages?.find(
       (message) => message.metadata?.agentStepType === 'revision'
     );
 
-    expect(agentMessages).toHaveLength(3);
+    expect(agentMessages).toHaveLength(4);
+    expect(agentMessages?.map((message) => message.metadata?.agentStepNode)).toEqual([
+      'content_generate_agent',
+      'content_verify_agent',
+      'content_agent',
+      'content_verify_agent',
+    ]);
+    expect(agentMessages?.[0].content).toBe('智能体初稿');
     expect(draftMessage?.content).toBe('智能体初稿');
     expect(draftMessage?.metadata?.agentStepNode).toBe('content_generate_agent');
-    expect(auditMessage?.content).toContain('第 0 轮审核');
-    expect(auditMessage?.content).toContain('evidence: 缺少供货范围');
-    expect(auditMessage?.content).toContain('fix_hint: 补充供货范围说明');
-    expect(auditMessage?.content).toContain('第 1 轮审核');
-    expect(auditMessage?.metadata?.agentStepNode).toBe('content_verify_agent');
-    expect(auditMessage?.metadata?.agentStepAuditRounds).toHaveLength(2);
+    expect(auditMessages?.[0].content).toContain('第 1 轮审核');
+    expect(auditMessages?.[0].content).toContain('evidence: 缺少供货范围');
+    expect(auditMessages?.[0].content).toContain('fix_hint: 补充供货范围说明');
+    expect(auditMessages?.[0].metadata?.agentStepNode).toBe('content_verify_agent');
+    expect(auditMessages?.[0].metadata?.agentStepAuditRounds).toHaveLength(1);
+    expect(auditMessages?.[1].content).toContain('第 2 轮审核');
+    expect(auditMessages?.[1].content).toContain('evidence: 质保期未明确');
+    expect(auditMessages?.[1].metadata?.agentStepNode).toBe('content_verify_agent');
+    expect(auditMessages?.[1].metadata?.agentStepAuditRounds).toHaveLength(1);
     expect(revisionMessage?.content).toBe('第一轮 AI 修改内容');
     expect(revisionMessage?.metadata?.agentStepNode).toBe('content_agent');
     expect(revisionMessage?.metadata?.agentStepRound).toBe(1);
+  });
+
+  it('removes duplicated task-content card when agent-step cards start streaming', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'generate',
+        status: 'running',
+      });
+      useChatStore.getState().ensureTaskLogMessage('task-1');
+      useChatStore.getState().ensureTaskContentMessage('task-1', {
+        content: '普通 LLM 快照',
+        status: 'generating',
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'draft',
+        round: 0,
+        node: 'content_generate_agent',
+        is_complete: true,
+        content: '智能体初稿',
+        findings: [],
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const group = useChatStore.getState().findTaskMessageGroup('task-1');
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+
+    expect(group?.contentMessage).toBeUndefined();
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].content).toBe('智能体初稿');
+    expect(conversation?.messages.some((message) => message.content === '普通 LLM 快照')).toBe(false);
   });
 
   it('completeTask persists two cards and appends one download card', () => {
@@ -308,6 +354,11 @@ describe('chatStore task message grouping', () => {
         task_kind: 'generate',
         status: 'running',
       });
+      useChatStore.getState().ensureTaskLogMessage('task-1');
+      useChatStore.getState().ensureTaskContentMessage('task-1', {
+        content: '重复的普通内容',
+        status: 'generating',
+      });
       useChatStore.getState().upsertAgentStepMessage('task-1', {
         timestamp: new Date().toISOString(),
         task_id: 'task-1',
@@ -353,8 +404,10 @@ describe('chatStore task message grouping', () => {
       '智能体初稿',
       '修复后的正文',
     ]);
+    expect(group?.contentMessage).toBeUndefined();
     expect(group?.downloadMessage?.metadata?.messageKind).toBe('task-download');
     expect(group?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
+    expect(conversation?.messages.some((message) => message.content === '重复的普通内容')).toBe(false);
   });
 
   it('queued terminal task does not create any chat cards', () => {

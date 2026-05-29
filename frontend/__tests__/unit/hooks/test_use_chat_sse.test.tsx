@@ -108,6 +108,7 @@ function resetStores() {
         logMessageId: 'msg-log-1',
       },
     },
+    conversationDrafts: {},
     isLoading: false,
     error: null,
     selectedTenderType: 'xjcg',
@@ -138,6 +139,7 @@ function setQueueOnlyTaskState() {
     currentConversationId: 'conv-1',
     activeTaskIds: ['task-1'],
     taskMessageMap: {},
+    conversationDrafts: {},
   }));
   useChatStreamStore.setState({ streams: {} });
   useChatTaskSessionStore.setState({ sessions: {} });
@@ -389,7 +391,7 @@ describe('useChatSSE', () => {
     const agentMessages = conversation?.messages.filter(
       (message) => message.metadata?.messageKind === 'agent-step'
     );
-    const auditMessage = agentMessages?.find(
+    const auditMessages = agentMessages?.filter(
       (message) => message.metadata?.agentStepType === 'audit'
     );
     const revisionMessage = agentMessages?.find(
@@ -397,15 +399,135 @@ describe('useChatSSE', () => {
     );
     const group = getTaskGroup();
 
-    expect(agentMessages).toHaveLength(3);
+    expect(agentMessages).toHaveLength(4);
+    expect(agentMessages?.map((message) => message.metadata?.agentStepNode)).toEqual([
+      'content_generate_agent',
+      'content_verify_agent',
+      'content_agent',
+      'content_verify_agent',
+    ]);
     expect(agentMessages?.[0].content).toBe('智能体初稿正文');
-    expect(auditMessage?.content).toContain('evidence: 交付地点缺失');
-    expect(auditMessage?.content).toContain('fix_hint: 补充验收标准');
-    expect(auditMessage?.metadata?.agentStepAuditRounds).toHaveLength(2);
+    expect(auditMessages?.[0].content).toContain('第 1 轮审核');
+    expect(auditMessages?.[0].content).toContain('evidence: 交付地点缺失');
+    expect(auditMessages?.[0].content).toContain('fix_hint: 补充交付地点');
+    expect(auditMessages?.[0].metadata?.agentStepAuditRounds).toHaveLength(1);
     expect(revisionMessage?.content).toBe('第一轮 AI 修改内容');
+    expect(auditMessages?.[1].content).toContain('第 2 轮审核');
+    expect(auditMessages?.[1].content).toContain('evidence: 验收标准不明确');
+    expect(auditMessages?.[1].content).toContain('fix_hint: 补充验收标准');
+    expect(auditMessages?.[1].metadata?.agentStepAuditRounds).toHaveLength(1);
     expect(group?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
     expect(group?.contentMessage).toBeUndefined();
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
+  });
+
+  it('removes task-content if agent_step arrives after llm snapshot placeholder', async () => {
+    mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'llm',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          node: 'generate_polished_text',
+          content: '普通 LLM 快照',
+          content_mode: 'snapshot',
+          is_complete: false,
+        },
+      });
+    });
+
+    expect(getTaskGroup()?.contentMessage?.status).toBe('generating');
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'draft',
+          round: 0,
+          node: 'content_generate_agent',
+          is_complete: true,
+          content: '智能体初稿正文',
+          findings: [],
+        },
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+
+    expect(getTaskGroup()?.contentMessage).toBeUndefined();
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].content).toBe('智能体初稿正文');
+    expect(conversation?.messages.some((message) => message.content === '普通 LLM 快照')).toBe(false);
+  });
+
+  it('does not create task-content from llm snapshot when conversation uses agent mode', async () => {
+    mockGetTaskStatus.mockResolvedValue({
+      ...createRunningTaskStatus(),
+      progress: {
+        ...createRunningTaskStatus().progress,
+        running_nodes: ['content_agent'],
+        current_node: 'content_agent',
+      },
+    });
+    useChatStore.setState((state) => ({
+      ...state,
+      conversationDrafts: {
+        ...state.conversationDrafts,
+        'conv-1': {
+          generation_mode: 'agent',
+        },
+      },
+    }));
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'llm',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          node: 'generate_polished_text',
+          content: '普通 LLM 快照',
+          content_mode: 'snapshot',
+          is_complete: false,
+        },
+      });
+    });
+
+    expect(useChatStreamStore.getState().streams['task-1']?.aiText).toBe('普通 LLM 快照');
+    expect(getTaskGroup()?.contentMessage).toBeUndefined();
   });
 
   it('keeps SSE disconnected while queued and creates task-log only when running', async () => {

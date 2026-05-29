@@ -532,7 +532,7 @@ function normalizeAgentAuditRounds(rounds: unknown): AgentAuditRound[] {
 function formatAgentAuditContent(rounds: AgentAuditRound[]): string {
   return rounds
     .map((round) => {
-      const lines = [`第 ${round.round} 轮审核`];
+      const lines = [`第 ${round.round + 1} 轮审核`];
 
       if (round.findings.length === 0) {
         lines.push('未发现需要修复的问题');
@@ -562,11 +562,17 @@ function findAgentStepMessage(
     if (message.metadata.agentStepType !== stepType) {
       return false;
     }
-    if (stepType === 'audit' || stepType === 'draft') {
+    if (stepType === 'draft') {
       return true;
     }
     return message.metadata.agentStepRound === round;
   });
+}
+
+function hasAgentStepMessages(messages: Message[], taskId: string): boolean {
+  return messages.some(
+    (message) => message.taskId === taskId && message.metadata?.messageKind === TASK_AGENT_STEP_KIND
+  );
 }
 
 function getMessageById(messages: Message[], messageId?: string): Message | undefined {
@@ -746,6 +752,7 @@ interface ChatStore {
       status?: Message['status'];
       content?: string;
       error?: string;
+      suppressForAgentStep?: boolean;
     }
   ) => string | null;
   markTaskContentReady: (taskId: string, aiText?: string) => void;
@@ -1138,6 +1145,16 @@ export const useChatStore = create<ChatStore>()(
           if (locatedTaskGroup.contentMessage) {
             return locatedTaskGroup.contentMessage.id;
           }
+          const conversation = get().conversations.find(
+            (item) => item.id === locatedTaskGroup.conversationId
+          );
+          if (
+            options?.suppressForAgentStep &&
+            conversation &&
+            hasAgentStepMessages(conversation.messages, taskId)
+          ) {
+            return null;
+          }
 
           const contentMessageId = get().addMessage(locatedTaskGroup.conversationId, {
             type: 'ai',
@@ -1201,6 +1218,22 @@ export const useChatStore = create<ChatStore>()(
 
         upsertAgentStepMessage: (taskId, step) => {
           get().ensureTaskLogMessage(taskId, { status: 'generating' });
+          const locatedTaskGroup = get().findTaskMessageGroup(taskId);
+          if (
+            locatedTaskGroup?.contentMessage &&
+            getTaskMessageKind(locatedTaskGroup.contentMessage) === TASK_CONTENT_KIND
+          ) {
+            get().deleteMessage(locatedTaskGroup.conversationId, locatedTaskGroup.contentMessage.id);
+            const nextGroup = { ...locatedTaskGroup.group };
+            delete nextGroup.contentMessageId;
+            set((state) => ({
+              taskMessageMap: {
+                ...state.taskMessageMap,
+                [taskId]: nextGroup,
+              },
+            }));
+          }
+
           const conversation = findConversationByTaskIdFromState(get(), taskId);
           if (!conversation) {
             return null;
@@ -1217,9 +1250,7 @@ export const useChatStore = create<ChatStore>()(
           let auditRounds: AgentAuditRound[] | undefined;
 
           if (stepType === 'audit') {
-            const existingRounds = normalizeAgentAuditRounds(
-              existing?.metadata?.agentStepAuditRounds
-            );
+            const existingRounds = normalizeAgentAuditRounds(existing?.metadata?.agentStepAuditRounds);
             const nextRound: AgentAuditRound = { round: stepRound, findings };
             auditRounds = [
               ...existingRounds.filter((round) => round.round !== stepRound),
@@ -1268,6 +1299,18 @@ export const useChatStore = create<ChatStore>()(
             const hasLogs = Array.isArray(content?.logs);
             const hasAiText = typeof content?.aiText === 'string';
             const hasNonEmptyAiText = hasAiText && (content?.aiText?.length || 0) > 0;
+            const conversation = get().conversations.find((item) => item.id === conversationId);
+            const usesAgentStepCards = conversation
+              ? hasAgentStepMessages(conversation.messages, taskId)
+              : false;
+
+            if (
+              usesAgentStepCards &&
+              contentMessage &&
+              getTaskMessageKind(contentMessage) === TASK_CONTENT_KIND
+            ) {
+              get().deleteMessage(conversationId, contentMessage.id);
+            }
 
             if (logMessage) {
               get().updateMessage(conversationId, logMessage.id, {
@@ -1280,14 +1323,16 @@ export const useChatStore = create<ChatStore>()(
               });
             }
 
-            let contentMessageId: string | undefined = contentMessage?.id;
-            if (!contentMessage && hasNonEmptyAiText) {
+            let contentMessageId: string | undefined = usesAgentStepCards
+              ? undefined
+              : contentMessage?.id;
+            if (!usesAgentStepCards && !contentMessage && hasNonEmptyAiText) {
               contentMessageId =
                 get().ensureTaskContentMessage(taskId, {
                   status: 'completed',
                   content: content?.aiText || '',
                 }) || undefined;
-            } else if (contentMessage) {
+            } else if (!usesAgentStepCards && contentMessage) {
               get().updateMessage(conversationId, contentMessage.id, {
                 status: 'completed',
                 ...(hasAiText ? { content: content?.aiText || '' } : {}),
@@ -1336,7 +1381,14 @@ export const useChatStore = create<ChatStore>()(
               }
             }
 
-            nextGroup = mergeTaskMessageGroup(group, {
+            const baseGroup = usesAgentStepCards
+              ? (() => {
+                  const nextBaseGroup = { ...group };
+                  delete nextBaseGroup.contentMessageId;
+                  return nextBaseGroup;
+                })()
+              : group;
+            nextGroup = mergeTaskMessageGroup(baseGroup, {
               ...(logMessage ? { logMessageId: logMessage.id } : {}),
               ...(contentMessageId ? { contentMessageId } : {}),
               ...(downloadMessageId ? { downloadMessageId } : {}),
