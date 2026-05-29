@@ -262,7 +262,9 @@ describe('useChatSSE', () => {
     expect(completedGroup?.logMessage?.status).toBe('completed');
     expect(completedGroup?.contentMessage?.status).toBe('completed');
     expect(completedGroup?.contentMessage?.content).toBe('你好啊');
-    expect(completedGroup?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
+    expect(completedGroup?.downloadMessage?.metadata?.outputFile).toBe(
+      'D:/UploadFiles/output.docx'
+    );
     expect(completedGroup?.downloadMessage?.metadata?.styleWriteback).toEqual({
       summary: '样式回填: 抽取=1, 尝试=1, 成功=1, 跳过=0, 失败=0',
       extracted: 1,
@@ -478,7 +480,9 @@ describe('useChatSSE', () => {
     expect(getTaskGroup()?.contentMessage).toBeUndefined();
     expect(agentMessages).toHaveLength(1);
     expect(agentMessages?.[0].content).toBe('智能体初稿正文');
-    expect(conversation?.messages.some((message) => message.content === '普通 LLM 快照')).toBe(false);
+    expect(conversation?.messages.some((message) => message.content === '普通 LLM 快照')).toBe(
+      false
+    );
   });
 
   it('does not create task-content from llm snapshot when conversation uses agent mode', async () => {
@@ -976,6 +980,79 @@ describe('useChatSSE', () => {
     expect(onError).toHaveBeenCalledWith('生成失败');
   });
 
+  it('keeps agent-step cards without task-content when a fatal agent error arrives', async () => {
+    const onError = jest.fn();
+    mockGetTaskStatus.mockResolvedValue({
+      ...createRunningTaskStatus(),
+      progress: {
+        ...createRunningTaskStatus().progress,
+        running_nodes: ['content_agent'],
+        current_node: 'content_agent',
+      },
+    });
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+        onError,
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'draft',
+          round: 0,
+          node: 'content_generate_agent',
+          is_complete: true,
+          content: '智能体初稿正文',
+          findings: [],
+        },
+      });
+      useChatStreamStore.getState().setAIContent('task-1', '不应出现的普通 AI 内容卡', true);
+      latestOptions?.onMessage?.({
+        event: 'error',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          error: 'Request timed out.',
+          is_fatal: true,
+        },
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+    const group = getTaskGroup();
+
+    expect(latestCloseMock).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith('Request timed out.');
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].content).toBe('智能体初稿正文');
+    expect(group?.logMessage?.status).toBe('error');
+    expect(group?.logMessage?.metadata?.logs).toEqual(
+      expect.arrayContaining([expect.objectContaining({ message: 'Request timed out.' })])
+    );
+    expect(group?.contentMessage).toBeUndefined();
+    expect(
+      conversation?.messages.some((message) => message.content === '不应出现的普通 AI 内容卡')
+    ).toBe(false);
+  });
+
   it('closes the active SSE connection when a non-fatal cancel event arrives', async () => {
     const onComplete = jest.fn();
     mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
@@ -1312,9 +1389,7 @@ describe('useChatSSE', () => {
       });
     });
 
-    expect(useChatStreamStore.getState().streams['task-1']?.aiText).toBe(
-      '第一段\n第二段\n第三段'
-    );
+    expect(useChatStreamStore.getState().streams['task-1']?.aiText).toBe('第一段\n第二段\n第三段');
     expect(getTaskGroup()?.contentMessage?.status).toBe('completed');
     expect(getTaskGroup()?.contentMessage?.content).toBe('第一段\n第二段\n第三段');
 

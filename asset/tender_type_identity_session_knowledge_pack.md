@@ -175,6 +175,7 @@
 - `agent-step` 消息不纳入旧 `taskMessageMap` 的 `task-log` / `task-content` / `task-download` 三卡分组；done 事件仍只负责生成下载入口卡。
 - 智能体过程卡按真实调用顺序逐张展示：`content_generate_agent` 初稿卡、每轮 `content_verify_agent` 审核卡、每轮 `content_agent` 修复卡，最后由 `done` 事件追加下载卡。前端展示审核轮次时把后端 0-based `round` 转成用户可见的“第 1 轮审核”起算；审核卡不跨轮聚合。
 - 智能体过程卡标题以 `metadata.agentStepNode` 为准，分别显示 `content_generate_agent`、`content_verify_agent`、`content_agent`，不要再用“AI 初稿内容 / 智能体审核意见 / AI 修改内容”这类按 step_type 推导的标题。agent-step 卡出现后，前端不得再保留或补建普通 `task-content` 的“AI 生成内容”卡，避免与 `content_generate_agent` 正文重复。
+- 智能体 generate 任务失败、取消或本地中断时也必须沿用 agent-step 过程卡，不得因为运行时残留 `aiText` 而补建普通 `task-content` 卡；错误原因应进入 `task-log` 日志卡，保证用户能看到 `Request timed out.` 等失败信息。
 
 ## 聊天输入与排队恢复
 

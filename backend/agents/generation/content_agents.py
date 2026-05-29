@@ -296,26 +296,47 @@ def _parse_draft_output(output: dict[str, Any] | str) -> str:
 def _extract_verify_findings_from_messages(output: dict[str, Any] | str) -> list[AuditFinding] | None:
     for text in _iter_message_texts(output) or []:
         try:
-            return coerce_audit_findings(text, fallback_on_error=False)
+            return _filter_actionable_findings(
+                coerce_audit_findings(text, fallback_on_error=False)
+            )
         except GenerationAgentProtocolError:
             continue
     return None
+
+
+def _is_noop_audit_finding(finding: AuditFinding) -> bool:
+    evidence = finding.evidence.strip()
+    fix_hint = finding.fix_hint.strip()
+    return (
+        "无需修改" in fix_hint
+        or "不需要修改" in fix_hint
+        or "不视为问题" in evidence
+        or "不算问题" in evidence
+    )
+
+
+def _filter_actionable_findings(findings: list[AuditFinding]) -> list[AuditFinding]:
+    return [finding for finding in findings if not _is_noop_audit_finding(finding)]
 
 
 def _parse_verify_output(output: dict[str, Any] | str) -> list[AuditFinding]:
     if isinstance(output, dict):
         for key in ("findings", "audit_findings"):
             if key in output:
-                return coerce_audit_findings(
-                    json.dumps(output.get(key), ensure_ascii=False, default=str),
-                    fallback_on_error=True,
+                return _filter_actionable_findings(
+                    coerce_audit_findings(
+                        json.dumps(output.get(key), ensure_ascii=False, default=str),
+                        fallback_on_error=True,
+                    )
                 )
     message_findings = _extract_verify_findings_from_messages(output)
     if message_findings is not None:
         return message_findings
-    return coerce_audit_findings(
-        _extract_text_from_runner_output(output),
-        fallback_on_error=True,
+    return _filter_actionable_findings(
+        coerce_audit_findings(
+            _extract_text_from_runner_output(output),
+            fallback_on_error=True,
+        )
     )
 
 
@@ -334,6 +355,12 @@ def _parse_revision_output(
         return normalized
 
     raw_text = _extract_text_from_runner_output(output)
+    if not str(raw_text or "").strip():
+        progress_log.warning(
+            "[content_agent] 修复阶段未返回正文，保留当前正文继续审核: chars=%d",
+            len(current_text),
+        )
+        return current_text
     try:
         final_output = parse_content_agent_final_output(raw_text)
         return final_output.polished_text
@@ -357,6 +384,10 @@ def _is_revision_summary_text(raw_text: str) -> bool:
         "已根据审核意见",
         "修复完成",
         "已完成修复",
+        "已修正",
+        "已修改",
+        "修订完成",
+        "处理完成",
         "返回的结果显示",
         "content_agent 已",
     )
@@ -371,6 +402,7 @@ def _coerce_plain_revision_text(raw_text: str) -> str | None:
         "content_verify_agent",
         "已根据审核意见",
         "修复完成",
+        "修订完成",
         "返回的结果显示",
     )
     if any(marker in text for marker in meta_markers):
@@ -509,8 +541,11 @@ def _build_phase_payload(
             "当前 agent_phase=revise。禁止调用 content_generate_agent 或 content_verify_agent。"
             "根据 audit_findings 修复 current_text，并只输出 JSON 对象 polished_text。"
             "只能修改 audit_findings[].evidence 指向且 fix_hint 要求的内容，其它内容逐字保留。"
+            "polished_text 必须是修复后的完整正文，不是摘要；禁止输出解释、Markdown 或代码块。"
+            "如果某项 fix_hint 表示无需修改，应忽略该项，不要为了该项改写正文。"
             "如果 audit_findings 表示审核输出格式异常，或 fix_hint 要求保持原文不变，"
             "必须原样返回 current_text。不得要求用户补充信息。"
+            "输出示例：{\"polished_text\":\"<完整采购需求正文>\"}。"
         )
     phase_payload["messages"] = [{"role": "user", "content": instruction}]
     return phase_payload

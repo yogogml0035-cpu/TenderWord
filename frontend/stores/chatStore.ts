@@ -353,6 +353,31 @@ function buildInterruptedLogs(
   ];
 }
 
+function buildTaskFailureLogs(
+  existingLogs: unknown,
+  runtimeLogs: LogEntry[] | undefined,
+  errorMessage: string
+): LogEntry[] {
+  const baseLogs =
+    runtimeLogs && runtimeLogs.length > 0 ? runtimeLogs : normalizeLogEntries(existingLogs);
+  if (
+    !errorMessage ||
+    baseLogs.some((log) => log.level === 'error' && log.message === errorMessage)
+  ) {
+    return baseLogs;
+  }
+
+  return [
+    ...baseLogs,
+    {
+      id: generateMessageId(),
+      timestamp: Date.now(),
+      level: 'error',
+      message: errorMessage,
+    },
+  ];
+}
+
 function collectBackendRestartTaskIds(state: Pick<
   ChatStore,
   'conversations' | 'activeTaskIds' | 'taskSummaries' | 'conversationDrafts'
@@ -573,6 +598,30 @@ function hasAgentStepMessages(messages: Message[], taskId: string): boolean {
   return messages.some(
     (message) => message.taskId === taskId && message.metadata?.messageKind === TASK_AGENT_STEP_KIND
   );
+}
+
+function shouldUseAgentProcessCards(
+  state: Pick<ChatStore, 'conversations' | 'conversationDrafts' | 'taskSummaries'>,
+  taskId: string,
+  conversationId?: string | null
+): boolean {
+  const conversation =
+    (conversationId ? state.conversations.find((item) => item.id === conversationId) : null) ||
+    findConversationByTaskIdFromState(state, taskId);
+  const summary = state.taskSummaries[taskId];
+
+  if (summary?.task_kind && summary.task_kind !== 'generate') {
+    return false;
+  }
+  if (conversation && hasAgentStepMessages(conversation.messages, taskId)) {
+    return true;
+  }
+  if (summary?.current_node === 'content_agent') {
+    return true;
+  }
+  return conversation
+    ? state.conversationDrafts[conversation.id]?.generation_mode === 'agent'
+    : false;
 }
 
 function getMessageById(messages: Message[], messageId?: string): Message | undefined {
@@ -1299,10 +1348,7 @@ export const useChatStore = create<ChatStore>()(
             const hasLogs = Array.isArray(content?.logs);
             const hasAiText = typeof content?.aiText === 'string';
             const hasNonEmptyAiText = hasAiText && (content?.aiText?.length || 0) > 0;
-            const conversation = get().conversations.find((item) => item.id === conversationId);
-            const usesAgentStepCards = conversation
-              ? hasAgentStepMessages(conversation.messages, taskId)
-              : false;
+            const usesAgentStepCards = shouldUseAgentProcessCards(get(), taskId, conversationId);
 
             if (
               usesAgentStepCards &&
@@ -1440,6 +1486,12 @@ export const useChatStore = create<ChatStore>()(
             const hasLogs = Array.isArray(content?.logs);
             const hasAiText = typeof content?.aiText === 'string';
             const hasNonEmptyAiText = hasAiText && (content?.aiText?.length || 0) > 0;
+            const nextLogs = buildTaskFailureLogs(
+              logMessage?.metadata?.logs,
+              hasLogs ? content?.logs : undefined,
+              error
+            );
+            const usesAgentStepCards = shouldUseAgentProcessCards(get(), taskId, conversationId);
 
             if (logMessage && getTaskMessageKind(logMessage) === TASK_LOG_KIND) {
               get().updateMessage(conversationId, logMessage.id, {
@@ -1447,20 +1499,30 @@ export const useChatStore = create<ChatStore>()(
                 metadata: {
                   messageKind: TASK_LOG_KIND,
                   taskKind: get().taskSummaries[taskId]?.task_kind,
-                  ...(hasLogs ? { logs: content?.logs } : {}),
+                  logs: nextLogs,
                 },
               });
             }
 
-            let contentMessageId: string | undefined = contentMessage?.id;
-            if (!contentMessage && hasNonEmptyAiText) {
+            if (
+              usesAgentStepCards &&
+              contentMessage &&
+              getTaskMessageKind(contentMessage) === TASK_CONTENT_KIND
+            ) {
+              get().deleteMessage(conversationId, contentMessage.id);
+            }
+
+            let contentMessageId: string | undefined = usesAgentStepCards
+              ? undefined
+              : contentMessage?.id;
+            if (!usesAgentStepCards && !contentMessage && hasNonEmptyAiText) {
               contentMessageId =
                 get().ensureTaskContentMessage(taskId, {
                   status: 'error',
                   content: content?.aiText || '',
                   error,
                 }) || undefined;
-            } else if (contentMessage) {
+            } else if (!usesAgentStepCards && contentMessage) {
               get().updateMessage(conversationId, contentMessage.id, {
                 status: 'error',
                 error,
@@ -1472,7 +1534,14 @@ export const useChatStore = create<ChatStore>()(
               });
             }
 
-            nextGroup = mergeTaskMessageGroup(group, {
+            const baseGroup = usesAgentStepCards
+              ? (() => {
+                  const nextBaseGroup = { ...group };
+                  delete nextBaseGroup.contentMessageId;
+                  return nextBaseGroup;
+                })()
+              : group;
+            nextGroup = mergeTaskMessageGroup(baseGroup, {
               ...(logMessage ? { logMessageId: logMessage.id } : {}),
               ...(contentMessageId ? { contentMessageId } : {}),
             });
@@ -1522,6 +1591,7 @@ export const useChatStore = create<ChatStore>()(
             const hasLogs = Array.isArray(content?.logs);
             const hasAiText = typeof content?.aiText === 'string';
             const hasNonEmptyAiText = hasAiText && (content?.aiText?.length || 0) > 0;
+            const usesAgentStepCards = shouldUseAgentProcessCards(get(), taskId, conversationId);
 
             if (logMessage && getTaskMessageKind(logMessage) === TASK_LOG_KIND) {
               get().updateMessage(conversationId, logMessage.id, {
@@ -1533,14 +1603,24 @@ export const useChatStore = create<ChatStore>()(
               });
             }
 
-            let contentMessageId: string | undefined = contentMessage?.id;
-            if (!contentMessage && hasNonEmptyAiText) {
+            if (
+              usesAgentStepCards &&
+              contentMessage &&
+              getTaskMessageKind(contentMessage) === TASK_CONTENT_KIND
+            ) {
+              get().deleteMessage(conversationId, contentMessage.id);
+            }
+
+            let contentMessageId: string | undefined = usesAgentStepCards
+              ? undefined
+              : contentMessage?.id;
+            if (!usesAgentStepCards && !contentMessage && hasNonEmptyAiText) {
               contentMessageId =
                 get().ensureTaskContentMessage(taskId, {
                   status: 'cancelled',
                   content: content?.aiText || '',
                 }) || undefined;
-            } else if (contentMessage) {
+            } else if (!usesAgentStepCards && contentMessage) {
               get().updateMessage(conversationId, contentMessage.id, {
                 status: 'cancelled',
                 ...(hasAiText ? { content: content?.aiText || '' } : {}),
@@ -1551,7 +1631,14 @@ export const useChatStore = create<ChatStore>()(
               });
             }
 
-            nextGroup = mergeTaskMessageGroup(group, {
+            const baseGroup = usesAgentStepCards
+              ? (() => {
+                  const nextBaseGroup = { ...group };
+                  delete nextBaseGroup.contentMessageId;
+                  return nextBaseGroup;
+                })()
+              : group;
+            nextGroup = mergeTaskMessageGroup(baseGroup, {
               ...(logMessage ? { logMessageId: logMessage.id } : {}),
               ...(contentMessageId ? { contentMessageId } : {}),
             });
@@ -1612,7 +1699,11 @@ export const useChatStore = create<ChatStore>()(
 
           if (locatedTaskGroup) {
             const { conversationId, logMessage, contentMessage, group } = locatedTaskGroup;
-            const nextLogs = buildInterruptedLogs(logMessage?.metadata?.logs, runtimeSnapshot?.logs);
+            const usesAgentStepCards = shouldUseAgentProcessCards(get(), taskId, conversationId);
+            const nextLogs = buildInterruptedLogs(
+              logMessage?.metadata?.logs,
+              runtimeSnapshot?.logs
+            );
             const nextProgressText =
               runtimeSnapshot?.progressText ||
               taskSummary?.progress_text ||
@@ -1668,8 +1759,18 @@ export const useChatStore = create<ChatStore>()(
                   : '';
             const hasNonEmptyAiText = nextAiText.length > 0;
 
-            let contentMessageId: string | undefined = contentMessage?.id;
-            if (!contentMessage && hasNonEmptyAiText) {
+            if (
+              usesAgentStepCards &&
+              contentMessage &&
+              getTaskMessageKind(contentMessage) === TASK_CONTENT_KIND
+            ) {
+              get().deleteMessage(conversationId, contentMessage.id);
+            }
+
+            let contentMessageId: string | undefined = usesAgentStepCards
+              ? undefined
+              : contentMessage?.id;
+            if (!usesAgentStepCards && !contentMessage && hasNonEmptyAiText) {
               contentMessageId =
                 get().ensureTaskContentMessage(taskId, {
                   status: 'error',
@@ -1700,7 +1801,7 @@ export const useChatStore = create<ChatStore>()(
                   },
                 });
               }
-            } else if (contentMessage) {
+            } else if (!usesAgentStepCards && contentMessage) {
               get().updateMessage(conversationId, contentMessage.id, {
                 status: 'error',
                 ...(hasNonEmptyAiText ? { content: nextAiText } : {}),
@@ -1725,7 +1826,14 @@ export const useChatStore = create<ChatStore>()(
               });
             }
 
-            nextGroup = mergeTaskMessageGroup(group, {
+            const baseGroup = usesAgentStepCards
+              ? (() => {
+                  const nextBaseGroup = { ...group };
+                  delete nextBaseGroup.contentMessageId;
+                  return nextBaseGroup;
+                })()
+              : group;
+            nextGroup = mergeTaskMessageGroup(baseGroup, {
               ...(logMessage ? { logMessageId: logMessage.id } : {}),
               ...(contentMessageId ? { contentMessageId } : {}),
             });

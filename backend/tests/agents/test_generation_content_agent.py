@@ -311,7 +311,8 @@ def test_content_verify_agent_repairs_missing_fields_with_retry(monkeypatch) -> 
     result = graph.invoke(
         {
             "current_text": "采购需求正文",
-            "origin_tender_params": "质保期限：3年",
+            "origin_tender_params": "参考内容旧质保期限：1年",
+            "tender_params": "质保期限：3年",
             "model_provider": "deepseek",
         }
     )
@@ -343,7 +344,9 @@ def test_content_verify_agent_reads_current_text_from_config(monkeypatch) -> Non
             "configurable": {
                 "generation_agent_context": {
                     "current_text": "config draft text",
+                    "project_info": "config project info",
                     "origin_tender_params": "config origin params",
+                    "tender_params": "config tender params",
                     "model_provider": "qwen",
                 }
             }
@@ -352,8 +355,19 @@ def test_content_verify_agent_reads_current_text_from_config(monkeypatch) -> Non
 
     assert result["structured_response"] == []
     assert calls[0]["model_provider"] == "qwen"
-    assert "config origin params" in str(calls[0]["user_prompt"])
-    assert "config draft text" in str(calls[0]["user_prompt"])
+    user_prompt = str(calls[0]["user_prompt"])
+    system_prompt = str(calls[0]["system_prompt"])
+    assert "【项目基础信息】\nconfig project info" in user_prompt
+    assert "【参考内容（只作模板，不作事实真源）】\nconfig origin params" in user_prompt
+    assert "【技术参数（原材料，事实真源）】\nconfig tender params" in user_prompt
+    assert "【待审核正文】\nconfig draft text" in user_prompt
+    assert "参考内容】只作章节/编号/表格/语气模板" in user_prompt
+    assert "★、▲ 指标" in user_prompt
+    assert "多个包件/标段/采购包/独立设备组" in user_prompt
+    assert "只能输出严格合法的 JSON 数组本身" in system_prompt
+    assert "Few-shots" in system_prompt
+    assert "禁止输出“第 1 轮审核”" in system_prompt
+    assert "不要用技术参数中的设备标题覆盖项目基础信息" in system_prompt
 
 
 def test_content_verify_agent_repairs_common_json_issues_without_retry(monkeypatch) -> None:
@@ -656,6 +670,57 @@ def test_content_preserves_current_text_when_revision_returns_only_summary() -> 
     ]
     assert runner.payloads[3]["current_text"] == "draft text"
     assert events[2].content == "draft text"
+
+def test_content_preserves_current_text_when_revision_returns_empty_output() -> None:
+    runner = FakeRunner(
+        [
+            _draft_output("draft text"),
+            _audit_output([{"evidence": "项目名称错误", "fix_hint": "修正项目名称"}]),
+            "",
+            _audit_output([]),
+        ]
+    )
+
+    result = run_content_agent_generation({}, runner=runner)
+
+    assert result.polished_text == "draft text"
+    assert [payload["agent_phase"] for payload in runner.payloads] == [
+        "generate",
+        "verify",
+        "revise",
+        "verify",
+    ]
+    assert runner.payloads[3]["current_text"] == "draft text"
+
+def test_content_filters_noop_audit_findings_before_revision() -> None:
+    runner = FakeRunner(
+        [
+            _draft_output("draft text"),
+            _audit_output(
+                [
+                    {
+                        "evidence": "正文缺少质保期限",
+                        "fix_hint": "补充质保期限，保持其它内容不变",
+                    },
+                    {
+                        "evidence": "表格参数实质一致，不视为问题。",
+                        "fix_hint": "无需修改。",
+                    },
+                ]
+            ),
+            _revision_output("final text"),
+            _audit_output([]),
+        ]
+    )
+    events = []
+
+    result = run_content_agent_generation({}, runner=runner, step_callback=events.append)
+
+    assert result.polished_text == "final text"
+    assert runner.payloads[2]["audit_findings"] == [
+        {"evidence": "正文缺少质保期限", "fix_hint": "补充质保期限，保持其它内容不变"}
+    ]
+    assert [finding.evidence for finding in events[1].findings] == ["正文缺少质保期限"]
 
 
 def test_content_writes_content_agent_verify_logs_and_progress(
