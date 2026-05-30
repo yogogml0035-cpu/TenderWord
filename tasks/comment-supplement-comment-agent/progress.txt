@@ -7,6 +7,7 @@ Source: prd.json
 ## Codebase Patterns
 - 后端任务类型需要同时更新内部 `backend/task/task_queue_manager.py::TaskKind`、API `backend/models/task.py::TaskKind` 和 `backend/services/task_service.py` 的转换映射。
 - SSE `done` 新增结构字段时，需要同步后端模型 `backend/models/sse.py`、发送入口 `backend/core/sse_manager.py`、前端 `frontend/types/api.ts` 与类型契约测试。
+- Windows/WSL 共用工作区时，前端浏览器验证前要确认 Linux 原生 optional 依赖已安装；若 `lightningcss` 或 `@tailwindcss/oxide` 只存在 win32 包，在 `frontend/` 运行 `npm install --include=optional` 后重启 dev server。
 
 ## 2026-05-30 13:08 - US-001
 - 建立了 `comment_supplement` 任务类型契约：后端内部/API TaskKind、TaskService 映射、前端 TaskKind union 均已支持。
@@ -18,4 +19,14 @@ Source: prd.json
   - 任务类型是双枚举结构，新增 task kind 时不要只改 API 类型，还要改队列内部枚举和 TaskService 映射。
   - SSE done 的结构字段需要同时覆盖 Pydantic 模型、SSEManager 直接发送入口和前端 API 类型，避免断线重放/任务状态/前端卡片三处契约漂移。
   - 当前工作树已有与本需求无关的 `.env.example` 和 PowerShell 脚本空白改动，提交时应只暂存本轮文件。
+---
+## 2026-05-30 13:31 - US-001
+- 修复了 Validator 上次记录的浏览器验证环境问题：`frontend/node_modules` 只有 Windows 原生 optional package，已通过 `npm install --include=optional` 恢复 Linux 平台的 `lightningcss-linux-x64-gnu` 与 `@tailwindcss/oxide-linux-x64-gnu`。
+- 重启前端 dev server 后验证 `/tender` 页面返回 200，Playwright 打开页面成功，DOM 不再是 Next error，console 无 error/warning；截图保存到 `tasks/comment-supplement-comment-agent/screenshots/validator-us-001-pass-1.png`，console 和 requests 证据保存到 `tasks/comment-supplement-comment-agent/logs/validator-us-001-retry-console.log`、`tasks/comment-supplement-comment-agent/logs/validator-us-001-retry-requests.log`。
+- 更改的文件：`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m pytest backend/tests/services/test_task_service_task_kind.py backend/tests/services/test_sse_manager_agent_step.py backend/tests/models/test_sse_agent_step.py -v` 通过；`npm test -- --runTestsByPath __tests__/unit/types/test_api_sse_agent_step.test.ts` 通过；`npm run lint` 通过；`npm run type-check` 通过；`playwright-cli -s=validator-us-001-retry open http://localhost:8502/tender`、截图、console、requests 采集通过；`curl -sS -L -o /tmp/tenderword_tender_probe.html -w '%{http_code}\n' http://localhost:8502/tender` 返回 200。
+- **未来迭代的学习：**
+  - Windows 与 WSL 交替使用同一个 `frontend/node_modules` 时，平台原生 optional dependency 可能停留在 win32 版本，Next/Tailwind 编译会报缺少 Linux `.node` 文件；用锁文件恢复 optional 依赖后要重启 dev server。
+  - 根路径 `/` 当前会 307 重定向到 `/tender`，浏览器或 curl 健康检查应检查 `/tender` 或启用跟随跳转，避免把正常 redirect 当失败。
+  - 当前工作树已有与本需求无关的 `backend/.env.example` 和 `scripts/start-dev.ps1` 空白改动，提交时仍应只暂存本轮需求文件。
 ---
