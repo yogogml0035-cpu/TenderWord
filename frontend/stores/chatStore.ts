@@ -142,8 +142,7 @@ export interface ConversationFormDraft {
   pending_edit_prompt?: string;
   pending_edit_task_id?: string;
   files?: {
-    origin_tender?: ConversationDraftFile;
-    clean_draft?: ConversationDraftFile;
+    template?: ConversationDraftFile;
     tender_params: ConversationDraftFile[];
   };
 }
@@ -308,11 +307,8 @@ function mergeConversationDraft(
 
   if (nextDraft.files) {
     nextDraft.files = {
-      ...(nextDraft.files.origin_tender
-        ? { origin_tender: normalizeDraftFile(nextDraft.files.origin_tender) }
-        : {}),
-      ...(nextDraft.files.clean_draft
-        ? { clean_draft: normalizeDraftFile(nextDraft.files.clean_draft) }
+      ...(nextDraft.files.template
+        ? { template: normalizeDraftFile(nextDraft.files.template) }
         : {}),
       tender_params: (nextDraft.files.tender_params || [])
         .map((file) => normalizeDraftFile(file))

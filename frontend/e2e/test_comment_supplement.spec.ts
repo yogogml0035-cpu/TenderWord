@@ -181,11 +181,11 @@ async function seedConversation(
                   fund_source_lx: 0,
                 },
                 files: {
-                  clean_draft: {
-                    id: 'clean-draft',
-                    file_path: 'uploads/clean-draft.docx',
-                    file_name: 'clean-draft.docx',
-                    original_name: 'clean-draft.docx',
+                  template: {
+                    id: 'template',
+                    file_path: 'uploads/template.docx',
+                    file_name: 'template.docx',
+                    original_name: 'template.docx',
                     size: 128,
                     upload_time: '2026-05-30T10:00:00Z',
                   },

@@ -122,7 +122,7 @@ export interface UploadedFile {
   upload_time?: string;
 }
 
-export type FileType = 'clean_draft' | 'origin_tender' | 'params' | 'qualification';
+export type FileType = 'template' | 'clean_draft' | 'origin_tender' | 'params' | 'qualification';
 
 // ============================================
 // Generate Task Types

@@ -410,8 +410,7 @@ describe('TenderFormShared', () => {
         return mockTenderData;
       }
     );
-    mockUploadFactoryByType.clean_draft = () => [buildUploadedFile('clean_draft')];
-    mockUploadFactoryByType.origin_tender = () => [buildUploadedFile('origin_tender')];
+    mockUploadFactoryByType.template = () => [buildUploadedFile('template')];
     mockUploadFactoryByType.params = () => [buildUploadedFile('params')];
     setUrlParams();
     mockFetchTemplateCandidates.mockResolvedValue(buildTemplateCandidateResponse());
@@ -422,9 +421,9 @@ describe('TenderFormShared', () => {
   });
 
   it.each([
-    ['xjcg', '模板文件（可选）', '第三章  采购需求', '第四章  响应文件有关格式'],
-    ['gngk', '模板文件（可选）', '第三章 招标内容及要求', '第四章 投标文件有关格式'],
-    ['gjgk', '模板文件（可选）', '技术规格及要求', '附件1：投标文件封面（格式）'],
+    ['xjcg', '模板文件（必填）', '第三章  采购需求', '第四章  响应文件有关格式'],
+    ['gngk', '模板文件（必填）', '第三章 招标内容及要求', '第四章 投标文件有关格式'],
+    ['gjgk', '模板文件（必填）', '技术规格及要求', '附件1：投标文件封面（格式）'],
   ] as const)(
     'injects variant defaults for %s',
     (tenderType, cleanLabel, beforeText, afterText) => {
@@ -435,6 +434,47 @@ describe('TenderFormShared', () => {
       expect(screen.getByPlaceholderText('插入位置后的章节标题')).toHaveValue(afterText);
     }
   );
+
+  it('renders only template and technical parameter upload controls', () => {
+    renderSharedForm();
+
+    expect(screen.getByTestId('file-uploader-template')).toBeInTheDocument();
+    expect(screen.getByTestId('file-uploader-params')).toBeInTheDocument();
+    expect(screen.queryByTestId('file-uploader-clean_draft')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('file-uploader-origin_tender')).not.toBeInTheDocument();
+    expect(screen.getByText('模板文件（必填）')).toBeInTheDocument();
+    expect(screen.getByText('技术参数文件（必填）')).toBeInTheDocument();
+    expect(screen.queryByText('送审稿文件（可选）')).not.toBeInTheDocument();
+    expect(screen.queryByText('模板文件（可选）')).not.toBeInTheDocument();
+  });
+
+  it('syncs draft files as template and tender_params only', async () => {
+    const user = userEvent.setup();
+    const onDraftChange = jest.fn();
+    renderSharedForm({ onDraftChange });
+
+    await user.click(screen.getByLabelText('上传模板文件（必填）'));
+    await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
+
+    const fileUpdates = onDraftChange.mock.calls
+      .map(([updates]) => updates.files)
+      .filter(Boolean);
+
+    expect(fileUpdates).toEqual([
+      {
+        template: expect.objectContaining({ file_path: 'D:/UploadFiles/template.docx' }),
+        tender_params: [],
+      },
+      {
+        template: expect.objectContaining({ file_path: 'D:/UploadFiles/template.docx' }),
+        tender_params: [expect.objectContaining({ file_path: 'D:/UploadFiles/params.docx' })],
+      },
+    ]);
+    fileUpdates.forEach((files) => {
+      expect(files).not.toHaveProperty('origin_tender');
+      expect(files).not.toHaveProperty('clean_draft');
+    });
+  });
 
   it('syncs visible default anchors into draft on initial render', async () => {
     const onDraftChange = jest.fn();
@@ -671,7 +711,7 @@ describe('TenderFormShared', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('requires at least one clean/template or origin file', async () => {
+  it('requires template file', async () => {
     const user = userEvent.setup();
     const onSubmit = jest.fn();
     renderSharedForm({ onSubmit });
@@ -681,7 +721,7 @@ describe('TenderFormShared', () => {
     await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
     await user.click(screen.getByRole('button', { name: '开始生成' }));
 
-    expect(screen.getByText('清洁稿和送审稿至少要上传一个文件')).toBeInTheDocument();
+    expect(screen.getByText('请上传模板文件')).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -692,7 +732,7 @@ describe('TenderFormShared', () => {
 
     await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
     await user.click(screen.getByLabelText('模拟获取招标信息'));
-    await user.click(screen.getByLabelText('上传模板文件（可选）'));
+    await user.click(screen.getByLabelText('上传模板文件（必填）'));
     await user.click(screen.getByRole('button', { name: '开始生成' }));
 
     expect(screen.getByText('请上传至少一个技术参数文件')).toBeInTheDocument();
@@ -713,7 +753,7 @@ describe('TenderFormShared', () => {
 
     await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
     await user.click(screen.getByLabelText('模拟获取招标信息'));
-    await user.click(screen.getByLabelText('上传模板文件（可选）'));
+    await user.click(screen.getByLabelText('上传模板文件（必填）'));
     await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
     await user.click(screen.getByRole('button', { name: '开始生成' }));
 
@@ -728,7 +768,7 @@ describe('TenderFormShared', () => {
 
     await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
     await user.click(screen.getByLabelText('模拟获取招标信息'));
-    await user.click(screen.getByLabelText('上传模板文件（可选）'));
+    await user.click(screen.getByLabelText('上传模板文件（必填）'));
     await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
 
     const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
@@ -757,7 +797,7 @@ describe('TenderFormShared', () => {
         after_text: '新后文本',
       },
       files: {
-        clean_draft: expect.objectContaining({ file_path: 'D:/UploadFiles/clean_draft.docx' }),
+        template: expect.objectContaining({ file_path: 'D:/UploadFiles/template.docx' }),
         tender_params: [expect.objectContaining({ file_path: 'D:/UploadFiles/params.docx' })],
       },
     });
@@ -796,7 +836,7 @@ describe('TenderFormShared', () => {
 
     await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
     await user.click(screen.getByLabelText('模拟获取招标信息'));
-    await user.click(screen.getByLabelText('上传模板文件（可选）'));
+    await user.click(screen.getByLabelText('上传模板文件（必填）'));
     await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
     await user.click(screen.getByRole('button', { name: '开始生成' }));
 
@@ -838,7 +878,7 @@ describe('TenderFormShared', () => {
 
     await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
     await user.click(screen.getByLabelText('模拟获取招标信息'));
-    await user.click(screen.getByLabelText('上传模板文件（可选）'));
+    await user.click(screen.getByLabelText('上传模板文件（必填）'));
     await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
     await user.click(screen.getByRole('button', { name: '开始生成' }));
 
@@ -883,7 +923,7 @@ describe('TenderFormShared', () => {
 
     await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
     await user.click(screen.getByLabelText('模拟获取招标信息'));
-    await user.click(screen.getByLabelText('上传模板文件（可选）'));
+    await user.click(screen.getByLabelText('上传模板文件（必填）'));
     await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
     await user.click(screen.getByRole('button', { name: '开始生成' }));
 
@@ -979,7 +1019,7 @@ describe('TenderFormShared', () => {
 
     await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
     await user.click(screen.getByLabelText('模拟获取招标信息'));
-    await user.click(screen.getByLabelText('上传模板文件（可选）'));
+    await user.click(screen.getByLabelText('上传模板文件（必填）'));
     await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
     await user.click(screen.getByRole('button', { name: '开始生成' }));
 
@@ -998,7 +1038,7 @@ describe('TenderFormShared', () => {
 
     await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
     await user.click(screen.getByLabelText('模拟获取招标信息'));
-    await user.click(screen.getByLabelText('上传模板文件（可选）'));
+    await user.click(screen.getByLabelText('上传模板文件（必填）'));
     await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
 
     const beforeInput = screen.getByPlaceholderText('插入位置前的章节标题');
@@ -1028,7 +1068,7 @@ describe('TenderFormShared', () => {
         after_text: '初始后文本',
       },
       files: {
-        clean_draft: {
+        template: {
           id: 'draft-clean',
           file_path: 'D:/UploadFiles/draft-clean.docx',
           file_name: 'draft-clean.docx',
@@ -2430,7 +2470,7 @@ describe('TenderFormShared', () => {
     expect(mockSelectTemplateCandidate).not.toHaveBeenCalled();
   });
 
-  it('fills both upload slots after successful template selection without showing template feedback', async () => {
+  it('fills the template upload slot after successful template selection without showing template feedback', async () => {
     const user = userEvent.setup();
     mockSelectTemplateCandidate.mockResolvedValue({
       selected_files: {
@@ -2470,7 +2510,7 @@ describe('TenderFormShared', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('template-candidate-dialog')).not.toBeInTheDocument()
     );
-    expect(screen.getAllByText('测试模板-送审稿.docx')).toHaveLength(2);
+    expect(screen.getAllByText('测试模板-送审稿.docx')).toHaveLength(1);
     expect(screen.queryByTestId('template-feedback')).not.toBeInTheDocument();
   });
 

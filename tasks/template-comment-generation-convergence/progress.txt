@@ -5,3 +5,25 @@ Started: 2026-05-31 02:50
 Source: prd.json
 
 ## Codebase Patterns
+- `TenderFormShared` is the shared source of truth for upload labels, draft sync, and submit validation; wrapper forms should only supply tender-type defaults.
+- `chatStore.mergeConversationDraft()` is the normalization point for `ConversationFormDraft.files`; keep only populated upload slots and let the form own draft writes.
+- Playwright validation can seed `chat-storage` directly and mock `/api/conversations/*/heartbeat` to reach `/tender` without backend or Word COM.
+
+## 2026-05-31 03:23 - US-001
+- 将共享表单的上传区收敛为“模板文件（必填）”和“技术参数文件（必填）”，并把 draft files 结构改为 `template` + `tender_params`
+- 更改的文件：
+  - `frontend/components/forms/TenderFormShared.tsx`
+  - `frontend/stores/chatStore.ts`
+  - `frontend/types/api.ts`
+  - `frontend/e2e/test_tender_form_upload_slots.spec.ts`
+  - `frontend/__tests__/unit/components/forms/test_tender_form_shared.test.tsx`
+  - `frontend/__tests__/unit/components/forms/test_xjcg_tender_form.test.tsx`
+  - `frontend/__tests__/unit/components/forms/test_gngk_tender_form.test.tsx`
+  - `frontend/__tests__/unit/components/chat/test_form_panel.test.tsx`
+  - `frontend/e2e/test_generation_mode_agent.spec.ts`
+  - `frontend/e2e/test_comment_supplement.spec.ts`
+- **未来迭代的学习：**
+  - 发现的 patterns：共享表单是上传文案、draft 同步和必填校验的单一入口，类型 wrapper 不应再各自持有上传槽位语义
+  - 遇到的陷阱：会话 draft 的旧文件槽位会拖住 wrapper 测试和 e2e seed，改动后要同步清掉所有 seeded `chat-storage` 里的旧字段
+  - 有用的上下文：`/tender` 的无后端浏览器验收可以通过 sessionStorage seed + heartbeat mock 完成，不需要启动真实任务链
+---

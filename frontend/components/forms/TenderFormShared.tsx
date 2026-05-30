@@ -56,6 +56,7 @@ export interface BaseTenderFormData {
   tender_data: TenderData;
   model: ModelType;
   files: {
+    template?: UploadedFile;
     origin_tender?: UploadedFile;
     clean_draft?: UploadedFile;
     tender_params: UploadedFile[];
@@ -79,13 +80,9 @@ export interface TenderFormSharedProps<TFormData extends BaseTenderFormData = Ba
 }
 
 const sharedUploadCopy = {
-  cleanDraftUpload: {
-    label: '模板文件（可选）',
-    description: '上传则优先使用，若未上传则使用送审稿文件作为模板',
-  },
-  originUpload: {
-    label: '送审稿文件（可选）',
-    description: '若上传则最终文件将生成批注',
+  templateUpload: {
+    label: '模板文件（必填）',
+    description: '上传模板 Word 文件，作为生成正文的格式与内容参考',
   },
 } as const;
 
@@ -667,11 +664,8 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       initialDraft?.tender_data || initialTenderData
     )
   );
-  const [originFile, setOriginFile] = useState<UploadedFile | null>(
-    (initialDraft?.files?.origin_tender as UploadedFile | undefined) || null
-  );
-  const [cleanDraftFile, setCleanDraftFile] = useState<UploadedFile | null>(
-    (initialDraft?.files?.clean_draft as UploadedFile | undefined) || null
+  const [templateFile, setTemplateFile] = useState<UploadedFile | null>(
+    (initialDraft?.files?.template as UploadedFile | undefined) || null
   );
   const [paramFiles, setParamFiles] = useState<UploadedFile[]>(
     (initialDraft?.files?.tender_params as UploadedFile[] | undefined) || []
@@ -901,21 +895,15 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   );
 
   const syncDraftFiles = useCallback(
-    (
-      nextOriginFile: UploadedFile | null,
-      nextCleanDraftFile: UploadedFile | null,
-      nextParamFiles: UploadedFile[]
-    ) => {
+    (nextTemplateFile: UploadedFile | null, nextParamFiles: UploadedFile[]) => {
       if (!onDraftChange) {
         return;
       }
 
-      const nextOriginTender = toDraftFile(nextOriginFile);
-      const nextCleanDraft = toDraftFile(nextCleanDraftFile);
+      const nextTemplate = toDraftFile(nextTemplateFile);
       onDraftChange({
         files: {
-          ...(nextOriginTender ? { origin_tender: nextOriginTender } : {}),
-          ...(nextCleanDraft ? { clean_draft: nextCleanDraft } : {}),
+          template: nextTemplate || undefined,
           tender_params: nextParamFiles
             .map((file) => toDraftFile(file))
             .filter((file): file is ConversationDraftFile => !!file),
@@ -1207,10 +1195,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     [fundLx, initialDraft, insertionConfig, onDraftChange, tenderLx, tenderType]
   );
 
-  const originUploaderFiles = useMemo(() => (originFile ? [originFile] : []), [originFile]);
-  const cleanDraftUploaderFiles = useMemo(
-    () => (cleanDraftFile ? [cleanDraftFile] : []),
-    [cleanDraftFile]
+  const templateUploaderFiles = useMemo(
+    () => (templateFile ? [templateFile] : []),
+    [templateFile]
   );
   const tenderInfoItems = useMemo(
     () => toTenderInfoItems(tenderType, tenderData, tenderTypeInfo),
@@ -1481,21 +1468,17 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
           },
         });
 
-        const nextCleanDraftFile = response.selected_files.clean_draft
-          ? toSelectedUploadedFile(response.selected_files.clean_draft)
-          : cleanDraftFile;
-        const nextOriginFile = response.selected_files.origin_tender
-          ? toSelectedUploadedFile(response.selected_files.origin_tender)
-          : originFile;
+        const selectedFile =
+          response.selected_files.clean_draft || response.selected_files.origin_tender || null;
+        const nextTemplateFile = selectedFile
+          ? toSelectedUploadedFile(selectedFile)
+          : templateFile;
 
-        if (response.selected_files.clean_draft) {
-          setCleanDraftFile(nextCleanDraftFile);
-        }
-        if (response.selected_files.origin_tender) {
-          setOriginFile(nextOriginFile);
+        if (selectedFile) {
+          setTemplateFile(nextTemplateFile);
         }
 
-        syncDraftFiles(nextOriginFile, nextCleanDraftFile, paramFiles);
+        syncDraftFiles(nextTemplateFile, paramFiles);
         setTemplateDialogOpen(false);
         setTemplateDialogError(null);
         setTemplateDialogNotice(null);
@@ -1514,7 +1497,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         setSelectingTemplateRowKey(null);
       }
     },
-    [cleanDraftFile, originFile, paramFiles, syncDraftFiles]
+    [paramFiles, syncDraftFiles, templateFile]
   );
 
   const uploadSectionAction = (
@@ -1544,8 +1527,8 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         return;
       }
 
-      if (!originFile && !cleanDraftFile) {
-        setError('清洁稿和送审稿至少要上传一个文件');
+      if (!templateFile) {
+        setError('请上传模板文件');
         return;
       }
 
@@ -1581,8 +1564,8 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         },
         model: selectedModel,
         files: {
-          origin_tender: originFile || undefined,
-          clean_draft: cleanDraftFile || undefined,
+          template: templateFile || undefined,
+          clean_draft: templateFile || undefined,
           tender_params: paramFiles,
         },
         insertion_config: insertionConfig,
@@ -1599,8 +1582,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       generationMode,
       generationStyle,
       styleWritebackMode,
-      originFile,
-      cleanDraftFile,
+      templateFile,
       paramFiles,
       insertionConfig,
       onSubmit,
@@ -1722,34 +1704,18 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         <FormSection title="文件上传" index={2} headerAction={uploadSectionAction}>
           <div className="space-y-5">
             <FileUploader
-              label={sharedUploadCopy.cleanDraftUpload.label}
-              description={sharedUploadCopy.cleanDraftUpload.description}
+              label={sharedUploadCopy.templateUpload.label}
+              description={sharedUploadCopy.templateUpload.description}
               accept=".doc,.docx"
               multiple={false}
               autoUpload={true}
               disabled={isSubmitting}
-              fileType="clean_draft"
-              initialFiles={cleanDraftUploaderFiles}
+              fileType="template"
+              initialFiles={templateUploaderFiles}
               onFilesChange={(files) => {
-                const nextCleanDraftFile = files[0] || null;
-                setCleanDraftFile(nextCleanDraftFile);
-                syncDraftFiles(originFile, nextCleanDraftFile, paramFiles);
-              }}
-            />
-
-            <FileUploader
-              label={sharedUploadCopy.originUpload.label}
-              description={sharedUploadCopy.originUpload.description}
-              accept=".doc,.docx"
-              multiple={false}
-              autoUpload={true}
-              disabled={isSubmitting}
-              fileType="origin_tender"
-              initialFiles={originUploaderFiles}
-              onFilesChange={(files) => {
-                const nextOriginFile = files[0] || null;
-                setOriginFile(nextOriginFile);
-                syncDraftFiles(nextOriginFile, cleanDraftFile, paramFiles);
+                const nextTemplateFile = files[0] || null;
+                setTemplateFile(nextTemplateFile);
+                syncDraftFiles(nextTemplateFile, paramFiles);
               }}
             />
 
@@ -1765,7 +1731,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
               initialFiles={paramFiles}
               onFilesChange={(files) => {
                 setParamFiles(files);
-                syncDraftFiles(originFile, cleanDraftFile, files);
+                syncDraftFiles(templateFile, files);
               }}
             />
           </div>
