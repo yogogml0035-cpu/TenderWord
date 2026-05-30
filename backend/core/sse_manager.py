@@ -180,6 +180,7 @@ class SSEManager:
         task_kind: str = "generate",
         content: Optional[str] = None,
         findings: Optional[List[dict[str, str]]] = None,
+        content_agent: Optional[dict[str, Any]] = None,
         comment_agent: Optional[dict[str, Any]] = None,
         is_complete: bool = False,
     ) -> None:
@@ -192,6 +193,7 @@ class SSEManager:
                 node=node,
                 content=content,
                 findings=findings,
+                content_agent=content_agent,
                 comment_agent=comment_agent,
                 is_complete=is_complete,
             )
@@ -651,6 +653,7 @@ class SSEManager:
         task_kind: str = "generate",
         content: Optional[str] = None,
         findings: Optional[List[dict[str, str]]] = None,
+        content_agent: Optional[dict[str, Any]] = None,
         comment_agent: Optional[dict[str, Any]] = None,
         is_complete: bool = False,
     ) -> int:
@@ -663,6 +666,7 @@ class SSEManager:
             node=node,
             content=content,
             findings=findings or [],
+            content_agent=content_agent,
             comment_agent=comment_agent,
             is_complete=is_complete,
         ).model_dump(mode="json")

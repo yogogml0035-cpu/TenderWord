@@ -3,6 +3,7 @@ import type {
   SSEAgentStepEvent,
   SSEAgentStepFinding,
   SSECommentAgentStep,
+  SSEContentAgentStep,
   SSEDoneEvent,
   SSEEventType,
   TaskKind,
@@ -59,6 +60,69 @@ describe('SSE agent_step API types', () => {
     };
 
     expect(event.content).toBe('修复后的采购需求正文');
+  });
+
+  it('models structured content_agent process payloads', () => {
+    const contentAgent: SSEContentAgentStep = {
+      phase: 'final',
+      summary: '最终完成，修复 1 轮，最终正文约 4 字。',
+      rounds: [
+        {
+          round: 1,
+          phase: 'draft',
+          label: '初稿生成',
+          summary: '初稿生成完成，约 4 字。',
+          issue_count: 0,
+          fix_count: 0,
+          content: '初稿正文',
+          findings: [],
+        },
+        {
+          round: 1,
+          phase: 'audit',
+          label: '第 1 轮审核发现',
+          summary: '第 1 轮审核发现 1 个问题。',
+          issue_count: 1,
+          fix_count: 0,
+          content: '[{"evidence":"缺少交付地点","fix_hint":"补充交付地点"}]',
+          findings: [
+            {
+              evidence: '缺少交付地点',
+              fix_hint: '补充交付地点',
+            },
+          ],
+        },
+      ],
+      highlights: [
+        {
+          evidence: '缺少交付地点',
+          fix_hint: '补充交付地点',
+        },
+      ],
+      final_result: {
+        summary: '最终完成，修复 1 轮，最终正文约 4 字。',
+        revision_rounds: 1,
+        final_chars: 4,
+        issue_count: 0,
+        content: '最终正文',
+      },
+    };
+    const event: SSEAgentStepEvent = {
+      timestamp: '2026-05-27T17:12:00',
+      task_id: 'task-agent-1',
+      task_kind: 'generate',
+      step_type: 'final',
+      round: 2,
+      node: 'content_agent',
+      is_complete: true,
+      content: '最终完成，修复 1 轮，最终正文约 4 字。',
+      findings: [],
+      content_agent: contentAgent,
+    };
+
+    expect(event.content_agent?.phase).toBe('final');
+    expect(event.content_agent?.rounds).toHaveLength(2);
+    expect(event.content_agent?.final_result?.content).toBe('最终正文');
   });
 
   it('models final main agent step as 1-based round metadata', () => {

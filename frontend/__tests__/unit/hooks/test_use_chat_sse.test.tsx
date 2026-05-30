@@ -313,7 +313,7 @@ describe('useChatSSE', () => {
     expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
   });
 
-  it('keeps node-based agent_step stream cards after done', async () => {
+  it('keeps legacy node-based agent_step stream cards after done', async () => {
     mockGetTaskStatus.mockResolvedValue({
       ...createRunningTaskStatus(),
       progress: {
@@ -462,6 +462,186 @@ describe('useChatSSE', () => {
     expect(group?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
     expect(group?.contentMessage).toBeUndefined();
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
+  });
+
+  it('aggregates structured content_agent agent_step events into one card', async () => {
+    mockGetTaskStatus.mockResolvedValue({
+      ...createRunningTaskStatus(),
+      progress: {
+        ...createRunningTaskStatus().progress,
+        running_nodes: ['content_agent'],
+        current_node: 'content_agent',
+      },
+    });
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    const draftRound = {
+      round: 1,
+      phase: 'draft' as const,
+      label: '初稿生成',
+      summary: '初稿生成完成，约 4 字。',
+      issue_count: 0,
+      fix_count: 0,
+      content: '初稿正文',
+      findings: [],
+    };
+    const auditRound = {
+      round: 1,
+      phase: 'audit' as const,
+      label: '第 1 轮审核发现',
+      summary: '第 1 轮审核发现 1 个问题。',
+      issue_count: 1,
+      fix_count: 0,
+      content: '[{"evidence":"缺少交付地点","fix_hint":"补充交付地点"}]',
+      findings: [
+        {
+          evidence: '缺少交付地点',
+          fix_hint: '补充交付地点',
+        },
+      ],
+    };
+    const revisionRound = {
+      round: 1,
+      phase: 'revision' as const,
+      label: '第 1 轮修复',
+      summary: '第 1 轮修复完成，已处理 1 个问题。',
+      issue_count: 1,
+      fix_count: 1,
+      content: '修复正文',
+      findings: auditRound.findings,
+    };
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_generate_agent',
+          is_complete: false,
+          content: '初稿正文',
+          findings: [],
+          content_agent: {
+            phase: 'draft',
+            summary: '初稿生成完成，约 4 字。',
+            rounds: [draftRound],
+            highlights: [],
+          },
+        },
+      });
+    });
+
+    let conversation = useChatStore.getState().getCurrentConversation();
+    let agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].metadata?.agentStepNode).toBe('content_agent');
+    expect(agentMessages?.[0].metadata?.contentAgent?.phase).toBe('draft');
+    expect(useChatStreamStore.getState().streams['task-1']?.agentSteps?.['content_agent']).toMatchObject({
+      content: '初稿正文',
+      contentAgent: expect.objectContaining({ phase: 'draft' }),
+      isComplete: false,
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_verify_agent',
+          is_complete: true,
+          content: '[{"evidence":"缺少交付地点","fix_hint":"补充交付地点"}]',
+          findings: auditRound.findings,
+          content_agent: {
+            phase: 'audit',
+            summary: '第 1 轮审核发现 1 个问题。',
+            rounds: [draftRound, auditRound],
+            highlights: auditRound.findings,
+          },
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '3',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_revise_agent',
+          is_complete: true,
+          content: '修复正文',
+          findings: auditRound.findings,
+          content_agent: {
+            phase: 'revision',
+            summary: '第 1 轮修复完成，已处理 1 个问题。',
+            rounds: [draftRound, auditRound, revisionRound],
+            highlights: auditRound.findings,
+          },
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '4',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'final',
+          round: 2,
+          node: 'content_agent',
+          is_complete: true,
+          content: '最终完成，修复 1 轮，最终正文约 4 字。',
+          findings: [],
+          content_agent: {
+            phase: 'final',
+            summary: '最终完成，修复 1 轮，最终正文约 4 字。',
+            rounds: [draftRound, auditRound, revisionRound],
+            highlights: [],
+            final_result: {
+              summary: '最终完成，修复 1 轮，最终正文约 4 字。',
+              revision_rounds: 1,
+              final_chars: 4,
+              issue_count: 0,
+              content: '最终正文',
+            },
+          },
+        },
+      });
+    });
+
+    conversation = useChatStore.getState().getCurrentConversation();
+    agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].metadata?.agentStepKey).toBe('content_agent');
+    expect(agentMessages?.[0].metadata?.contentAgent?.phase).toBe('final');
+    expect(agentMessages?.[0].metadata?.contentAgent?.rounds).toHaveLength(3);
+    expect(agentMessages?.[0].content).toBe('最终正文');
+    expect(agentMessages?.[0].status).toBe('completed');
   });
 
   it('keeps comment_agent incomplete snapshots transient and persists final snapshot', async () => {

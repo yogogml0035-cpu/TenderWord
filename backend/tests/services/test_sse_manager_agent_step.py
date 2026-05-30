@@ -125,6 +125,54 @@ async def test_send_agent_step_replays_structured_comment_agent_payload() -> Non
     assert missed_events[0].data["comment_agent"]["writeback"]["issues"][0]["reason"] == "目标位置已有批注，已跳过"
 
 @pytest.mark.asyncio
+async def test_send_agent_step_replays_structured_content_agent_payload() -> None:
+    manager = SSEManager(heartbeat_interval=1)
+    content_agent = {
+        "phase": "audit",
+        "summary": "第 1 轮审核发现 1 个问题。",
+        "rounds": [
+            {
+                "round": 1,
+                "phase": "audit",
+                "label": "第 1 轮审核发现",
+                "summary": "第 1 轮审核发现 1 个问题。",
+                "issue_count": 1,
+                "fix_count": 0,
+                "content": '[{"evidence":"缺少交付地点","fix_hint":"补充交付地点"}]',
+                "findings": [
+                    {
+                        "evidence": "缺少交付地点",
+                        "fix_hint": "补充交付地点",
+                    }
+                ],
+            }
+        ],
+        "highlights": [
+            {
+                "evidence": "缺少交付地点",
+                "fix_hint": "补充交付地点",
+            }
+        ],
+    }
+
+    await manager.send_agent_step(
+        task_id="task-agent-1",
+        task_kind="generate",
+        step_type="stream",
+        round=1,
+        node="content_verify_agent",
+        content='[{"evidence":"缺少交付地点","fix_hint":"补充交付地点"}]',
+        content_agent=content_agent,
+        is_complete=False,
+    )
+
+    missed_events = await manager.get_missed_events("task-agent-1", 0)
+
+    assert missed_events[0].event is SSEEventType.AGENT_STEP
+    assert missed_events[0].data["content_agent"]["summary"] == "第 1 轮审核发现 1 个问题。"
+    assert missed_events[0].data["content_agent"]["rounds"][0]["issue_count"] == 1
+
+@pytest.mark.asyncio
 async def test_send_done_buffers_comment_writeback_contract() -> None:
     manager = SSEManager(heartbeat_interval=1)
     comment_writeback = {

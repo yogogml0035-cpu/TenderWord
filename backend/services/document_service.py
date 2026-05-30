@@ -350,6 +350,11 @@ class SSECallback:
                         finding.model_dump(mode="json")
                         for finding in agent_step_data.findings
                     ],
+                    content_agent=(
+                        agent_step_data.content_agent.model_dump(mode="json")
+                        if agent_step_data.content_agent is not None
+                        else None
+                    ),
                     comment_agent=(
                         agent_step_data.comment_agent.model_dump(mode="json")
                         if agent_step_data.comment_agent is not None

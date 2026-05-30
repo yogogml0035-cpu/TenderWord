@@ -647,6 +647,22 @@ def test_content_runner_creates_workspace_and_reads_final_file(
         "stream",
         "final",
     ]
+    assert [event.content_agent["phase"] for event in events] == [
+        "draft",
+        "audit",
+        "revision",
+        "audit",
+        "final",
+    ]
+    assert [event.content_agent["summary"] for event in events] == [
+        "初稿生成完成，约 10 字。",
+        "第 1 轮审核发现 1 个问题。",
+        "第 1 轮修复完成，已处理 1 个问题。",
+        "第 2 轮修复复核通过。",
+        "最终完成，修复 1 轮，最终正文约 10 字。",
+    ]
+    assert events[2].content_agent["rounds"][2]["fix_count"] == 1
+    assert events[-1].content_agent["final_result"]["content"] == "final text"
 
 
 def test_content_runner_writes_complete_generation_context() -> None:

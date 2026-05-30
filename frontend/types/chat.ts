@@ -11,6 +11,7 @@ import type { TenderType } from './index';
 import type {
   CommentWritebackSummary,
   SSECommentAgentStep,
+  SSEContentAgentStep,
   StyleWritebackSummary,
   TaskKind,
 } from './api';
@@ -92,9 +93,12 @@ export interface Message {
     taskKind?: TaskKind;
     agentStepType?: AgentStepType;
     agentStepRound?: number;
+    agentStepKey?: string;
     agentStepNode?: string;
+    agentStepSourceNode?: string;
     agentStepFindings?: AgentStepFinding[];
     agentStepAuditRounds?: AgentAuditRound[];
+    contentAgent?: SSEContentAgentStep;
     commentAgent?: SSECommentAgentStep;
     progressPercent?: number;
     progressText?: string;

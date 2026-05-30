@@ -25,6 +25,7 @@ def _build_agent_step_data(
         node=payload.node,
         content=payload.content,
         findings=[finding.model_dump(mode="json") for finding in payload.findings],
+        content_agent=payload.content_agent,
         is_complete=payload.is_complete,
     )
 

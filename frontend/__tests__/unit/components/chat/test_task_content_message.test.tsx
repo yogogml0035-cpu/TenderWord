@@ -55,7 +55,7 @@ describe('TaskContentMessage', () => {
     expect(screen.queryByText('等待生成...')).not.toBeInTheDocument();
   });
 
-  it('uses final title for the main content agent final step', () => {
+  it('uses the Chinese content_agent process card title', () => {
     render(
       <TaskContentMessage
         message={createMessage({
@@ -70,8 +70,92 @@ describe('TaskContentMessage', () => {
       />
     );
 
-    expect(screen.getByText('content_agent final')).toBeInTheDocument();
+    expect(screen.getByText('正文智能体')).toBeInTheDocument();
+    expect(screen.queryByText('content_agent final')).not.toBeInTheDocument();
     expect(screen.queryByText('content_agent round-2')).not.toBeInTheDocument();
+  });
+
+  it('renders structured content_agent stages and collapsed raw outputs', () => {
+    render(
+      <TaskContentMessage
+        message={createMessage({
+          content: '最终正文',
+          metadata: {
+            messageKind: 'agent-step',
+            taskKind: 'generate',
+            agentStepType: 'final',
+            agentStepNode: 'content_agent',
+            agentStepRound: 2,
+            contentAgent: {
+              phase: 'final',
+              summary: '最终完成，修复 1 轮，最终正文约 4 字。',
+              rounds: [
+                {
+                  round: 1,
+                  phase: 'draft',
+                  label: '初稿生成',
+                  summary: '初稿生成完成，约 4 字。',
+                  issue_count: 0,
+                  fix_count: 0,
+                  content: '初稿正文',
+                  findings: [],
+                },
+                {
+                  round: 1,
+                  phase: 'audit',
+                  label: '第 1 轮审核发现',
+                  summary: '第 1 轮审核发现 1 个问题。',
+                  issue_count: 1,
+                  fix_count: 0,
+                  content: '[{"evidence":"缺少交付地点","fix_hint":"补充交付地点"}]',
+                  findings: [
+                    {
+                      evidence: '缺少交付地点',
+                      fix_hint: '补充交付地点',
+                    },
+                  ],
+                },
+                {
+                  round: 1,
+                  phase: 'revision',
+                  label: '第 1 轮修复',
+                  summary: '第 1 轮修复完成，已处理 1 个问题。',
+                  issue_count: 1,
+                  fix_count: 1,
+                  content: '修复正文',
+                  findings: [
+                    {
+                      evidence: '缺少交付地点',
+                      fix_hint: '补充交付地点',
+                    },
+                  ],
+                },
+              ],
+              highlights: [],
+              final_result: {
+                summary: '最终完成，修复 1 轮，最终正文约 4 字。',
+                revision_rounds: 1,
+                final_chars: 4,
+                issue_count: 0,
+                content: '最终正文',
+              },
+            },
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByText('正文智能体')).toBeInTheDocument();
+    expect(screen.getByText('初稿生成')).toBeInTheDocument();
+    expect(screen.getByText('第 1 轮审核发现')).toBeInTheDocument();
+    expect(screen.getByText('第 1 轮修复')).toBeInTheDocument();
+    expect(screen.getAllByText('依据：')).toHaveLength(2);
+    expect(screen.getAllByText('缺少交付地点')).toHaveLength(2);
+    expect(screen.getAllByText('修复建议：')).toHaveLength(2);
+    expect(screen.getAllByText('补充交付地点')).toHaveLength(2);
+    expect(screen.getAllByText('最终完成，修复 1 轮，最终正文约 4 字。').length).toBeGreaterThan(0);
+    const draftDetails = screen.getByText('查看初稿正文').closest('details');
+    expect(draftDetails).not.toHaveAttribute('open');
   });
 
   it('uses the Chinese comment_agent process card title', () => {

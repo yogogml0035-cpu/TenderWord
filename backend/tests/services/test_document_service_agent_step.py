@@ -71,6 +71,46 @@ def test_sse_callback_push_agent_step_preserves_comment_agent_payload() -> None:
     assert events[0].data["comment_agent"]["writeback"]["added"] == 1
 
 
+def test_sse_callback_push_agent_step_preserves_content_agent_payload() -> None:
+    callback = SSECallback("task-agent-1")
+
+    callback.push_agent_step(
+        AgentStepEventData(
+            task_id="task-agent-1",
+            task_kind="generate",
+            step_type="draft",
+            round=1,
+            node="content_generate_agent",
+            content="初稿正文",
+            is_complete=False,
+            content_agent={
+                "phase": "draft",
+                "summary": "初稿生成完成，约 4 字。",
+                "rounds": [
+                    {
+                        "round": 1,
+                        "phase": "draft",
+                        "label": "初稿生成",
+                        "summary": "初稿生成完成，约 4 字。",
+                        "issue_count": 0,
+                        "fix_count": 0,
+                        "content": "初稿正文",
+                        "findings": [],
+                    }
+                ],
+                "highlights": [],
+            },
+        )
+    )
+
+    events = callback.get_events()
+
+    assert len(events) == 1
+    assert events[0].event is SSEEventType.AGENT_STEP
+    assert events[0].data["content_agent"]["phase"] == "draft"
+    assert events[0].data["content_agent"]["rounds"][0]["label"] == "初稿生成"
+
+
 def test_sse_callback_push_done_keeps_comment_writeback_contract() -> None:
     callback = SSECallback("task-comment-1")
     comment_writeback = {

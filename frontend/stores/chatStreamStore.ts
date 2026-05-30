@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { LogEntry } from '@/types/chat';
-import type { SSECommentAgentStep } from '@/types/api';
+import type { SSECommentAgentStep, SSEContentAgentStep } from '@/types/api';
 
 export interface TaskStreamState {
   logs: LogEntry[];
@@ -10,6 +10,7 @@ export interface TaskStreamState {
     string,
     {
       content: string;
+      contentAgent?: SSEContentAgentStep;
       commentAgent?: SSECommentAgentStep;
       isComplete: boolean;
     }
@@ -40,6 +41,7 @@ interface ChatStreamStore {
     stepKey: string,
     snapshot: {
       content: string;
+      contentAgent?: SSEContentAgentStep;
       commentAgent?: SSECommentAgentStep;
       isComplete: boolean;
     }

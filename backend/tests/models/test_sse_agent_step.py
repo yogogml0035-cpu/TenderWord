@@ -142,6 +142,62 @@ def test_agent_step_event_data_can_carry_structured_comment_agent_payload() -> N
     assert payload["comment_agent"]["rounds"][1]["highlights"][0]["status"] == "已修复"
     assert payload["comment_agent"]["writeback"]["added"] == 1
 
+def test_agent_step_event_data_can_carry_structured_content_agent_payload() -> None:
+    event_data = AgentStepEventData(
+        task_id="task-agent-1",
+        task_kind="generate",
+        step_type="final",
+        round=2,
+        node="content_agent",
+        content="最终完成，修复 1 轮，最终正文约 4 字。",
+        is_complete=True,
+        content_agent={
+            "phase": "final",
+            "summary": "最终完成，修复 1 轮，最终正文约 4 字。",
+            "rounds": [
+                {
+                    "round": 1,
+                    "phase": "draft",
+                    "label": "初稿生成",
+                    "summary": "初稿生成完成，约 10 字。",
+                    "issue_count": 0,
+                    "fix_count": 0,
+                    "content": "初稿正文",
+                    "findings": [],
+                },
+                {
+                    "round": 1,
+                    "phase": "audit",
+                    "label": "第 1 轮审核发现",
+                    "summary": "第 1 轮审核发现 1 个问题。",
+                    "issue_count": 1,
+                    "fix_count": 0,
+                    "content": "[]",
+                    "findings": [
+                        {
+                            "evidence": "缺少交付地点",
+                            "fix_hint": "补充交付地点",
+                        }
+                    ],
+                },
+            ],
+            "highlights": [],
+            "final_result": {
+                "summary": "最终完成，修复 1 轮，最终正文约 4 字。",
+                "revision_rounds": 1,
+                "final_chars": 4,
+                "issue_count": 0,
+                "content": "最终正文",
+            },
+        },
+    )
+
+    payload = event_data.model_dump(mode="json")
+
+    assert payload["content_agent"]["summary"] == "最终完成，修复 1 轮，最终正文约 4 字。"
+    assert payload["content_agent"]["rounds"][1]["issue_count"] == 1
+    assert payload["content_agent"]["final_result"]["revision_rounds"] == 1
+
 def test_done_event_data_contains_comment_writeback_contract() -> None:
     event_data = DoneEventData(
         task_id="task-comment-1",

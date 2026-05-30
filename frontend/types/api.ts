@@ -470,6 +470,33 @@ export interface SSEAgentStepFinding {
   fix_hint: string;
 }
 
+export interface SSEContentAgentRound {
+  round: number;
+  phase: 'draft' | 'audit' | 'revision';
+  label: string;
+  summary: string;
+  issue_count: number;
+  fix_count: number;
+  content?: string | null;
+  findings: SSEAgentStepFinding[];
+}
+
+export interface SSEContentAgentFinalResult {
+  summary: string;
+  revision_rounds: number;
+  final_chars: number;
+  issue_count: number;
+  content?: string | null;
+}
+
+export interface SSEContentAgentStep {
+  phase: 'draft' | 'audit' | 'revision' | 'final';
+  summary: string;
+  rounds: SSEContentAgentRound[];
+  highlights: SSEAgentStepFinding[];
+  final_result?: SSEContentAgentFinalResult | null;
+}
+
 export interface SSECommentAgentHighlight {
   index: number;
   status: string;
@@ -514,6 +541,7 @@ export interface SSEAgentStepEvent {
   is_complete: boolean;
   content?: string | null;
   findings: SSEAgentStepFinding[];
+  content_agent?: SSEContentAgentStep | null;
   comment_agent?: SSECommentAgentStep | null;
 }
 

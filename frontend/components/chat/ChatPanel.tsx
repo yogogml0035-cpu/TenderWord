@@ -236,7 +236,12 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         const node = message.metadata?.agentStepNode;
         const round = message.metadata?.agentStepRound;
         const stepKey =
-          typeof node === 'string' && typeof round === 'number' ? `${node}:${round}` : null;
+          message.metadata?.agentStepKey ||
+          (message.metadata?.contentAgent || node === 'content_agent'
+            ? 'content_agent'
+            : typeof node === 'string' && typeof round === 'number'
+              ? `${node}:${round}`
+              : null);
         const stepSnapshot = stepKey ? stream.agentSteps?.[stepKey] : undefined;
         if (message.status === 'generating' && stepSnapshot && !stepSnapshot.isComplete) {
           return {
@@ -244,6 +249,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             content: stepSnapshot.content,
             metadata: {
               ...(message.metadata || {}),
+              ...(stepSnapshot.contentAgent ? { contentAgent: stepSnapshot.contentAgent } : {}),
               ...(stepSnapshot.commentAgent ? { commentAgent: stepSnapshot.commentAgent } : {}),
             },
           };

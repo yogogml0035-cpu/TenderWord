@@ -123,7 +123,7 @@ async function seedConversation(page: Page) {
 }
 
 test.describe('Generation mode agent flow', () => {
-  test('renders node-based agent stream and download cards from mocked agent SSE', async ({
+  test('renders structured content agent card and download card from mocked agent SSE', async ({
     page,
   }) => {
     const consoleErrors: string[] = [];
@@ -207,6 +207,51 @@ test.describe('Generation mode agent flow', () => {
 
     await page.route(`**/api/stream/${taskId}**`, async (route) => {
       const now = '2026-05-27T14:30:01Z';
+      const draftRound = {
+        round: 1,
+        phase: 'draft',
+        label: '初稿生成',
+        summary: '初稿生成完成，约 10 字。',
+        issue_count: 0,
+        fix_count: 0,
+        content: '这是智能体初稿正文。',
+        findings: [],
+      };
+      const auditRound = {
+        round: 1,
+        phase: 'audit',
+        label: '第 1 轮审核发现',
+        summary: '第 1 轮审核发现 1 个问题。',
+        issue_count: 1,
+        fix_count: 0,
+        content: '[{"evidence":"交付范围缺少验收标准","fix_hint":"补充设备验收和交付要求"}]',
+        findings: [
+          {
+            evidence: '交付范围缺少验收标准',
+            fix_hint: '补充设备验收和交付要求',
+          },
+        ],
+      };
+      const revisionRound = {
+        round: 1,
+        phase: 'revision',
+        label: '第 1 轮修复',
+        summary: '第 1 轮修复完成，已处理 1 个问题。',
+        issue_count: 1,
+        fix_count: 1,
+        content: '这是第 1 轮 AI 修改内容，已补充验收标准。',
+        findings: auditRound.findings,
+      };
+      const finalReviewRound = {
+        round: 2,
+        phase: 'audit',
+        label: '第 2 轮修复复核',
+        summary: '第 2 轮修复复核通过。',
+        issue_count: 0,
+        fix_count: 0,
+        content: '[]',
+        findings: [],
+      };
       const body = [
         sseEvent('connected', '0', { task_id: taskId, message: 'connected' }),
         sseEvent('agent_step', '1', {
@@ -219,6 +264,12 @@ test.describe('Generation mode agent flow', () => {
           is_complete: true,
           content: '这是智能体初稿正文。',
           findings: [],
+          content_agent: {
+            phase: 'draft',
+            summary: '初稿生成完成，约 10 字。',
+            rounds: [draftRound],
+            highlights: [],
+          },
         }),
         sseEvent('agent_step', '2', {
           timestamp: now,
@@ -235,6 +286,12 @@ test.describe('Generation mode agent flow', () => {
               fix_hint: '补充设备验收和交付要求',
             },
           ],
+          content_agent: {
+            phase: 'audit',
+            summary: '第 1 轮审核发现 1 个问题。',
+            rounds: [draftRound, auditRound],
+            highlights: auditRound.findings,
+          },
         }),
         sseEvent('agent_step', '3', {
           timestamp: now,
@@ -246,6 +303,12 @@ test.describe('Generation mode agent flow', () => {
           is_complete: true,
           content: '这是第 1 轮 AI 修改内容，已补充验收标准。',
           findings: [],
+          content_agent: {
+            phase: 'revision',
+            summary: '第 1 轮修复完成，已处理 1 个问题。',
+            rounds: [draftRound, auditRound, revisionRound],
+            highlights: auditRound.findings,
+          },
         }),
         sseEvent('agent_step', '4', {
           timestamp: now,
@@ -257,8 +320,38 @@ test.describe('Generation mode agent flow', () => {
           is_complete: true,
           content: '[]',
           findings: [],
+          content_agent: {
+            phase: 'audit',
+            summary: '第 2 轮修复复核通过。',
+            rounds: [draftRound, auditRound, revisionRound, finalReviewRound],
+            highlights: [],
+          },
         }),
-        sseEvent('done', '5', {
+        sseEvent('agent_step', '5', {
+          timestamp: now,
+          task_id: taskId,
+          task_kind: 'generate',
+          step_type: 'final',
+          round: 2,
+          node: 'content_agent',
+          is_complete: true,
+          content: '最终完成，修复 1 轮，最终正文约 7 字。',
+          findings: [],
+          content_agent: {
+            phase: 'final',
+            summary: '最终完成，修复 1 轮，最终正文约 7 字。',
+            rounds: [draftRound, auditRound, revisionRound, finalReviewRound],
+            highlights: [],
+            final_result: {
+              summary: '最终完成，修复 1 轮，最终正文约 7 字。',
+              revision_rounds: 1,
+              final_chars: 7,
+              issue_count: 0,
+              content: '这是最终正文。',
+            },
+          },
+        }),
+        sseEvent('done', '6', {
           timestamp: now,
           task_id: taskId,
           task_kind: 'generate',
@@ -294,16 +387,23 @@ test.describe('Generation mode agent flow', () => {
 
     await expect.poll(() => generatePayload?.generation_mode).toBe('agent');
 
-    await expect(page.getByText('content_generate_agent')).toBeVisible();
+    await expect(page.getByText('正文智能体')).toHaveCount(1);
+    await expect(page.getByText('content_generate_agent')).toHaveCount(0);
+    await expect(page.getByText('content_verify_agent round-1', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('content_revise_agent round-1', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('content_verify_agent round-2', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('初稿生成', { exact: true })).toBeVisible();
+    await expect(page.getByText('第 1 轮审核发现', { exact: true })).toBeVisible();
+    await expect(page.getByText('第 1 轮修复', { exact: true })).toBeVisible();
+    await expect(page.getByText('第 2 轮修复复核', { exact: true })).toBeVisible();
+    await expect(page.getByText('交付范围缺少验收标准').first()).toBeVisible();
+    await expect(page.getByText('补充设备验收和交付要求').first()).toBeVisible();
+    await expect(page.getByText('这是智能体初稿正文。')).not.toBeVisible();
+    await page.getByText('查看初稿正文').click();
     await expect(page.getByText('这是智能体初稿正文。')).toBeVisible();
-    await expect(page.getByText('content_verify_agent round-1', { exact: true })).toBeVisible();
-    await expect(page.getByText('content_revise_agent round-1', { exact: true })).toBeVisible();
-    await expect(page.getByText('content_verify_agent round-2', { exact: true })).toBeVisible();
-    await expect(page.getByText('交付范围缺少验收标准')).toBeVisible();
-    await expect(page.getByText('[]')).toBeVisible();
-    await expect(page.getByText('第 1 轮审核')).toHaveCount(0);
+    await expect(page.getByText('[]')).not.toBeVisible();
     await expect(page.getByText('evidence: 交付范围缺少验收标准')).toHaveCount(0);
-    await expect(page.getByText('这是第 1 轮 AI 修改内容，已补充验收标准。')).toBeVisible();
+    await expect(page.getByText('这是第 1 轮 AI 修改内容，已补充验收标准。')).not.toBeVisible();
     await expect(page.getByText('AI 生成内容')).toHaveCount(0);
     await expect(page.getByRole('button', { name: '下载文件' })).toBeVisible();
 

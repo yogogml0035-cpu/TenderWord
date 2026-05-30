@@ -25,6 +25,11 @@ from backend.agents.generation.types import (
     GenerationAgentToolCallUnsupportedError,
 )
 from backend.agents.generation.verify_agent_graph import create_verify_agent_graph
+from backend.models import (
+    ContentAgentFinalData,
+    ContentAgentRoundData,
+    ContentAgentStepData,
+)
 from backend.agents.generation.workspace import (
     DRAFT_PATH,
     FINAL_POLISHED_TEXT_PATH,
@@ -338,6 +343,11 @@ def _agent_step_payload_from_event(event: Any) -> AgentStepPayload | None:
         )
         if data.get("findings")
         else [],
+        content_agent=(
+            data.get("content_agent")
+            if isinstance(data.get("content_agent"), dict)
+            else None
+        ),
         is_complete=bool(data.get("is_complete")),
     )
 
@@ -354,6 +364,212 @@ def _build_agent_step_bridge(
             _emit_step(callback, payload)
 
     return emit
+
+
+CONTENT_AGENT_ROUND_PHASE_ORDER = {"draft": 0, "audit": 1, "revision": 2}
+
+
+def _text_char_count(value: Any) -> int:
+    return len(str(value or "").strip())
+
+
+def _content_agent_round_label(phase: str, round_index: int) -> str:
+    if phase == "draft":
+        return "初稿生成"
+    if phase == "audit":
+        return "第 1 轮审核发现" if round_index == 1 else f"第 {round_index} 轮修复复核"
+    if phase == "revision":
+        return f"第 {round_index} 轮修复"
+    return "正文智能体"
+
+
+def _content_agent_round_summary(
+    *,
+    phase: str,
+    round_index: int,
+    issue_count: int,
+    fix_count: int,
+    content_chars: int,
+) -> str:
+    if phase == "draft":
+        return f"初稿生成完成，约 {content_chars} 字。"
+    if phase == "audit":
+        if round_index == 1:
+            return (
+                f"第 1 轮审核发现 {issue_count} 个问题。"
+                if issue_count
+                else "第 1 轮审核未发现问题。"
+            )
+        return (
+            f"第 {round_index} 轮修复复核发现 {issue_count} 个问题。"
+            if issue_count
+            else f"第 {round_index} 轮修复复核通过。"
+        )
+    if phase == "revision":
+        return (
+            f"第 {round_index} 轮修复完成，已处理 {fix_count} 个问题。"
+            if fix_count
+            else f"第 {round_index} 轮修复完成。"
+        )
+    return "正文智能体处理中。"
+
+
+def _content_agent_final_summary(
+    *,
+    final_chars: int,
+    issue_count: int,
+    revision_rounds: int,
+) -> str:
+    summary = f"最终完成，修复 {revision_rounds} 轮，最终正文约 {final_chars} 字。"
+    if issue_count:
+        summary += f" 仍保留 {issue_count} 个问题记录。"
+    return summary
+
+
+def _serialize_findings(findings: list[AuditFinding]) -> list[dict[str, str]]:
+    return [finding.model_dump(mode="json") for finding in findings]
+
+
+class ContentAgentProcessTracker:
+    """Builds deterministic user-facing summaries for content_agent events."""
+
+    def __init__(self) -> None:
+        self._rounds: dict[tuple[str, int], ContentAgentRoundData] = {}
+
+    def _ordered_rounds(self) -> list[ContentAgentRoundData]:
+        return sorted(
+            self._rounds.values(),
+            key=lambda item: (
+                item.round,
+                CONTENT_AGENT_ROUND_PHASE_ORDER.get(item.phase, 99),
+            ),
+        )
+
+    def _findings_for_payload(self, payload: AgentStepPayload) -> list[dict[str, str]]:
+        findings = _serialize_findings(payload.findings)
+        if findings or payload.node != VERIFY_AGENT_NODE or not payload.content:
+            return findings
+        return _serialize_findings(
+            coerce_audit_findings(payload.content, fallback_on_error=True)
+        )
+
+    def build_step(self, payload: AgentStepPayload) -> ContentAgentStepData | None:
+        phase = self._phase_for_node(payload.node)
+        if phase is None:
+            return None
+
+        round_index = max(1, int(payload.round or 1))
+        findings = self._findings_for_payload(payload)
+        if phase == "revision" and not findings:
+            previous_audit = self._rounds.get(("audit", round_index))
+            if previous_audit is not None:
+                findings = [
+                    finding.model_dump(mode="json")
+                    for finding in previous_audit.findings
+                ]
+        issue_count = len(findings)
+        fix_count = issue_count if phase == "revision" else 0
+        content = payload.content if isinstance(payload.content, str) else None
+        summary = _content_agent_round_summary(
+            phase=phase,
+            round_index=round_index,
+            issue_count=issue_count,
+            fix_count=fix_count,
+            content_chars=_text_char_count(content),
+        )
+
+        round_data = ContentAgentRoundData(
+            round=round_index,
+            phase=phase,
+            label=_content_agent_round_label(phase, round_index),
+            summary=summary,
+            issue_count=issue_count,
+            fix_count=fix_count,
+            content=content,
+            findings=findings,
+        )
+        self._rounds[(phase, round_index)] = round_data
+
+        return ContentAgentStepData(
+            phase=phase,
+            summary=summary,
+            rounds=self._ordered_rounds(),
+            highlights=findings if phase in {"audit", "revision"} else [],
+        )
+
+    def build_final(
+        self,
+        *,
+        final_text: str,
+        findings: list[AuditFinding],
+        revision_rounds: int,
+    ) -> ContentAgentStepData:
+        serialized_findings = _serialize_findings(findings)
+        summary = _content_agent_final_summary(
+            final_chars=_text_char_count(final_text),
+            issue_count=len(serialized_findings),
+            revision_rounds=revision_rounds,
+        )
+        return ContentAgentStepData(
+            phase="final",
+            summary=summary,
+            rounds=self._ordered_rounds(),
+            highlights=serialized_findings,
+            final_result=ContentAgentFinalData(
+                summary=summary,
+                revision_rounds=revision_rounds,
+                final_chars=_text_char_count(final_text),
+                issue_count=len(serialized_findings),
+                content=final_text,
+            ),
+        )
+
+    @staticmethod
+    def _phase_for_node(node: str) -> str | None:
+        if node == GENERATE_AGENT_NODE:
+            return "draft"
+        if node == VERIFY_AGENT_NODE:
+            return "audit"
+        if node == REVISE_AGENT_NODE:
+            return "revision"
+        return None
+
+
+class ContentAgentStepEmitter:
+    def __init__(self, callback: Callable[[AgentStepPayload], None]) -> None:
+        self._callback = callback
+        self._tracker = ContentAgentProcessTracker()
+
+    def __call__(self, payload: AgentStepPayload) -> None:
+        if payload.content_agent is None:
+            content_agent = self._tracker.build_step(payload)
+            if content_agent is not None:
+                payload = payload.model_copy(
+                    update={"content_agent": content_agent.model_dump(mode="json")}
+                )
+        self._callback(payload)
+
+    def build_final_payload(
+        self,
+        *,
+        round_index: int,
+        final_text: str,
+        findings: list[AuditFinding],
+        revision_rounds: int,
+    ) -> AgentStepPayload:
+        content_agent = self._tracker.build_final(
+            final_text=final_text,
+            findings=findings,
+            revision_rounds=revision_rounds,
+        )
+        return AgentStepPayload(
+            step_type="final",
+            round=round_index,
+            node=CONTENT_AGENT_NODE,
+            content=content_agent.summary,
+            content_agent=content_agent.model_dump(mode="json"),
+            is_complete=True,
+        )
 
 
 def _infer_round_from_text(value: Any) -> int | None:
@@ -516,6 +732,11 @@ def _relay_runner_stream(
                             json.dumps(chunk.get("findings") or [], ensure_ascii=False),
                             fallback_on_error=True,
                         ) if chunk.get("findings") else [],
+                        content_agent=(
+                            chunk.get("content_agent")
+                            if isinstance(chunk.get("content_agent"), dict)
+                            else None
+                        ),
                         is_complete=bool(chunk.get("is_complete")),
                     ),
                 )
@@ -596,12 +817,13 @@ def run_content_agent_generation(
     workspace_dir = create_workspace_dir(task_id)
     backend = create_workspace_backend(workspace_dir)
     base_payload = _build_generation_payload(state, model_provider, task_id)
+    step_emitter = ContentAgentStepEmitter(step_callback) if step_callback is not None else None
     runner_config = _build_runner_config(
         config,
         payload=base_payload,
         backend=backend,
         workspace_dir=workspace_dir,
-        step_callback=step_callback,
+        step_callback=step_emitter,
     )
     selected_runner = runner or _fake_runner or create_content_agent_runner(
         model_provider,
@@ -627,7 +849,7 @@ def run_content_agent_generation(
         selected_runner,
         {"messages": [{"role": "user", "content": _build_main_agent_user_prompt()}]},
         runner_config,
-        step_callback,
+        step_emitter,
     )
 
     validate_round_protocol(workspace_dir)
@@ -638,16 +860,17 @@ def run_content_agent_generation(
     findings, last_audit_round = _read_optional_audit_findings(backend)
     revision_rounds = _count_revision_rounds(workspace_dir)
 
-    _emit_step(
-        step_callback,
-        AgentStepPayload(
-            step_type="final",
-            round=max(1, last_audit_round, revision_rounds),
-            node=CONTENT_AGENT_NODE,
-            content="智能体生成完成，最终正文已通过文件协议写入 final。",
-            is_complete=True,
-        ),
-    )
+    if step_emitter is not None:
+        final_round = max(1, last_audit_round, revision_rounds)
+        _emit_step(
+            step_emitter,
+            step_emitter.build_final_payload(
+                round_index=final_round,
+                final_text=final_text,
+                findings=findings,
+                revision_rounds=revision_rounds,
+            ),
+        )
     progress_log.info(
         "[content_agent] 智能体生成完成: task_id=%s, revision_rounds=%d, final_chars=%d, workspace=%s",
         task_id,

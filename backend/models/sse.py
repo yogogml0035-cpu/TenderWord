@@ -141,6 +141,39 @@ class AgentStepFindingData(BaseModel):
     fix_hint: str = Field(..., description="修复建议")
 
 
+class ContentAgentRoundData(BaseModel):
+    """正文智能体单阶段摘要。"""
+
+    round: int = Field(..., ge=1, description="轮次")
+    phase: Literal["draft", "audit", "revision"] = Field(..., description="阶段")
+    label: str = Field(default="", description="阶段展示名")
+    summary: str = Field(default="", description="阶段摘要")
+    issue_count: int = Field(default=0, ge=0, description="问题数")
+    fix_count: int = Field(default=0, ge=0, description="修复数")
+    content: Optional[str] = Field(default=None, description="原始输出")
+    findings: List[AgentStepFindingData] = Field(default_factory=list, description="阶段问题")
+
+
+class ContentAgentFinalData(BaseModel):
+    """正文智能体最终结果摘要。"""
+
+    summary: str = Field(default="", description="最终摘要")
+    revision_rounds: int = Field(default=0, ge=0, description="修复轮次")
+    final_chars: int = Field(default=0, ge=0, description="最终正文字符数")
+    issue_count: int = Field(default=0, ge=0, description="最终问题数")
+    content: Optional[str] = Field(default=None, description="最终正文原文")
+
+
+class ContentAgentStepData(BaseModel):
+    """正文智能体结构化过程数据。"""
+
+    phase: Literal["draft", "audit", "revision", "final"] = Field(..., description="过程阶段")
+    summary: str = Field(default="", description="当前阶段摘要")
+    rounds: List[ContentAgentRoundData] = Field(default_factory=list, description="阶段摘要列表")
+    highlights: List[AgentStepFindingData] = Field(default_factory=list, description="当前阶段问题")
+    final_result: Optional[ContentAgentFinalData] = Field(default=None, description="最终结果")
+
+
 class CommentAgentHighlightData(BaseModel):
     """批注智能体用户可见重点项。"""
 
@@ -198,6 +231,10 @@ class AgentStepEventData(BaseModel):
     findings: List[AgentStepFindingData] = Field(
         default_factory=list,
         description="审核意见列表",
+    )
+    content_agent: Optional[ContentAgentStepData] = Field(
+        default=None,
+        description="正文智能体结构化过程数据",
     )
     comment_agent: Optional[CommentAgentStepData] = Field(
         default=None,

@@ -6,6 +6,7 @@ import type {
   GenerationStyle,
   CommentWritebackSummary,
   SSEAgentStepEvent,
+  SSEContentAgentStep,
   StyleWritebackMode,
   StyleWritebackSummary,
   TaskKind,
@@ -610,6 +611,89 @@ function normalizeCommentAgentStep(value: unknown): SSEAgentStepEvent['comment_a
   return payload;
 }
 
+function normalizeContentAgentStep(value: unknown): SSEContentAgentStep | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const payload = value as Partial<SSEContentAgentStep> & {
+    rounds?: unknown;
+    highlights?: unknown;
+    final_result?: unknown;
+  };
+  if (
+    payload.phase !== 'draft' &&
+    payload.phase !== 'audit' &&
+    payload.phase !== 'revision' &&
+    payload.phase !== 'final'
+  ) {
+    return undefined;
+  }
+
+  const normalizeRound = (roundValue: unknown) => {
+    if (!roundValue || typeof roundValue !== 'object') {
+      return null;
+    }
+    const round = roundValue as Record<string, unknown>;
+    const roundIndex = typeof round.round === 'number' ? round.round : Number(round.round || 0);
+    if (!Number.isFinite(roundIndex) || roundIndex < 1) {
+      return null;
+    }
+    const findings = normalizeAgentStepFindings(round.findings);
+    const roundPhase =
+      round.phase === 'draft' || round.phase === 'audit' || round.phase === 'revision'
+        ? round.phase
+        : payload.phase === 'draft' || payload.phase === 'audit' || payload.phase === 'revision'
+          ? payload.phase
+          : 'audit';
+    return {
+      round: roundIndex,
+      phase: roundPhase,
+      label: typeof round.label === 'string' ? round.label : '',
+      summary: typeof round.summary === 'string' ? round.summary : '',
+      issue_count: Number.isFinite(Number(round.issue_count)) ? Number(round.issue_count) : findings.length,
+      fix_count: Number.isFinite(Number(round.fix_count)) ? Number(round.fix_count) : 0,
+      content: typeof round.content === 'string' ? round.content : undefined,
+      findings,
+    };
+  };
+
+  const rounds = Array.isArray(payload.rounds)
+    ? payload.rounds.map(normalizeRound).filter((item): item is NonNullable<ReturnType<typeof normalizeRound>> => !!item)
+    : [];
+
+  const highlights = normalizeAgentStepFindings(payload.highlights);
+  const finalResult =
+    payload.final_result && typeof payload.final_result === 'object'
+      ? (() => {
+          const result = payload.final_result as unknown as Record<string, unknown>;
+          return {
+            summary: typeof result.summary === 'string' ? result.summary : '',
+            revision_rounds: Number.isFinite(Number(result.revision_rounds))
+              ? Number(result.revision_rounds)
+              : 0,
+            final_chars: Number.isFinite(Number(result.final_chars)) ? Number(result.final_chars) : 0,
+            issue_count: Number.isFinite(Number(result.issue_count)) ? Number(result.issue_count) : 0,
+            content: typeof result.content === 'string' ? result.content : undefined,
+          };
+        })()
+      : undefined;
+
+  return {
+    phase: payload.phase,
+    summary: typeof payload.summary === 'string' ? payload.summary : '',
+    rounds,
+    highlights,
+    ...(finalResult ? { final_result: finalResult } : {}),
+  };
+}
+
+function getAgentStepMessageKey(node: string, round: number, hasContentAgent: boolean): string {
+  if (hasContentAgent || node === 'content_agent') {
+    return 'content_agent';
+  }
+  return `${node}:${round || 1}`;
+}
+
 function shouldShowVerifyFindingsJson(
   step: { content?: unknown; is_complete?: boolean },
   findings: AgentStepFinding[]
@@ -620,17 +704,27 @@ function shouldShowVerifyFindingsJson(
   return !!step.is_complete || findings.length > 0;
 }
 
-function findAgentStepMessage(
-  messages: Message[],
-  taskId: string,
-  node: string,
-  round: number
-): Message | undefined {
+function getMessageAgentStepKey(message: Message): string | undefined {
+  if (typeof message.metadata?.agentStepKey === 'string') {
+    return message.metadata.agentStepKey;
+  }
+  const node = message.metadata?.agentStepNode;
+  const round = message.metadata?.agentStepRound;
+  if (node === 'content_agent') {
+    return 'content_agent';
+  }
+  if (typeof node === 'string' && typeof round === 'number') {
+    return `${node}:${round}`;
+  }
+  return undefined;
+}
+
+function findAgentStepMessage(messages: Message[], taskId: string, key: string): Message | undefined {
   return messages.find((message) => {
     if (message.taskId !== taskId || message.metadata?.messageKind !== TASK_AGENT_STEP_KIND) {
       return false;
     }
-    return message.metadata.agentStepNode === node && message.metadata.agentStepRound === round;
+    return getMessageAgentStepKey(message) === key;
   });
 }
 
@@ -1359,11 +1453,20 @@ export const useChatStore = create<ChatStore>()(
           const stepType = step.step_type || 'stream';
           const stepRound = step.round;
           const findings = normalizeAgentStepFindings(step.findings);
+          const contentAgent = normalizeContentAgentStep(step.content_agent);
           const commentAgent = normalizeCommentAgentStep(step.comment_agent);
           const taskKind = step.task_kind || get().taskSummaries[taskId]?.task_kind;
-          const incomingStatus: Message['status'] = step.is_complete ? 'completed' : 'generating';
-          const node = step.node || 'content_agent';
-          const existing = findAgentStepMessage(conversation.messages, taskId, node, stepRound);
+          const sourceNode = step.node || 'content_agent';
+          const stepKey = getAgentStepMessageKey(sourceNode, stepRound, !!contentAgent);
+          const node = contentAgent ? 'content_agent' : sourceNode;
+          const incomingStatus: Message['status'] = contentAgent
+            ? contentAgent.phase === 'final' && step.is_complete
+              ? 'completed'
+              : 'generating'
+            : step.is_complete
+              ? 'completed'
+              : 'generating';
+          const existing = findAgentStepMessage(conversation.messages, taskId, stepKey);
           if (existing && isTerminalMessageStatus(existing.status) && incomingStatus === 'generating') {
             return existing.id;
           }
@@ -1374,8 +1477,7 @@ export const useChatStore = create<ChatStore>()(
               message.taskId !== taskId ||
               message.status !== 'generating' ||
               message.metadata?.messageKind !== TASK_AGENT_STEP_KIND ||
-              (message.metadata.agentStepNode === node &&
-                message.metadata.agentStepRound === stepRound)
+              getMessageAgentStepKey(message) === stepKey
             ) {
               return;
             }
@@ -1385,7 +1487,9 @@ export const useChatStore = create<ChatStore>()(
           let content = typeof step.content === 'string' ? step.content : '';
           let auditRounds: AgentAuditRound[] | undefined;
 
-          if (node === 'content_verify_agent') {
+          if (contentAgent) {
+            content = contentAgent.final_result?.content || content || contentAgent.summary;
+          } else if (node === 'content_verify_agent') {
             const existingRounds = normalizeAgentAuditRounds(existing?.metadata?.agentStepAuditRounds);
             const nextRound: AgentAuditRound = { round: stepRound, findings };
             auditRounds = [
@@ -1406,17 +1510,25 @@ export const useChatStore = create<ChatStore>()(
             ...(taskKind ? { taskKind } : {}),
             agentStepType: stepType,
             agentStepRound: stepRound,
+            agentStepKey: stepKey,
             agentStepNode: node,
+            ...(sourceNode !== node ? { agentStepSourceNode: sourceNode } : {}),
             agentStepFindings: findings,
+            ...(contentAgent ? { contentAgent } : {}),
             ...(commentAgent ? { commentAgent } : {}),
             ...(auditRounds ? { agentStepAuditRounds: auditRounds } : {}),
           };
 
           const existingContent = typeof existing?.content === 'string' ? existing.content : '';
-          const persistedContent = step.is_complete ? content : existingContent;
+          const persistedContent = contentAgent
+            ? content || existingContent
+            : step.is_complete
+              ? content
+              : existingContent;
 
           if (existing) {
             if (
+              !contentAgent &&
               !step.is_complete &&
               typeof step.content === 'string' &&
               step.content.length > 0

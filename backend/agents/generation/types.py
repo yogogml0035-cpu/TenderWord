@@ -70,6 +70,7 @@ class AgentStepPayload(BaseModel):
     node: str
     content: str | None = None
     findings: list[AuditFinding] = Field(default_factory=list)
+    content_agent: dict[str, Any] | None = None
     comment_agent: dict[str, Any] | None = None
     is_complete: bool = False
 

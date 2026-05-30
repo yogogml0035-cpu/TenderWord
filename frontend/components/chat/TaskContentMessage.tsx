@@ -8,6 +8,8 @@ import type {
   SSECommentAgentRound,
   SSECommentAgentStep,
   SSECommentAgentWriteback,
+  SSEContentAgentRound,
+  SSEContentAgentStep,
 } from '@/types/api';
 
 interface TaskContentMessageProps {
@@ -87,6 +89,9 @@ function getContentTitle(message: Message) {
   if (message.metadata?.messageKind === 'agent-step') {
     const node = message.metadata.agentStepNode;
     if (typeof node === 'string' && node.trim()) {
+      if (message.metadata.contentAgent || node.trim() === 'content_agent') {
+        return '正文智能体';
+      }
       if (node.trim() === 'comment_agent') {
         return '批注智能体';
       }
@@ -241,6 +246,134 @@ function CommentAgentProcessView({ commentAgent }: { commentAgent: SSECommentAge
   );
 }
 
+function getContentAgentPhaseLabel(phase: SSEContentAgentStep['phase']): string {
+  switch (phase) {
+    case 'draft':
+      return '初稿生成';
+    case 'audit':
+      return '审核发现';
+    case 'revision':
+      return '修复复核';
+    case 'final':
+      return '最终完成';
+    default:
+      return '正文智能体';
+  }
+}
+
+function getContentAgentRawLabel(round: SSEContentAgentRound): string {
+  switch (round.phase) {
+    case 'draft':
+      return '查看初稿正文';
+    case 'audit':
+      return '查看审核原始输出';
+    case 'revision':
+      return '查看修复正文';
+    default:
+      return '查看原始输出';
+  }
+}
+
+function ContentAgentRawBlock({ label, content }: { label: string; content?: string | null }) {
+  if (!content) {
+    return null;
+  }
+  return (
+    <details className="mt-2 rounded border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600">
+      <summary className="cursor-pointer select-none font-medium text-gray-600">{label}</summary>
+      <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-gray-600">
+        {content}
+      </pre>
+    </details>
+  );
+}
+
+function ContentAgentFindingItem({ finding }: { finding: { evidence: string; fix_hint: string } }) {
+  return (
+    <li className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      <p>
+        <span className="font-medium">依据：</span>
+        {finding.evidence}
+      </p>
+      <p className="mt-1">
+        <span className="font-medium">修复建议：</span>
+        {finding.fix_hint}
+      </p>
+    </li>
+  );
+}
+
+function ContentAgentRoundBlock({ round }: { round: SSEContentAgentRound }) {
+  return (
+    <section className="rounded border border-gray-200 bg-gray-50/60 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-sm font-medium text-gray-700">
+          {round.label || getContentAgentPhaseLabel(round.phase)}
+        </h4>
+        <p className="text-xs text-gray-500">
+          问题 {formatCount(round.issue_count)} 个 / 修复 {formatCount(round.fix_count)} 个
+        </p>
+      </div>
+      {round.summary && <p className="mt-1 text-xs leading-5 text-gray-600">{round.summary}</p>}
+      {round.findings.length > 0 ? (
+        <ul className="mt-2 space-y-2">
+          {round.findings.map((finding, index) => (
+            <ContentAgentFindingItem key={`${round.phase}-${round.round}-${index}`} finding={finding} />
+          ))}
+        </ul>
+      ) : round.phase === 'audit' ? (
+        <p className="mt-2 text-xs text-gray-500">普通通过项已计入数量。</p>
+      ) : null}
+      <ContentAgentRawBlock label={getContentAgentRawLabel(round)} content={round.content} />
+    </section>
+  );
+}
+
+function ContentAgentProcessView({ contentAgent }: { contentAgent: SSEContentAgentStep }) {
+  const finalResult = contentAgent.final_result || null;
+
+  return (
+    <div className="space-y-3 text-sm text-gray-700">
+      <div className="rounded border border-blue-100 bg-blue-50 px-3 py-2">
+        <p className="font-medium text-blue-900">
+          {contentAgent.summary || `${getContentAgentPhaseLabel(contentAgent.phase)}中`}
+        </p>
+        <p className="mt-1 text-xs text-blue-700">
+          当前阶段：{getContentAgentPhaseLabel(contentAgent.phase)} / 已记录 {contentAgent.rounds.length} 个阶段
+        </p>
+      </div>
+
+      {contentAgent.rounds.map((round, index) => (
+        <ContentAgentRoundBlock key={`${round.phase}-${round.round}-${index}`} round={round} />
+      ))}
+
+      {contentAgent.highlights.length > 0 && contentAgent.phase === 'final' && (
+        <section className="rounded border border-amber-200 bg-amber-50/70 p-3">
+          <h4 className="text-sm font-medium text-amber-800">最终仍需关注</h4>
+          <ul className="mt-2 space-y-2">
+            {contentAgent.highlights.map((finding, index) => (
+              <ContentAgentFindingItem key={`final-highlight-${index}`} finding={finding} />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {finalResult && (
+        <section className="rounded border border-gray-200 bg-white p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-sm font-medium text-gray-700">最终完成</h4>
+            <p className="text-xs text-gray-500">
+              修复 {formatCount(finalResult.revision_rounds)} 轮 / 正文 {formatCount(finalResult.final_chars)} 字 / 问题 {formatCount(finalResult.issue_count)} 个
+            </p>
+          </div>
+          {finalResult.summary && <p className="mt-1 text-xs leading-5 text-gray-600">{finalResult.summary}</p>}
+          <ContentAgentRawBlock label="查看最终正文" content={finalResult.content} />
+        </section>
+      )}
+    </div>
+  );
+}
+
 export function TaskContentMessage({
   message,
   maxHeight = 320,
@@ -253,9 +386,13 @@ export function TaskContentMessage({
   const progressPercent = message.metadata?.progressPercent;
   const contentTitle = getContentTitle(message);
   const commentAgent = message.metadata?.commentAgent;
+  const contentAgent = message.metadata?.contentAgent;
+  const copyContent = contentAgent?.final_result?.content || content;
   const isEmptyRunningAgentStep =
     message.metadata?.messageKind === 'agent-step' &&
     message.status === 'generating' &&
+    !contentAgent &&
+    !commentAgent &&
     content.length === 0;
   const isAgentStep = message.metadata?.messageKind === 'agent-step';
 
@@ -274,14 +411,14 @@ export function TaskContentMessage({
       return;
     }
     el.scrollTop = el.scrollHeight;
-  }, [content, stickToBottom]);
+  }, [content, commentAgent, contentAgent, stickToBottom]);
 
   const handleCopyContent = useCallback(() => {
     if (disabled) {
       return;
     }
-    void copyPlainText(content);
-  }, [content, disabled]);
+    void copyPlainText(copyContent);
+  }, [copyContent, disabled]);
 
   return (
     <div className={`overflow-hidden rounded border bg-white shadow-sm ${getBorderColor(message.status)}`}>
@@ -303,7 +440,7 @@ export function TaskContentMessage({
             aria-label="复制AI内容"
             title="复制AI内容"
             onClick={handleCopyContent}
-            disabled={!content || disabled}
+            disabled={!copyContent || disabled}
             className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 transition-colors duration-200 hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Copy className="h-3.5 w-3.5" />
@@ -330,7 +467,9 @@ export function TaskContentMessage({
         className={`overflow-x-hidden overflow-y-auto p-3 ${isEmptyRunningAgentStep ? 'py-2' : ''}`}
         style={{ maxHeight }}
       >
-        {commentAgent ? (
+        {contentAgent ? (
+          <ContentAgentProcessView contentAgent={contentAgent} />
+        ) : commentAgent ? (
           <CommentAgentProcessView commentAgent={commentAgent} />
         ) : content ? (
           <pre

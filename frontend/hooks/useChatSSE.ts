@@ -160,7 +160,10 @@ function shouldAcceptAgentStep(
   return true;
 }
 
-function getAgentStepKey(step: Pick<SSEAgentStepEvent, 'node' | 'round'>): string {
+function getAgentStepKey(step: Pick<SSEAgentStepEvent, 'node' | 'round' | 'content_agent'>): string {
+  if (step.content_agent || step.node === 'content_agent') {
+    return 'content_agent';
+  }
   return `${step.node || 'content_agent'}:${step.round || 1}`;
 }
 
@@ -462,6 +465,9 @@ export function useChatSSE({
                   : '';
               useChatStreamStore.getState().setAgentStep(taskId, stepKey, {
                 content: normalizedContent,
+                ...(agentStepData.content_agent
+                  ? { contentAgent: agentStepData.content_agent }
+                  : {}),
                 ...(agentStepData.comment_agent
                   ? { commentAgent: agentStepData.comment_agent }
                   : {}),

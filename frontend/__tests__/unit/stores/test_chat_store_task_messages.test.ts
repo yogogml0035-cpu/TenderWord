@@ -158,7 +158,7 @@ describe('chatStore task message grouping', () => {
     expect(group?.contentMessage?.content).toBe('节点完成内容');
   });
 
-  it('upserts agent-step cards by node and round and keeps verify JSON raw', () => {
+  it('upserts legacy agent-step cards by node and round and keeps verify JSON raw', () => {
     act(() => {
       useChatStore.getState().startTask('conv-1', 'task-1', {
         task_kind: 'generate',
@@ -267,6 +267,252 @@ describe('chatStore task message grouping', () => {
     expect(secondAuditMessage?.metadata?.agentStepNode).toBe('content_verify_agent');
     expect(secondAuditMessage?.metadata?.agentStepRound).toBe(2);
     expect(secondAuditMessage?.metadata?.agentStepAuditRounds).toHaveLength(1);
+  });
+
+  it('aggregates structured content_agent snapshots into one正文智能体 card', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'generate',
+        status: 'running',
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_generate_agent',
+        is_complete: true,
+        content: '初稿正文',
+        findings: [],
+        content_agent: {
+          phase: 'draft',
+          summary: '初稿生成完成，约 4 字。',
+          rounds: [
+            {
+              round: 1,
+              phase: 'draft',
+              label: '初稿生成',
+              summary: '初稿生成完成，约 4 字。',
+              issue_count: 0,
+              fix_count: 0,
+              content: '初稿正文',
+              findings: [],
+            },
+          ],
+          highlights: [],
+        },
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_verify_agent',
+        is_complete: true,
+        content: '[{"evidence":"缺少交付地点","fix_hint":"补充交付地点"}]',
+        findings: [
+          {
+            evidence: '缺少交付地点',
+            fix_hint: '补充交付地点',
+          },
+        ],
+        content_agent: {
+          phase: 'audit',
+          summary: '第 1 轮审核发现 1 个问题。',
+          rounds: [
+            {
+              round: 1,
+              phase: 'draft',
+              label: '初稿生成',
+              summary: '初稿生成完成，约 4 字。',
+              issue_count: 0,
+              fix_count: 0,
+              content: '初稿正文',
+              findings: [],
+            },
+            {
+              round: 1,
+              phase: 'audit',
+              label: '第 1 轮审核发现',
+              summary: '第 1 轮审核发现 1 个问题。',
+              issue_count: 1,
+              fix_count: 0,
+              content: '[{"evidence":"缺少交付地点","fix_hint":"补充交付地点"}]',
+              findings: [
+                {
+                  evidence: '缺少交付地点',
+                  fix_hint: '补充交付地点',
+                },
+              ],
+            },
+          ],
+          highlights: [
+            {
+              evidence: '缺少交付地点',
+              fix_hint: '补充交付地点',
+            },
+          ],
+        },
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_revise_agent',
+        is_complete: true,
+        content: '修复正文',
+        findings: [
+          {
+            evidence: '缺少交付地点',
+            fix_hint: '补充交付地点',
+          },
+        ],
+        content_agent: {
+          phase: 'revision',
+          summary: '第 1 轮修复完成，已处理 1 个问题。',
+          rounds: [
+            {
+              round: 1,
+              phase: 'draft',
+              label: '初稿生成',
+              summary: '初稿生成完成，约 4 字。',
+              issue_count: 0,
+              fix_count: 0,
+              content: '初稿正文',
+              findings: [],
+            },
+            {
+              round: 1,
+              phase: 'audit',
+              label: '第 1 轮审核发现',
+              summary: '第 1 轮审核发现 1 个问题。',
+              issue_count: 1,
+              fix_count: 0,
+              content: '[{"evidence":"缺少交付地点","fix_hint":"补充交付地点"}]',
+              findings: [
+                {
+                  evidence: '缺少交付地点',
+                  fix_hint: '补充交付地点',
+                },
+              ],
+            },
+            {
+              round: 1,
+              phase: 'revision',
+              label: '第 1 轮修复',
+              summary: '第 1 轮修复完成，已处理 1 个问题。',
+              issue_count: 1,
+              fix_count: 1,
+              content: '修复正文',
+              findings: [
+                {
+                  evidence: '缺少交付地点',
+                  fix_hint: '补充交付地点',
+                },
+              ],
+            },
+          ],
+          highlights: [
+            {
+              evidence: '缺少交付地点',
+              fix_hint: '补充交付地点',
+            },
+          ],
+        },
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'final',
+        round: 2,
+        node: 'content_agent',
+        is_complete: true,
+        content: '最终完成，修复 1 轮，最终正文约 4 字。',
+        findings: [],
+        content_agent: {
+          phase: 'final',
+          summary: '最终完成，修复 1 轮，最终正文约 4 字。',
+          rounds: [
+            {
+              round: 1,
+              phase: 'draft',
+              label: '初稿生成',
+              summary: '初稿生成完成，约 4 字。',
+              issue_count: 0,
+              fix_count: 0,
+              content: '初稿正文',
+              findings: [],
+            },
+            {
+              round: 1,
+              phase: 'audit',
+              label: '第 1 轮审核发现',
+              summary: '第 1 轮审核发现 1 个问题。',
+              issue_count: 1,
+              fix_count: 0,
+              content: '[{"evidence":"缺少交付地点","fix_hint":"补充交付地点"}]',
+              findings: [
+                {
+                  evidence: '缺少交付地点',
+                  fix_hint: '补充交付地点',
+                },
+              ],
+            },
+            {
+              round: 1,
+              phase: 'revision',
+              label: '第 1 轮修复',
+              summary: '第 1 轮修复完成，已处理 1 个问题。',
+              issue_count: 1,
+              fix_count: 1,
+              content: '修复正文',
+              findings: [
+                {
+                  evidence: '缺少交付地点',
+                  fix_hint: '补充交付地点',
+                },
+              ],
+            },
+            {
+              round: 2,
+              phase: 'audit',
+              label: '第 2 轮修复复核',
+              summary: '第 2 轮修复复核通过。',
+              issue_count: 0,
+              fix_count: 0,
+              content: '[]',
+              findings: [],
+            },
+          ],
+          highlights: [],
+          final_result: {
+            summary: '最终完成，修复 1 轮，最终正文约 4 字。',
+            revision_rounds: 1,
+            final_chars: 4,
+            issue_count: 0,
+            content: '最终正文',
+          },
+        },
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].metadata?.agentStepKey).toBe('content_agent');
+    expect(agentMessages?.[0].metadata?.agentStepNode).toBe('content_agent');
+    expect(agentMessages?.[0].metadata?.contentAgent?.phase).toBe('final');
+    expect(agentMessages?.[0].metadata?.contentAgent?.rounds).toHaveLength(4);
+    expect(agentMessages?.[0].content).toBe('最终正文');
+    expect(agentMessages?.[0].status).toBe('completed');
   });
 
   it('keeps comment_agent incomplete snapshots lightweight and persists final snapshot', () => {
