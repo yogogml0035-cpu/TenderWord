@@ -4,6 +4,8 @@ import importlib
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 extract_module = importlib.import_module(
     "backend.nodes.common_word_nodes.extract_tender_params"
 )
@@ -46,10 +48,15 @@ def _patch_extract_runtime(
         "create_word_application",
         lambda **_kwargs: ("word", False),
     )
+
+    def _fake_open_document_with_retry(**kwargs):
+        style_call["opened_file_path"] = kwargs["file_path"]
+        return doc
+
     monkeypatch.setattr(
         extract_module,
         "open_document_with_retry",
-        lambda **_kwargs: doc,
+        _fake_open_document_with_retry,
     )
     monkeypatch.setattr(
         extract_module,
@@ -97,6 +104,17 @@ def _patch_extract_runtime(
         "close_word_application",
         lambda **_kwargs: None,
     )
+
+    def _fake_extract_text_from_word_file(file_path: str) -> str:
+        extracted_paths = style_call.setdefault("tender_param_paths", [])
+        extracted_paths.append(file_path)
+        return f"技术参数:{Path(file_path).stem}"
+
+    monkeypatch.setattr(
+        extract_module,
+        "extract_text_from_word_file",
+        _fake_extract_text_from_word_file,
+    )
     monkeypatch.setattr(
         extract_module.progress_log,
         "info",
@@ -123,11 +141,31 @@ def _patch_extract_runtime(
 
 def _build_state(doc_path: Path) -> dict[str, Any]:
     return {
-        "clean_draft_path": str(doc_path),
+        "template_path": str(doc_path),
         "tender_type": "xjcg",
         "insertion_before_text": "第三章 采购需求",
         "insertion_after_text": "第四章 响应文件有关格式",
     }
+
+
+def test_extract_tender_params_requires_template_path() -> None:
+    with pytest.raises(ValueError) as exc_info:
+        extract_module.extract_tender_params(
+            {
+                "clean_draft_path": "D:/legacy-clean.docx",
+                "origin_tender_path": "D:/legacy-review.docx",
+                "insertion_before_text": "第三章 采购需求",
+                "insertion_after_text": "第四章 响应文件有关格式",
+            },
+            config=None,
+        )
+
+    message = str(exc_info.value)
+    assert "template_path" in message
+    assert "clean_draft" not in message
+    assert "origin_tender" not in message
+    assert "清洁稿" not in message
+    assert "送审稿" not in message
 
 
 def test_extract_tender_params_records_inline_style_fragments(
@@ -166,6 +204,7 @@ def test_extract_tender_params_records_inline_style_fragments(
     assert result["end_page"] == 4
     assert style_call["args"] == (fake_doc,)
     assert style_call["kwargs"] == {"bound_start": 20, "bound_end": 80}
+    assert style_call["opened_file_path"] == str(doc_path)
     assert (20, 80) in fake_doc.range_calls
     assert any(
         "模板样式提取完成，片段 1 个" in message
@@ -173,6 +212,44 @@ def test_extract_tender_params_records_inline_style_fragments(
     )
     assert not progress_warnings
     assert not debug_messages
+
+
+def test_extract_tender_params_joins_multiple_tender_param_paths(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    doc_path = tmp_path / "template.docx"
+    doc_path.write_bytes(b"docx")
+    param_one = tmp_path / "param-one.docx"
+    param_two = tmp_path / "param-two.docx"
+    param_one.write_bytes(b"param-one")
+    param_two.write_bytes(b"param-two")
+    fake_doc = _FakeDoc()
+    progress_messages: list[str] = []
+    progress_warnings: list[str] = []
+    debug_messages: list[str] = []
+
+    style_call = _patch_extract_runtime(
+        monkeypatch,
+        doc=fake_doc,
+        style_fragments=[],
+        progress_messages=progress_messages,
+        progress_warnings=progress_warnings,
+        debug_messages=debug_messages,
+    )
+
+    result = extract_module.extract_tender_params(
+        {
+            **_build_state(doc_path),
+            "tender_param_paths": [str(param_one), str(param_two)],
+        },
+        config=None,
+    )
+
+    assert result["origin_tender_params"] == "原始采购需求"
+    assert result["tender_params"] == "技术参数:param-one\n\n技术参数:param-two"
+    assert style_call["opened_file_path"] == str(doc_path)
+    assert style_call["tender_param_paths"] == [str(param_one), str(param_two)]
 
 
 def test_extract_tender_params_style_extraction_failure_is_best_effort(

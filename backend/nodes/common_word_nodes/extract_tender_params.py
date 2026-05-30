@@ -54,8 +54,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
     从 state 中读取：
     - insertion_before_text: 插入位置的前置文本
     - insertion_after_text: 插入位置的后置文本
-    - clean_draft_path: 清洁稿文档路径（优先使用）
-    - origin_tender_path: 送审稿文档路径（备选）
+    - template_path: 模板文档路径
     - tender_type: 招标类型（'xjcg' 或 'gngk'）
     - tender_param_paths: 技术参数文件路径列表（可选）
 
@@ -67,23 +66,20 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
     """
     start_time = time.time()
     print(f"[extract_tender_params] 开始执行...")
-    _visible_log("开始提取原始采购需求")
+    _visible_log("开始提取模板参考正文")
 
     # 获取输入参数
-    clean_draft_path = state.get("clean_draft_path")
-    origin_tender_path = state.get("origin_tender_path")
+    template_path = state.get("template_path")
     before_text = state.get("insertion_before_text")
     after_text = state.get("insertion_after_text")
     tender_type = state.get("tender_type", "xjcg")
 
     # 确定提取源路径
-    extract_source_path = clean_draft_path or origin_tender_path
-    if not extract_source_path or (
-        isinstance(extract_source_path, str) and extract_source_path.strip() == ""
+    if not template_path or (
+        isinstance(template_path, str) and template_path.strip() == ""
     ):
-        raise ValueError(
-            "需要 clean_draft_path（清洁稿）或 origin_tender_path（送审稿）来提取文档中的内容"
-        )
+        raise ValueError("需要 template_path 来提取模板参考正文")
+    extract_source_path = template_path
 
     # 如果没有提供前后文本，返回空内容
     if not before_text or not after_text:
@@ -101,11 +97,11 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
 
     # 检查文件是否存在
     if not os.path.exists(extract_source_path):
-        raise FileNotFoundError(f"未找到待提取文档: {extract_source_path}")
+        raise FileNotFoundError(f"未找到模板文件: {extract_source_path}")
 
     # 检查文件是否可读
     if not os.access(extract_source_path, os.R_OK):
-        raise PermissionError(f"无法读取待提取文档: {extract_source_path}")
+        raise PermissionError(f"无法读取模板文件: {extract_source_path}")
 
     before_size, after_size = get_anchor_target_sizes(str(tender_type or "xjcg"))
     print(
@@ -122,7 +118,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
 
     try:
         # 使用统一的工具函数创建 Word 应用程序
-        _visible_log("开始打开采购需求文档")
+        _visible_log("开始打开模板文件")
         wps, com_initialized = create_word_application(
             initial_delay=0.5,
             post_init_delay=0.5,
@@ -138,7 +134,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
             read_only=True,
             node_name="extract_tender_params",
         )
-        _visible_log("文档打开完成，准备定位采购需求锚点")
+        _visible_log("文档打开完成，准备定位模板参考正文锚点")
 
         # 使用统一的工具函数取消文档保护
         unprotect_document(doc, node_name="extract_tender_params")
@@ -147,7 +143,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
         print(f"[extract_tender_params] 正在查找锚点...")
         print(f"  前置文本: '{before_text}'")
         print(f"  后置文本: '{after_text}'")
-        _visible_log("开始查找采购需求前后锚点")
+        _visible_log("开始查找模板参考正文前后锚点")
 
         before_hit, after_hit = find_anchor_range(
             doc=doc,
@@ -195,7 +191,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
         end_page = int(content_range["end_page"])
 
         # 提取两个锚点之间的内容
-        _visible_log(f"锚点定位完成，开始提取第 {start_page} 至 {end_page} 页内容")
+        _visible_log(f"锚点定位完成，开始提取第 {start_page} 至 {end_page} 页模板正文")
         between_rng = doc.Range(range_start, range_end)
         extracted_content = extract_content_with_tables(between_rng)
         try:
@@ -226,7 +222,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
 
         print(f"[extract_tender_params] 页码范围: {start_page} - {end_page}")
         _visible_log(
-            f"原始采购需求提取完成，页码范围 {start_page}-{end_page}，非空白字符 {non_whitespace_chars}"
+            f"模板参考正文提取完成，页码范围 {start_page}-{end_page}，非空白字符 {non_whitespace_chars}"
         )
 
     except Exception as e:
@@ -320,7 +316,7 @@ if __name__ == "__main__":
 
     # 测试文档路径
     test_doc_paths = [
-        ("test_word/251534-招标文件-清洁稿.doc", "gngk"),
+        ("test_word/251534-招标文件-模板.doc", "gngk"),
         # ("TenderFile/252699-询价文件.doc", "xjcg"),
     ]
 
@@ -353,7 +349,7 @@ if __name__ == "__main__":
 
         test_state: TenderGraphStateBase = {
             "tender_type": tender_type,
-            "clean_draft_path": str(test_doc_path),
+            "template_path": str(test_doc_path),
             "insertion_before_text": before_text,
             "insertion_after_text": after_text,
         }
