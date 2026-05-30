@@ -11,6 +11,7 @@ Source: prd.json
 - 批注写回 summary/warning 规则统一走 `backend/nodes/common_word_nodes/comment_writeback.py::build_comment_writeback_summary_payload`；update_word 节点只在 `generated > 0 && failed > 0` 时用 `progress_log.warning()`，不要重新加入 0 写入硬失败。
 - `DocumentService._build_rewrite_state_snapshot()` 可以保存后端内部批注依据长数组和 `generation_mode`；`_build_task_result_payload()`、SSE `done` 和前端 `chat-storage` 只能保留白名单摘要字段，不能泄露 `comment_plan_detail`、`strikethrough_plan`、`non_black_font_plan`。
 - 新增 Prompt Layer builder 时同步补 `backend/prompts/types.py` 输入 dataclass、`backend/prompts/__init__.py` 导出和 `backend/tests/prompts/test_*.py` 契约测试；Prompt Layer 仍只做纯渲染，不接日志、LLM 或 Word 副作用。
+- `comment_agent` 采用“纯确定性函数 + LangChain StructuredTool factory”的分层：校验只读取 `polished_text`，Word 写入工具必须重新校验并限制在 `bound_start/bound_end` 内，不复用全文兜底写回。
 
 ## 2026-05-30 13:08 - US-001
 - 建立了 `comment_supplement` 任务类型契约：后端内部/API TaskKind、TaskService 映射、前端 TaskKind union 均已支持。
@@ -66,4 +67,17 @@ Source: prd.json
   - 无参考批注 prompt 只能消费 `polished_text`，后续 comment_supplement/comment_agent 接入时不要把 `comment_plan_detail`、`strikethrough_plan` 或 `non_black_font_plan` 塞回该 prompt。
   - gngk 子类型仍通过 `get_tender_type_family()` 收敛到 `gngk` prompt registry，新增 prompt builder 要沿用 family 归一化而不是枚举所有后端 form_type。
   - Prompt Layer 变更也要更新共享知识包；若只新增同一主题内规则，`asset/README.md` 更新适用范围即可，不需要新建知识包。
+---
+## 2026-05-30 15:04 - US-005
+- 新增 `comment_agent` 运行时包：固定 `name="comment_agent"` 调用 `langchain.agents.create_agent`，并用 `ToolCallLimitMiddleware` 将 `validate_comment_references` 限制为最多 3 次、`write_validated_comments_to_word` 限制为最多 1 次。
+- 实现确定性校验与写入工具：AI 只能按同 index 修改 `reference_text`，`comment_text` 必须保持初始 JSON 原样；校验只基于 `polished_text`，失败反馈包含 index、原 reference、失败原因和相近片段；写入工具会重新校验，只在 Word 锚点边界内写入无既有批注的通过项。
+- 增加 `comment_agent` 审计日志：记录初始 JSON、AIMessage 内容、每轮校验结果、最终 passed/failed/skipped 和 Word 写入统计；`agent_step` 只转发 AIMessage 内容，过滤工具消息。
+- 更改的文件：`backend/agents/comments/__init__.py`、`backend/agents/comments/comment_agent.py`、`backend/agents/comments/tools.py`、`backend/agents/comments/types.py`、`backend/agents/comments/workspace.py`、`backend/tests/agents/test_comment_agent.py`、`asset/shared_runtime_word_skill_knowledge_pack.md`、`asset/README.md`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m pytest backend/tests/agents/test_comment_agent.py -v` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests/agents/test_comment_agent.py backend/tests/nodes/test_comment_writeback.py -v` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests -v` 通过，368 passed；`npm run lint` 通过；`npm run type-check` 通过；`npm test -- --runInBand` 通过，31 suites / 355 tests；本轮改动文件的 staged `git diff --cached --check` 通过。
+- 全仓 `git diff --check` 仍因进入本轮前已有的 `backend/.env.example`、`scripts/start-dev.ps1` trailing whitespace 失败，未改动这些既有文件。
+- 本 story 只新增后端运行时与测试，无 UI 改动，未执行浏览器验证。
+- **未来迭代的学习：**
+  - `comment_agent` 的 LangChain 工具限制按工具名配置；后续接入 graph 时必须继续使用 `validate_comment_references` 和 `write_validated_comments_to_word` 这两个稳定工具名。
+  - 批注候选校验不要把 Word 文档当兜底来源；AI 修复锚点的唯一文本依据是 `polished_text`，Word 工具只负责在已限定锚点边界内写入。
+  - 工具消息和排障细节只进审计日志，前端过程卡只能展示 `AIMessage.content`。
 ---

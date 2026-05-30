@@ -13,6 +13,7 @@
 - 生成任务 REST 入口：`backend/api/generate.py`
 - Graph 主干、锁、取消与进度包装：`backend/graphs/base_graph.py`、`backend/task/task_queue_manager.py`
 - 初次生成智能体运行时：`backend/agents/generation/`
+- 批注锚点智能体运行时：`backend/agents/comments/`
 - task skill runtime：`backend/graphs/skill_graph.py`、`backend/skills/`
 - Prompt Layer：`backend/prompts/`
 - Word 业务 helper：`backend/helper/word_helper/`
@@ -79,6 +80,7 @@
 - `generate_comments` 的批注 JSON 属于严格机器契约：节点必须先尝试本地提取数组、移除代码块包裹、修正常见尾逗号/非法反斜杠；仍失败时只允许再走一次 Prompt Layer 定义的 JSON 修复调用，然后再决定是否降级为空数组。原始批注输出与修复输出应继续落到 `backend/prompts_log/generate_log/` 便于排障。
 - 批注生成 prompt 的 `reference_text` 必须要求连续、逐字、可精确搜索且尽量唯一；短词或高频词风险要扩展到同句、同分句或同单元格内的连续原文，不能跨行/跨段/跨单元格拼接。无法形成唯一可回填锚点时应输出空数组或删除该条。
 - 无参考批注 prompt 的真源是 `backend/prompts/comment_no_reference_prompt.py`。它只依据 `polished_text` 做合规性、公平性、严谨性三维审查，输出纯净 JSON 数组，元素只包含 `reference_text` 和 `comment_text`；`reference_text` 必须精确来自 `polished_text`，不得引入批注计划、删除线计划、非黑色字体计划、历史参考或送审稿差异逻辑。
+- `comment_agent` 运行时真源是 `backend/agents/comments/`。生产 runner 必须用 `langchain.agents.create_agent(..., name="comment_agent")` 创建，并用 `ToolCallLimitMiddleware` 按工具名限制 `validate_comment_references` 最多 3 次、`write_validated_comments_to_word` 最多 1 次；测试注入点是 `set_comment_agent_runner()`。
 
 ## Word / Queue / Helper 边界
 
@@ -123,6 +125,8 @@
 - AI 批注写回是可降级增强项：正文已成功写入并可下载时，`generated_comment_count > 0` 且最终成功写入数为 `0` 不再让 update 路径硬失败；统一 `comment_writeback` 摘要由共享 helper 计算，`warning` 只在 `generated > 0 && failed > 0` 时为 true，`generated=0` 和 skipped-only 不警告，用户可见统计在 warning 条件下走 `progress_log.warning()`。
 - 批注写回的重试只覆盖 Word `Comments.Add` 的 COM / RPC 写入异常；`reference_text` 未匹配属于定位失败，不会靠重试恢复。
 - 批注定位先走 Word 精确 `Find`；精确未命中时，共享 `comment_writeback` 可用规范化唯一匹配兜底，忽略空白、控制符、常见标点和换行。锚点范围内唯一命中才插入；若锚点范围疑似漂移，只允许全文唯一命中兜底；多处命中必须失败，避免把批注错插到其它章节。
+- `comment_agent` 的确定性校验只看 `polished_text`，AI 只能在同 index 上修改 `reference_text`，`comment_text` 必须与初始 JSON 原样一致；校验失败反馈要保留 index、原始 reference、失败原因和相近候选片段。Word 写入工具必须重新执行校验，只在传入锚点边界内查找并写入已通过且目标范围无既有批注的条目，不使用全文兜底；已有批注位置计入 skipped。
+- `comment_agent` 审计日志默认写入 `backend/prompts_log/comment_agent_audit/`，至少记录初始 JSON、AIMessage 内容、每轮校验结果、最终 passed/failed/skipped 和 Word 写入统计。对外 `agent_step` 只展示 `AIMessage.content`，工具消息和排障细节不得进入前端过程卡。
 - 样式回填是 best-effort：低相似度、0 命中或片段跳过不硬失败；批注写回同样不得阻断已成功写入正文的下载主流程，只通过 `comment_writeback` 统计和 warning 暴露。
 - `style_writeback_mode=bold_only` 时，样式回填必须先在共享 `inline_style_ops` 中裁剪片段：只保留 `bold=True`，并清空下划线、斜体、删除线、字体颜色、高亮和 `underline_style`；裁剪后不再含加粗的片段不得进入 extracted/attempted 计数或写回流程。
 - `replace_content` 给首个正文 `project_name` 插入 `PROJECT_NAME_FIRST_HIT_COMMENT` 时，必须先按规范化后的批注文案做去重；只跳过“同文案”重复批注，其他文案批注不影响新增。Word 若把既有批注暴露成零宽或贴边锚点，也要视为同一落点参与判重。
@@ -159,6 +163,7 @@
 - Word helper：`backend/tests/helper/test_content_ops.py`、`backend/tests/helper/test_paragraph_boundary_ops.py`、`backend/tests/helper/test_inline_style_ops.py`
 - 锁感知删除 helper：`backend/tests/helper/test_delete_ops.py`、`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`
 - 批注写回：`backend/tests/nodes/test_comment_writeback.py`
+- 批注锚点智能体：`backend/tests/agents/test_comment_agent.py`
 - 受保护字段与写回：`backend/tests/nodes/test_protected_fields_strict_matching.py`、`backend/tests/nodes/test_update_word_inline_style_writeback.py`
 - Prompt / LLM stream：`backend/tests/prompts/test_generate_prompt_routing.py`、`backend/tests/util/test_llm_stream_utils.py`
 - 批注 prompt 契约：`backend/tests/prompts/test_comment_prompt_reference_contract.py`、`backend/tests/prompts/test_comment_no_reference_prompt.py`
