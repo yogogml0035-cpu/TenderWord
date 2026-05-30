@@ -129,6 +129,10 @@ function shouldUseAgentStepCards(
   return currentNode === 'content_agent' || isAgentGenerationConversation(taskId, conversationId);
 }
 
+function getAgentStepKey(step: Pick<SSEAgentStepEvent, 'node' | 'round'>): string {
+  return `${step.node || 'content_agent'}:${step.round || 1}`;
+}
+
 /**
  * Hook that maps SSE events to task-log/task-content/task-download messages.
  */
@@ -399,6 +403,15 @@ export function useChatSSE({
               current_node: agentStepData.node,
               current_node_display: agentStepData.node,
             });
+            if (!agentStepData.is_complete) {
+              useChatStreamStore.getState().setAgentStep(taskId, getAgentStepKey(agentStepData), {
+                content:
+                  typeof agentStepData.content === 'string'
+                    ? normalizeAIContent(agentStepData.content)
+                    : '',
+                isComplete: false,
+              });
+            }
             upsertAgentStepMessage(taskId, {
               ...agentStepData,
               task_id: taskId,

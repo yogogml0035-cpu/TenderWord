@@ -142,6 +142,9 @@
 - `agent_step` 是智能体 generate 的用户态 SSE 显式例外，用于展示主 agent 计划 / 调用决策 / 验收说明，以及 generate / verify / revise 子 agent 原始流，不替代 `done` / `error` 终态。
 - 后端 `AgentStepEventData` 字段包括 `task_id`、`task_kind`、`step_type`、`round`、`node`、`timestamp`、`is_complete`、可选 `content` 与 `findings`。`round` 是 1-based；当前智能体子 agent 流使用 `step_type=stream`，主 agent 终局事件使用 `step_type=final`。`content_verify_agent` 卡展示原始 JSON streaming，不做后端格式化，也不额外创建文件产物卡。
 - `DocumentService` 在 graph config 中注入 `agent_step_callback`，智能体生成链路统一经 `SSECallback.push_agent_step()` 进入本地缓冲与 `SSEManager.send_agent_step_threadsafe()`；子 agent 与 runner stream 不再各自直连 `sse_manager`，避免同一过程卡双通道重复推送。`SSEManager.send_agent_step()` 会进入缓冲，断线续传时可重放。
+- 前端合并 `agent_step` 时必须把终态视为单调状态：迟到的 `is_complete=false` 快照不得覆盖已完成卡片；后续子 agent 开始或完成时，上一张仍在 `generating` 的过程卡也要收口为完成态。
+- 高频 `agent_step` 运行中快照只进入 `frontend/stores/chatStreamStore.ts` 的临时 stream，不写入持久化 `chat-storage`；只有完成事件才把最终正文 / JSON 固化到 `chatStore.conversations`。否则每个 SSE 片段都会触发会话数组重写、React 消息列表重渲染和 `sessionStorage` JSON 序列化，长文本或重复任务会让浏览器主线程卡死。
+- 前端实时日志展示要优先降低主线程工作量，而不是只做视觉隐藏：生成中日志明细默认不挂载，复制文本点击时才构造；外层消息列表自动滚动只跟消息数量变化，不跟每个 SSE 内容片段变化。
 - `frontend/hooks/useChatSSE.ts` 负责接收 done metadata；下载卡片是否展示摘要属于 UI 决策，不能影响任务结果透传契约。
 
 ## 关联测试与验证入口
@@ -161,6 +164,7 @@
 - DeepAgents content_agent 与公共节点：`backend/tests/agents/test_generation_content_agent.py`、`backend/tests/nodes/test_content_agent_generate.py`
 - generation mode graph 分流与逐类型闭环：`backend/tests/graphs/test_generation_mode_branching.py`、`backend/tests/graphs/test_xjcg_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_hw_zc_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_hw_cz_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_fw_zc_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_fw_cz_generation_mode_agent.py`、`backend/tests/graphs/test_gjgk_generation_mode_agent.py`
 - agent_step SSE：`backend/tests/models/test_sse_agent_step.py`、`backend/tests/services/test_sse_manager_agent_step.py`、`backend/tests/services/test_document_service_agent_step.py`
+- 前端 SSE / 日志性能边界：`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/components/chat/test_message_list.test.tsx`
 
 ## 回归风险
 

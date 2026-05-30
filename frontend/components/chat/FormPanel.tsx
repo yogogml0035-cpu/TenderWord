@@ -159,6 +159,7 @@ interface FormPanelProps {
 export function FormPanel({ className = '', initialTenderData }: FormPanelProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [headerControlsTarget, setHeaderControlsTarget] = useState<HTMLDivElement | null>(null);
+  const submitLockRef = useRef(false);
   const mounted = useHydrated();
   const {
     addMessage,
@@ -352,9 +353,13 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
   const handleSubmit = useCallback(
     async (formData: TenderFormData) => {
       if (!conversation) return;
+      if (submitLockRef.current || useChatStore.getState().currentConversationIsBusy()) {
+        return;
+      }
 
       let placeholderMessageId: string | null = null;
       try {
+        submitLockRef.current = true;
         setIsSubmitting(true);
         placeholderMessageId = addMessage(conversation.id, {
           type: 'ai',
@@ -408,6 +413,8 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
         console.error('Failed to create task:', error);
         setIsSubmitting(false);
         alert('创建任务失败，请重试');
+      } finally {
+        submitLockRef.current = false;
       }
     },
     [addMessage, conversation, deleteMessage, startTask, upsertTaskSummary]

@@ -114,6 +114,7 @@ export function MessageList({
   const containerRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [userScrolled, setUserScrolled] = useState(false);
+  const messageCount = messages.length;
 
   const handleScroll = () => {
     if (!containerRef.current) return;
@@ -131,7 +132,7 @@ export function MessageList({
     if (containerRef.current && isAtBottom && !userScrolled) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  }, [messages, isAtBottom, userScrolled]);
+  }, [messageCount, isAtBottom, userScrolled]);
 
   const scrollToBottom = () => {
     if (containerRef.current) {

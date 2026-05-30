@@ -5,6 +5,13 @@ export interface TaskStreamState {
   logs: LogEntry[];
   aiText: string;
   aiComplete: boolean;
+  agentSteps?: Record<
+    string,
+    {
+      content: string;
+      isComplete: boolean;
+    }
+  >;
   lastCompleteAiText?: string;
   lastEventId?: string;
   progressPercent?: number;
@@ -25,6 +32,14 @@ interface ChatStreamStore {
       TaskStreamState,
       'progressPercent' | 'progressText' | 'currentNode' | 'currentNodeDisplay'
     >
+  ) => void;
+  setAgentStep: (
+    taskId: string,
+    stepKey: string,
+    snapshot: {
+      content: string;
+      isComplete: boolean;
+    }
   ) => void;
   setLastEventId: (taskId: string, lastEventId?: string) => void;
   clearStream: (taskId: string) => void;
@@ -105,6 +120,23 @@ export const useChatStreamStore = create<ChatStreamStore>()((set) => ({
           [taskId]: {
             ...current,
             ...progress,
+          },
+        },
+      };
+    }),
+
+  setAgentStep: (taskId, stepKey, snapshot) =>
+    set((state) => {
+      const current = state.streams[taskId] ?? createStreamState();
+      return {
+        streams: {
+          ...state.streams,
+          [taskId]: {
+            ...current,
+            agentSteps: {
+              ...(current.agentSteps || {}),
+              [stepKey]: snapshot,
+            },
           },
         },
       };

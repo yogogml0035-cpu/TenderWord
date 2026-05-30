@@ -497,6 +497,99 @@ describe('useChatSSE', () => {
     expect(verifyMessage?.status).toBe('completed');
   });
 
+  it('buffers incomplete agent_step snapshots outside the persisted chat store', async () => {
+    mockGetTaskStatus.mockResolvedValue({
+      ...createRunningTaskStatus(),
+      progress: {
+        ...createRunningTaskStatus().progress,
+        running_nodes: ['content_agent'],
+        current_node: 'content_agent',
+      },
+    });
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_generate_agent',
+          is_complete: false,
+          content: '第一段',
+          findings: [],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_generate_agent',
+          is_complete: false,
+          content: '第一段\n第二段',
+          findings: [],
+        },
+      });
+    });
+
+    let conversation = useChatStore.getState().getCurrentConversation();
+    let agentMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_generate_agent'
+    );
+    expect(agentMessage?.content).toBe('');
+    expect(agentMessage?.status).toBe('generating');
+    expect(useChatStreamStore.getState().streams['task-1']?.agentSteps).toEqual({
+      'content_generate_agent:1': {
+        content: '第一段\n第二段',
+        isComplete: false,
+      },
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '3',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_generate_agent',
+          is_complete: true,
+          content: '第一段\n第二段',
+          findings: [],
+        },
+      });
+    });
+
+    conversation = useChatStore.getState().getCurrentConversation();
+    agentMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_generate_agent'
+    );
+    expect(agentMessage?.content).toBe('第一段\n第二段');
+    expect(agentMessage?.status).toBe('completed');
+  });
+
   it('removes task-content if agent_step arrives after llm snapshot placeholder', async () => {
     mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
 

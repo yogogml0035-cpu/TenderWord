@@ -1279,9 +1279,26 @@ export const useChatStore = create<ChatStore>()(
           const stepRound = step.round;
           const findings = normalizeAgentStepFindings(step.findings);
           const taskKind = step.task_kind || get().taskSummaries[taskId]?.task_kind;
-          const status: Message['status'] = step.is_complete ? 'completed' : 'generating';
+          const incomingStatus: Message['status'] = step.is_complete ? 'completed' : 'generating';
           const node = step.node || 'content_agent';
           const existing = findAgentStepMessage(conversation.messages, taskId, node, stepRound);
+          if (existing && isTerminalMessageStatus(existing.status) && incomingStatus === 'generating') {
+            return existing.id;
+          }
+          const status = incomingStatus;
+
+          conversation.messages.forEach((message) => {
+            if (
+              message.taskId !== taskId ||
+              message.status !== 'generating' ||
+              message.metadata?.messageKind !== TASK_AGENT_STEP_KIND ||
+              (message.metadata.agentStepNode === node &&
+                message.metadata.agentStepRound === stepRound)
+            ) {
+              return;
+            }
+            get().updateMessage(conversation.id, message.id, { status: 'completed' });
+          });
 
           let content = typeof step.content === 'string' ? step.content : '';
           let auditRounds: AgentAuditRound[] | undefined;
@@ -1312,9 +1329,14 @@ export const useChatStore = create<ChatStore>()(
             ...(auditRounds ? { agentStepAuditRounds: auditRounds } : {}),
           };
 
+          const persistedContent = step.is_complete ? content : '';
+
           if (existing) {
+            if (!step.is_complete && typeof step.content === 'string' && step.content.length > 0) {
+              return existing.id;
+            }
             get().updateMessage(conversation.id, existing.id, {
-              content,
+              content: persistedContent,
               status,
               error: undefined,
               metadata,
@@ -1324,7 +1346,7 @@ export const useChatStore = create<ChatStore>()(
 
           return get().addMessage(conversation.id, {
             type: 'ai',
-            content,
+            content: persistedContent,
             status,
             taskId,
             metadata,

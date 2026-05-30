@@ -128,6 +128,11 @@ test.describe('Generation mode agent flow', () => {
   }) => {
     const consoleErrors: string[] = [];
     let generatePayload: Record<string, unknown> | null = null;
+    let generateCallCount = 0;
+    let releaseGenerateResponse!: () => void;
+    const generateResponseGate = new Promise<void>((resolve) => {
+      releaseGenerateResponse = resolve;
+    });
 
     page.on('console', (message) => {
       if (message.type() === 'error') {
@@ -182,7 +187,9 @@ test.describe('Generation mode agent flow', () => {
     });
 
     await page.route('**/api/generate', async (route) => {
+      generateCallCount += 1;
       generatePayload = (await route.request().postDataJSON()) as Record<string, unknown>;
+      await generateResponseGate;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -278,7 +285,12 @@ test.describe('Generation mode agent flow', () => {
 
     await expect(page.getByRole('heading', { name: '询价采购' })).toBeVisible();
     await page.getByRole('group', { name: '生成方式' }).getByRole('button', { name: '智能体' }).click();
-    await page.getByRole('button', { name: /开始生成/ }).click();
+    await page.getByRole('button', { name: /开始生成/ }).evaluate((button) => {
+      (button as HTMLButtonElement).click();
+      (button as HTMLButtonElement).click();
+    });
+    await expect.poll(() => generateCallCount).toBe(1);
+    releaseGenerateResponse();
 
     await expect.poll(() => generatePayload?.generation_mode).toBe('agent');
 
