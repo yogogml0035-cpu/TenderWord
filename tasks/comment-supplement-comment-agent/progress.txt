@@ -17,6 +17,8 @@ Source: prd.json
 - 补充批注成功后通过 `ConversationService.append_comment_supplement_success()` 追加 assistant rewrite_state，使 latest `prepared_doc_path` 指向补充批注副本，后续 rewrite/edit 继续读取 latest rewrite_state。
 - 前端任务完成入口有两条：`useChatSSE` 的 SSE `done` 与 task status fallback、`FormPanel.syncTaskTerminalState()`；新增 result 摘要字段时两条路径都要传给 `chatStore.completeTask()`。
 - 下载卡的用户动作以 `message.metadata.taskKind` 判定任务来源；`comment_supplement` 从 generate 下载卡进入 `ChatPanel -> createCommentSupplementTask -> startTask`，不要在卡片组件内直接访问 store 或裸 `fetch`。
+- `comment_agent` 的 `agent_step` 事件是一组同 node/round 的 AIMessage 内容片段，前端应按顺序追加到同一张卡；最终 `is_complete=true` 且 `content` 为空时只收尾，不清空已追加内容。
+- Next dev 会自动把 `.next/dev/types/**/*.ts` 加回主 `tsconfig.json`；前端稳定类型检查走 `frontend/tsconfig.typecheck.json`，避免 dev 生成缓存里的 validator 语法问题影响 `npm run type-check`。
 
 ## 2026-05-30 13:08 - US-001
 - 建立了 `comment_supplement` 任务类型契约：后端内部/API TaskKind、TaskService 映射、前端 TaskKind union 均已支持。
@@ -124,4 +126,18 @@ Source: prd.json
   - `comment_writeback` 前端透传不能只改 SSE `done`；任务状态补拉和 FormPanel 终态同步也会创建下载卡。
   - 下载卡只负责展示和回调分发，创建补充批注任务应留在 ChatPanel，继续走统一 API helper、placeholder log message 和 `startTask`。
   - 真实浏览器验证可用 sessionStorage 种入完成的 generate 下载卡，并用 Playwright route mock `/api/comment-supplement`、task status、heartbeat，避免未启动后端造成 console 噪声。
+---
+## 2026-05-30 17:01 - US-009
+- 展示 `comment_agent` 过程卡：`TaskContentMessage` 对 `comment_agent` 使用精确标题，不再显示 `comment_agent round-1`。
+- 扩展 `useChatSSE` 和 `chatStore` 的 agent-step 分组规则：agent generate 与 `comment_supplement` 可显示 `comment_agent` 卡；同一 node/round 的多条 AIMessage 内容按顺序追加；最终空完成事件保留已追加内容；workflow generate 的 `comment_agent` 事件会被过滤。
+- 新增稳定 typecheck 配置 `frontend/tsconfig.typecheck.json`，并让 `npm run type-check` 使用该配置，避免 Next dev 自动生成的 `.next/dev/types/validator.ts` 破坏本地类型检查。
+- 同步回写 `asset/tender_type_identity_session_knowledge_pack.md` 与 `asset/README.md`，记录 `comment_agent` 过程卡追加、标题和 gating 边界。
+- 更改的文件：`frontend/hooks/useChatSSE.ts`、`frontend/stores/chatStore.ts`、`frontend/components/chat/TaskContentMessage.tsx`、`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`、`frontend/__tests__/unit/components/chat/test_task_content_message.test.tsx`、`frontend/package.json`、`frontend/tsconfig.typecheck.json`、`asset/tender_type_identity_session_knowledge_pack.md`、`asset/README.md`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`npm test -- --runTestsByPath __tests__/unit/hooks/test_use_chat_sse.test.tsx __tests__/unit/stores/test_chat_store_task_messages.test.ts __tests__/unit/components/chat/test_task_content_message.test.tsx --runInBand` 通过；`npm run lint` 通过；`npm run type-check` 通过；`npm test -- --runInBand` 通过，31 suites / 367 tests；Playwright MCP mock 浏览器验证通过，截图保存到 `tasks/comment-supplement-comment-agent/screenshots/us-009-comment-agent-card.png`，断言与 console 保存到 `tasks/comment-supplement-comment-agent/logs/us-009-browser-assertions.json`、`tasks/comment-supplement-comment-agent/logs/us-009-browser-console.log`；本轮变更文件 `git diff --check -- ...` 通过。
+- 全仓 `git diff --check` 仍受进入本轮前已有的 `backend/.env.example`、`scripts/start-dev.ps1` trailing whitespace 影响，未改动这些既有文件。
+- 本 story 只改前端 agent-step 展示与 type-check 配置，未运行后端 pytest。
+- **未来迭代的学习：**
+  - `comment_agent` 的 AIMessage 内容不是普通 snapshot；前端需要追加同一张卡并在最终空完成事件保留内容。
+  - `comment_supplement` 是允许 agent-step 过程卡的任务类型，但 rewrite/edit 仍不应启用 agent-step 卡。
+  - UI mock 浏览器验证应 route heartbeat，避免未启动后端时产生无关 console error。
 ---

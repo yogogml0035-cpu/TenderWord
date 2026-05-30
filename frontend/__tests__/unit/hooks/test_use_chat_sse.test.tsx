@@ -70,6 +70,23 @@ function createEditRunningTaskStatus() {
   };
 }
 
+function createCommentSupplementRunningTaskStatus() {
+  return {
+    task_id: 'task-1',
+    task_kind: 'comment_supplement' as const,
+    status: 'running' as const,
+    created_at: new Date().toISOString(),
+    progress: {
+      completed_nodes: ['prepare_comment_supplement'],
+      running_nodes: ['comment_agent'],
+      current_node: 'comment_agent',
+      completed_count: 1,
+      total_nodes: 4,
+      progress_percent: 25,
+    },
+  };
+}
+
 function resetStores() {
   window.localStorage.clear();
   window.sessionStorage.clear();
@@ -445,6 +462,225 @@ describe('useChatSSE', () => {
     expect(group?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
     expect(group?.contentMessage).toBeUndefined();
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
+  });
+
+  it('appends comment_agent AIMessage content for agent generate tasks', async () => {
+    mockGetTaskStatus.mockResolvedValue({
+      ...createRunningTaskStatus(),
+      progress: {
+        ...createRunningTaskStatus().progress,
+        running_nodes: ['comment_agent'],
+        current_node: 'comment_agent',
+      },
+    });
+    useChatStore.setState((state) => ({
+      ...state,
+      conversationDrafts: {
+        ...state.conversationDrafts,
+        'conv-1': {
+          generation_mode: 'agent',
+        },
+      },
+    }));
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: false,
+          content: '开始校验批注锚点',
+          findings: [],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: false,
+          content: '批注锚点校验完成',
+          findings: [],
+        },
+      });
+    });
+
+    let conversation = useChatStore.getState().getCurrentConversation();
+    let commentAgentMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'comment_agent'
+    );
+
+    expect(commentAgentMessage?.content).toBe('开始校验批注锚点\n\n批注锚点校验完成');
+    expect(commentAgentMessage?.status).toBe('generating');
+    expect(useChatStreamStore.getState().streams['task-1']?.agentSteps).toEqual({
+      'comment_agent:1': {
+        content: '开始校验批注锚点\n\n批注锚点校验完成',
+        isComplete: false,
+      },
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '3',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: true,
+          content: null,
+          findings: [],
+        },
+      });
+    });
+
+    conversation = useChatStore.getState().getCurrentConversation();
+    commentAgentMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'comment_agent'
+    );
+
+    expect(commentAgentMessage?.content).toBe('开始校验批注锚点\n\n批注锚点校验完成');
+    expect(commentAgentMessage?.status).toBe('completed');
+  });
+
+  it('shows comment_agent card for comment_supplement tasks and keeps one download card', async () => {
+    mockGetTaskStatus.mockResolvedValue(createCommentSupplementRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'comment_supplement',
+          step_type: 'stream',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: false,
+          content: '正在修复批注锚点',
+          findings: [],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'comment_supplement',
+          step_type: 'stream',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: true,
+          content: null,
+          findings: [],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'done',
+        id: '3',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'comment_supplement',
+          success: true,
+          message: '任务完成',
+          output_file: 'D:/UploadFiles/commented.docx',
+          file_name: 'commented.docx',
+          processing_time: 12.5,
+        },
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+    const group = getTaskGroup();
+
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].metadata?.agentStepNode).toBe('comment_agent');
+    expect(agentMessages?.[0].metadata?.taskKind).toBe('comment_supplement');
+    expect(agentMessages?.[0].content).toBe('正在修复批注锚点');
+    expect(agentMessages?.[0].status).toBe('completed');
+    expect(group?.contentMessage).toBeUndefined();
+    expect(group?.downloadMessage?.metadata?.taskKind).toBe('comment_supplement');
+    expect(group?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/commented.docx');
+  });
+
+  it('ignores comment_agent agent_step events for workflow generate tasks', async () => {
+    mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: false,
+          content: 'workflow 不应展示的批注智能体内容',
+          findings: [],
+        },
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    expect(
+      conversation?.messages.some((message) => message.metadata?.agentStepNode === 'comment_agent')
+    ).toBe(false);
   });
 
   it('keeps empty running verify agent-step compact until final [] arrives', async () => {

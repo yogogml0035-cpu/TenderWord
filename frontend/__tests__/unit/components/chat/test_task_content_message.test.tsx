@@ -73,4 +73,23 @@ describe('TaskContentMessage', () => {
     expect(screen.getByText('content_agent final')).toBeInTheDocument();
     expect(screen.queryByText('content_agent round-2')).not.toBeInTheDocument();
   });
+
+  it('uses the exact comment_agent node name as the process card title', () => {
+    render(
+      <TaskContentMessage
+        message={createMessage({
+          metadata: {
+            messageKind: 'agent-step',
+            taskKind: 'comment_supplement',
+            agentStepType: 'stream',
+            agentStepNode: 'comment_agent',
+            agentStepRound: 1,
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByText('comment_agent')).toBeInTheDocument();
+    expect(screen.queryByText('comment_agent round-1')).not.toBeInTheDocument();
+  });
 });

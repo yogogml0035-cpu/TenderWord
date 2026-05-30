@@ -108,6 +108,16 @@ function hasAgentStepCard(taskId: string): boolean {
   );
 }
 
+function appendCommentAgentContent(current: string, next: string): string {
+  if (!next) {
+    return current;
+  }
+  if (!current) {
+    return next;
+  }
+  return `${current}\n\n${next}`;
+}
+
 function isAgentGenerationConversation(taskId: string, conversationId: string | null): boolean {
   const state = useChatStore.getState();
   const conversation =
@@ -128,15 +138,54 @@ function shouldUseAgentStepCards(
   if (hasAgentStepCard(taskId)) {
     return true;
   }
+  if (taskKind === 'comment_supplement') {
+    return true;
+  }
   if (taskKind !== 'generate') {
     return false;
   }
   const currentNode = useChatStore.getState().getTaskSummary(taskId)?.current_node;
-  return currentNode === 'content_agent' || isAgentGenerationConversation(taskId, conversationId);
+  return (
+    currentNode === 'content_agent' ||
+    currentNode === 'comment_agent' ||
+    isAgentGenerationConversation(taskId, conversationId)
+  );
+}
+
+function shouldAcceptAgentStep(
+  taskId: string,
+  conversationId: string | null,
+  taskKind: TaskKind,
+  node: string
+): boolean {
+  if (taskKind === 'comment_supplement') {
+    return node === 'comment_agent';
+  }
+  if (taskKind !== 'generate') {
+    return false;
+  }
+  if (node === 'comment_agent') {
+    return shouldUseAgentStepCards(taskId, conversationId, taskKind);
+  }
+  return true;
 }
 
 function getAgentStepKey(step: Pick<SSEAgentStepEvent, 'node' | 'round'>): string {
   return `${step.node || 'content_agent'}:${step.round || 1}`;
+}
+
+function getAgentStepStreamContent(
+  taskId: string,
+  stepKey: string,
+  node: string,
+  incomingContent: string
+): string {
+  if (node !== 'comment_agent') {
+    return incomingContent;
+  }
+  const existingContent =
+    useChatStreamStore.getState().streams[taskId]?.agentSteps?.[stepKey]?.content || '';
+  return appendCommentAgentContent(existingContent, incomingContent);
 }
 
 /**
@@ -419,18 +468,29 @@ export function useChatSSE({
             }
 
             const taskKind = resolveTaskKind(taskId, agentStepData.task_kind);
+            const agentStepNode = agentStepData.node || 'content_agent';
+            if (!shouldAcceptAgentStep(taskId, conversationId, taskKind, agentStepNode)) {
+              break;
+            }
             upsertTaskSummary(taskId, {
               task_kind: taskKind,
               status: 'running',
-              current_node: agentStepData.node,
-              current_node_display: agentStepData.node,
+              current_node: agentStepNode,
+              current_node_display: agentStepNode,
             });
             if (!agentStepData.is_complete) {
-              useChatStreamStore.getState().setAgentStep(taskId, getAgentStepKey(agentStepData), {
-                content:
-                  typeof agentStepData.content === 'string'
-                    ? normalizeAIContent(agentStepData.content)
-                    : '',
+              const stepKey = getAgentStepKey(agentStepData);
+              const normalizedContent =
+                typeof agentStepData.content === 'string'
+                  ? normalizeAIContent(agentStepData.content)
+                  : '';
+              useChatStreamStore.getState().setAgentStep(taskId, stepKey, {
+                content: getAgentStepStreamContent(
+                  taskId,
+                  stepKey,
+                  agentStepNode,
+                  normalizedContent
+                ),
                 isComplete: false,
               });
             }
@@ -470,8 +530,14 @@ export function useChatSSE({
 
             const triggerNode = getAIContentTriggerNode(progressData.task_kind);
             const progressIsAgentBranch =
-              progressData.task_kind === 'generate' &&
-              (progressData.current_node === 'content_agent' || progressData.node === 'content_agent');
+              (progressData.task_kind === 'generate' &&
+                (progressData.current_node === 'content_agent' ||
+                  progressData.node === 'content_agent' ||
+                  progressData.current_node === 'comment_agent' ||
+                  progressData.node === 'comment_agent')) ||
+              (progressData.task_kind === 'comment_supplement' &&
+                (progressData.current_node === 'comment_agent' ||
+                  progressData.node === 'comment_agent'));
             if (
               !progressIsAgentBranch &&
               !shouldUseAgentStepCards(taskId, conversationId, progressData.task_kind) &&

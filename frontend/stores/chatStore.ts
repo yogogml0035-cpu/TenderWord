@@ -629,6 +629,20 @@ function hasAgentStepMessages(messages: Message[], taskId: string): boolean {
   );
 }
 
+function isAgentProcessTaskKind(taskKind?: TaskKind): boolean {
+  return taskKind === 'generate' || taskKind === 'comment_supplement';
+}
+
+function appendCommentAgentContent(current: string, next: string): string {
+  if (!next) {
+    return current;
+  }
+  if (!current) {
+    return next;
+  }
+  return `${current}\n\n${next}`;
+}
+
 function shouldUseAgentProcessCards(
   state: Pick<ChatStore, 'conversations' | 'conversationDrafts' | 'taskSummaries'>,
   taskId: string,
@@ -639,13 +653,16 @@ function shouldUseAgentProcessCards(
     findConversationByTaskIdFromState(state, taskId);
   const summary = state.taskSummaries[taskId];
 
-  if (summary?.task_kind && summary.task_kind !== 'generate') {
+  if (summary?.task_kind && !isAgentProcessTaskKind(summary.task_kind)) {
     return false;
   }
   if (conversation && hasAgentStepMessages(conversation.messages, taskId)) {
     return true;
   }
-  if (summary?.current_node === 'content_agent') {
+  if (summary?.current_node === 'content_agent' || summary?.current_node === 'comment_agent') {
+    return true;
+  }
+  if (summary?.task_kind === 'comment_supplement') {
     return true;
   }
   return conversation
@@ -1324,6 +1341,7 @@ export const useChatStore = create<ChatStore>()(
           const taskKind = step.task_kind || get().taskSummaries[taskId]?.task_kind;
           const incomingStatus: Message['status'] = step.is_complete ? 'completed' : 'generating';
           const node = step.node || 'content_agent';
+          const isCommentAgentStep = node === 'comment_agent';
           const existing = findAgentStepMessage(conversation.messages, taskId, node, stepRound);
           if (existing && isTerminalMessageStatus(existing.status) && incomingStatus === 'generating') {
             return existing.id;
@@ -1372,10 +1390,20 @@ export const useChatStore = create<ChatStore>()(
             ...(auditRounds ? { agentStepAuditRounds: auditRounds } : {}),
           };
 
-          const persistedContent = step.is_complete ? content : '';
+          const existingContent = typeof existing?.content === 'string' ? existing.content : '';
+          const persistedContent = isCommentAgentStep
+            ? appendCommentAgentContent(existingContent, content)
+            : step.is_complete
+              ? content
+              : '';
 
           if (existing) {
-            if (!step.is_complete && typeof step.content === 'string' && step.content.length > 0) {
+            if (
+              !isCommentAgentStep &&
+              !step.is_complete &&
+              typeof step.content === 'string' &&
+              step.content.length > 0
+            ) {
               return existing.id;
             }
             get().updateMessage(conversation.id, existing.id, {

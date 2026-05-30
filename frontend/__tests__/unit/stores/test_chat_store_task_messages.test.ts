@@ -269,6 +269,60 @@ describe('chatStore task message grouping', () => {
     expect(secondAuditMessage?.metadata?.agentStepAuditRounds).toHaveLength(1);
   });
 
+  it('appends comment_agent AIMessage contents to one process card and preserves them on final', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'comment_supplement',
+        status: 'running',
+        current_node: 'comment_agent',
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'comment_supplement',
+        step_type: 'stream',
+        round: 1,
+        node: 'comment_agent',
+        is_complete: false,
+        content: '开始校验批注锚点',
+        findings: [],
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'comment_supplement',
+        step_type: 'stream',
+        round: 1,
+        node: 'comment_agent',
+        is_complete: false,
+        content: '批注锚点校验完成',
+        findings: [],
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'comment_supplement',
+        step_type: 'stream',
+        round: 1,
+        node: 'comment_agent',
+        is_complete: true,
+        content: undefined,
+        findings: [],
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].metadata?.agentStepNode).toBe('comment_agent');
+    expect(agentMessages?.[0].metadata?.taskKind).toBe('comment_supplement');
+    expect(agentMessages?.[0].content).toBe('开始校验批注锚点\n\n批注锚点校验完成');
+    expect(agentMessages?.[0].status).toBe('completed');
+  });
+
   it('does not render empty verify findings as JSON until content or completion findings exist', () => {
     act(() => {
       useChatStore.getState().startTask('conv-1', 'task-1', {

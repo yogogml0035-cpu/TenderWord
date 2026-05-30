@@ -81,6 +81,9 @@ function getContentTitle(message: Message) {
   if (message.metadata?.messageKind === 'agent-step') {
     const node = message.metadata.agentStepNode;
     if (typeof node === 'string' && node.trim()) {
+      if (node.trim() === 'comment_agent') {
+        return 'comment_agent';
+      }
       if (message.metadata.agentStepType === 'final') {
         return `${node.trim()} final`;
       }
