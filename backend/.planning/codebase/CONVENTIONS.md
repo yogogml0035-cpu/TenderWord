@@ -1,6 +1,6 @@
 # 后端编码约定事实地图
 
-**分析日期：** 2026-05-27
+**分析日期：** 2026-05-30
 
 **范围：** `backend/` 源码和测试约定。
 
@@ -47,6 +47,7 @@
 
 - 新 graph 应继承共享 graph 主干，优先覆写必要节点，不复制整套流程。
 - `StandardTenderWorkflowGraph` 是标准生成拓扑真源。
+- `generation_mode` 分流只允许在 `StandardTenderWorkflowGraph` 基类维护：`workflow` 走 `generate_polished_text`，`agent` 走 `content_agent`。
 - 节点必须尊重取消检查、任务进度包装和 Word COM 串行化。
 - 类型状态字段必须显式声明在 `backend/states/`，不靠隐式 dict key 扩散。
 - `gngk` family 共享 prompt、replacement 和公共节点路由时，以 `get_tender_type_family()` 为准。
@@ -67,6 +68,8 @@
 - 与 LLM 契约强绑定的字面量、rewrite 路由、预览截断、历史压缩规则应收敛到 Prompt Layer。
 - LLM 流式超时统一用 `settings.LLM_STREAM_TIMEOUT_SECONDS`。
 - 修改 prompt 示例文案时要复核 `backend/tests/prompts/` 中的字面量断言。
+- `content_agent`、`content_generate_agent`、`content_verify_agent`、`content_revise_agent` 等节点名和 JSON 字段是机器契约，提示词说明可以中文化，但这些标识符不能翻译或改名。
+- `content_generate_agent` 复用生成 prompt builder；修改 generate prompt 时要同时评估 workflow 与 agent 两条初次生成链路。
 
 ## API 与模型约定
 
@@ -74,6 +77,8 @@
 - `GenerateRequest.form_type` 变化必须同步前端类型、`gngkFormType`、转换器、ChatPanel edit 调用点和测试。
 - SSE 事件类型变化必须同步后端模型、发送方、前端 union 类型、解析和测试。
 - `generation_style` 是 generate-only 字段，不进入 rewrite/edit 请求模型、skill state 或 prompt surface。
+- `generation_mode` 是 generate-only 字段，不进入 rewrite/edit 请求模型、skill state 或 prompt surface。
+- `agent_step` 是智能体生成的用户态过程事件，不替代 `done` / `error` 终态；新增或调整时必须同步后端模型、SSE manager、前端 named event、类型和 store 测试。
 
 ## 测试约定
 

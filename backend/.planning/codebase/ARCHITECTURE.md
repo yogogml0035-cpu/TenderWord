@@ -1,7 +1,7 @@
-<!-- refreshed: 2026-05-27 -->
+<!-- refreshed: 2026-05-30 -->
 # 后端架构事实地图
 
-**分析日期：** 2026-05-27
+**分析日期：** 2026-05-30
 
 **范围：** 仅覆盖 `backend/`，并在启动、验证和 Windows/WSL 运行边界上参考根级 `AGENTS.md`、`README.md` 与 `scripts/`。
 
@@ -13,7 +13,7 @@ FastAPI /api
   -> service 编排
   -> 任务队列 + SSE
   -> LangGraph 生成 / rewrite / edit / 用户路由
-  -> Prompt Layer + LLM provider
+  -> Prompt Layer + LLM provider / DeepAgents content_agent
   -> Word helper + Word COM utility
   -> 上传目录中的产物与下载接口
 ```
@@ -34,6 +34,7 @@ FastAPI /api
 | Node 层 | Word 准备、抽参、删除、替换、生成、批注、写回等 graph 节点 | `backend/nodes/` |
 | Word 业务 helper | 受保护字段、正文边界、插入、cleanup、样式回填、范围工具 | `backend/helper/word_helper/` |
 | 技术 utility | Word COM 生命周期、上传存储、HTTP、LLM 流式、日志 | `backend/util/` |
+| 内容智能体 | 初次生成 `generation_mode=agent` 的 DeepAgents 主/子智能体、工作区和步骤事件 | `backend/agents/generation/` |
 | Prompt / Skill | prompt 渲染、prompt-bound 解析、rewrite/edit task skill 声明 | `backend/prompts/`, `backend/skills/` |
 | 配置 | 环境配置、招标类型锚点、字号、content mode、profile、family | `backend/config/settings.py`, `backend/config/tender_config.py` |
 
@@ -43,10 +44,10 @@ FastAPI /api
 
 1. `POST /api/generate` 在 `backend/api/generate.py` 校验 `GenerateRequest`。
 2. `DocumentService.create_task()` 根据 `form_type` 从 `GRAPH_REGISTRY` 选择 graph，并构造初始 state。
-3. 初始 state 写入 `tender_type`、文件路径、招标数据、默认锚点、`generation_style`、`style_writeback_mode` 和会话信息。
+3. 初始 state 写入 `tender_type`、文件路径、招标数据、默认锚点、`generation_style`、`generation_mode`、`style_writeback_mode` 和会话信息。
 4. `TaskQueueManager` 创建任务并进入队列。
 5. 后台线程执行 graph；`BaseGraph.invoke_with_timing_async()` 等待公平队列、获取跨进程锁、注册运行上下文并执行 LangGraph。
-6. `StandardTenderWorkflowGraph` 按共享拓扑执行模板准备、抽参、Word 子图、LLM 生成、批注、写回等节点。
+6. `StandardTenderWorkflowGraph` 按共享拓扑执行模板准备、抽参、Word 子图、生成、批注、写回等节点；`generation_mode=workflow` 进入 `generate_polished_text`，`generation_mode=agent` 进入公共 `content_agent` 节点。
 7. 类型 graph 只绑定差异节点：`xjcg`、`gngk_hw_zc`、`gngk_hw_cz`、`gngk_fw_zc`、`gngk_fw_cz`、`gjgk` 分别由 `backend/graphs/*_tender_graph.py` 注册。
 8. 成功后 `DocumentService` 构造任务结果、更新会话快照并发送 SSE `done`；失败时发送 SSE `error` 并标记任务失败。
 
@@ -57,6 +58,14 @@ FastAPI /api
 - 任务状态、取消和心跳由 `backend/api/tasks.py` 与 `backend/services/task_service.py` 暴露。
 - SSE 主入口是 `GET /api/stream/{task_id}`，事件缓存与 `Last-Event-ID` 重放在 `backend/core/sse_manager.py`。
 - `progress_log` 通过 `sse_log_handler` 转成用户可见进度日志；排障细节应留在 `execution_log`。
+- 智能体生成过程通过 `agent_step` SSE 展示 `content_agent`、`content_generate_agent`、`content_verify_agent`、`content_revise_agent` 的流式过程；终态仍必须走 `done` / `error`。
+
+### 智能体生成分支
+
+- `backend/nodes/common_word_nodes/content_agent_generate.py` 是标准 graph 中的公共智能体节点，只把 DeepAgents 结果收敛为 `polished_text` 与 `generate_polished_done=True`。
+- `backend/agents/generation/content_agents.py` 是 DeepAgents 主运行时真源，主 `content_agent` 通过 task 工具调度 generate / verify / revise 子 agent，最多 3 轮审核修订。
+- `backend/agents/generation/workspace.py` 管理单次生成工作区，默认写入 `backend/prompts_log/content_agent_workspace/`，用于审计输入、草稿、审核、修订和最终正文。
+- `agent_step` 事件由 graph config 注入的 callback 进入 `SSEManager`，不由子 agent 直接连接 SSE manager。
 
 ### 普通聊天、rewrite 与 edit
 
@@ -80,9 +89,11 @@ FastAPI /api
 ## 核心抽象
 
 - `GenerateRequest` / `EditTaskRequest`：生成和显式 edit 的 API 输入契约，位于 `backend/models/generate.py`。
+- `GenerationMode`：初次生成方式契约，`workflow` 是默认旧路径，`agent` 只影响初次 generate 的生成节点选择。
 - `FormType` -> `GRAPH_REGISTRY`：`xjcg_tender`、四个 `gngk_*_tender` 和 `gjgk_tender` 到 graph class 的延迟注册，位于 `backend/services/document_service.py`。
 - `TenderGraphStateBase`：生成与 task skill 写回共享 state 底座，位于 `backend/states/base_state.py`。
 - `StandardTenderWorkflowGraph`：标准 tender 生成拓扑，类型 graph 通过 class attribute 绑定差异节点。
+- `content_agent`：标准生成 graph 的智能体生成节点，不能在各类型 graph 里复制分流逻辑。
 - `TaskQueueManager`：长任务队列、串行化、心跳和进度真源。
 - `SSEManager`：任务事件缓存、跨线程发送和重连重放。
 - `TaskSkillWorkflow`：rewrite/edit skill 从 `SKILL.md` 与 `scripts/workflow.py` 声明可执行节点序列。
@@ -96,7 +107,7 @@ FastAPI /api
 - Word 业务逻辑优先下沉到 `backend/helper/word_helper/`；`backend/util/word_util/` 只放 COM 生命周期和底层工具。
 - 后端跨包导入统一使用 `backend.*`；旧的短 import 只能作为历史兼容，不应复制。
 - 任务、SSE 和会话快照是进程内存态；上传和生成文件是本地文件态。
-- Prompt、LLM 超时、rewrite/edit skill 契约应集中维护，不在 service/node 里散落大段 prompt。
+- Prompt、LLM 超时、DeepAgents content_agent、rewrite/edit skill 契约应集中维护，不在 service/node 里散落大段 prompt。
 
 ## 反模式
 
@@ -118,6 +129,7 @@ FastAPI /api
 ## 横切关注点
 
 - 日志分层：`progress_log` 面向用户进度，`execution_log` 面向排障，`prompt_log` 面向 prompt 记录，`skill_audit_log` 面向 task skill 审计。
+- `content_agent` 工作区保留完整输入和生成中间产物；运行期日志只记录长度、节点和摘要，不记录完整客户正文。
 - 文件安全：上传文件名清洗、下载路径限制、模板候选下载白名单都在后端执行。
 - 测试入口：后端测试按 API、graph、node、helper、service、prompt、config 等目录归档在 `backend/tests/`。
 

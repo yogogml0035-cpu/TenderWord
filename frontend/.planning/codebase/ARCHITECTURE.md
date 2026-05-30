@@ -1,7 +1,7 @@
-<!-- refreshed: 2026-05-27 -->
+<!-- refreshed: 2026-05-30 -->
 # 前端架构事实地图
 
-**分析日期：** 2026-05-27
+**分析日期：** 2026-05-30
 
 **范围：** `frontend/`，并在启动、验证和 API 边界上参考根级 `AGENTS.md`、`README.md` 与 `scripts/`。
 
@@ -16,7 +16,7 @@ Next.js App Router
   -> FastAPI /api
 ```
 
-前端是 TenderWord 的浏览器工作台。它负责招标类型选择、URL 深链、会话和草稿、文件上传、模板候选弹窗、生成任务创建、普通聊天、rewrite/edit 任务创建、SSE 进度展示和下载入口。
+前端是 TenderWord 的浏览器工作台。它负责招标类型选择、URL 深链、会话和草稿、文件上传、模板候选弹窗、生成任务创建、智能体生成方式选择、普通聊天、rewrite/edit 任务创建、SSE 进度与智能体过程卡展示和下载入口。
 
 ## 主要层次
 
@@ -43,14 +43,14 @@ Next.js App Router
 
 ### 生成任务
 
-1. `TenderFormShared` 收集招标数据、上传文件、模板候选结果、插入锚点、生成风格和样式回填模式。
+1. `TenderFormShared` 收集招标数据、上传文件、模板候选结果、插入锚点、生成风格、生成方式和样式回填模式。
 2. `FormPanel` 通过 `tenderFormRegistry` 获取表单组件和转换器。
-3. `frontend/lib/formDataConverter.ts` 把前端类型转换为后端 `GenerateRequest`。
+3. `frontend/lib/formDataConverter.ts` 把前端类型转换为后端 `GenerateRequest`，并把缺省 `generation_mode` 归一为 `workflow`。
 4. `gngk` 由 `frontend/lib/gngkFormType.ts` 根据 `tender_lx + fund_lx + ifzgcg` 分派到四套后端 form type；工程类当前复用服务链路。
 5. `frontend/lib/api.ts` 调用 `createGenerateTask()`。
 6. `chatStore.startTask()` 创建任务消息组和 task summary。
 7. `useCurrentConversationTaskStatus()` 查询队列/运行状态，`useChatSSE()` 连接任务 SSE。
-8. SSE `log`、`llm`、`progress`、`done`、`error` 进入 `chatStreamStore` 和任务消息。
+8. SSE `log`、`llm`、`progress`、`agent_step`、`done`、`error` 进入 `chatStreamStore` 和任务消息；`agent_step` 完成事件持久化为 `agent-step` 过程卡，运行中快照留在临时 stream。
 9. 任务完成后 `TaskDownloadMessage` 展示下载入口，下载仍经 `frontend/lib/api.ts`。
 
 ### 普通聊天、rewrite 与 edit
@@ -72,9 +72,9 @@ Next.js App Router
 
 - `TenderType`：前端 UI 类型，仅有 `xjcg`、`gngk`、`gjgk`。
 - `GenerateRequest` / `EditTaskRequest`：前端镜像后端任务创建 payload，位于 `frontend/types/api.ts`。
-- `ConversationFormDraft`：每个会话的表单、文件、锚点、聊天输入和 pending 恢复状态。
-- `TaskMessageGroupIds`：一个 task id 对应 log/content/download 三类任务消息。
-- `chatStreamStore`：运行中任务的 transient logs、AI 文本、进度、当前节点和 `lastEventId`。
+- `ConversationFormDraft`：每个会话的表单、文件、锚点、`generation_mode`、聊天输入和 pending 恢复状态。
+- `TaskMessageGroupIds`：一个 task id 对应 log/content/download 三类任务消息；智能体 `agent-step` 过程卡不纳入该三卡分组。
+- `chatStreamStore`：运行中任务的 transient logs、AI 文本、agent step 快照、进度、当前节点和 `lastEventId`。
 - `buildCanonicalSearchParams()`：会话身份到浏览器 URL 的唯一构造入口。
 - `tenderFormRegistry`：TenderType 到显示名、表单组件和 generate converter 的注册表。
 
@@ -85,7 +85,7 @@ Next.js App Router
 - URL canonical 化统一走 `frontend/utils/tenderTypeMapper.ts` 和 store helper。
 - 会话、草稿和任务恢复语义继续使用 `sessionStorage`。
 - 从 `sessionStorage` 恢复 running task 前必须先查任务状态，404 / `TASK_NOT_FOUND` 收敛为本地中断态。
-- 新增 SSE 事件类型必须同步前端 `types/api.ts`、`useChatSSE` 和测试。
+- 新增 SSE 事件类型必须同步前端 `types/api.ts`、`frontend/lib/sse.ts` named event、`useChatSSE` 和测试。
 - 类型 identity 或 `form_type` 分派变化必须同步 `gngkFormType.ts`、`formDataConverter.ts`、`ChatPanel.tsx`、`tenderTypeMapper.ts`、注册表、store 和测试。
 
 ## 反模式
@@ -96,6 +96,7 @@ Next.js App Router
 - 直接 append 任务消息，绕过 `chatStore` 的 task group 方法。
 - 把 pending rewrite/edit prompt 当成正常发送后的延迟清空机制。
 - 让用户态 SSE UI 展示候选打分、淘汰阈值等排障细节。
+- 把智能体运行中的高频 `agent_step` 快照直接写入持久化会话消息，导致 sessionStorage 与渲染压力放大。
 
 ## 错误处理
 

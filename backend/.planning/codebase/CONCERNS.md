@@ -1,6 +1,6 @@
 # 后端风险事实地图
 
-**分析日期：** 2026-05-27
+**分析日期：** 2026-05-30
 
 **范围：** `backend/` 当前技术债、脆弱点、安全边界和测试缺口。
 
@@ -20,6 +20,11 @@
 - 文件：`backend/task/task_queue_manager.py`、`backend/core/sse_manager.py`、`backend/services/conversation_service.py`
 - 风险：服务重启会丢失任务状态、SSE buffer 和会话快照。
 - 安全修改：前端已把后端重启收敛成本地中断态；后端若引入持久化，要同步接口和恢复语义。
+
+**智能体生成分支增加了文件工作区与事件链路：**
+- 文件：`backend/agents/generation/`、`backend/nodes/common_word_nodes/content_agent_generate.py`、`backend/core/sse_manager.py`
+- 风险：如果子 agent 绕过统一 callback 直发 SSE，或运行中快照写入错误存储，会造成重复过程卡、断线重放异常或浏览器持久化膨胀。
+- 安全修改：智能体步骤统一走 `agent_step_callback` -> `SSEManager.send_agent_step()`；运行日志只记录摘要，完整输入与中间产物留在 content agent 工作区。
 
 ## 已知脆弱区
 
@@ -48,6 +53,11 @@
 - 文件：`backend/prompts/generate_by_template_prompt.py`、`backend/tests/prompts/test_generate_prompt_routing.py`
 - 风险：只改提示语示例也可能破坏字面量断言。
 - 安全修改：prompt 文案变化同步复核 prompt 测试。
+
+**generation mode 不得影响 rewrite/edit：**
+- 文件：`backend/models/generate.py`、`backend/services/document_service.py`、`backend/states/base_state.py`
+- 风险：把 `generation_mode` 混入 rewrite/edit 会让显式修改链路误触初次生成智能体分支。
+- 安全修改：`generation_mode` 只进入 generate request 和 generate initial state；rewrite/edit 请求模型、skill state 和 prompt surface 不接收该字段。
 
 ## 安全关注
 
@@ -82,6 +92,7 @@
 - 改 `FormType` 或 graph registry：同步前端 union、`gngkFormType`、converter、ChatPanel edit 调用点、graph 测试。
 - 改 SSE event：同步后端模型、发送方、前端类型、`useChatSSE` 和测试。
 - 改 Word helper：同步相关节点测试和 `asset/shared_runtime_word_skill_knowledge_pack.md`。
+- 改 `generation_mode`、`content_agent` 或 `agent_step`：同步 generation mode graph 测试、agent 运行时测试、SSE manager 测试、前端事件解析测试和相关知识包。
 - 改类型 identity / URL：同步 `asset/tender_type_identity_session_knowledge_pack.md`。
 - 改模板候选：同步 `asset/template_candidate_pipeline_knowledge_pack.md`。
 

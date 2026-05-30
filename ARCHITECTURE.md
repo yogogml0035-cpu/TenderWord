@@ -1,6 +1,6 @@
 # TenderWord 架构地图
 
-**生成日期：** 2026-05-27
+**生成日期：** 2026-05-30
 
 本文件是根级系统架构地图，描述 TenderWord 的系统边界、子系统职责和推荐理解路径。实现细节仍以代码为准；子系统内部事实以 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 为准。
 
@@ -13,7 +13,7 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
   -> FastAPI /api
   -> 任务队列 + SSE
   -> LangGraph tender 或 skill workflow
-  -> Prompt Layer + LLM provider
+  -> Prompt Layer + LLM provider / DeepAgents content_agent
   -> Word COM 文档操作
   -> 生成文件 / 任务结果 / 下载
 ```
@@ -29,6 +29,7 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 - `/` 与 `/tender` 页面入口。
 - 招标类型侧栏、表单面板、聊天和任务面板。
 - 会话、草稿、历史、任务摘要与 SSE resume 元数据的 `sessionStorage` 持久化。
+- 初次生成 `generation_mode` 草稿、生成方式控件和智能体 `agent-step` 过程卡展示。
 - 前端 `TenderType`、URL canonical 化、`gngk` 子类型身份匹配。
 - 通过 `frontend/lib/api.ts` 调用后端 JSON、上传、下载、NDJSON 和 SSE helper。
 - 模板候选弹窗、候选选择、后端文件回填和下载链接展示。
@@ -48,7 +49,7 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 - `DocumentService` 任务创建、graph 选择、初始 state 构造、任务提交和结果 payload。
 - `TaskQueueManager` 串行化文档任务、跟踪进度、取消、心跳和清理。
 - `SSEManager` 事件缓冲、客户端管理和重连重放。
-- 标准 tender graph、rewrite/edit skill graph 和 user routing graph。
+- 标准 tender graph、rewrite/edit skill graph、user routing graph 和 `generation_mode=agent` 的 content agent 分支。
 - Word COM 生命周期、共享 Word helper、类型特化节点和 Prompt Layer。
 - 外部 LLM provider、招标详情接口和模板候选接口的后端代理。
 
@@ -88,7 +89,7 @@ frontend/components/chat/
 frontend/components/forms/
   招标表单、上传、模板候选弹窗
 frontend/stores/
-  持久化会话状态与临时 stream 状态
+  持久化会话状态、agent-step 过程卡与临时 stream 状态
 frontend/lib/
   API client、SSE wrapper、招标数据 helper、gngk form type helper
 frontend/types/ 与 frontend/utils/
@@ -118,6 +119,8 @@ backend/core/
   SSE 管理与跨线程基础设施
 backend/graphs/
   LangGraph tender、skill、user 工作流
+backend/agents/generation/
+  初次生成 content_agent 主/子智能体与工作区
 backend/states/
   Typed graph state 契约
 backend/nodes/
@@ -135,13 +138,14 @@ backend/prompts/ 与 backend/skills/
 - API router 保持薄入口，业务编排放 service / graph / node / helper。
 - Word COM 是稀缺临界资源，新增能力不得绕开队列、graph 锁、取消检查和进度包装。
 - Prompt Layer 只做纯渲染和契约相关逻辑，不承载副作用。
+- `generation_mode` 分流保留在标准生成 graph 主干，类型 graph 不复制智能体分支。
 - 后端跨包导入统一使用 `backend.*` 包绝对路径。
 
 ## 关键运行链路
 
 ### 生成
 
-`POST /api/generate` 由前端表单提交，后端创建任务并通过 tender graph 执行文档生成。任务进度通过 SSE 回到前端，完成后前端展示下载入口。
+`POST /api/generate` 由前端表单提交，后端创建任务并通过 tender graph 执行文档生成。`generation_mode=workflow` 走旧 `generate_polished_text`，`generation_mode=agent` 走 `content_agent`，两者最终都产出 `polished_text` 并进入批注、写回和下载主干。任务进度通过 SSE 回到前端，智能体过程通过 `agent_step` 展示，完成后前端展示下载入口。
 
 关键入口：
 - `frontend/components/chat/FormPanel.tsx`
@@ -150,6 +154,8 @@ backend/prompts/ 与 backend/skills/
 - `backend/api/generate.py`
 - `backend/services/document_service.py`
 - `backend/graphs/base_graph.py`
+- `backend/nodes/common_word_nodes/content_agent_generate.py`
+- `backend/agents/generation/`
 - `backend/services/document_service.py`
 
 ### Rewrite / 聊天

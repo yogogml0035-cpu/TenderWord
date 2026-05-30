@@ -1,6 +1,6 @@
 # 后端测试事实地图
 
-**分析日期：** 2026-05-23
+**分析日期：** 2026-05-30
 
 **范围：** `backend/tests/` 与后端验证命令。
 
@@ -16,6 +16,7 @@
 ```text
 backend/tests/
 ├── api/        # API route 行为
+├── agents/     # DeepAgents 内容智能体运行时
 ├── config/     # tender_config 等配置约束
 ├── graphs/     # graph 注册、节点绑定、流程路由
 ├── helper/     # Word helper 纯逻辑
@@ -36,10 +37,13 @@ backend/tests/
 - API：`backend/tests/api/test_generate_api.py`、`backend/tests/api/test_tender_api.py`。
 - 类型配置：`backend/tests/config/test_tender_config_protected_fields.py`。
 - graph 路由：`backend/tests/graphs/test_gngk_tender_graph.py`、`backend/tests/graphs/test_gjgk_tender_graph.py`。
+- generation mode：`backend/tests/graphs/test_generation_mode_branching.py`、`test_generation_mode_workflow.py` 和各类型 `test_*_generation_mode_agent.py`。
+- 内容智能体：`backend/tests/agents/test_generation_content_agent.py`、`backend/tests/nodes/test_content_agent_generate.py`。
 - Word helper：`backend/tests/helper/test_content_ops.py`、`test_delete_ops.py`、`test_paragraph_boundary_ops.py`、`test_inline_style_ops.py`。
 - 节点：`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`、`test_gngk_fw_zc_update_word.py`、`test_common_update_word_split.py`、`test_comment_writeback.py`。
 - prompt：`backend/tests/prompts/test_generate_prompt_routing.py`、`test_comment_prompt_reference_contract.py`。
 - service：`backend/tests/services/test_document_service_initial_state.py`、`test_document_service_task_result.py`、`test_user_routing_service.py`。
+- agent_step SSE：`backend/tests/models/test_sse_agent_step.py`、`backend/tests/services/test_sse_manager_agent_step.py`、`backend/tests/services/test_document_service_agent_step.py`。
 
 ## Mock 与 fixture 模式
 
@@ -47,6 +51,7 @@ backend/tests/
 - LLM、HTTP、SSE 和文件系统副作用用 monkeypatch 或临时目录隔离。
 - 真实 Word COM 只用于必要集成验收；当前多数后端测试不要求本机 Word。
 - gngk graph 路由测试应同时断言 `GRAPH_REGISTRY` 和各兄弟类型节点绑定，避免继承链变更误扩散。
+- generation mode 测试要同时证明默认 `workflow` 不触发 `content_agent`，以及 `agent` 分支产出的 `polished_text` 会继续进入各类型既有写回主干。
 
 ## COM 安全测试策略
 
@@ -97,6 +102,7 @@ git diff --check
 - Word helper：`backend/tests/helper/` 与使用该 helper 的节点测试。
 - Word 节点：相关 `backend/tests/nodes/`，必要时全量 pytest。
 - prompt：`backend/tests/prompts/` 与调用该 prompt 的节点/service 测试。
+- content_agent / agent_step：`backend/tests/agents/`、`backend/tests/nodes/test_content_agent_generate.py`、`backend/tests/services/test_sse_manager_agent_step.py`、`backend/tests/services/test_document_service_agent_step.py`。
 - 任务/SSE：`backend/tests/services/`、`backend/tests/progress/`、相关 API 测试。
 
 ---

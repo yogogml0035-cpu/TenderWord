@@ -1,6 +1,6 @@
 # 前端风险事实地图
 
-**分析日期：** 2026-05-27
+**分析日期：** 2026-05-30
 
 **范围：** `frontend/` 当前技术债、脆弱点、安全边界和测试缺口。
 
@@ -31,7 +31,7 @@
 **SSE 事件是跨端契约：**
 - 文件：`frontend/types/api.ts`、`frontend/hooks/useChatSSE.ts`、`frontend/lib/sse.ts`
 - 风险：后端新增事件或 payload 字段，前端未同步会丢进度或终态。
-- 安全修改：同步 union 类型、解析、store 映射和测试。
+- 安全修改：同步 union 类型、底层 named event 注册、解析、store 映射和测试。
 
 **模板候选安全边界在后端：**
 - 文件：`frontend/components/forms/TemplateCandidateDialog.tsx`、`frontend/components/forms/TenderFormShared.tsx`、`frontend/lib/api.ts`
@@ -53,7 +53,7 @@
 ## 性能与扩展限制
 
 - `sessionStorage` 会话和任务摘要适合单浏览器会话，不是跨设备持久化。
-- 长任务日志和 LLM 文本在浏览器内存中增长，复杂任务可继续关注清理策略。
+- 长任务日志、LLM 文本和 agent step 快照在浏览器内存中增长，复杂任务可继续关注清理策略。
 - 任务/SSE 恢复依赖后端进程内事件缓存，后端重启后只能本地收敛。
 
 ## 缺失或未确认能力
@@ -68,13 +68,14 @@
 - 真实后端 + Word COM 生成链路无法由常规前端 Jest 覆盖。
 - 模板候选和 SSE 的复杂 UI 状态仍可补更多 mock E2E。
 - gngk 新类型或子类型分派变化时，需要同时覆盖 `gngkFormType`、converter、ChatPanel edit、URL、store 会话匹配。
+- 智能体过程卡需要继续覆盖 named event、未完成快照缓存、完成态持久化、失败/取消不补普通 task-content 卡。
 
 ## 回归风险检查
 
 - 改 API：同步 `types/api.ts`、`lib/api.ts`、后端模型和测试。
 - 改 gngk 分派：同步 `gngkFormType`、generate converter 与 edit builder。
 - 改 URL：同步 mapper、store、页面启动和 E2E。
-- 改任务 UI：同步 task group store、stream store、SSE hook 和消息组件测试。
+- 改任务 UI：同步 task group store、stream store、SSE hook、agent-step 持久化和消息组件测试。
 - 改模板候选：同步 API client、弹窗、表单回填和知识包。
 
 ---

@@ -1,6 +1,6 @@
 # 前端集成事实地图
 
-**分析日期：** 2026-05-27
+**分析日期：** 2026-05-30
 
 **范围：** `frontend/` 对后端 API、浏览器运行时、存储、测试工具和本地启动环境的集成边界。
 
@@ -33,13 +33,15 @@
 - 任务 SSE URL 由 `getTaskStreamUrl()` 构造。
 - `frontend/lib/sse.ts` 包装 `EventSource`，支持 heartbeat timeout、last event id、去重和重连。
 - `frontend/hooks/useChatSSE.ts` 把后端 SSE 事件映射到 `chatStreamStore` 与 `chatStore`。
+- `agent_step` 是 named SSE event，必须由 `frontend/lib/sse.ts` 显式注册 `addEventListener` 后才能到达 `useChatSSE`。
 - 用户流式聊天/rewrite 通过 `streamUserMessage()` 解析 NDJSON。
 
 ## 浏览器存储
 
 - `chatStore`、`chatTaskSessionStore`、`historyStore`、`useAppStore` 使用 `sessionStorage`。
-- `chatStreamStore` 是内存态，不持久化完整 stream payload。
+- `chatStreamStore` 是内存态，不持久化完整 stream payload；未完成的 agent step 快照也只留在这里。
 - 浏览器地址栏必须与当前会话身份同步，canonical URL 走 `tenderTypeMapper`。
+- 完成态 `agent-step` 过程卡保存在 `chatStore.conversations`，但不纳入旧 task log/content/download 三卡分组。
 
 ## 文件与下载
 
@@ -83,7 +85,7 @@
 ## 集成风险
 
 - API shape 变化必须同步 `frontend/types/api.ts`、`frontend/lib/api.ts`、后端模型和测试。
-- SSE 事件变化必须同步事件类型、解析、store 映射和测试。
+- SSE 事件变化必须同步事件类型、底层 named event 注册、解析、store 映射和测试。
 - gngk form type 分派必须集中在 `frontend/lib/gngkFormType.ts`，`formDataConverter.ts` 与 `ChatPanel.tsx` 只能调用共享 helper。
 - URL 参数变化必须同步 `tenderTypeMapper.ts`、store、页面启动和 E2E。
 - 模板候选改动不能绕过后端代理。

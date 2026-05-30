@@ -103,7 +103,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - `progress_log` 只写用户可理解的进度和状态，不写排障堆栈。
 - `execution_log` 只写排障细节、异常栈、关键参数摘要。
 - `sse_log_handler` 负责把进度日志转为前端可消费事件；任务失败时必须收敛成 `error` 或 `done`，不能让 SSE 静默中断。
-- 新增 SSE 事件类型时，必须同步更新前端解析、类型定义和测试。
+- 新增 SSE 事件类型时，必须同步更新前端底层 named event 注册、解析、类型定义和测试。
 - 批注与样式回写结果属于共享任务契约：`comment_writeback_*`、`style_writeback_*` 摘要不得在 state、任务结果或 SSE `done` 事件里丢失；当 `generated_comment_count > 0` 且 `comment_writeback_added == 0` 时任务必须硬失败。
 - 前端用户态 SSE 进度只展示 outcome-first 的精简信息；候选打分、淘汰原因、阈值和其它排障诊断继续留在 `execution_log` 或 debug log，不能直接暴露到用户态日志或额外新增逐片段样式 UI。
 
@@ -138,6 +138,8 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - 与 LLM 契约强绑定的固定字面量、rewrite 路由字面量、文档预览截断规则、历史消息压缩规则必须收口到 Prompt Layer。
 - task 型 skill 的声明与 fail-fast 校验，以 `backend/skills/*/SKILL.md`、`backend/skills/loader.py`、`backend/skills/registry.py` 为准。
 - `generation_style` 是 generate-only 运行时字段：它只允许影响初次生成链路的 prompt 路由，不得透传进 `rewrite` / `edit` 的请求模型、skill state 或 prompt surface。
+- `generation_mode` 是 generate-only 运行时字段：`workflow` 走旧生成节点，`agent` 走公共 `content_agent` 分支；该分流只允许影响初次生成链路，不得透传进 `rewrite` / `edit`。
+- `agent_step` 是智能体生成过程 SSE，只用于过程展示和断线重放；不得替代 `done` / `error` 终态，运行中高频快照不得直接持久化成会话消息。
 - `edit` 是显式入口，只走 `POST /api/edit`；不得把它重新并回 `/api/user/stream` 的模型判路链路。
 - LLM 流式超时统一复用 `backend/config/settings.py` 的 `LLM_STREAM_TIMEOUT_SECONDS`；generate / rewrite / edit / user routing / chat stream / 模板候选 AI 重排都不得各自写死超时常量。
 
@@ -297,8 +299,8 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 
 ### 需求修改后的知识回写路由
 
-- 改 Prompt Layer、task skill、generate/rewrite/edit runtime、Word COM、批注/样式回写、`backend/helper/word_helper/` 业务 helper、任务结果或 SSE 主干：更新 `asset/shared_runtime_word_skill_knowledge_pack.md`。
-- 改招标类型 identity、URL 判型、`form_type` 分派、anchor config、graph/state/node/replacement 收敛、当前页面会话范围、左侧栏展开与切换、`sessionStorage` 语义、聊天草稿或排队恢复：更新 `asset/tender_type_identity_session_knowledge_pack.md`。
+- 改 Prompt Layer、task skill、generate/rewrite/edit runtime、`generation_mode` 后端分流、DeepAgents `content_agent`、Word COM、批注/样式回写、`backend/helper/word_helper/` 业务 helper、任务结果或 SSE 主干：更新 `asset/shared_runtime_word_skill_knowledge_pack.md`。
+- 改招标类型 identity、URL 判型、`form_type` 分派、anchor config、graph/state/node/replacement 收敛、当前页面会话范围、左侧栏展开与切换、`sessionStorage` 语义、`generation_mode` 草稿、智能体过程卡、聊天草稿或排队恢复：更新 `asset/tender_type_identity_session_knowledge_pack.md`。
 - 改模板候选、AI 重排、下载代理、文件回填与模板弹窗链路：更新 `asset/template_candidate_pipeline_knowledge_pack.md`。
 - 若新规则会影响未来多数需求，再把它从知识包提升写回 `AGENTS.md`。
 
@@ -322,7 +324,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 
 ```text
 frontend/    Next.js 前端（表单、会话、聊天、SSE 展示、任务状态）
-backend/     FastAPI + LangGraph 后端（队列、图、节点、Prompt Layer、Word、SSE）
+backend/     FastAPI + LangGraph 后端（队列、图、节点、Prompt Layer、content_agent、Word、SSE）
 ARCHITECTURE.md  根级系统架构地图（系统边界、子系统职责、理解路径）
 INTERFACES.md    根级接口边界地图（API、SSE、任务、模板候选、外部集成）
 coding_maps/     仓库级系统地图（跨子项目调用链、阅读指南、集成风险）
@@ -343,7 +345,7 @@ guide/       可选目录；若存在，仅放本地 Git / worktree 操作说明
 | Graph / State / Node | `backend/graphs/`, `backend/states/`, `backend/nodes/` |
 | Word 业务 helper | `backend/helper/word_helper/` |
 | 任务与队列 | `backend/services/document_service.py`, `backend/task/task_queue_manager.py` |
-| Prompt Layer | `backend/prompts/`, `backend/services/user_routing_service.py` |
+| Prompt Layer / 内容智能体 | `backend/prompts/`, `backend/agents/generation/`, `backend/services/user_routing_service.py` |
 | Word 工具 | `backend/util/word_util/` |
 | 日志与 SSE | `backend/util/log_util/`, `backend/core/sse_manager.py`, `backend/api/stream.py` |
 | 后端代码地图 | `backend/.planning/codebase/` |
@@ -434,6 +436,7 @@ TMPDIR=/tmp TMP=/tmp TEMP=/tmp .venv-linux/bin/python -m pytest tests -v
 - 禁止并发分支同时打开同一个 `prepared_doc_path` 做 Word COM 读写。
 - 禁止公共节点依赖某个类型私有字段。
 - 禁止把长 prompt 永久散落在多个节点函数内部。
+- 禁止在类型 graph 中复制 `generation_mode` 分流或绕过公共 `content_agent` 节点。
 - 禁止在 README、旧注释、`guide/` 或不存在的 `docs/` 基础上推断真实接口。
 - 禁止把一次性 Git / worktree / 分支操作指南继续沉淀到 `asset/`。
 - 禁止把“新增类型”变成顺手的大重构；目标是收敛，不是借题发挥。

@@ -1,6 +1,6 @@
 # 后端结构事实地图
 
-**分析日期：** 2026-05-23
+**分析日期：** 2026-05-30
 
 **范围：** `backend/` 源码、测试与后端相关启动脚本。
 
@@ -8,6 +8,7 @@
 
 ```text
 backend/
+├── agents/              # DeepAgents 内容生成智能体
 ├── api/                  # FastAPI routers
 ├── config/               # settings 与招标类型配置
 ├── core/                 # SSE 等核心运行基础设施
@@ -32,6 +33,7 @@ backend/
 | 目录 | 当前职责 |
 | --- | --- |
 | `backend/api/` | `/api` router：生成、edit、任务、SSE、用户流式、会话心跳、上传、下载、招标详情、模板候选。 |
+| `backend/agents/generation/` | 初次生成 `generation_mode=agent` 的 DeepAgents 主/子智能体、JSON 协议、模型工厂和工作区管理。 |
 | `backend/models/` | `GenerateRequest`、`EditTaskRequest`、任务状态、SSE 事件、上传与模板候选模型。 |
 | `backend/services/` | `DocumentService`、任务状态展示、会话快照、用户路由、模板候选 AI 重排。 |
 | `backend/task/` | `TaskQueueManager`、任务实体、进度、取消、心跳。 |
@@ -82,6 +84,17 @@ backend/
 - `backend/graphs/gjgk_tender_graph.py`：国际公开 graph，含自定义 Word 操作和 post-update 顺序。
 - `backend/graphs/skill_graph.py`：rewrite/edit skill workflow 执行。
 - `backend/graphs/user_graph.py`：用户消息路由。
+- `backend/nodes/common_word_nodes/content_agent_generate.py`：智能体生成公共节点，调用 `run_content_agent_generation()` 并写回标准 `polished_text` 契约。
+
+### 内容智能体
+
+- `backend/agents/generation/content_agents.py`：`content_agent` 主运行时、runner 注入点和 DeepAgents 编排。
+- `backend/agents/generation/generate_agent_graph.py`：`content_generate_agent` 子图，复用生成 prompt builder。
+- `backend/agents/generation/verify_agent_graph.py`：`content_verify_agent` 子图，输出审核 JSON findings。
+- `backend/agents/generation/revise_agent_graph.py`：`content_revise_agent` 子图，按审核意见修订正文。
+- `backend/agents/generation/json_utils.py`、`types.py`：智能体输入输出协议解析与结构校验。
+- `backend/agents/generation/workspace.py`：FilesystemBackend 工作区和文件交接契约。
+- `backend/agents/generation/agent_step_events.py`：智能体步骤事件归一化。
 
 ### Word helper 与工具层
 
@@ -98,6 +111,7 @@ backend/
 ### 测试
 
 - `backend/tests/api/`：API 层。
+- `backend/tests/agents/`：DeepAgents 内容智能体运行时。
 - `backend/tests/config/`：配置与 profile。
 - `backend/tests/graphs/`：graph 注册与节点绑定。
 - `backend/tests/helper/`：Word helper。
@@ -122,6 +136,7 @@ backend/
 - 新 Word 业务逻辑：两个以上类型会复用时放 `backend/helper/word_helper/`。
 - 新 COM 技术工具：放 `backend/util/word_util/`。
 - 新 prompt：放 `backend/prompts/`，同时补 prompt 契约测试。
+- 新初次生成智能体能力：优先扩展 `backend/agents/generation/` 和公共 `content_agent` 节点，不在类型 graph 里复制智能体分支。
 - 新 task skill：放 `backend/skills/<skill>/`，并通过 loader/registry fail-fast。
 - 新测试：按 API、config、graph、helper、node、prompt、service、util 等范围归档。
 

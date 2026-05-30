@@ -1,6 +1,6 @@
 # 后端集成事实地图
 
-**分析日期：** 2026-05-23
+**分析日期：** 2026-05-30
 
 **范围：** `backend/` 对外部服务、浏览器客户端、文件系统、Word COM 和运行环境的集成边界。
 
@@ -18,6 +18,15 @@
 - 当前模型枚举在 `backend/models/generate.py`：`deepseek`、`qwen`、`doubao`。
 - Provider 配置在 `backend/config/settings.py`，包括 key、base URL、模型名和 `LLM_STREAM_TIMEOUT_SECONDS`。
 - 生成、rewrite、edit、普通聊天和模板候选 AI 重排都应复用统一流式超时配置。
+- 初次生成的 `generation_mode=agent` 通过 `backend/agents/generation/` 调用 DeepAgents；模型配置仍复用 `settings.get_llm_config()` 和 OpenAI-compatible client 参数。
+- `content_agent` 工作区默认位于 `backend/prompts_log/content_agent_workspace/`，作为智能体输入、草稿、审核、修订和最终正文的本地审计边界。
+
+### Agent Step SSE
+
+- 智能体生成步骤通过 `SSEEventType.AGENT_STEP` 推送。
+- `DocumentService` 在 graph config 中注入 `agent_step_callback`，公共 `content_agent` 节点和子 agent 通过该 callback 进入 `SSEManager`。
+- `SSEManager.send_agent_step()` 会进入事件缓冲，断线重连时可随 `Last-Event-ID` 重放。
+- 前端必须在 `frontend/lib/sse.ts` 显式监听 `agent_step` named event，再由 `frontend/hooks/useChatSSE.ts` 映射为过程卡。
 
 ### 招标详情接口
 
@@ -64,6 +73,7 @@
 - `execution_log` 面向排障堆栈、关键参数摘要和 graph 执行细节。
 - `prompt_log` 和 `skill_audit_log` 分别记录 prompt 与 skill task 审计。
 - 当前未确认外部 APM、日志平台或 tracing 系统。
+- 当前未确认外部 LangSmith / tracing 为强依赖；相关配置存在时应保持可选、fail-soft。
 
 ## CI/CD 与部署
 

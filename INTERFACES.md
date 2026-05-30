@@ -1,6 +1,6 @@
 # TenderWord 接口边界
 
-**生成日期：** 2026-05-27
+**生成日期：** 2026-05-30
 
 本文件记录 TenderWord 当前已确认的系统级接口边界。具体模型和行为以 `backend/api/`、`backend/models/`、`frontend/types/api.ts` 和 `frontend/lib/api.ts` 为准。
 
@@ -28,6 +28,7 @@
 
 同步要求：
 - `GenerateRequest.form_type` 变化必须同步 `frontend/types/api.ts`、`frontend/lib/formDataConverter.ts` 和 `backend/models/generate.py`；`gngk` 分派变化还必须同步 `frontend/lib/gngkFormType.ts`。
+- `generation_mode` 是 generate-only 字段，默认 `workflow`；`agent` 只影响初次生成节点选择，不进入 rewrite / edit 请求模型、skill state 或 prompt surface。
 - `gngk` 的后端分派依赖 `tender_lx + fund_lx + ifzgcg`，共享真源是 `frontend/lib/gngkFormType.ts`；generate 由 `formDataConverter.ts` 调用该 helper，edit 由 `ChatPanel.tsx` 调用该 helper，不能绕开 helper 单独改调用点。
 
 ### 任务状态、取消与心跳
@@ -57,12 +58,13 @@
 | 前端映射 | `frontend/hooks/useChatSSE.ts` |
 | 前端类型 | `frontend/types/api.ts` |
 
-已确认前端事件类型包括 `connected`、`log`、`llm`、`progress`、`status`、`error`、`done`、`heartbeat`。
+已确认前端事件类型包括 `connected`、`log`、`llm`、`progress`、`agent_step`、`status`、`error`、`done`、`heartbeat`。
 
 同步要求：
-- 新增 SSE 事件类型必须同步后端模型、事件发送、前端 union 类型、`useChatSSE` 解析和测试。
+- 新增 SSE 事件类型必须同步后端模型、事件发送、前端 union 类型、`frontend/lib/sse.ts` named event 注册、`useChatSSE` 解析和测试。
 - 任务失败必须最终表现为 `error` 或 `done`，不能让 SSE 静默中断。
 - `comment_writeback_*` 和 `style_writeback_*` 摘要属于任务结果契约，不得在 state、任务结果或 `done` 事件中丢失。
+- `agent_step` 是智能体生成过程事件，允许断线重放和前端过程卡展示，但不替代 `done` / `error` 终态。
 
 ### 用户流式、聊天与 Rewrite
 
@@ -78,7 +80,7 @@
 同步要求：
 - NDJSON event shape 变化必须同步 `frontend/types/api.ts` 和 `ChatPanel`。
 - rewrite 可创建任务，但 edit 不应重新并入 `/api/user/stream` 的模型判路链路。
-- `generation_style` 是 generate-only 字段，不得透传进 rewrite / edit 请求模型、skill state 或 prompt surface。
+- `generation_style` 和 `generation_mode` 是 generate-only 字段，不得透传进 rewrite / edit 请求模型、skill state 或 prompt surface。
 
 ### Edit 任务
 
@@ -184,7 +186,7 @@
 
 ### LLM 服务商
 
-后端通过 OpenAI-compatible streaming client 调用 DeepSeek、Doubao / Volcengine ARK 和 Qwen / DashScope。调用封装集中在 `backend/util/common_util/llm_stream_utils.py` 和相关服务。
+后端通过 OpenAI-compatible streaming client 调用 DeepSeek、Doubao / Volcengine ARK 和 Qwen / DashScope。调用封装集中在 `backend/util/common_util/llm_stream_utils.py` 和相关服务。初次生成的 `generation_mode=agent` 通过 `backend/agents/generation/` 调用 DeepAgents content agent，模型配置仍复用后端 settings。
 
 关键设置位于 `backend/config/settings.py`，包括 provider key、base URL、model、`LLM_STREAM_TIMEOUT_SECONDS` 和模板候选重排 provider。
 
@@ -218,7 +220,7 @@ Word COM 只存在于后端：
 ## 排查建议
 
 - 接口返回异常：先看 `frontend/lib/api.ts` 的 `ApiError` 包装，再看对应 `backend/api/` route 和 `backend/models/`。
-- SSE 卡住：先区分任务是否还存在、队列是否运行、后端是否发出 `error` / `done`，再看 `backend/core/sse_manager.py` 和 `frontend/hooks/useChatSSE.ts`。
+- SSE 卡住：先区分任务是否还存在、队列是否运行、后端是否发出 `error` / `done`，再看 `backend/core/sse_manager.py` 和 `frontend/hooks/useChatSSE.ts`；`agent_step` 不显示时还要检查 `frontend/lib/sse.ts` 是否监听 named event。
 - `gngk` 类型不对：同时检查 URL 参数、draft、`gngkFormType`、`formDataConverter`、`ChatPanel` edit 调用点、后端 `FormType` 和 `GRAPH_REGISTRY`。
 - 模板候选不可选：检查 `year`、blocked reason、后端归一化、AI row_index 重排和前端选择按钮状态。
 - Word 写回异常：先看任务队列、graph 锁、protected fields、paragraph boundary helper，再看类型专属 node。

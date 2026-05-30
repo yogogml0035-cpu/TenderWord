@@ -1,6 +1,6 @@
 # 后端技术栈事实地图
 
-**分析日期：** 2026-05-23
+**分析日期：** 2026-05-30
 
 **范围：** `backend/`、后端依赖、后端启动/验证相关根脚本。
 
@@ -29,6 +29,7 @@
 | Pydantic v2 | 请求/响应模型、枚举、字段校验 | `backend/models/` |
 | Pydantic Settings | `.env` 配置加载 | `backend/config/settings.py` |
 | LangGraph | 生成、rewrite/edit、用户路由工作流 | `backend/graphs/` |
+| DeepAgents | `generation_mode=agent` 的内容生成主/子智能体运行时 | `backend/agents/generation/` |
 | pywin32 | Word COM 自动化 | `backend/util/word_util/` |
 | OpenAI-compatible SDK | DeepSeek、Doubao/ARK、Qwen/DashScope 流式调用 | `backend/util/common_util/llm_stream_utils.py` |
 | pytest / pytest-asyncio | 后端单测与 async 测试 | `backend/tests/` |
@@ -36,7 +37,8 @@
 ## 关键依赖
 
 - `fastapi`、`uvicorn[standard]`、`pydantic`、`pydantic-settings`：API 与配置基础。
-- `langgraph`、`langchain-core`、`langchain-deepseek`：graph 与 LLM 相关工作流基础。
+- `langgraph`、`langchain-core`、`langchain-deepseek`、`langchain-openai`：graph、DeepAgents 和 LLM 相关工作流基础。
+- `deepagents`：内容生成智能体运行时。
 - `openai`、`volcengine-python-sdk[ark]`、`httpx`、`aiohttp`：LLM 与 HTTP 调用。
 - `python-multipart`：文件上传。
 - `python-dotenv`：环境变量辅助。
