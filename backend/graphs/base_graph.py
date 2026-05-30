@@ -268,6 +268,8 @@ TRACKED_PROGRESS_NODES = {
     NODE_CONTENT_AGENT,
     "generate_comments",
     NODE_COMMENT_AGENT,
+    "prepare_comment_supplement",
+    "finalize_comment_supplement",
     "update_word",
 }
 

@@ -165,6 +165,27 @@ class ConversationService:
             model=model,
         )
 
+    def append_comment_supplement_success(
+        self,
+        conversation_id: str,
+        *,
+        rewrite_state: Dict[str, Any],
+        model: Optional[str] = None,
+    ) -> None:
+        """Append one assistant rewrite_state entry after comment supplement success."""
+        now = time.time()
+        message = RewriteMessage(
+            role="assistant",
+            content="comment_supplement_success",
+            rewrite_state=dict(rewrite_state),
+            model=model,
+            created_at=now,
+        )
+        with self._lock:
+            runtime = self._ensure_runtime_locked(conversation_id, now=now)
+            runtime.rewrite_messages.append(message)
+            self._trim_messages_locked(runtime)
+
     def _append_revision_success(
         self,
         conversation_id: str,

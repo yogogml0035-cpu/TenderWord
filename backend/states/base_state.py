@@ -43,6 +43,10 @@ class TenderGraphStateBase(BaseState, total=False):
     tender_param_paths: List[str]
     clean_draft_path: Optional[str]
     prepared_doc_path: str
+    source_prepared_doc_path: str
+    comment_supplement_source_file: str
+    comment_supplement_temp_output_path: str
+    comment_supplement_completed: bool
     generation_style: str
     generation_mode: str
     style_writeback_mode: str

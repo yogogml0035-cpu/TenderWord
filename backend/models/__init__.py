@@ -26,6 +26,7 @@ from .task import (
 
 # 生成请求/响应模型
 from .generate import (
+    CommentSupplementRequest,
     EditTaskRequest,
     FileRequirement,
     FormRequirementsResponse,
@@ -117,6 +118,7 @@ __all__ = [
     "FormType",
     "GenerationMode",
     "GenerationStyle",
+    "CommentSupplementRequest",
     "EditTaskRequest",
     "GenerateRequest",
     "GenerateResponse",

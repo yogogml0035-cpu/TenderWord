@@ -13,6 +13,8 @@ Source: prd.json
 - 新增 Prompt Layer builder 时同步补 `backend/prompts/types.py` 输入 dataclass、`backend/prompts/__init__.py` 导出和 `backend/tests/prompts/test_*.py` 契约测试；Prompt Layer 仍只做纯渲染，不接日志、LLM 或 Word 副作用。
 - `comment_agent` 采用“纯确定性函数 + LangChain StructuredTool factory”的分层：校验只读取 `polished_text`，Word 写入工具必须重新校验并限制在 `bound_start/bound_end` 内，不复用全文兜底写回。
 - agent generate 批注链路由 `StandardTenderWorkflowGraph` 统一编排：`comments_branch_done` 设置 `suppress_ai_comment_writeback=True`，各类型 `update_word` 只写正文/样式/保存，随后进入公共 `comment_agent` 节点；不要在类型 graph 里复制该分流。
+- `comment_supplement` 后端闭环固定走 `POST /api/comment-supplement -> DocumentService.create_comment_supplement_task -> CommentSupplementGraph`；创建任务前必须校验传入 `source_file` 等于 latest `rewrite_state.prepared_doc_path` 且文件存在。
+- 补充批注成功后通过 `ConversationService.append_comment_supplement_success()` 追加 assistant rewrite_state，使 latest `prepared_doc_path` 指向补充批注副本，后续 rewrite/edit 继续读取 latest rewrite_state。
 
 ## 2026-05-30 13:08 - US-001
 - 建立了 `comment_supplement` 任务类型契约：后端内部/API TaskKind、TaskService 映射、前端 TaskKind union 均已支持。
@@ -94,4 +96,17 @@ Source: prd.json
   - `comment_agent` graph 节点不要从 `backend.nodes.common_word_nodes.__init__` re-export；`backend.agents.comments.tools` 会导入 `comment_writeback`，包级提前导出会形成 `backend.agents.comments` 与 `common_word_nodes` 的循环初始化。
   - agent generate 的批注增强失败必须在节点内降级成 `comment_writeback.warning`，不能向 graph 外抛出导致任务失败；正文保存成功才是 generate 下载主流程的强契约。
   - 逐类型 `update_word` 都要识别 `suppress_ai_comment_writeback`，否则某个类型会在 agent 路径提前写批注并绕过 `comment_agent` 工具门禁。
+---
+## 2026-05-30 15:54 - US-007
+- 新增 `comment_supplement` 后端任务闭环：`POST /api/comment-supplement` 创建 `task_kind=comment_supplement` 任务，校验 `conversation_id`、latest `rewrite_state`、`polished_text`、当前源文件存在且匹配 latest `prepared_doc_path`。
+- 新增 `CommentSupplementGraph`，通过 BaseGraph 执行 `prepare_comment_supplement -> generate_comments -> comment_agent -> finalize_comment_supplement`，准备节点复制当前文档为新副本，无参考批注节点基于 latest `rewrite_state.polished_text` 生成候选，并复用现有 `comment_agent` 写回与 warning 摘要。
+- 任务完成后新增 `ConversationService.append_comment_supplement_success()` 追加最新 assistant rewrite_state，使 `prepared_doc_path` 指向补充批注后的副本；任务 result 和 SSE done 继续包含 `output_file`、`file_name`、`comment_writeback`。
+- 更新共享运行时知识包，记录补充批注 API、Graph、latest rewrite_state 更新和测试入口。
+- 更改的文件：`backend/models/generate.py`、`backend/models/__init__.py`、`backend/api/comment_supplement.py`、`backend/main.py`、`backend/services/document_service.py`、`backend/services/conversation_service.py`、`backend/graphs/comment_supplement_graph.py`、`backend/graphs/__init__.py`、`backend/graphs/base_graph.py`、`backend/nodes/common_word_nodes/comment_supplement.py`、`backend/states/base_state.py`、`backend/task/task_queue_manager.py`、`backend/tests/api/test_comment_supplement_api.py`、`backend/tests/graphs/test_comment_supplement_graph.py`、`backend/tests/services/test_document_service_comment_supplement.py`、`asset/shared_runtime_word_skill_knowledge_pack.md`、`asset/README.md`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/api/comment_supplement.py backend/graphs/comment_supplement_graph.py backend/nodes/common_word_nodes/comment_supplement.py backend/services/document_service.py backend/models/generate.py backend/services/conversation_service.py backend/task/task_queue_manager.py backend/states/base_state.py` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests/api/test_comment_supplement_api.py backend/tests/graphs/test_comment_supplement_graph.py backend/tests/services/test_document_service_comment_supplement.py -v` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests -v` 通过，380 passed；`npm run lint` 通过；`npm run type-check` 通过；`npm test -- --runInBand` 通过，31 suites / 355 tests；本轮变更文件 `git diff --check -- ...` 通过。
+- 全仓 `git diff --check` 仍受进入本轮前已有的 `backend/.env.example`、`scripts/start-dev.ps1` trailing whitespace 影响，未改动这些既有文件。
+- **未来迭代的学习：**
+  - `comment_supplement` 不应信任前端传入任意 Word 路径；service 层必须把 `source_file` 与 latest `rewrite_state.prepared_doc_path` 解析后比较，再让 graph 复制副本。
+  - 独立补充批注任务不直接更新旧文件；`prepare_comment_supplement` 创建副本并把 `prepared_doc_path` 指向副本，完成后 conversation latest rewrite_state 才成为后续 rewrite/edit 的真源。
+  - 无参考补充批注生成可以复用 `generate_comments` 的 JSON 解析工具，但 prompt 只能来自 `comment_no_reference_prompt`，不要把三组内部批注依据重新塞进 supplement prompt。
 ---
