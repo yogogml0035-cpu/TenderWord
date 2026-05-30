@@ -173,6 +173,12 @@ export interface EditTaskRequest {
   tender_data_snapshot?: TenderData;
 }
 
+export interface CommentSupplementTaskRequest {
+  conversation_id: string;
+  source_file: string;
+  model: GenerateRequest['model'];
+}
+
 // ============================================
 // Task Progress Types
 // ============================================

@@ -4,6 +4,7 @@ import type { TenderType, FundLx, TenderLx } from '@/types';
 import type {
   GenerationMode,
   GenerationStyle,
+  CommentWritebackSummary,
   SSEAgentStepEvent,
   StyleWritebackMode,
   StyleWritebackSummary,
@@ -839,7 +840,8 @@ interface ChatStore {
     outputFile?: string,
     fileName?: string,
     content?: TaskMessageSnapshot,
-    styleWriteback?: StyleWritebackSummary
+    styleWriteback?: StyleWritebackSummary,
+    commentWriteback?: CommentWritebackSummary
   ) => void;
   failTask: (taskId: string, error: string, content?: TaskMessageSnapshot) => void;
   cancelTask: (taskId: string, content?: TaskMessageSnapshot) => void;
@@ -1394,7 +1396,7 @@ export const useChatStore = create<ChatStore>()(
           });
         },
 
-        completeTask: (taskId, outputFile, fileName, content, styleWriteback) => {
+        completeTask: (taskId, outputFile, fileName, content, styleWriteback, commentWriteback) => {
           const locatedTaskGroup = get().findTaskMessageGroup(taskId);
           let nextGroup: TaskMessageGroupIds | undefined;
           const terminalConversationId: string | null = locatedTaskGroup?.conversationId || null;
@@ -1464,6 +1466,7 @@ export const useChatStore = create<ChatStore>()(
                     outputFile,
                     fileName: resolvedFileName,
                     ...(styleWriteback ? { styleWriteback } : {}),
+                    ...(commentWriteback ? { commentWriteback } : {}),
                   },
                 });
                 downloadMessageId = downloadMessage.id;
@@ -1479,6 +1482,7 @@ export const useChatStore = create<ChatStore>()(
                     outputFile,
                     fileName: resolvedFileName,
                     ...(styleWriteback ? { styleWriteback } : {}),
+                    ...(commentWriteback ? { commentWriteback } : {}),
                   },
                 });
               }

@@ -241,6 +241,9 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
           let styleWriteback:
             | import('@/types/api').StyleWritebackSummary
             | undefined;
+          let commentWriteback:
+            | import('@/types/api').CommentWritebackSummary
+            | undefined;
 
           if (typeof task.result === 'string') {
             outputFile = task.result !== 'success' ? task.result : undefined;
@@ -248,11 +251,16 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
             const outputFileValue = task.result.output_file;
             const fileNameValue = task.result.file_name;
             const styleWritebackValue = task.result.style_writeback;
+            const commentWritebackValue = task.result.comment_writeback;
             outputFile = typeof outputFileValue === 'string' ? outputFileValue : undefined;
             fileName = typeof fileNameValue === 'string' ? fileNameValue : undefined;
             styleWriteback =
               typeof styleWritebackValue === 'object' && styleWritebackValue !== null
                 ? (styleWritebackValue as import('@/types/api').StyleWritebackSummary)
+                : undefined;
+            commentWriteback =
+              typeof commentWritebackValue === 'object' && commentWritebackValue !== null
+                ? (commentWritebackValue as import('@/types/api').CommentWritebackSummary)
                 : undefined;
           }
 
@@ -260,7 +268,14 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
             fileName = outputFile.split(/[\\/]/).pop();
           }
 
-          completeChatTask(taskId, outputFile, fileName, finalContent, styleWriteback);
+          completeChatTask(
+            taskId,
+            outputFile,
+            fileName,
+            finalContent,
+            styleWriteback,
+            commentWriteback
+          );
           settled = true;
         } else if (status === 'failed') {
           const errorMessage = typeof task.error === 'string' ? task.error : '生成失败';

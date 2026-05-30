@@ -15,6 +15,8 @@ Source: prd.json
 - agent generate 批注链路由 `StandardTenderWorkflowGraph` 统一编排：`comments_branch_done` 设置 `suppress_ai_comment_writeback=True`，各类型 `update_word` 只写正文/样式/保存，随后进入公共 `comment_agent` 节点；不要在类型 graph 里复制该分流。
 - `comment_supplement` 后端闭环固定走 `POST /api/comment-supplement -> DocumentService.create_comment_supplement_task -> CommentSupplementGraph`；创建任务前必须校验传入 `source_file` 等于 latest `rewrite_state.prepared_doc_path` 且文件存在。
 - 补充批注成功后通过 `ConversationService.append_comment_supplement_success()` 追加 assistant rewrite_state，使 latest `prepared_doc_path` 指向补充批注副本，后续 rewrite/edit 继续读取 latest rewrite_state。
+- 前端任务完成入口有两条：`useChatSSE` 的 SSE `done` 与 task status fallback、`FormPanel.syncTaskTerminalState()`；新增 result 摘要字段时两条路径都要传给 `chatStore.completeTask()`。
+- 下载卡的用户动作以 `message.metadata.taskKind` 判定任务来源；`comment_supplement` 从 generate 下载卡进入 `ChatPanel -> createCommentSupplementTask -> startTask`，不要在卡片组件内直接访问 store 或裸 `fetch`。
 
 ## 2026-05-30 13:08 - US-001
 - 建立了 `comment_supplement` 任务类型契约：后端内部/API TaskKind、TaskService 映射、前端 TaskKind union 均已支持。
@@ -109,4 +111,17 @@ Source: prd.json
   - `comment_supplement` 不应信任前端传入任意 Word 路径；service 层必须把 `source_file` 与 latest `rewrite_state.prepared_doc_path` 解析后比较，再让 graph 复制副本。
   - 独立补充批注任务不直接更新旧文件；`prepare_comment_supplement` 创建副本并把 `prepared_doc_path` 指向副本，完成后 conversation latest rewrite_state 才成为后续 rewrite/edit 的真源。
   - 无参考补充批注生成可以复用 `generate_comments` 的 JSON 解析工具，但 prompt 只能来自 `comment_no_reference_prompt`，不要把三组内部批注依据重新塞进 supplement prompt。
+---
+## 2026-05-30 16:19 - US-008
+- 实现了前端补充批注入口：`frontend/lib/api.ts` 新增 `createCommentSupplementTask()`，ChatPanel 从初次 generate 下载卡调用 `/api/comment-supplement` 并通过现有 `startTask` 进入任务/SSE 链路。
+- 将 `comment_writeback` 前端摘要贯通到下载卡 metadata：task status fallback、SSE done、FormPanel 终态同步和 `chatStore.completeTask()` 都会保存 `commentWriteback`。
+- 更新下载卡 UI：仅 generate 成功卡展示 `补充批注`，rewrite/edit/comment_supplement 不展示；`commentWriteback.warning=true` 时显示“文档已生成，部分批注未写入”，下载按钮仍可点击。
+- 更改的文件：`frontend/types/api.ts`、`frontend/types/chat.ts`、`frontend/lib/api.ts`、`frontend/hooks/useChatSSE.ts`、`frontend/stores/chatStore.ts`、`frontend/components/chat/FormPanel.tsx`、`frontend/components/chat/TaskDownloadMessage.tsx`、`frontend/components/chat/MessageList.tsx`、`frontend/components/chat/ChatPanel.tsx`、`frontend/__tests__/unit/lib/test_api.test.ts`、`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`、`frontend/__tests__/unit/components/chat/test_message_list.test.tsx`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`npm test -- --runTestsByPath __tests__/unit/lib/test_api.test.ts __tests__/unit/hooks/test_use_chat_sse.test.tsx __tests__/unit/stores/test_chat_store_task_messages.test.ts __tests__/unit/components/chat/test_message_list.test.tsx __tests__/unit/components/chat/test_chat_panel.test.tsx --runInBand` 通过；`npm run lint` 通过；`npm run type-check` 通过；`npm test -- --runInBand` 通过，31 suites / 362 tests；浏览器 mock 验证通过，截图保存到 `tasks/comment-supplement-comment-agent/screenshots/us-008-browser-mocked-flow.png`，断言保存到 `tasks/comment-supplement-comment-agent/logs/us-008-browser-mocked-assertions.json`；本轮变更文件 `git diff --check -- ...` 通过。
+- 全仓 `git diff --check` 仍受进入本轮前已有的 `backend/.env.example`、`scripts/start-dev.ps1` trailing whitespace 影响，未改动这些既有文件。
+- 本 story 只改前端任务入口和展示，未运行后端 pytest。
+- **未来迭代的学习：**
+  - `comment_writeback` 前端透传不能只改 SSE `done`；任务状态补拉和 FormPanel 终态同步也会创建下载卡。
+  - 下载卡只负责展示和回调分发，创建补充批注任务应留在 ChatPanel，继续走统一 API helper、placeholder log message 和 `startTask`。
+  - 真实浏览器验证可用 sessionStorage 种入完成的 generate 下载卡，并用 Playwright route mock `/api/comment-supplement`、task status、heartbeat，避免未启动后端造成 console 噪声。
 ---

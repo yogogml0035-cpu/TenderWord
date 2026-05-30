@@ -240,6 +240,7 @@ describe('useChatSSE', () => {
         data: {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
+          task_kind: 'generate',
           success: true,
           message: '任务完成',
           output_file: 'D:/UploadFiles/output.docx',
@@ -253,6 +254,14 @@ describe('useChatSSE', () => {
             failed: 0,
             applied_by_style: { strikethrough: 1 },
             skipped_by_reason: {},
+          },
+          comment_writeback: {
+            summary: 'AI 批注写入: 生成=3, 成功=1, 跳过=0, 失败=2',
+            generated: 3,
+            added: 1,
+            failed: 2,
+            skipped: 0,
+            warning: true,
           },
         },
       });
@@ -274,6 +283,14 @@ describe('useChatSSE', () => {
       failed: 0,
       applied_by_style: { strikethrough: 1 },
       skipped_by_reason: {},
+    });
+    expect(completedGroup?.downloadMessage?.metadata?.commentWriteback).toEqual({
+      summary: 'AI 批注写入: 生成=3, 成功=1, 跳过=0, 失败=2',
+      generated: 3,
+      added: 1,
+      failed: 2,
+      skipped: 0,
+      warning: true,
     });
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
     expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
@@ -957,6 +974,14 @@ describe('useChatSSE', () => {
           applied_by_style: { bold: 1 },
           skipped_by_reason: { low_confidence: 1 },
         },
+        comment_writeback: {
+          summary: 'AI 批注写入: 生成=2, 成功=2, 跳过=0, 失败=0',
+          generated: 2,
+          added: 2,
+          failed: 0,
+          skipped: 0,
+          warning: false,
+        },
       },
     });
 
@@ -999,6 +1024,14 @@ describe('useChatSSE', () => {
       failed: 0,
       applied_by_style: { bold: 1 },
       skipped_by_reason: { low_confidence: 1 },
+    });
+    expect(group?.downloadMessage?.metadata?.commentWriteback).toEqual({
+      summary: 'AI 批注写入: 生成=2, 成功=2, 跳过=0, 失败=0',
+      generated: 2,
+      added: 2,
+      failed: 0,
+      skipped: 0,
+      warning: false,
     });
     expect(latestOptions?.endpoint).toBe('');
   });

@@ -9,6 +9,7 @@ import type {
   SSEAgentStepEvent,
   SSELLMEvent,
   SSEProgressEvent,
+  CommentWritebackSummary,
   StyleWritebackSummary,
   TaskData,
   TaskKind,
@@ -209,7 +210,12 @@ export function useChatSSE({
       const outputFile =
         typeof rawResult === 'string' && rawResult !== 'success' ? rawResult : undefined;
       const fileName = typeof outputFile === 'string' ? outputFile.split(/[\\/]/).pop() : undefined;
-      return { outputFile, fileName, styleWriteback: undefined as StyleWritebackSummary | undefined };
+      return {
+        outputFile,
+        fileName,
+        styleWriteback: undefined as StyleWritebackSummary | undefined,
+        commentWriteback: undefined as CommentWritebackSummary | undefined,
+      };
     }
 
     const outputFile =
@@ -224,8 +230,12 @@ export function useChatSSE({
       typeof rawResult.style_writeback === 'object' && rawResult.style_writeback !== null
         ? (rawResult.style_writeback as StyleWritebackSummary)
         : undefined;
+    const commentWriteback =
+      typeof rawResult.comment_writeback === 'object' && rawResult.comment_writeback !== null
+        ? (rawResult.comment_writeback as CommentWritebackSummary)
+        : undefined;
 
-    return { outputFile, fileName, styleWriteback };
+    return { outputFile, fileName, styleWriteback, commentWriteback };
   }, []);
 
   const finalizeFromTaskStatus = useCallback(
@@ -247,8 +257,15 @@ export function useChatSSE({
       const finalContent = getCurrentContent(targetTaskId, task.status === 'completed');
 
       if (task.status === 'completed') {
-        const { outputFile, fileName, styleWriteback } = extractOutputInfo(task);
-        completeTask(targetTaskId, outputFile, fileName, finalContent, styleWriteback);
+        const { outputFile, fileName, styleWriteback, commentWriteback } = extractOutputInfo(task);
+        completeTask(
+          targetTaskId,
+          outputFile,
+          fileName,
+          finalContent,
+          styleWriteback,
+          commentWriteback
+        );
         clearTaskRuntime(targetTaskId);
         onCompleteRef.current?.();
         return;
@@ -484,6 +501,10 @@ export function useChatSSE({
               typeof doneData.style_writeback === 'object' && doneData.style_writeback !== null
                 ? doneData.style_writeback
                 : undefined;
+            const commentWriteback =
+              typeof doneData.comment_writeback === 'object' && doneData.comment_writeback !== null
+                ? doneData.comment_writeback
+                : undefined;
             handledTerminalTasksRef.current.add(taskId);
             closeRef.current();
             completeTask(
@@ -491,7 +512,8 @@ export function useChatSSE({
               outputFile,
               fileName,
               getCurrentContent(taskId, true),
-              styleWriteback
+              styleWriteback,
+              commentWriteback
             );
             clearTaskRuntime(taskId);
           }

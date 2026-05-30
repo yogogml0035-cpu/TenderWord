@@ -1,6 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ChatPanel } from '@/components/chat/ChatPanel';
-import { cancelTask, createEditTask, streamUserMessage, uploadFile } from '@/lib/api';
+import {
+  cancelTask,
+  createCommentSupplementTask,
+  createEditTask,
+  streamUserMessage,
+  uploadFile,
+} from '@/lib/api';
 import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import type { UserStreamEvent } from '@/types/api';
@@ -11,6 +17,7 @@ jest.mock('@/lib/api', () => {
   return {
     ...actual,
     cancelTask: jest.fn(),
+    createCommentSupplementTask: jest.fn(),
     createEditTask: jest.fn(),
     downloadFile: jest.fn(),
     streamUserMessage: jest.fn(),
@@ -26,11 +33,15 @@ jest.mock('@/components/chat/MessageList', () => ({
   MessageList: ({
     messages,
     emptyState,
+    onCommentSupplement,
     onRetry,
+    commentSupplementDisabled,
   }: {
-    messages: Array<unknown>;
+    messages: Message[];
     emptyState?: unknown;
+    onCommentSupplement?: (message: Message) => void;
     onRetry?: (message: Message) => void;
+    commentSupplementDisabled?: boolean;
   }) => (
     <div data-testid="message-list">
       {messages.length === 0 ? (
@@ -49,6 +60,16 @@ jest.mock('@/components/chat/MessageList', () => ({
           onClick={() => onRetry(messages[0] as Message)}
         >
           retry message
+        </button>
+      )}
+      {onCommentSupplement && messages.length > 0 && (
+        <button
+          type="button"
+          data-testid="comment-supplement-button"
+          disabled={commentSupplementDisabled}
+          onClick={() => onCommentSupplement(messages[messages.length - 1])}
+        >
+          supplement comments
         </button>
       )}
     </div>
@@ -133,6 +154,9 @@ jest.mock('@/components/chat/ChatInput', () => ({
 
 const mockStreamUserMessage = streamUserMessage as jest.MockedFunction<typeof streamUserMessage>;
 const mockCancelTask = cancelTask as jest.MockedFunction<typeof cancelTask>;
+const mockCreateCommentSupplementTask = createCommentSupplementTask as jest.MockedFunction<
+  typeof createCommentSupplementTask
+>;
 const mockCreateEditTask = createEditTask as jest.MockedFunction<typeof createEditTask>;
 const mockUploadFile = uploadFile as jest.MockedFunction<typeof uploadFile>;
 
@@ -164,6 +188,7 @@ describe('ChatPanel', () => {
     window.sessionStorage.clear();
     mockStreamUserMessage.mockReset();
     mockCancelTask.mockReset();
+    mockCreateCommentSupplementTask.mockReset();
     mockCreateEditTask.mockReset();
     mockUploadFile.mockReset();
     mockCancelTask.mockResolvedValue({
@@ -631,6 +656,87 @@ describe('ChatPanel', () => {
       expect(draft?.input_mode).toBe('edit');
       expect(draft?.edit_file?.file_path).toBe('D:/UploadFiles/latest-edit.docx');
       expect(draft?.edit_file?.original_name).toBe('latest-edit.docx');
+    });
+  });
+
+  it('creates a comment supplement task from a generate download card', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+          messages: [
+            {
+              id: 'msg-download',
+              conversationId: 'conv-1',
+              type: 'ai',
+              content: 'output.docx',
+              timestamp: Date.now(),
+              status: 'completed',
+              taskId: 'task-generate-finished',
+              metadata: {
+                messageKind: 'task-download',
+                taskKind: 'generate',
+                outputFile: 'D:/UploadFiles/output.docx',
+                fileName: 'output.docx',
+              },
+            },
+          ],
+        },
+      ],
+      activeTaskIds: [],
+      taskMessageMap: {
+        'task-generate-finished': {
+          downloadMessageId: 'msg-download',
+        },
+      },
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          model: 'qwen',
+        },
+      },
+    }));
+    mockCreateCommentSupplementTask.mockResolvedValue({
+      task_id: 'task-comment-supplement',
+      task_kind: 'comment_supplement',
+      status: 'queued',
+      queue_position: 0,
+      waiting_count: 0,
+    });
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('comment-supplement-button'));
+
+    await waitFor(() => {
+      expect(mockCreateCommentSupplementTask).toHaveBeenCalledWith({
+        conversation_id: 'conv-1',
+        source_file: 'D:/UploadFiles/output.docx',
+        model: 'qwen',
+      });
+      const conversation = useChatStore.getState().conversations[0];
+      expect(conversation.currentTaskId).toBe('task-comment-supplement');
+      expect(useChatStore.getState().taskMessageMap['task-comment-supplement']).toEqual(
+        expect.objectContaining({
+          logMessageId: expect.any(String),
+        })
+      );
+      expect(useChatStore.getState().taskSummaries['task-comment-supplement']).toMatchObject({
+        task_kind: 'comment_supplement',
+        status: 'queued',
+      });
+      expect(conversation.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            content: '正在创建补充批注任务',
+            metadata: expect.objectContaining({
+              chatKind: 'task-notice',
+            }),
+          }),
+        ])
+      );
     });
   });
 

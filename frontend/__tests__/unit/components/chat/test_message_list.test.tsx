@@ -46,6 +46,7 @@ function createTaskMessages(): Message[] {
       taskId: 'task-1',
       metadata: {
         messageKind: 'task-download',
+        taskKind: 'generate',
         outputFile: 'D:/UploadFiles/output.docx',
         fileName: 'output.docx',
         styleWriteback: {
@@ -236,6 +237,60 @@ describe('MessageList', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '下载文件' }));
 
+    expect(onDownload).toHaveBeenCalledWith('D:/UploadFiles/output.docx', 'output.docx');
+  });
+
+  it('shows comment supplement action only on generate download cards', () => {
+    const messages = createTaskMessages();
+    const onCommentSupplement = jest.fn();
+
+    render(<MessageList messages={messages} onCommentSupplement={onCommentSupplement} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '补充批注' }));
+
+    expect(onCommentSupplement).toHaveBeenCalledWith(messages[2]);
+  });
+
+  it.each(['rewrite', 'edit', 'comment_supplement'] as const)(
+    'does not show comment supplement action on %s download cards',
+    (taskKind) => {
+      const messages = createTaskMessages();
+      messages[2] = {
+        ...messages[2],
+        metadata: {
+          ...(messages[2].metadata || {}),
+          taskKind,
+        },
+      };
+
+      render(<MessageList messages={messages} onCommentSupplement={jest.fn()} />);
+
+      expect(screen.queryByRole('button', { name: '补充批注' })).not.toBeInTheDocument();
+    }
+  );
+
+  it('shows comment warning without disabling download', () => {
+    const onDownload = jest.fn();
+    const messages = createTaskMessages();
+    messages[2] = {
+      ...messages[2],
+      metadata: {
+        ...(messages[2].metadata || {}),
+        commentWriteback: {
+          summary: 'AI 批注写入: 生成=3, 成功=1, 跳过=0, 失败=2',
+          generated: 3,
+          added: 1,
+          failed: 2,
+          skipped: 0,
+          warning: true,
+        },
+      },
+    };
+
+    render(<MessageList messages={messages} onDownload={onDownload} />);
+
+    expect(screen.getByText('文档已生成，部分批注未写入')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下载文件' }));
     expect(onDownload).toHaveBeenCalledWith('D:/UploadFiles/output.docx', 'output.docx');
   });
 

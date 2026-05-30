@@ -10,9 +10,11 @@ import { TaskDownloadMessage } from './TaskDownloadMessage';
 interface MessageListProps {
   messages: Message[];
   onDownload?: (filePath: string, fileName?: string) => void;
+  onCommentSupplement?: (message: Message) => void;
   onRetry?: (message: Message) => void;
   emptyState?: React.ReactNode;
   interactionDisabled?: boolean;
+  commentSupplementDisabled?: boolean;
   className?: string;
 }
 
@@ -106,9 +108,11 @@ async function copyPlainText(text: string) {
 export function MessageList({
   messages,
   onDownload,
+  onCommentSupplement,
   onRetry,
   emptyState,
   interactionDisabled = false,
+  commentSupplementDisabled = false,
   className = '',
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -178,6 +182,8 @@ export function MessageList({
               message={message}
               interactionDisabled={interactionDisabled}
               onDownload={onDownload}
+              onCommentSupplement={onCommentSupplement}
+              commentSupplementDisabled={commentSupplementDisabled}
               onRetry={onRetry}
             />
           </div>
@@ -214,10 +220,19 @@ interface MessageItemProps {
   message: Message;
   interactionDisabled?: boolean;
   onDownload?: (filePath: string, fileName?: string) => void;
+  onCommentSupplement?: (message: Message) => void;
+  commentSupplementDisabled?: boolean;
   onRetry?: (message: Message) => void;
 }
 
-function MessageItem({ message, interactionDisabled = false, onDownload, onRetry }: MessageItemProps) {
+function MessageItem({
+  message,
+  interactionDisabled = false,
+  onDownload,
+  onCommentSupplement,
+  commentSupplementDisabled = false,
+  onRetry,
+}: MessageItemProps) {
   const [copied, setCopied] = useState(false);
   const [showUserActions, setShowUserActions] = useState(false);
   const copyResetTimerRef = useRef<number | null>(null);
@@ -278,7 +293,9 @@ function MessageItem({ message, interactionDisabled = false, onDownload, onRetry
             <TaskDownloadMessage
               message={message}
               disabled={interactionDisabled}
+              commentSupplementDisabled={commentSupplementDisabled}
               onDownload={onDownload}
+              onCommentSupplement={onCommentSupplement}
             />
           )}
           {!messageKind && (

@@ -19,6 +19,7 @@ import type {
   TaskHeartbeatData,
   TaskListData,
   CancelTaskData,
+  CommentSupplementTaskRequest,
   CreateTaskData,
   EditTaskRequest,
   GenerateRequest,
@@ -618,6 +619,15 @@ export async function createGenerateTask(params: GenerateRequest): Promise<Creat
 
 export async function createEditTask(params: EditTaskRequest): Promise<CreateTaskData> {
   return request<CreateTaskData>('/api/edit', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function createCommentSupplementTask(
+  params: CommentSupplementTaskRequest
+): Promise<CreateTaskData> {
+  return request<CreateTaskData>('/api/comment-supplement', {
     method: 'POST',
     body: JSON.stringify(params),
   });
