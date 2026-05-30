@@ -19,6 +19,8 @@ Source: prd.json
 - 下载卡的用户动作以 `message.metadata.taskKind` 判定任务来源；`comment_supplement` 从 generate 下载卡进入 `ChatPanel -> createCommentSupplementTask -> startTask`，不要在卡片组件内直接访问 store 或裸 `fetch`。
 - `comment_agent` 的 `agent_step` 事件是一组同 node/round 的 AIMessage 内容片段，前端应按顺序追加到同一张卡；最终 `is_complete=true` 且 `content` 为空时只收尾，不清空已追加内容。
 - Next dev 会自动把 `.next/dev/types/**/*.ts` 加回主 `tsconfig.json`；前端稳定类型检查走 `frontend/tsconfig.typecheck.json`，避免 dev 生成缓存里的 validator 语法问题影响 `npm run type-check`。
+- 当前根路径 `/` 直接重定向到 `/tender` 工作台；首页类 E2E 应断言 tender workspace 的真实入口元素，不要继续依赖历史 landing page 的 `进入使用` 链接或 `main` 内容。
+- Playwright E2E 若写 requirement 证据，artifact root 必须指向当前任务目录；不要把新截图或 console 日志写入旧 Ralph 任务目录。
 
 ## 2026-05-30 13:08 - US-001
 - 建立了 `comment_supplement` 任务类型契约：后端内部/API TaskKind、TaskService 映射、前端 TaskKind union 均已支持。
@@ -140,4 +142,16 @@ Source: prd.json
   - `comment_agent` 的 AIMessage 内容不是普通 snapshot；前端需要追加同一张卡并在最终空完成事件保留内容。
   - `comment_supplement` 是允许 agent-step 过程卡的任务类型，但 rewrite/edit 仍不应启用 agent-step 卡。
   - UI mock 浏览器验证应 route heartbeat，避免未启动后端时产生无关 console error。
+---
+## 2026-05-30 17:34 - US-010
+- 新增 `frontend/e2e/test_comment_supplement.spec.ts`，用 Playwright mock 覆盖三条用户可见契约：初次 generate 下载卡点击“补充批注”后创建 `comment_supplement`、展示 `comment_agent` 卡并生成新下载卡；agent generate 同时展示正文 agent 卡和 `comment_agent` 卡；workflow generate 过滤 `comment_agent` 卡。
+- 更新已有 E2E：`test_generation_mode_agent.spec.ts` 的证据目录改为当前任务路径；`test_home.spec.ts` 和 `test_url_conversation.spec.ts` 改为断言当前 `/` 到 `/tender` 的真实入口，不再依赖历史 landing page。
+- 回写 `asset/shared_runtime_word_skill_knowledge_pack.md` 与 `asset/README.md`，记录补充批注 / `comment_agent` mock E2E 回归入口。
+- 更改的文件：`frontend/e2e/test_comment_supplement.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`、`frontend/e2e/test_home.spec.ts`、`frontend/e2e/test_url_conversation.spec.ts`、`asset/shared_runtime_word_skill_knowledge_pack.md`、`asset/README.md`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`npm run test:e2e -- e2e/test_comment_supplement.spec.ts` 通过，3 passed；`npm run test:e2e` 通过，27 passed；`npm run lint` 通过；`npm run type-check` 通过；`npm test -- --runTestsByPath __tests__/unit/types/test_api_sse_agent_step.test.ts __tests__/unit/lib/test_api.test.ts __tests__/unit/hooks/test_use_chat_sse.test.tsx __tests__/unit/stores/test_chat_store_task_messages.test.ts __tests__/unit/components/chat/test_message_list.test.tsx __tests__/unit/components/chat/test_chat_panel.test.tsx __tests__/unit/components/chat/test_task_content_message.test.tsx --runInBand` 通过，7 suites / 128 tests；`npm test -- --runInBand` 通过，31 suites / 367 tests；`backend/.venv-linux/bin/python -m pytest backend/tests/nodes/test_comment_writeback.py backend/tests/services/test_document_service_task_result.py backend/tests/services/test_document_service_comment_supplement.py backend/tests/api/test_comment_supplement_api.py backend/tests/graphs/test_comment_supplement_graph.py backend/tests/agents/test_comment_agent.py backend/tests/prompts/test_comment_no_reference_prompt.py -v` 通过，61 passed；`backend/.venv-linux/bin/python -m pytest backend/tests -v` 通过，380 passed；`git diff --check` 通过。
+- 证据：截图写入 `tasks/comment-supplement-comment-agent/screenshots/us-010-comment-supplement-flow.png`、`us-010-agent-generate-comment-agent.png`、`us-010-workflow-no-comment-agent.png`；console 日志写入 `tasks/comment-supplement-comment-agent/logs/us-010-comment-supplement-console.log`、`us-010-agent-generate-console.log`、`us-010-workflow-generate-console.log`。
+- **未来迭代的学习：**
+  - 补充批注 E2E 可以完全 mock `/api/comment-supplement`、task status、heartbeat 和 SSE；不需要后端或 Word COM 即可覆盖 UI 任务链路。
+  - `comment_agent` 在前端标题中保持精确节点名；正文子 agent 仍会按 round 显示，例如 `content_generate_agent round-1`。
+  - 全量 E2E 里根路径已经是工作台重定向，旧首页断言会误报失败；新增导航测试应以 `/tender` 的 sidebar 和空态为真源。
 ---

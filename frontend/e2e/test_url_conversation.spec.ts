@@ -495,9 +495,8 @@ test.describe('URL-driven Conversation Flow', () => {
 });
 
 test.describe('Tender Page Basic Navigation', () => {
-  test('can navigate from homepage to tender page', async ({ page }) => {
+  test('root route redirects to tender page', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('link', { name: /进入使用/ }).click();
 
     await expect(page).toHaveURL(/\/tender/);
     await expect(page.getByText('类型', { exact: true })).toBeVisible();
