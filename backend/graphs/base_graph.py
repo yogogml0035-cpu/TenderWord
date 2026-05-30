@@ -251,8 +251,6 @@ class CrossProcessFileLock:
 # ============================================================================
 TRACKED_PROGRESS_NODES = {
     "prepare_template",
-    "get_comments",
-    "copy_comments",
     "extract_tender_params",
     "resolve_edit_target",
     "resolve_rewrite_target",

@@ -12,7 +12,7 @@ from backend.helper.word_helper.inline_style_ops import (
     build_inline_style_extraction_logs,
     extract_inline_style_fragments,
 )
-from backend.nodes.common_word_nodes.get_comments import (
+from backend.nodes.common_word_nodes.comment_extraction import (
     result_to_polished_comments,
 )
 from backend.prompts.skill_prompt import render_task_skill_prompt
@@ -59,9 +59,9 @@ def _build_edit_output_path(source_path: pathlib.Path) -> pathlib.Path:
 
 
 def resolve_edit_target(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
-    source_path_value = str(state.get("source_origin_tender_path") or "").strip()
+    source_path_value = str(state.get("source_document_path") or "").strip()
     if not source_path_value:
-        raise ValueError("source_origin_tender_path 不能为空")
+        raise ValueError("source_document_path 不能为空")
 
     source_path = pathlib.Path(source_path_value).expanduser()
     if not source_path.is_file():
@@ -83,10 +83,8 @@ def resolve_edit_target(state: TaskSkillGraphState, config) -> TaskSkillGraphSta
     )
 
     updates: Dict[str, Any] = {
-        "source_origin_tender_path": str(source_path.resolve()),
-        "origin_tender_path": str(edit_output_path),
+        "source_document_path": str(source_path.resolve()),
         "prepared_doc_path": str(edit_output_path),
-        "clean_draft_path": str(edit_output_path),
         "verbose_style_progress_logs": True,
         "suppress_comment_progress_logs": True,
     }
@@ -95,9 +93,9 @@ def resolve_edit_target(state: TaskSkillGraphState, config) -> TaskSkillGraphSta
 
 def extract_edit_context(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
     del config
-    document_path = str(state.get("prepared_doc_path") or state.get("origin_tender_path") or "").strip()
+    document_path = str(state.get("prepared_doc_path") or "").strip()
     if not document_path:
-        raise ValueError("extract_edit_context 需要 prepared_doc_path 或 origin_tender_path")
+        raise ValueError("extract_edit_context 需要 prepared_doc_path")
 
     before_text = state.get("insertion_before_text")
     after_text = state.get("insertion_after_text")
@@ -189,7 +187,7 @@ def extract_edit_context(state: TaskSkillGraphState, config) -> TaskSkillGraphSt
             ):
                 progress_log.info("[%s] %s", NODE_NAME_EXTRACT, message)
         return TaskSkillGraphState(
-            origin_tender_params=extracted_content,
+            source_section_text=extracted_content,
             polished_comments=polished_comments,
             inline_style_fragments=inline_style_fragments,
             start_page=start_page,
@@ -220,7 +218,7 @@ def edit_text(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
             sections=(
                 TaskSkillPromptSection(
                     title="当前锚点区正文",
-                    content=str(state.get("origin_tender_params") or ""),
+                    content=str(state.get("source_section_text") or ""),
                 ),
                 TaskSkillPromptSection(
                     title="用户修改指令",

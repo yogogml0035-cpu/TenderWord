@@ -9,10 +9,8 @@
 - replace_content: 替换内容
 - generate_polished_text: 生成修改文本（根据 tender_type 选择对应的 prompt）
 - content_agent_generate: 使用 DeepAgents 智能体生成修改文本
-- get_comments: 从送审稿 Word 文档中提取批注内容
 - get_rewrite_comments: 在 rewrite 前提取锚点区间内的原批注
-- copy_comments: 从送审稿按内容锚定复制批注到模板
-- generate_comments: 基于修改文本与计划使用 LLM 生成批注指令
+- generate_comments: 基于生成正文使用 LLM 生成批注指令
 - extract_tender_params: 提取招标参数内容（从锚点之间）
 - delete_tender_param: 删除招标参数内容（从锚点之间）
 - update_word: 更新 Word 文档（插入修改文本）
@@ -24,9 +22,7 @@ from backend.nodes.common_word_nodes.generate_polished_text import (
     generate_polished_text,
 )
 from backend.nodes.common_word_nodes.content_agent_generate import content_agent_generate
-from backend.nodes.common_word_nodes.get_comments import get_comments
 from backend.nodes.common_word_nodes.get_rewrite_comments import get_rewrite_comments
-from backend.nodes.common_word_nodes.copy_comments import copy_comments
 from backend.nodes.common_word_nodes.generate_comments import generate_comments
 from backend.nodes.common_word_nodes.extract_tender_params import extract_tender_params
 from backend.nodes.common_word_nodes.delete_tender_param import delete_tender_param
@@ -42,9 +38,7 @@ __all__ = [
     "replace_content",
     "generate_polished_text",
     "content_agent_generate",
-    "get_comments",
     "get_rewrite_comments",
-    "copy_comments",
     "generate_comments",
     "extract_tender_params",
     "delete_tender_param",

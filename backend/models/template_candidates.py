@@ -21,7 +21,7 @@ class TemplateCandidate(BaseModel):
     xbr: str = Field(default="", description="协办人")
     year: Optional[int] = Field(default=None, description="模板年份")
     fsg: Optional[str] = Field(default=None, description="发售稿链接")
-    shener: Optional[str] = Field(default=None, description="送审稿链接")
+    shener: Optional[str] = Field(default=None, description="推荐模板链接")
     selectable: bool = Field(default=False, description="是否允许直接选择")
     blocked_reason: Optional[str] = Field(default=None, description="不可选原因")
 
@@ -64,7 +64,7 @@ class TemplateCandidateSelectPayload(BaseModel):
     tendername: str = Field(..., min_length=1, description="模板项目名称")
     year: Optional[int] = Field(default=None, description="模板年份")
     fsg: Optional[str] = Field(default=None, description="发售稿链接")
-    shener: Optional[str] = Field(default=None, description="送审稿链接")
+    shener: Optional[str] = Field(default=None, description="推荐模板链接")
 
 
 class TemplateCandidateSelectRequest(BaseModel):

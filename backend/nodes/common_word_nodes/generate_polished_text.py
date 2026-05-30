@@ -37,8 +37,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
     progress_log.debug("[generate_polished_text] 开始执行...")
     
     # 优先使用文件路径，如果没有则使用文本内容
-    origin_tender_path = state.get("origin_tender_path")
-    origin_tender_params = state.get("origin_tender_params")
+    template_reference_text = state.get("template_reference_text")
     tender_param_paths = state.get("tender_param_paths") or []
     
     tender_params = state.get("tender_params")
@@ -60,7 +59,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
         rewrite_base_text = str(
             state.get("rewrite_base_text")
             or state.get("polished_text")
-            or origin_tender_params
+            or template_reference_text
             or ""
         )
         rewrite_user_prompt = str(state.get("rewrite_user_prompt") or "").strip()
@@ -91,7 +90,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
                 generation_style=str(state.get("generation_style") or "template"),
                 project_info=str(state.get("project_content", "") or ""),
                 tender_params=tender_params,
-                origin_tender_params=origin_tender_params,
+                template_reference_text=template_reference_text,
             )
         )
 
@@ -207,9 +206,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
 
     output_dir = None
     candidate_output_paths = [
-        origin_tender_path,
         state.get("prepared_doc_path"),
-        state.get("clean_draft_path"),
         state.get("rewrite_temp_output_path"),
     ]
     if tender_param_paths:
@@ -321,7 +318,7 @@ if __name__ == "__main__":
         progress_log.debug("第二步: 读取技术参数文档内容")
         progress_log.debug("-" * 80)
         
-        origin_tender_params = extract_text_from_word_file(str(tech_spec_path))
+        template_reference_text = extract_text_from_word_file(str(tech_spec_path))
         
         # 第三步：调用 generate_polished_text 生成修改后的文本
         progress_log.debug("") or progress_log.debug("-" * 80)
@@ -330,7 +327,7 @@ if __name__ == "__main__":
         
         polish_state: TenderGraphStateBase = {
             "tender_params": tender_params,
-            "origin_tender_params": origin_tender_params,
+            "template_reference_text": template_reference_text,
         }
         
         polished_result_state = generate_polished_text(polish_state, config=None)

@@ -29,7 +29,7 @@ def test_edit_text_writes_prompt_and_request_message_stages(tmp_path, monkeypatc
     result = edit_nodes.edit_text(
         {
             "edit_user_prompt": "请更新交付日期",
-            "origin_tender_params": "原始正文",
+            "source_section_text": "原始正文",
         },
         {
             "configurable": {
@@ -69,7 +69,7 @@ def test_edit_text_does_not_require_audit_path(monkeypatch):
     result = edit_nodes.edit_text(
         {
             "edit_user_prompt": "请修改文本",
-            "origin_tender_params": "原始正文",
+            "source_section_text": "原始正文",
         },
         {"configurable": {"model_provider": "deepseek"}},
     )
@@ -105,7 +105,7 @@ def test_edit_text_writes_generate_log_artifacts_without_breaking_edit_log(
     result = edit_nodes.edit_text(
         {
             "edit_user_prompt": "请更新交付日期",
-            "origin_tender_params": "原始正文",
+            "source_section_text": "原始正文",
         },
         {
             "configurable": {

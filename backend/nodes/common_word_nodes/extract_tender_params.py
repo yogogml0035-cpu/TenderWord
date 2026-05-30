@@ -59,7 +59,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
     - tender_param_paths: 技术参数文件路径列表（可选）
 
     提取的内容存储到：
-    - origin_tender_params: 从文档提取的原始内容
+    - template_reference_text: 从文档提取的原始内容
     - tender_params: 从技术参数文件提取的内容（如有）
     - start_page: 提取内容起始页码
     - end_page: 提取内容结束页码
@@ -87,7 +87,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
             f"[extract_tender_params] 警告: 未提供 insertion_before_text 或 insertion_after_text，跳过提取"
         )
         return TenderGraphStateBase(
-            origin_tender_params="",
+            template_reference_text="",
             tender_params="",
         )
 
@@ -254,7 +254,7 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
 
     # 构建更新字典
     updates: Dict[str, Any] = {
-        "origin_tender_params": extracted_content,
+        "template_reference_text": extracted_content,
         "inline_style_fragments": inline_style_fragments,
     }
 
@@ -357,7 +357,7 @@ if __name__ == "__main__":
         try:
             result = extract_tender_params(test_state, config=None)
 
-            content = result.get("origin_tender_params", "")
+            content = result.get("template_reference_text", "")
             if content:
                 print(f"\n成功提取，长度: {len(content)} 字符")
                 print(

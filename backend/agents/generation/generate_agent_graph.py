@@ -137,21 +137,21 @@ def _generate_draft(
     )
     project_info = str(_context_value(merged_state, config, "project_info", "") or "")
     tender_params = _context_value(merged_state, config, "tender_params")
-    origin_tender_params = _context_value(merged_state, config, "origin_tender_params")
+    template_reference_text = _context_value(merged_state, config, "template_reference_text")
     log_summary = (
         "[content_generate_agent] prompt 输入摘要: tender_type=%s, generation_style=%s, "
-        "project_info_chars=%d, origin_tender_params_chars=%d, tender_params_chars=%d"
+        "project_info_chars=%d, template_reference_text_chars=%d, tender_params_chars=%d"
     )
     log_args = (
         tender_type,
         generation_style,
         _text_length(project_info),
-        _text_length(origin_tender_params),
+        _text_length(template_reference_text),
         _text_length(tender_params),
     )
     all_inputs_empty = (
         _text_length(project_info) == 0
-        and _text_length(origin_tender_params) == 0
+        and _text_length(template_reference_text) == 0
         and _text_length(tender_params) == 0
     )
     if all_inputs_empty:
@@ -164,7 +164,7 @@ def _generate_draft(
             generation_style=generation_style,
             project_info=project_info,
             tender_params=tender_params,
-            origin_tender_params=origin_tender_params,
+            template_reference_text=template_reference_text,
         )
     )
     content = _run_async(

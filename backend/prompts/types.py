@@ -21,7 +21,7 @@ class GeneratePromptInput:
     generation_style: str = "template"
     project_info: str = ""
     tender_params: Any = ""
-    origin_tender_params: Any = ""
+    template_reference_text: Any = ""
 
 
 @dataclass(frozen=True)

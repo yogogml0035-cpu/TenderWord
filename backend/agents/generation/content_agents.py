@@ -227,7 +227,7 @@ def _build_generation_payload(
         "tender_type": str(state.get("tender_type") or "xjcg"),
         "generation_style": str(state.get("generation_style") or "template"),
         "project_info": str(state.get("project_content") or ""),
-        "origin_tender_params": state.get("origin_tender_params"),
+        "template_reference_text": state.get("template_reference_text"),
         "tender_params": state.get("tender_params"),
         "model_provider": model_provider,
     }
@@ -271,11 +271,11 @@ def _log_generation_input_summary(
     payload: dict[str, Any],
 ) -> None:
     project_info_chars = _text_length(payload.get("project_info"))
-    origin_chars = _text_length(payload.get("origin_tender_params"))
+    origin_chars = _text_length(payload.get("template_reference_text"))
     tender_chars = _text_length(payload.get("tender_params"))
     message = (
         "[content_agent] 生成上下文摘要: task_id=%s, generation_style=%s, "
-        "project_info_chars=%d, origin_tender_params_chars=%d, tender_params_chars=%d"
+        "project_info_chars=%d, template_reference_text_chars=%d, tender_params_chars=%d"
     )
     args = (
         task_id,

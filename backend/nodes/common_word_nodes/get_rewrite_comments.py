@@ -18,7 +18,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.nodes.common_word_nodes.get_comments import (
+from backend.nodes.common_word_nodes.comment_extraction import (
     extract_document_analysis_result,
     result_to_polished_comments,
 )
@@ -33,18 +33,16 @@ def get_rewrite_comments(state: TaskSkillGraphState, config) -> TaskSkillGraphSt
     """
     在 rewrite 删除原内容之前，提取锚点区间内的旧批注并写入 polished_comments。
 
-    与 get_comments 不同，本节点采用 strict 语义：
+    本节点采用 strict 语义：
     - 必须存在可读文档
     - 必须提供前后锚点
     - 必须成功定位锚点区间
     - Word/Inspector 异常直接抛出，终止 rewrite 任务
     """
     start_time = time.perf_counter()
-    document_path = state.get("prepared_doc_path") or state.get("origin_tender_path")
-    if not document_path or (
-        isinstance(document_path, str) and document_path.strip() == ""
-    ):
-        raise ValueError("get_rewrite_comments 需要 prepared_doc_path 或 origin_tender_path")
+    document_path = str(state.get("prepared_doc_path") or "").strip()
+    if not document_path:
+        raise ValueError("get_rewrite_comments 需要 prepared_doc_path")
 
     file_path = Path(str(document_path))
     if not file_path.exists():

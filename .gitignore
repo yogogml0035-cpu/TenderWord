@@ -2,6 +2,7 @@
 *.log
 backend/logs/*
 backend/prompts_log/*
+**/prompts_log/**
 
 audits/
 # Python 缓存文件

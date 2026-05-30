@@ -170,11 +170,6 @@ interface TaskScopeState {
 
 const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(['completed', 'failed', 'cancelled']);
 const TERMINAL_MESSAGE_STATUSES = new Set<Message['status']>(['completed', 'error', 'cancelled']);
-const REWRITE_STATE_DETAIL_METADATA_KEYS = [
-  'comment_plan_detail',
-  'strikethrough_plan',
-  'non_black_font_plan',
-] as const;
 
 function isTerminalTaskStatus(status?: TaskStatus): boolean {
   if (!status) {
@@ -188,42 +183,6 @@ function isTerminalMessageStatus(status?: Message['status']): boolean {
     return false;
   }
   return TERMINAL_MESSAGE_STATUSES.has(status);
-}
-
-function sanitizeMessageMetadataForPersistence(
-  metadata: Message['metadata'] | undefined
-): Message['metadata'] | undefined {
-  if (!metadata) {
-    return metadata;
-  }
-
-  let changed = false;
-  const nextMetadata = { ...metadata };
-  for (const key of REWRITE_STATE_DETAIL_METADATA_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(nextMetadata, key)) {
-      delete nextMetadata[key];
-      changed = true;
-    }
-  }
-
-  return changed ? nextMetadata : metadata;
-}
-
-function sanitizeConversationForPersistence(conversation: Conversation): Conversation {
-  let changed = false;
-  const messages = conversation.messages.map((message) => {
-    const metadata = sanitizeMessageMetadataForPersistence(message.metadata);
-    if (metadata === message.metadata) {
-      return message;
-    }
-    changed = true;
-    return {
-      ...message,
-      metadata,
-    };
-  });
-
-  return changed ? { ...conversation, messages } : conversation;
 }
 
 function normalizeDraftFile(file: ConversationDraftFile | undefined): ConversationDraftFile | undefined {
@@ -2413,7 +2372,7 @@ export const useChatStore = create<ChatStore>()(
         name: 'chat-storage',
         storage: createJSONStorage(() => sessionStorage),
         partialize: (state) => ({
-          conversations: state.conversations.map(sanitizeConversationForPersistence),
+          conversations: state.conversations,
           currentConversationId: state.currentConversationId,
           selectedTenderType: state.selectedTenderType,
           conversationDrafts: state.conversationDrafts,

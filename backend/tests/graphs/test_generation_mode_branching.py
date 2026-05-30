@@ -106,12 +106,12 @@ def test_agent_branch_uses_content_and_skips_generate_polished_text() -> None:
     assert result["generate_polished_done"] is True
 
 
-def test_agent_branch_skips_generate_comments_even_when_origin_tender_exists() -> None:
+def test_agent_branch_uses_comment_agent_regardless_of_source_document_path() -> None:
     calls: list[str] = []
     result = _build_graph(calls).compile().invoke(
         {
             "generation_mode": "agent",
-            "origin_tender_path": "D:/UploadFiles/review.docx",
+            "source_document_path": "D:/UploadFiles/review.docx",
             "prepared_doc_path": "D:/UploadFiles/template.docx",
             "insertion_before_text": "before",
             "insertion_after_text": "after",
@@ -124,12 +124,17 @@ def test_agent_branch_skips_generate_comments_even_when_origin_tender_exists() -
     assert result["polished_text"] == "agent text"
 
 
-def test_standard_graph_does_not_register_legacy_comment_copy_nodes() -> None:
+def test_standard_graph_registers_current_comment_topology_only() -> None:
     graph_nodes = set(_build_graph([]).compile().get_graph().nodes)
+    removed_nodes = {
+        "".join(("get", "_comments")),
+        "".join(("copy", "_comments")),
+        "comments_ready",
+    }
 
-    assert "get_comments" not in graph_nodes
-    assert "copy_comments" not in graph_nodes
-    assert "comments_ready" not in graph_nodes
+    assert graph_nodes.isdisjoint(removed_nodes)
+    assert "generate_comments" in graph_nodes
+    assert "comment_agent" in graph_nodes
 
 
 def test_estimate_total_nodes_uses_selected_generation_branch() -> None:
@@ -141,7 +146,7 @@ def test_estimate_total_nodes_uses_selected_generation_branch() -> None:
         graph.estimate_total_nodes(
             {
                 "generation_mode": "workflow",
-                "origin_tender_path": "D:/UploadFiles/review.docx",
+                "source_document_path": "D:/UploadFiles/review.docx",
             }
         )
         == 8

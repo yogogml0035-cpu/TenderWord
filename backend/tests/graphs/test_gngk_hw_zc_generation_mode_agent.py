@@ -65,7 +65,7 @@ def _stub_gngk_hw_zc_nodes(
         calls.append("extract_tender_params")
         return {
             "tender_params": "gngk hw zc extracted params",
-            "origin_tender_params": "gngk hw zc origin params",
+            "template_reference_text": "gngk hw zc origin params",
         }
 
     def _delete_tender_param(state, config=None):

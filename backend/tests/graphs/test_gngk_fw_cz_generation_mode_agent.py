@@ -69,7 +69,7 @@ def _stub_gngk_fw_cz_nodes(
         calls.append("extract_tender_params")
         return {
             "tender_params": "gngk fw cz extracted params",
-            "origin_tender_params": "gngk fw cz origin params",
+            "template_reference_text": "gngk fw cz origin params",
         }
 
     def _delete_tender_param(state, config=None):

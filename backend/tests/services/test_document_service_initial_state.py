@@ -89,9 +89,7 @@ def test_build_initial_state_uses_template_and_tender_params_only() -> None:
         "D:/UploadFiles/params1.docx",
         "D:/UploadFiles/params2.docx",
     ]
-    assert "origin_tender_path" not in state
-    assert "clean_draft_path" not in state
-    assert "source_origin_tender_path" not in state
+    assert "source_document_path" not in state
     assert state["project_number"] == "254DSITC2512"
     assert "254DSITC2512" in state["tender_invitation"]
 

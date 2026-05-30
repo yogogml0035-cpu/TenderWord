@@ -197,7 +197,7 @@ def _request_json_repair(
 def _render_verify_user_prompt(
     *,
     project_info: Any,
-    origin_tender_params: Any,
+    template_reference_text: Any,
     tender_params: Any,
     current_text: str,
 ) -> str:
@@ -218,7 +218,7 @@ def _render_verify_user_prompt(
         "- 不要因为正文编号、章节外壳、表格形态与技术参数原文不同而报错。\n\n"
         "只返回需要修复的问题；不需要修改的问题不要出现在 JSON 数组里。\n\n"
         f"【项目基础信息】\n{project_info or ''}\n\n"
-        f"【参考内容（只作模板，不作事实真源）】\n{origin_tender_params or ''}\n\n"
+        f"【参考内容（只作模板，不作事实真源）】\n{template_reference_text or ''}\n\n"
         f"【技术参数（原材料，事实真源）】\n{tender_params or ''}\n\n"
         f"【待审核正文】\n{current_text}"
     )
@@ -307,7 +307,7 @@ def _verify_text(
     else:
         user_prompt = _render_verify_user_prompt(
             project_info=_context_value(merged_state, config, "project_info"),
-            origin_tender_params=_context_value(merged_state, config, "origin_tender_params"),
+            template_reference_text=_context_value(merged_state, config, "template_reference_text"),
             tender_params=_context_value(merged_state, config, "tender_params"),
             current_text=current_text,
         )

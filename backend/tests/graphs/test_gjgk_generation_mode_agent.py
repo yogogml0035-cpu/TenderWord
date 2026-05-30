@@ -70,7 +70,7 @@ def _stub_gjgk_nodes(
         calls.append("extract_tender_params")
         return {
             "tender_params": "gjgk extracted params",
-            "origin_tender_params": "gjgk origin params",
+            "template_reference_text": "gjgk origin params",
         }
 
     def _gjgk_delete_tender_param(state, config=None):

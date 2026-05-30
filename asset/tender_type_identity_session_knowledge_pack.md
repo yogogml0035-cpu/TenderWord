@@ -125,6 +125,12 @@
 
 ## 前端表单与任务分派
 
+### 生成上传与 payload
+
+- 全类型初次生成的上传契约只有模板文件和技术参数文件：前端 draft `files` 只保存 `template` 与 `tender_params`，提交 payload 只发送 `file_paths.template` 与 `file_paths.tender_params`。
+- 后端 `DocumentService._build_initial_state()` 只把生成文件输入装配为 `template_path` 与 `tender_param_paths`；节点层按 `template_path` 提取 `template_reference_text`，技术参数文件内容汇总到 `tender_params`。
+- 修改这个契约时必须同步 `frontend/components/forms/TenderFormShared.tsx`、`frontend/lib/formDataConverter.ts`、`frontend/types/api.ts`、`backend/models/generate.py`、`backend/services/document_service.py` 和相关前后端测试。
+
 ### `gngk` 到后端 `form_type`
 
 `frontend/lib/gngkFormType.ts` 是 generate 与 edit 共享的 `gngk` 后端 `form_type` 分派真源，`frontend/lib/formDataConverter.ts` 与 `frontend/components/chat/ChatPanel.tsx` 都必须调用它：

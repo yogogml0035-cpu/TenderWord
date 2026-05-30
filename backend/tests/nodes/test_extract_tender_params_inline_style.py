@@ -152,8 +152,6 @@ def test_extract_tender_params_requires_template_path() -> None:
     with pytest.raises(ValueError) as exc_info:
         extract_module.extract_tender_params(
             {
-                "clean_draft_path": "D:/legacy-clean.docx",
-                "origin_tender_path": "D:/legacy-review.docx",
                 "insertion_before_text": "第三章 采购需求",
                 "insertion_after_text": "第四章 响应文件有关格式",
             },
@@ -162,10 +160,6 @@ def test_extract_tender_params_requires_template_path() -> None:
 
     message = str(exc_info.value)
     assert "template_path" in message
-    assert "clean_draft" not in message
-    assert "origin_tender" not in message
-    assert "清洁稿" not in message
-    assert "送审稿" not in message
 
 
 def test_extract_tender_params_records_inline_style_fragments(
@@ -198,7 +192,7 @@ def test_extract_tender_params_records_inline_style_fragments(
 
     result = extract_module.extract_tender_params(_build_state(doc_path), config=None)
 
-    assert result["origin_tender_params"] == "原始采购需求"
+    assert result["template_reference_text"] == "原始采购需求"
     assert result["inline_style_fragments"] == fragments
     assert result["start_page"] == 2
     assert result["end_page"] == 4
@@ -246,7 +240,7 @@ def test_extract_tender_params_joins_multiple_tender_param_paths(
         config=None,
     )
 
-    assert result["origin_tender_params"] == "原始采购需求"
+    assert result["template_reference_text"] == "原始采购需求"
     assert result["tender_params"] == "技术参数:param-one\n\n技术参数:param-two"
     assert style_call["opened_file_path"] == str(doc_path)
     assert style_call["tender_param_paths"] == [str(param_one), str(param_two)]
@@ -273,7 +267,7 @@ def test_extract_tender_params_style_extraction_failure_is_best_effort(
 
     result = extract_module.extract_tender_params(_build_state(doc_path), config=None)
 
-    assert result["origin_tender_params"] == "原始采购需求"
+    assert result["template_reference_text"] == "原始采购需求"
     assert result["inline_style_fragments"] == []
     assert any("模板样式抽取失败，已跳过" in message for message in progress_warnings)
     assert any("style extraction exploded" in message for message in debug_messages)

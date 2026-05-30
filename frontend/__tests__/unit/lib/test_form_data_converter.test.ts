@@ -102,8 +102,7 @@ describe('formDataConverter', () => {
         template: '/uploads/template.docx',
         tender_params: ['/uploads/params.docx'],
       });
-      expect(request.file_paths).not.toHaveProperty('origin_tender');
-      expect(request.file_paths).not.toHaveProperty('clean_draft');
+      expect(Object.keys(request.file_paths).sort()).toEqual(['template', 'tender_params']);
     }
   );
 

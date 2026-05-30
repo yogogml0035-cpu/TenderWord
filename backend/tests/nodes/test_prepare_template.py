@@ -32,22 +32,15 @@ class _FakeWord:
 def test_prepare_template_requires_template_path() -> None:
     with pytest.raises(ValueError) as exc_info:
         prepare_module.prepare_template(
-            {
-                "clean_draft_path": "D:/legacy-clean.docx",
-                "origin_tender_path": "D:/legacy-review.docx",
-            },
+            {},
             config=None,
         )
 
     message = str(exc_info.value)
     assert "template_path" in message
-    assert "clean_draft" not in message
-    assert "origin_tender" not in message
-    assert "清洁稿" not in message
-    assert "送审稿" not in message
 
 
-def test_prepare_template_copies_template_path_and_ignores_legacy_slots(
+def test_prepare_template_copies_template_path(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -69,8 +62,6 @@ def test_prepare_template_copies_template_path_and_ignores_legacy_slots(
     result = prepare_module.prepare_template(
         {
             "template_path": str(template_path),
-            "clean_draft_path": str(tmp_path / "legacy-clean.docx"),
-            "origin_tender_path": str(tmp_path / "legacy-review.docx"),
             "project_number": "PN001",
             "project_name": "DemoProject",
         },

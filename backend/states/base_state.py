@@ -40,9 +40,8 @@ class CommentInstruction(TypedDict):
 
 class TenderGraphStateBase(BaseState, total=False):
     template_path: str
-    origin_tender_path: str
+    source_document_path: str
     tender_param_paths: List[str]
-    clean_draft_path: Optional[str]
     prepared_doc_path: str
     source_prepared_doc_path: str
     comment_supplement_source_file: str
@@ -52,7 +51,7 @@ class TenderGraphStateBase(BaseState, total=False):
     generation_mode: str
     style_writeback_mode: str
 
-    origin_tender_params: str
+    template_reference_text: str
     tender_params: str
     inline_style_fragments: List[Dict[str, Any]]
     verbose_style_progress_logs: bool
@@ -65,10 +64,7 @@ class TenderGraphStateBase(BaseState, total=False):
     insertion_after_text: str
 
     polished_text: str
-    
-    comment_plan_detail: List[Dict[str, Any]]
-    strikethrough_plan: List[Dict[str, Any]]
-    non_black_font_plan: List[Dict[str, Any]]
+
     polished_comments: List[CommentInstruction]
     generated_comment_count: int
     comment_writeback_summary: str
@@ -78,9 +74,6 @@ class TenderGraphStateBase(BaseState, total=False):
 
     insertion_log: str
     replacement_log: str
-    copy_comments_log: str
-    copy_comments_added: int
-    copy_comments_unmatched: List[Dict[str, Any]]
     comments_summary: str
 
     # Comment writeback tracking (captured by update_word / gjgk_update_word nodes)

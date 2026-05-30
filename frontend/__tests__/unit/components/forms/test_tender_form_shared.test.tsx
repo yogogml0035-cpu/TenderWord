@@ -440,12 +440,9 @@ describe('TenderFormShared', () => {
 
     expect(screen.getByTestId('file-uploader-template')).toBeInTheDocument();
     expect(screen.getByTestId('file-uploader-params')).toBeInTheDocument();
-    expect(screen.queryByTestId('file-uploader-clean_draft')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('file-uploader-origin_tender')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId(/^file-uploader-/)).toHaveLength(2);
     expect(screen.getByText('模板文件（必填）')).toBeInTheDocument();
     expect(screen.getByText('技术参数文件（必填）')).toBeInTheDocument();
-    expect(screen.queryByText('送审稿文件（可选）')).not.toBeInTheDocument();
-    expect(screen.queryByText('模板文件（可选）')).not.toBeInTheDocument();
   });
 
   it('syncs draft files as template and tender_params only', async () => {
@@ -471,8 +468,7 @@ describe('TenderFormShared', () => {
       },
     ]);
     fileUpdates.forEach((files) => {
-      expect(files).not.toHaveProperty('origin_tender');
-      expect(files).not.toHaveProperty('clean_draft');
+      expect(Object.keys(files).sort()).toEqual(['template', 'tender_params']);
     });
   });
 

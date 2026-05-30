@@ -50,7 +50,7 @@ def test_generate_polished_text_uses_generate_prompt_and_stream_llm(
             "generation_style": "param",
             "project_content": "project info",
             "tender_params": "new tender params",
-            "origin_tender_params": "template shell",
+            "template_reference_text": "template shell",
             "project_number": "P-001",
             "project_name": "Workflow Project",
         },
@@ -69,7 +69,7 @@ def test_generate_polished_text_uses_generate_prompt_and_stream_llm(
         generation_style="param",
         project_info="project info",
         tender_params="new tender params",
-        origin_tender_params="template shell",
+        template_reference_text="template shell",
     )
     assert captured_stream["model_provider"] == "qwen"
     assert captured_stream["system_prompt"] == "system prompt"

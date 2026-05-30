@@ -59,7 +59,7 @@ LLM_SNAPSHOT_INTERVAL_SECONDS = 0.25
 REWRITE_STATE_KEYS = [
     "tender_type",
     "prepared_doc_path",
-    "source_origin_tender_path",
+    "source_document_path",
     "polished_text",
     "tender_params",
     "insertion_before_text",
@@ -82,12 +82,6 @@ REWRITE_STATE_KEYS = [
     "fund_source_lx",
     "tender_invitation",
     "delivery_location",
-]
-
-REWRITE_STATE_DETAIL_KEYS = [
-    "comment_plan_detail",
-    "strikethrough_plan",
-    "non_black_font_plan",
 ]
 
 REWRITE_DEFAULT_ANCHORS = {
@@ -818,9 +812,9 @@ class DocumentService:
             "rewrite_user_prompt": user_prompt,
             "rewrite_mode": True,
         }
-        if latest_rewrite_state is not None and "source_origin_tender_path" in latest_rewrite_state:
-            initial_state["source_origin_tender_path"] = str(
-                latest_rewrite_state.get("source_origin_tender_path") or ""
+        if latest_rewrite_state is not None and "source_document_path" in latest_rewrite_state:
+            initial_state["source_document_path"] = str(
+                latest_rewrite_state.get("source_document_path") or ""
             ).strip()
         return initial_state
 
@@ -873,7 +867,7 @@ class DocumentService:
             "tender_lx": int(request.tender_lx),
             "fund_source_lx": str(request.fund_source_lx),
             "edit_user_prompt": str(request.edit_prompt).strip(),
-            "source_origin_tender_path": str(request.file_path).strip(),
+            "source_document_path": str(request.file_path).strip(),
             "insertion_before_text": str(insertion_before_text),
             "insertion_after_text": str(insertion_after_text),
         }
@@ -907,8 +901,7 @@ class DocumentService:
                 "comment_supplement_source_file": source_file,
                 "source_prepared_doc_path": source_file,
                 "prepared_doc_path": source_file,
-                "origin_tender_path": source_file,
-                "clean_draft_path": source_file,
+                "source_document_path": source_file,
                 "polished_text": str(latest_rewrite_state.get("polished_text") or ""),
             }
         )
@@ -1301,13 +1294,6 @@ class DocumentService:
             generation_mode = initial_state.get("generation_mode")
         if isinstance(generation_mode, str) and generation_mode.strip():
             snapshot["generation_mode"] = generation_mode.strip()
-
-        for key in REWRITE_STATE_DETAIL_KEYS:
-            value = result_state.get(key)
-            if value is None:
-                value = initial_state.get(key)
-            if isinstance(value, list):
-                snapshot[key] = copy.deepcopy(value)
 
         return snapshot
 

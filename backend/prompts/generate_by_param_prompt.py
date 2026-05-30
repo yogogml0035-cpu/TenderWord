@@ -89,7 +89,7 @@ PARAM_POLISH_USER_PROMPT = """
 {project_info}
 
 2. 【参考内容】（保留外层结构与非技术参考）：
-{origin_tender_params}
+{template_reference_text}
 
 3. 【技术参数】（技术章节正文的唯一实质内容来源）：
 {tender_params}
@@ -117,6 +117,6 @@ def render_generate_by_param_prompt(data: GeneratePromptInput) -> RenderedPrompt
         user_prompt=user_prompt.format(
             project_info=format_prompt_value(data.project_info),
             tender_params=format_prompt_value(data.tender_params),
-            origin_tender_params=format_prompt_value(data.origin_tender_params),
+            template_reference_text=format_prompt_value(data.template_reference_text),
         ),
     )

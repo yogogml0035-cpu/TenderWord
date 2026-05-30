@@ -199,7 +199,7 @@ def test_content_generate_agent_reuses_generate_prompt_and_model_config(monkeypa
             "generation_style": "param",
             "project_info": "project info",
             "tender_params": "template params",
-            "origin_tender_params": "new params",
+            "template_reference_text": "new params",
             "model_provider": "qwen",
             "messages": [],
         }
@@ -210,7 +210,7 @@ def test_content_generate_agent_reuses_generate_prompt_and_model_config(monkeypa
         generation_style="param",
         project_info="project info",
         tender_params="template params",
-        origin_tender_params="new params",
+        template_reference_text="new params",
     )
     assert captured_stream["model_provider"] == "qwen"
     assert captured_stream["system_prompt"] == "system"
@@ -247,7 +247,7 @@ def test_content_generate_agent_reads_parent_context_from_config(monkeypatch) ->
                     "generation_style": "param",
                     "project_info": "config project",
                     "tender_params": "config tender params",
-                    "origin_tender_params": "config origin params",
+                    "template_reference_text": "config origin params",
                     "model_provider": "doubao",
                 }
             }
@@ -259,7 +259,7 @@ def test_content_generate_agent_reads_parent_context_from_config(monkeypatch) ->
         generation_style="param",
         project_info="config project",
         tender_params="config tender params",
-        origin_tender_params="config origin params",
+        template_reference_text="config origin params",
     )
     assert result["structured_response"] == {"draft_text": "draft text"}
 
@@ -328,7 +328,7 @@ def test_content_verify_agent_repairs_missing_fields_with_retry(monkeypatch) -> 
     result = graph.invoke(
         {
             "current_text": "采购需求正文",
-            "origin_tender_params": "参考内容旧质保期限：1年",
+            "template_reference_text": "参考内容旧质保期限：1年",
             "tender_params": "质保期限：3年",
             "model_provider": "deepseek",
         }
@@ -362,7 +362,7 @@ def test_content_verify_agent_reads_current_text_from_config(monkeypatch) -> Non
                 "generation_agent_context": {
                     "current_text": "config draft text",
                     "project_info": "config project info",
-                    "origin_tender_params": "config origin params",
+                    "template_reference_text": "config origin params",
                     "tender_params": "config tender params",
                     "model_provider": "qwen",
                 }
@@ -615,7 +615,7 @@ def test_content_runner_creates_workspace_and_reads_final_file(
             "generation_style": "template",
             "project_content": "project",
             "tender_params": "params",
-            "origin_tender_params": "origin",
+            "template_reference_text": "origin",
         },
         {"configurable": {"model_provider": "deepseek", "task_id": "task-agent-42"}},
         runner=runner,
@@ -674,7 +674,7 @@ def test_content_runner_writes_complete_generation_context() -> None:
             "generation_style": "param",
             "project_content": "project",
             "tender_params": {"name": "params"},
-            "origin_tender_params": "origin",
+            "template_reference_text": "origin",
         },
         {"configurable": {"model_provider": "qwen", "task_id": "task-agent-context"}},
         runner=runner,
@@ -686,7 +686,7 @@ def test_content_runner_writes_complete_generation_context() -> None:
         "tender_type": "gngk_hw_zc",
         "generation_style": "param",
         "project_info": "project",
-        "origin_tender_params": "origin",
+        "template_reference_text": "origin",
         "tender_params": {"name": "params"},
         "model_provider": "qwen",
     }

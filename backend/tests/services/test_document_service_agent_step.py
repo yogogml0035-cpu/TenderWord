@@ -138,6 +138,3 @@ def test_sse_callback_push_done_keeps_comment_writeback_contract() -> None:
     assert len(events) == 1
     assert events[0].event is SSEEventType.DONE
     assert events[0].data["comment_writeback"] == comment_writeback
-    assert "comment_plan_detail" not in events[0].data
-    assert "strikethrough_plan" not in events[0].data
-    assert "non_black_font_plan" not in events[0].data

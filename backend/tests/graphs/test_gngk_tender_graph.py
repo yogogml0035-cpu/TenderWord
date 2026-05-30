@@ -102,7 +102,7 @@ def test_standard_generate_graph_preserves_inline_style_fragments_until_update()
 
     def _extract_node(state, config=None):
         return {
-            "origin_tender_params": "模板正文",
+            "template_reference_text": "模板正文",
             "inline_style_fragments": [{"source_text": "模板样式"}],
             "start_page": 1,
             "end_page": 1,

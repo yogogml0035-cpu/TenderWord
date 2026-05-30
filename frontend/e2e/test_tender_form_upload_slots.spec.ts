@@ -112,10 +112,7 @@ test.describe('Tender form upload slots', () => {
     await expect(page.getByTestId('file-uploader-params-card')).toBeVisible();
     await expect(page.getByText('模板文件（必填）')).toHaveCount(1);
     await expect(page.getByText('技术参数文件（必填）')).toHaveCount(1);
-    await expect(page.getByTestId('file-uploader-clean_draft-card')).toHaveCount(0);
-    await expect(page.getByTestId('file-uploader-origin_tender-card')).toHaveCount(0);
-    await expect(page.getByText('送审稿文件（可选）')).toHaveCount(0);
-    await expect(page.getByText('模板文件（可选）')).toHaveCount(0);
+    await expect(page.getByTestId(/file-uploader-.*-card/)).toHaveCount(2);
 
     await page.getByRole('button', { name: '开始生成' }).click();
     await expect(page.getByText('请上传模板文件')).toBeVisible();
