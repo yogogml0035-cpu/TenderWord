@@ -7,7 +7,7 @@ const generateDoneTaskId = 'task-generate-done-e2e';
 const commentSupplementTaskId = 'task-comment-supplement-e2e';
 const agentGenerateTaskId = 'task-agent-generate-comment-e2e';
 const workflowGenerateTaskId = 'task-workflow-generate-comment-e2e';
-const artifactRoot = path.resolve(__dirname, '../../tasks/comment-supplement-comment-agent');
+const artifactRoot = path.resolve(__dirname, '../../tasks/template-comment-generation-convergence');
 const screenshotsDir = path.join(artifactRoot, 'screenshots');
 const logsDir = path.join(artifactRoot, 'logs');
 
