@@ -81,8 +81,8 @@ function createCommentSupplementRunningTaskStatus() {
       running_nodes: ['comment_agent'],
       current_node: 'comment_agent',
       completed_count: 1,
-      total_nodes: 4,
-      progress_percent: 25,
+      total_nodes: 3,
+      progress_percent: 33.3,
     },
   };
 }

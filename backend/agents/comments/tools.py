@@ -43,11 +43,25 @@ class WriteValidatedCommentsInput(BaseModel):
 class CommentAgentToolContext:
     initial_comments: list[dict[str, str]]
     polished_text: str
+    allow_comment_generation: bool = False
     log_parts: list[str] = field(default_factory=list)
     validation_results: list[dict[str, Any]] = field(default_factory=list)
     tool_snapshots: list[CommentAgentToolSnapshot] = field(default_factory=list)
     final_proposed_comments: list[dict[str, str]] = field(default_factory=list)
     writeback_result: CommentWritebackResult | None = None
+
+def _effective_initial_comments(
+    context: CommentAgentToolContext,
+    proposed_comments: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    if context.initial_comments or not context.allow_comment_generation:
+        return context.initial_comments
+
+    context.initial_comments = [
+        item.model_dump(mode="json")
+        for item in normalize_comment_candidates(proposed_comments)
+    ]
+    return context.initial_comments
 
 def normalize_comment_candidates(
     comments: list[Mapping[str, Any]] | None,
@@ -484,8 +498,9 @@ def create_comment_agent_tools(context: CommentAgentToolContext) -> list[Structu
         proposed_comments: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """校验 AI 修复后的批注锚点，只允许同 index 修改 reference_text。"""
+        initial_comments = _effective_initial_comments(context, proposed_comments)
         validation = validate_comment_reference_candidates(
-            initial_comments=context.initial_comments,
+            initial_comments=initial_comments,
             proposed_comments=proposed_comments,
             polished_text=context.polished_text,
         )
@@ -499,8 +514,9 @@ def create_comment_agent_tools(context: CommentAgentToolContext) -> list[Structu
         proposed_comments: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """提交最终候选。这里只重新校验并记录候选，真正 Word 写入由 graph 节点线程执行。"""
+        initial_comments = _effective_initial_comments(context, proposed_comments)
         validation = validate_comment_reference_candidates(
-            initial_comments=context.initial_comments,
+            initial_comments=initial_comments,
             proposed_comments=proposed_comments,
             polished_text=context.polished_text,
         )

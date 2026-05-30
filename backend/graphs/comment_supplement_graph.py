@@ -8,13 +8,11 @@ from backend.graphs.base_graph import BaseGraph
 from backend.nodes.common_word_nodes.comment_agent import comment_agent_writeback
 from backend.nodes.common_word_nodes.comment_supplement import (
     finalize_comment_supplement,
-    generate_comment_supplement_comments,
     prepare_comment_supplement,
 )
 from backend.states import TenderGraphStateBase
 
 NODE_PREPARE_COMMENT_SUPPLEMENT = "prepare_comment_supplement"
-NODE_GENERATE_COMMENTS = "generate_comments"
 NODE_COMMENT_AGENT = "comment_agent"
 NODE_FINALIZE_COMMENT_SUPPLEMENT = "finalize_comment_supplement"
 
@@ -24,7 +22,6 @@ class CommentSupplementGraph(BaseGraph):
     STATE_CLS = TenderGraphStateBase
 
     NODE_PREPARE_COMMENT_SUPPLEMENT: Callable = prepare_comment_supplement
-    NODE_GENERATE_COMMENTS: Callable = generate_comment_supplement_comments
     NODE_COMMENT_AGENT: Callable = comment_agent_writeback
     NODE_FINALIZE_COMMENT_SUPPLEMENT: Callable = finalize_comment_supplement
 
@@ -33,7 +30,7 @@ class CommentSupplementGraph(BaseGraph):
 
     def estimate_total_nodes(self, initial_state: dict) -> int:
         del initial_state
-        return 4
+        return 3
 
     def build_graph(self) -> StateGraph:
         builder = StateGraph(self.STATE_CLS)
@@ -43,13 +40,6 @@ class CommentSupplementGraph(BaseGraph):
             self.wrap_node(
                 NODE_PREPARE_COMMENT_SUPPLEMENT,
                 getattr(type(self), "NODE_PREPARE_COMMENT_SUPPLEMENT"),
-            ),
-        )
-        builder.add_node(
-            NODE_GENERATE_COMMENTS,
-            self.wrap_node(
-                NODE_GENERATE_COMMENTS,
-                getattr(type(self), "NODE_GENERATE_COMMENTS"),
             ),
         )
         builder.add_node(
@@ -68,8 +58,7 @@ class CommentSupplementGraph(BaseGraph):
         )
 
         builder.add_edge(START, NODE_PREPARE_COMMENT_SUPPLEMENT)
-        builder.add_edge(NODE_PREPARE_COMMENT_SUPPLEMENT, NODE_GENERATE_COMMENTS)
-        builder.add_edge(NODE_GENERATE_COMMENTS, NODE_COMMENT_AGENT)
+        builder.add_edge(NODE_PREPARE_COMMENT_SUPPLEMENT, NODE_COMMENT_AGENT)
         builder.add_edge(NODE_COMMENT_AGENT, NODE_FINALIZE_COMMENT_SUPPLEMENT)
         builder.add_edge(NODE_FINALIZE_COMMENT_SUPPLEMENT, END)
         return builder

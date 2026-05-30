@@ -11,6 +11,8 @@ from backend.nodes.common_word_nodes.comment_writeback import (
     CommentWritebackResult,
     build_comment_writeback_summary_payload,
 )
+from backend.prompts.comment_no_reference_prompt import render_comment_no_reference_prompt
+from backend.prompts.types import CommentNoReferencePromptInput
 from backend.states.base_state import TenderGraphStateBase
 from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
@@ -203,11 +205,14 @@ def comment_agent_writeback(
     config=None,
 ) -> TenderGraphStateBase:
     """Run comment_agent after agent-mode body writeback without failing the task."""
+    configurable = _get_configurable(config)
+    task_kind = str(configurable.get("task_kind") or state.get("task_kind") or "generate")
     comments = list(state.get("polished_comments") or [])
     generated_count = _coerce_generated_count(state, comments)
     log_parts = ["comment_agent 开始处理批注"]
+    allow_comment_generation = task_kind == "comment_supplement" and not comments
 
-    if not comments:
+    if not comments and not allow_comment_generation:
         log_parts.append("没有可写入的 AI 批注，跳过 comment_agent")
         _emit_comment_agent_final_warning(
             state,
@@ -288,7 +293,19 @@ def comment_agent_writeback(
         bound_end = int(content_range["range_end"])
         log_parts.append(f"comment_agent 批注范围: {bound_start}-{bound_end}")
 
-        configurable = _get_configurable(config)
+        comment_generation_instruction = None
+        if allow_comment_generation:
+            rendered_prompt = render_comment_no_reference_prompt(
+                CommentNoReferencePromptInput(
+                    tender_type=tender_type,
+                    polished_text=str(state.get("polished_text") or ""),
+                )
+            )
+            comment_generation_instruction = (
+                rendered_prompt.system_prompt + "\n\n" + rendered_prompt.user_prompt
+            )
+            log_parts.append("comment_agent 将直接生成补充批注候选")
+
         result = run_comment_agent(
             initial_comments=comments,
             polished_text=str(state.get("polished_text") or ""),
@@ -299,7 +316,17 @@ def comment_agent_writeback(
             task_id=str(configurable.get("task_id") or state.get("task_id") or "comment-agent"),
             config=config,
             step_callback=_make_agent_step_callback(state, config),
+            allow_comment_generation=allow_comment_generation,
+            comment_generation_instruction=comment_generation_instruction,
         )
+        if allow_comment_generation:
+            generated_count = max(
+                generated_count,
+                len(getattr(result.validation, "passed", []) or [])
+                + len(getattr(result.validation, "failed", []) or [])
+                + len(getattr(result.validation, "skipped", []) or []),
+                len(result.final_proposed_comments or []),
+            )
         try:
             save_document_with_retry(doc, node_name=NODE_NAME)
             log_parts.append("comment_agent 批注写入后已保存文档")

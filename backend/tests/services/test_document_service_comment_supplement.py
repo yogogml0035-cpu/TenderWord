@@ -27,7 +27,7 @@ class _TaskQueue:
 
     def set_total_nodes(self, task_id: str, total_nodes: int) -> None:
         assert task_id == "task-1"
-        assert total_nodes == 4
+        assert total_nodes == 3
 
     def complete_task(self, task_id: str, result=None, error=None) -> None:
         self.completed = {"task_id": task_id, "result": result, "error": error}
@@ -88,7 +88,7 @@ async def test_create_comment_supplement_task_validates_and_submits(monkeypatch,
     assert submitted["task_kind"] == "comment_supplement"
     assert submitted["model_provider"] == "qwen"
     assert submitted["conversation_id"] == "conv-1"
-    assert submitted["llm_node_name"] == "generate_comments"
+    assert submitted["llm_node_name"] == "comment_agent"
     assert submitted["initial_state"]["prepared_doc_path"] == str(source_file.resolve())
     assert submitted["initial_state"]["comment_supplement_source_file"] == str(source_file.resolve())
     assert submitted["initial_state"]["polished_text"] == "投标人须提供原厂授权函。"
@@ -140,7 +140,7 @@ def test_run_graph_updates_latest_rewrite_state_for_comment_supplement(
 
     class FakeGraph:
         def estimate_total_nodes(self, initial_state):
-            return 4
+            return 3
 
         def compile(self):
             return object()
@@ -183,7 +183,7 @@ def test_run_graph_updates_latest_rewrite_state_for_comment_supplement(
         "deepseek",
         task_kind="comment_supplement",
         conversation_id="conv-1",
-        llm_node_name="generate_comments",
+        llm_node_name="comment_agent",
     )
 
     assert service._conversation_service.appended is not None

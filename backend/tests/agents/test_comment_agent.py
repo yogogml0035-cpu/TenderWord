@@ -171,6 +171,38 @@ def test_validate_rejects_comment_text_changes_with_feedback() -> None:
     assert failure.original_reference_text == "原厂授权"
     assert "投标人须提供原厂授权函" in failure.candidate_fragments[0]
 
+def test_validate_tool_seeds_initial_candidates_in_generation_mode() -> None:
+    context = CommentAgentToolContext(
+        initial_comments=[],
+        polished_text="投标人须提供原厂授权函，并承诺售后。",
+        allow_comment_generation=True,
+    )
+    validate_tool = next(
+        tool
+        for tool in create_comment_agent_tools(context)
+        if tool.name == VALIDATE_COMMENT_REFERENCES_TOOL
+    )
+
+    payload = validate_tool.invoke(
+        {
+            "proposed_comments": [
+                {
+                    "reference_text": "投标人须提供原厂授权函",
+                    "comment_text": "建议提示：不得要求原厂授权函。",
+                }
+            ]
+        }
+    )
+
+    assert context.initial_comments == [
+        {
+            "reference_text": "投标人须提供原厂授权函",
+            "comment_text": "建议提示：不得要求原厂授权函。",
+        }
+    ]
+    assert payload["passed"][0]["reference_text"] == "投标人须提供原厂授权函"
+    assert payload["passed"][0]["comment_text"] == "建议提示：不得要求原厂授权函。"
+
 def test_validate_uses_only_polished_text_for_anchor_lookup() -> None:
     result = validate_comment_reference_candidates(
         initial_comments=[
@@ -396,6 +428,56 @@ def test_run_comment_agent_pushes_tool_snapshots_and_writes_word_after_runner(tm
     assert audit["final_proposed_comments"][0]["reference_text"] == "投标人须提供原厂授权函"
     assert audit["final_passed"][0]["reference_text"] == "投标人须提供原厂授权函"
     assert audit["writeback_result"]["added"] == 1
+
+def test_run_comment_agent_can_generate_candidates_in_generation_mode(tmp_path) -> None:
+    doc = _FakeDocument("投标人须提供原厂授权函，并承诺售后。")
+    audit_path = tmp_path / "comment-agent-audit.json"
+
+    class FakeRunner:
+        def stream(self, payload, config, **_kwargs):
+            context = config["configurable"]["comment_agent_tool_context"]
+            tools = {
+                tool.name: tool
+                for tool in create_comment_agent_tools(context)
+            }
+            assert "请直接接手补充批注任务" in str(payload["messages"][0].content)
+            proposed = [
+                {
+                    "reference_text": "投标人须提供原厂授权函",
+                    "comment_text": "建议提示：不得要求原厂授权函。",
+                }
+            ]
+            yield AIMessage(content="开始生成补充批注")
+            validation = tools[VALIDATE_COMMENT_REFERENCES_TOOL].invoke(
+                {"proposed_comments": proposed}
+            )
+            assert validation["passed"][0]["reference_text"] == "投标人须提供原厂授权函"
+            tools[WRITE_VALIDATED_COMMENTS_TOOL].invoke({"proposed_comments": proposed})
+            yield AIMessage(content="补充批注生成完成")
+
+    events = []
+    result = run_comment_agent(
+        initial_comments=[],
+        polished_text=doc.text,
+        doc=doc,
+        bound_start=0,
+        bound_end=len(doc.text),
+        task_id="task-2",
+        runner=FakeRunner(),
+        step_callback=events.append,
+        audit_log_path=audit_path,
+        allow_comment_generation=True,
+        comment_generation_instruction="请仅依据修改文本生成纯净 JSON 数组。",
+    )
+
+    assert result.ai_messages == ["开始生成补充批注", "补充批注生成完成"]
+    assert result.final_proposed_comments[0]["reference_text"] == "投标人须提供原厂授权函"
+    assert result.writeback_result["added"] == 1
+    assert doc.Comments.Count == 1
+    assert events[-1].comment_agent["writeback"]["added"] == 1
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert audit["initial_comments"][0]["reference_text"] == "投标人须提供原厂授权函"
+    assert audit["final_proposed_comments"][0]["reference_text"] == "投标人须提供原厂授权函"
 
 def test_run_comment_agent_shows_two_validation_rounds_and_silent_final_recheck(tmp_path) -> None:
     doc = _FakeDocument("7.投标人须提供售后服务承诺。")

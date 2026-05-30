@@ -35,9 +35,9 @@ function taskStatus(taskId: string, taskKind: TaskKind, currentNode = 'comment_a
       current_node: currentNode,
       current_node_display: currentNode,
       progress_text: '处理中',
-      completed_count: 2,
-      total_nodes: 5,
-      progress_percent: 40,
+      completed_count: 1,
+      total_nodes: 3,
+      progress_percent: 33.3,
     },
   };
 }

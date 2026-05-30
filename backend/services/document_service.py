@@ -106,7 +106,7 @@ TASK_KIND_TO_LLM_NODE = {
     "generate": "generate_polished_text",
     "rewrite": "rewrite_text",
     "edit": "edit_text",
-    "comment_supplement": "generate_comments",
+    "comment_supplement": "comment_agent",
 }
 
 class _DiscardingWriter:

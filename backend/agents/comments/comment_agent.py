@@ -43,6 +43,19 @@ COMMENT_AGENT_SYSTEM_PROMPT = """
 6. 最终只输出简短中文结果摘要，不展示工具消息或排障细节。
 """.strip()
 
+COMMENT_AGENT_GENERATION_SYSTEM_PROMPT = """
+你是批注智能体 comment_agent，负责先生成补充批注候选，再校验锚点并提交写回。
+
+硬性规则：
+1. 先基于 polished_text 和批注生成规则生成 proposed_comments，元素只能包含 reference_text 与 comment_text。
+2. 必须调用 validate_comment_references，输入 proposed_comments。
+3. 你最多可以根据校验反馈修复 reference_text 并再次调用校验工具；校验工具最多 2 次。
+4. 第一次校验后的同 index comment_text 不得改写、润色、删减或新增；后续只能修改 reference_text。
+5. 每条 reference_text 必须精确来自 polished_text，连续、逐字、原标点一致，不得跨段拼接。
+6. 完成校验后最多调用 1 次 write_validated_comments_to_word 提交最终候选；该工具不直接写 Word，真正写入由运行时在 graph 节点线程执行。
+7. 最终只输出简短中文结果摘要，不展示工具消息或排障细节。
+""".strip()
+
 class CommentAgentRunner(Protocol):
     def invoke(
         self,
@@ -75,11 +88,16 @@ def create_comment_agent_runner(
     model_provider: str,
     *,
     tools: list[BaseTool],
+    allow_comment_generation: bool = False,
 ) -> CommentAgentRunner:
     return create_agent(
         model=create_generation_chat_model(model_provider),
         tools=tools,
-        system_prompt=COMMENT_AGENT_SYSTEM_PROMPT,
+        system_prompt=(
+            COMMENT_AGENT_GENERATION_SYSTEM_PROMPT
+            if allow_comment_generation
+            else COMMENT_AGENT_SYSTEM_PROMPT
+        ),
         middleware=build_comment_agent_middleware(),
         name=COMMENT_AGENT_NODE,
     )
@@ -520,7 +538,25 @@ def _build_user_prompt(
     *,
     initial_comments: list[dict[str, str]],
     polished_text: str,
+    allow_comment_generation: bool = False,
+    comment_generation_instruction: str | None = None,
 ) -> str:
+    if allow_comment_generation and not initial_comments:
+        generation_instruction = str(comment_generation_instruction or "").strip()
+        instruction_block = (
+            f"【批注生成规则】\n{generation_instruction}\n\n"
+            if generation_instruction
+            else ""
+        )
+        return (
+            "请直接接手补充批注任务：先生成补充批注候选 proposed_comments，"
+            "再调用工具完成锚点校验、必要修复和最终候选提交。"
+            "Word 写入由运行时完成，工具线程不会直接操作 Word。\n\n"
+            f"{instruction_block}"
+            "【polished_text】\n"
+            f"{polished_text}"
+        )
+
     return (
         "请修复以下批注候选的 reference_text，并用工具完成校验与最终候选提交。"
         "Word 写入由运行时完成，工具线程不会直接操作 Word。\n\n"
@@ -585,6 +621,8 @@ def run_comment_agent(
     runner: CommentAgentRunner | None = None,
     step_callback: Callable[[AgentStepPayload], None] | None = None,
     audit_log_path: str | Path | None = None,
+    allow_comment_generation: bool = False,
+    comment_generation_instruction: str | None = None,
 ) -> CommentAgentResult:
     normalized_initial = [
         item.model_dump(mode="json")
@@ -593,11 +631,13 @@ def run_comment_agent(
     context = CommentAgentToolContext(
         initial_comments=normalized_initial,
         polished_text=str(polished_text or ""),
+        allow_comment_generation=allow_comment_generation and not normalized_initial,
     )
     tools = create_comment_agent_tools(context)
     selected_runner = runner or _fake_runner or create_comment_agent_runner(
         model_provider,
         tools=tools,
+        allow_comment_generation=context.allow_comment_generation,
     )
     runner_config = _build_runner_config(config, context=context)
     payload = {
@@ -606,6 +646,8 @@ def run_comment_agent(
                 content=_build_user_prompt(
                     initial_comments=normalized_initial,
                     polished_text=str(polished_text or ""),
+                    allow_comment_generation=context.allow_comment_generation,
+                    comment_generation_instruction=comment_generation_instruction,
                 )
             )
         ]
@@ -678,15 +720,16 @@ def run_comment_agent(
             step_callback=step_callback,
         )
 
+    effective_initial_comments = context.initial_comments or normalized_initial
     final_proposed_comments = (
         context.final_proposed_comments
         or (context.tool_snapshots[-1].proposed_comments if context.tool_snapshots else [])
-        or normalized_initial
+        or effective_initial_comments
     )
     try:
         validation, writeback_result = write_validated_comment_candidates_to_word(
             doc=doc,
-            initial_comments=normalized_initial,
+            initial_comments=effective_initial_comments,
             proposed_comments=final_proposed_comments,
             polished_text=str(polished_text or ""),
             bound_start=int(bound_start),
@@ -711,7 +754,7 @@ def run_comment_agent(
 
     audit_payload = _build_audit_payload(
         task_id=task_id,
-        initial_comments=normalized_initial,
+        initial_comments=effective_initial_comments,
         ai_messages=ai_messages,
         validation=validation,
         validation_results=context.validation_results,
