@@ -207,7 +207,7 @@ test.describe('Generation mode agent flow', () => {
           task_id: taskId,
           task_kind: 'generate',
           step_type: 'stream',
-          round: 0,
+          round: 1,
           node: 'content_generate_agent',
           is_complete: true,
           content: '这是智能体初稿正文。',
@@ -284,11 +284,13 @@ test.describe('Generation mode agent flow', () => {
 
     await expect(page.getByText('content_generate_agent')).toBeVisible();
     await expect(page.getByText('这是智能体初稿正文。')).toBeVisible();
-    await expect(page.getByText('content_verify_agent', { exact: true })).toHaveCount(1);
+    await expect(page.getByText('content_verify_agent round-1', { exact: true })).toBeVisible();
+    await expect(page.getByText('content_revise_agent round-1', { exact: true })).toBeVisible();
+    await expect(page.getByText('content_verify_agent round-2', { exact: true })).toBeVisible();
+    await expect(page.getByText('交付范围缺少验收标准')).toBeVisible();
     await expect(page.getByText('[]')).toBeVisible();
     await expect(page.getByText('第 1 轮审核')).toHaveCount(0);
     await expect(page.getByText('evidence: 交付范围缺少验收标准')).toHaveCount(0);
-    await expect(page.getByText('content_revise_agent', { exact: true })).toBeVisible();
     await expect(page.getByText('这是第 1 轮 AI 修改内容，已补充验收标准。')).toBeVisible();
     await expect(page.getByText('AI 生成内容')).toHaveCount(0);
     await expect(page.getByRole('button', { name: '下载文件' })).toBeVisible();

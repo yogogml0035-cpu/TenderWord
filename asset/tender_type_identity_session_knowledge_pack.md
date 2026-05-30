@@ -173,9 +173,10 @@
 - 删除当前会话时，优先回退到同类型最新会话；同类型为空再回退到全局剩余会话。
 - 智能体过程卡是会话历史消息，不是运行时临时 stream。`agent_step` 会在 `chat-storage` 里保存为 `metadata.messageKind = "agent-step"` 的 AI 消息，刷新后随会话消息恢复。
 - `agent-step` 消息不纳入旧 `taskMessageMap` 的 `task-log` / `task-content` / `task-download` 三卡分组；done 事件仍只负责生成下载入口卡。
-- 智能体过程卡按 `metadata.agentStepNode` 聚合展示：`content_agent` 展示主 agent 显式计划、调用决策和最终验收说明；`content_generate_agent`、`content_verify_agent`、`content_revise_agent` 分别展示对应 subagent 原始 streaming 内容。相同 `node` 的后续 `agent_step` 事件 upsert 同一张卡，不按审核轮次新增多张 verify 卡。
-- `content_verify_agent` 卡展示后端 SSE `content` 中的原始 JSON 文本；没有 `content` 时才用 `findings` JSON 兜底。前端不再把审核格式化成“第 N 轮审核 / evidence / fix_hint”自然语言，也不创建文件产物卡。
-- 智能体过程卡标题以 `metadata.agentStepNode` 为准，分别显示 `content_agent`、`content_generate_agent`、`content_verify_agent`、`content_revise_agent`，不要再用“AI 初稿内容 / 智能体审核意见 / AI 修改内容”这类按 step_type 推导的标题。agent-step 卡出现后，前端不得再保留或补建普通 `task-content` 的“AI 生成内容”卡，避免与 `content_generate_agent` 正文重复。
+- 智能体过程卡按 `metadata.agentStepNode + metadata.agentStepRound` 聚合展示：`content_generate_agent`、`content_verify_agent`、`content_revise_agent` 分别展示对应 subagent 原始 streaming 内容；`content_agent` 只展示后端补发的终局验收卡。同一 `node` 不同轮次必须保留为多张卡，确保 `generate round-1 -> verify round-1 -> revise round-1 -> verify round-2 [] -> content_agent final` 这类因果顺序可见；只有相同 `node + round` 的 streaming 增量才 upsert 同一张卡。
+- `content_verify_agent` 卡展示后端 SSE `content` 中的原始 JSON 文本；没有 `content` 时只在完成事件或存在真实 findings 时用 `findings` JSON 兜底。启动空事件不得把空 findings 渲染成 `[]`。
+- 智能体过程卡标题以 `metadata.agentStepNode` 和 `metadata.agentStepRound` 为准，显示如 `content_generate_agent round-1`、`content_verify_agent round-1`、`content_revise_agent round-1`；主 agent 终局事件显示 `content_agent final`。不要再用“AI 初稿内容 / 智能体审核意见 / AI 修改内容”这类按 step_type 推导的标题。agent-step 卡出现后，前端不得再保留或补建普通 `task-content` 的“AI 生成内容”卡，避免与 `content_generate_agent` 正文重复。
+- 空内容且仍在运行中的 agent-step 卡只显示紧凑“正在调用...”状态，不展示大块“等待生成...”占位。
 - 智能体 generate 任务失败、取消或本地中断时也必须沿用 agent-step 过程卡，不得因为运行时残留 `aiText` 而补建普通 `task-content` 卡；错误原因应进入 `task-log` 日志卡，保证用户能看到 `Request timed out.` 等失败信息。
 
 ## 聊天输入与排队恢复

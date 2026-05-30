@@ -6,6 +6,10 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
+from backend.agents.generation.agent_step_events import (
+    emit_agent_step_event,
+    get_configurable,
+)
 from backend.agents.generation.json_utils import (
     build_audit_findings_fallback,
     coerce_audit_findings,
@@ -81,10 +85,6 @@ VERIFY_JSON_REPAIR_SYSTEM_PROMPT = (
 )
 
 
-def _get_configurable(config: dict[str, Any] | None) -> dict[str, Any]:
-    return config.get("configurable", {}) if isinstance(config, dict) else {}
-
-
 def _emit_verify_agent_step_snapshot(
     config: dict[str, Any] | None,
     *,
@@ -92,38 +92,16 @@ def _emit_verify_agent_step_snapshot(
     round_index: int,
     is_complete: bool,
 ) -> None:
-    configurable = _get_configurable(config)
-    task_id = str(configurable.get("task_id") or "").strip()
-    if not task_id:
-        return
-
-    task_kind = str(configurable.get("task_kind") or "generate")
-    callback = configurable.get("agent_step_callback")
-    event_data = {
-        "task_id": task_id,
-        "task_kind": task_kind,
-        "step_type": "stream",
-        "round": round_index,
-        "node": "content_verify_agent",
-        "content": content,
-        "findings": [],
-        "is_complete": is_complete,
-    }
-    if callable(callback):
-        try:
-            from backend.models import AgentStepEventData
-
-            callback(AgentStepEventData(**event_data))
-        except Exception as exc:
-            progress_log.debug(f"警告: content_verify_agent 过程回调失败: {exc}")
-
     try:
-        from backend.core.sse_manager import sse_manager
-
-        if getattr(sse_manager, "_loop", None) is not None:
-            sse_manager.send_agent_step_threadsafe(**event_data)
-    except Exception:
-        pass
+        emit_agent_step_event(
+            config,
+            round_index=round_index,
+            node="content_verify_agent",
+            content=content,
+            is_complete=is_complete,
+        )
+    except Exception as exc:
+        progress_log.debug(f"警告: content_verify_agent 过程回调失败: {exc}")
 
 
 def _build_stream_callbacks(
@@ -160,7 +138,7 @@ def _run_async(coro):
 def _get_generation_context(config: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(config, dict):
         return {}
-    configurable = config.get("configurable", {})
+    configurable = get_configurable(config)
     if not isinstance(configurable, dict):
         return {}
     context = configurable.get("generation_agent_context")
@@ -317,7 +295,7 @@ def _verify_text(
             or infer_next_audit_round(backend)
         )
     else:
-        round_index = int(_context_value(state, config, "revision_round", 0) or 0)
+        round_index = int(_context_value(state, config, "revision_round", 1) or 1)
         current_text = str(
             _context_value(state, config, "current_text")
             or _context_value(state, config, "draft_text")

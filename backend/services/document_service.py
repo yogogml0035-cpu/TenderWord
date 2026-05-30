@@ -234,6 +234,11 @@ class SSECallback:
         self._events: List[SSEEvent] = []
         self._lock = threading.Lock()
         self._done = False
+        try:
+            from backend.core.sse_manager import sse_manager
+        except Exception:  # pragma: no cover
+            sse_manager = None
+        self._sse_manager = sse_manager
 
     def push_event(self, event: SSEEvent) -> None:
         """推送事件.
@@ -310,6 +315,25 @@ class SSECallback:
             data=agent_step_data.model_dump(mode="json"),
         )
         self.push_event(event)
+        if self._sse_manager is not None:
+            try:
+                if getattr(self._sse_manager, "_loop", None) is None:
+                    return
+                self._sse_manager.send_agent_step_threadsafe(
+                    task_id=agent_step_data.task_id,
+                    task_kind=agent_step_data.task_kind,
+                    step_type=agent_step_data.step_type,
+                    round=agent_step_data.round,
+                    node=agent_step_data.node,
+                    content=agent_step_data.content,
+                    findings=[
+                        finding.model_dump(mode="json")
+                        for finding in agent_step_data.findings
+                    ],
+                    is_complete=agent_step_data.is_complete,
+                )
+            except Exception:
+                pass
 
     def push_done(self, done_data: DoneEventData) -> None:
         """推送完成事件.

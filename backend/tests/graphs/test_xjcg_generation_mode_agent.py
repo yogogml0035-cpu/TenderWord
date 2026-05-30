@@ -25,8 +25,8 @@ class FakeGenerationAgentRunner:
             structured = output.get("structured_response")
             if isinstance(structured, dict) and "draft_text" in structured:
                 current_text = structured["draft_text"]
-                backend.write("/drafts/round-0.md", current_text)
-                yield {"node": "content_generate_agent", "content": current_text, "is_complete": True}
+                backend.write("/drafts/round-1.md", current_text)
+                yield {"node": "content_generate_agent", "round": 1, "content": current_text, "is_complete": True}
             elif isinstance(structured, list):
                 raw_audit = json.dumps(structured, ensure_ascii=False)
                 backend.write(f"/audits/round-{audit_round}.json", raw_audit)

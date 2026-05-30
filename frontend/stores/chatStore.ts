@@ -557,16 +557,27 @@ function formatAgentFindingsJson(findings: AgentStepFinding[]): string {
   return JSON.stringify(findings, null, 2);
 }
 
+function shouldShowVerifyFindingsJson(
+  step: { content?: unknown; is_complete?: boolean },
+  findings: AgentStepFinding[]
+): boolean {
+  if (typeof step.content === 'string' && step.content.length > 0) {
+    return true;
+  }
+  return !!step.is_complete || findings.length > 0;
+}
+
 function findAgentStepMessage(
   messages: Message[],
   taskId: string,
-  node: string
+  node: string,
+  round: number
 ): Message | undefined {
   return messages.find((message) => {
     if (message.taskId !== taskId || message.metadata?.messageKind !== TASK_AGENT_STEP_KIND) {
       return false;
     }
-    return message.metadata.agentStepNode === node;
+    return message.metadata.agentStepNode === node && message.metadata.agentStepRound === round;
   });
 }
 
@@ -1270,7 +1281,7 @@ export const useChatStore = create<ChatStore>()(
           const taskKind = step.task_kind || get().taskSummaries[taskId]?.task_kind;
           const status: Message['status'] = step.is_complete ? 'completed' : 'generating';
           const node = step.node || 'content_agent';
-          const existing = findAgentStepMessage(conversation.messages, taskId, node);
+          const existing = findAgentStepMessage(conversation.messages, taskId, node, stepRound);
 
           let content = typeof step.content === 'string' ? step.content : '';
           let auditRounds: AgentAuditRound[] | undefined;
@@ -1282,10 +1293,13 @@ export const useChatStore = create<ChatStore>()(
               ...existingRounds.filter((round) => round.round !== stepRound),
               nextRound,
             ].sort((a, b) => a.round - b.round);
-            content =
-              typeof step.content === 'string' && step.content.length > 0
+            content = shouldShowVerifyFindingsJson(step, findings)
+              ? typeof step.content === 'string' && step.content.length > 0
                 ? step.content
-                : formatAgentFindingsJson(findings);
+                : formatAgentFindingsJson(findings)
+              : typeof existing?.content === 'string'
+                ? existing.content
+                : '';
           }
 
           const metadata = {

@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
+from backend.agents.generation.agent_step_events import emit_agent_step_event
 from backend.agents.generation.types import GenerationAgentState
 from backend.agents.generation.workspace import (
     audit_path,
@@ -30,12 +31,8 @@ REVISE_SYSTEM_PROMPT = """
 1. 只根据 /audits/round-N.json 中的 evidence 与 fix_hint 修复对应位置。
 2. 未被 audit 指定的位置必须逐字保留，不得润色、扩写、删减或重排。
 3. 输出必须是修订后的完整采购需求正文，不要输出解释、Markdown 代码块或 JSON。
-4. 如果 audit 为 []，原样输出当前正文。
+4. 如果 audit 为 []，直接返回“无需修订”，不得输出或重写当前正文。
 """.strip()
-
-
-def _get_configurable(config: dict[str, Any] | None) -> dict[str, Any]:
-    return config.get("configurable", {}) if isinstance(config, dict) else {}
 
 
 def _emit_revise_agent_step_snapshot(
@@ -45,38 +42,16 @@ def _emit_revise_agent_step_snapshot(
     round_index: int,
     is_complete: bool,
 ) -> None:
-    configurable = _get_configurable(config)
-    task_id = str(configurable.get("task_id") or "").strip()
-    if not task_id:
-        return
-
-    task_kind = str(configurable.get("task_kind") or "generate")
-    event_data = {
-        "task_id": task_id,
-        "task_kind": task_kind,
-        "step_type": "stream",
-        "round": round_index,
-        "node": REVISE_AGENT_NODE,
-        "content": content,
-        "findings": [],
-        "is_complete": is_complete,
-    }
-    callback = configurable.get("agent_step_callback")
-    if callable(callback):
-        try:
-            from backend.models import AgentStepEventData
-
-            callback(AgentStepEventData(**event_data))
-        except Exception as exc:
-            progress_log.debug(f"警告: content_revise_agent 过程回调失败: {exc}")
-
     try:
-        from backend.core.sse_manager import sse_manager
-
-        if getattr(sse_manager, "_loop", None) is not None:
-            sse_manager.send_agent_step_threadsafe(**event_data)
-    except Exception:
-        pass
+        emit_agent_step_event(
+            config,
+            round_index=round_index,
+            node=REVISE_AGENT_NODE,
+            content=content,
+            is_complete=is_complete,
+        )
+    except Exception as exc:
+        progress_log.debug(f"警告: content_revise_agent 过程回调失败: {exc}")
 
 
 def _build_stream_callbacks(
@@ -153,22 +128,35 @@ def _revise_text(
         audit_items = [{"evidence": "审核 JSON 格式异常", "fix_hint": "保持当前正文不变"}]
 
     if audit_items == []:
-        revised_text = current_text
-    else:
-        revised_text = str(
-            _run_async(
-                stream_llm_completion(
-                    model_provider=str(context_value(state, config, "model_provider", "deepseek") or "deepseek"),
-                    system_prompt=REVISE_SYSTEM_PROMPT,
-                    user_prompt=_render_revise_user_prompt(
-                        current_text=current_text,
-                        audit_json=raw_audit,
-                    ),
-                    callbacks=_build_stream_callbacks(config, round_index=round_index),
-                    check_interval=CHECK_INTERVAL,
-                )
+        _emit_revise_agent_step_snapshot(
+            config,
+            content="无需修订",
+            round_index=round_index,
+            is_complete=True,
+        )
+        return {
+            "messages": [AIMessage(content="无需修订")],
+            "structured_response": {
+                "status": "no_revision",
+                "message": "无需修订",
+            },
+            "no_revision": True,
+        }
+
+    revised_text = str(
+        _run_async(
+            stream_llm_completion(
+                model_provider=str(context_value(state, config, "model_provider", "deepseek") or "deepseek"),
+                system_prompt=REVISE_SYSTEM_PROMPT,
+                user_prompt=_render_revise_user_prompt(
+                    current_text=current_text,
+                    audit_json=raw_audit,
+                ),
+                callbacks=_build_stream_callbacks(config, round_index=round_index),
+                check_interval=CHECK_INTERVAL,
             )
         )
+    )
 
     if backend:
         write_backend_text(backend, revision_path(round_index), revised_text)

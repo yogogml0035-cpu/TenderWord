@@ -19,7 +19,7 @@ CONTENT_AGENT_WORKSPACE_ROOT = (
 )
 
 GENERATION_CONTEXT_PATH = "/inputs/generation_context.md"
-DRAFT_PATH = "/drafts/round-0.md"
+DRAFT_PATH = "/drafts/round-1.md"
 FINAL_POLISHED_TEXT_PATH = "/final/polished_text.md"
 
 

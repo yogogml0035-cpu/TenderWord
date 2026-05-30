@@ -55,4 +55,21 @@ describe('SSE agent_step API types', () => {
 
     expect(event.content).toBe('修复后的采购需求正文');
   });
+
+  it('models final main agent step as 1-based round metadata', () => {
+    const event: SSEAgentStepEvent = {
+      timestamp: '2026-05-27T17:12:00',
+      task_id: 'task-agent-1',
+      task_kind: 'generate',
+      step_type: 'final',
+      round: 2,
+      node: 'content_agent',
+      is_complete: true,
+      content: '智能体生成完成，最终正文已通过文件协议写入 final。',
+      findings: [],
+    };
+
+    expect(event.step_type).toBe('final');
+    expect(event.round).toBe(2);
+  });
 });

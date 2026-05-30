@@ -69,9 +69,10 @@ class FakeRunner:
                     "is_complete": bool(output.get("is_complete", False)),
                 }
             elif "draft" in output:
-                backend.write("/drafts/round-0.md", output["draft"])
+                backend.write("/drafts/round-1.md", output["draft"])
                 yield {
                     "node": "content_generate_agent",
+                    "round": 1,
                     "content": output["draft"],
                     "is_complete": True,
                 }
@@ -554,6 +555,45 @@ def test_content_revise_agent_streams_revision_snapshots(monkeypatch) -> None:
     assert all(event.is_complete is False for event in agent_steps)
 
 
+def test_content_revise_agent_skips_empty_audit_without_rewriting(monkeypatch) -> None:
+    agent_steps: list[object] = []
+
+    async def fake_stream_llm_completion(**_kwargs):
+        pytest.fail("empty audit should not call revision LLM")
+
+    monkeypatch.setattr(
+        revise_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    result = revise_agent_graph_module.create_revise_agent_graph().invoke(
+        {
+            "current_text": "原正文不应被重新输出",
+            "audit_findings": [],
+            "revision_round": 1,
+            "model_provider": "deepseek",
+        },
+        {
+            "configurable": {
+                "task_id": "task-agent-revise-empty-audit",
+                "agent_step_callback": agent_steps.append,
+            }
+        },
+    )
+
+    assert result["structured_response"] == {
+        "status": "no_revision",
+        "message": "无需修订",
+    }
+    assert result["no_revision"] is True
+    assert "polished_text" not in result
+    assert "revision_path" not in result
+    assert [event.content for event in agent_steps] == ["无需修订"]
+    assert all(event.node == "content_revise_agent" for event in agent_steps)
+    assert all(event.is_complete is True for event in agent_steps)
+
+
 def test_content_runner_creates_workspace_and_reads_final_file(
     _redirect_content_agent_workspace,
 ) -> None:
@@ -585,7 +625,7 @@ def test_content_runner_creates_workspace_and_reads_final_file(
     workspace_dir = result.workspace_dir
     assert workspace_dir == _redirect_content_agent_workspace / "task-agent-42_20260529-153000"
     assert (workspace_dir / "inputs" / "generation_context.md").exists()
-    assert (workspace_dir / "drafts" / "round-0.md").read_text(encoding="utf-8") == "draft text"
+    assert (workspace_dir / "drafts" / "round-1.md").read_text(encoding="utf-8") == "draft text"
     assert (workspace_dir / "audits" / "round-1.json").exists()
     assert (workspace_dir / "revisions" / "round-1.md").read_text(encoding="utf-8") == "revised text"
     assert (workspace_dir / "final" / "polished_text.md").read_text(encoding="utf-8") == "final text"
@@ -593,15 +633,20 @@ def test_content_runner_creates_workspace_and_reads_final_file(
     assert result.audit_findings == []
     assert result.revision_rounds == 1
     assert [event.node for event in events] == [
-        "content_agent",
         "content_generate_agent",
         "content_verify_agent",
         "content_revise_agent",
         "content_verify_agent",
         "content_agent",
-        "content_agent",
     ]
-    assert all(event.step_type == "stream" for event in events)
+    assert [event.round for event in events] == [1, 1, 1, 2, 2]
+    assert [event.step_type for event in events] == [
+        "stream",
+        "stream",
+        "stream",
+        "stream",
+        "final",
+    ]
 
 
 def test_content_runner_writes_complete_generation_context() -> None:

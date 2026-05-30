@@ -60,12 +60,13 @@ class GenerationAgentState(TypedDict, total=False):
     audit_path: str
     revision_round: int
     revision_path: str
+    no_revision: bool
     polished_text: str
 
 
 class AgentStepPayload(BaseModel):
     step_type: str
-    round: int = Field(..., ge=0)
+    round: int = Field(..., ge=1)
     node: str
     content: str | None = None
     findings: list[AuditFinding] = Field(default_factory=list)

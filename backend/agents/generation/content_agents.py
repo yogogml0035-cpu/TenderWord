@@ -33,6 +33,8 @@ from backend.agents.generation.workspace import (
     audit_path,
     create_workspace_backend,
     create_workspace_dir,
+    infer_next_audit_round,
+    infer_next_revision_round,
     read_backend_text,
     read_backend_text_optional,
     validate_round_protocol,
@@ -232,6 +234,7 @@ def _build_runner_config(
     payload: dict[str, Any],
     backend: BackendProtocol,
     workspace_dir: Path,
+    step_callback: Callable[[AgentStepPayload], None] | None,
 ) -> dict[str, Any]:
     next_config = {**config} if isinstance(config, dict) else {}
     existing_configurable = next_config.get("configurable", {})
@@ -241,6 +244,7 @@ def _build_runner_config(
     configurable["generation_agent_context"] = dict(payload)
     configurable["content_agent_backend"] = backend
     configurable["content_agent_workspace_dir"] = str(workspace_dir)
+    configurable["agent_step_callback"] = _build_agent_step_bridge(step_callback)
     next_config["configurable"] = configurable
     return next_config
 
@@ -312,11 +316,65 @@ def _emit_step(
     callback(payload)
 
 
-def _infer_round_from_text(value: Any) -> int:
+def _agent_step_payload_from_event(event: Any) -> AgentStepPayload | None:
+    if isinstance(event, AgentStepPayload):
+        return event
+    if event is None:
+        return None
+    if hasattr(event, "model_dump"):
+        data = event.model_dump(mode="json")
+    elif isinstance(event, dict):
+        data = event
+    else:
+        return None
+    return AgentStepPayload(
+        step_type=str(data.get("step_type") or "stream"),
+        round=int(data.get("round") or 1),
+        node=str(data.get("node") or CONTENT_AGENT_NODE),
+        content=data.get("content"),
+        findings=coerce_audit_findings(
+            json.dumps(data.get("findings") or [], ensure_ascii=False),
+            fallback_on_error=True,
+        )
+        if data.get("findings")
+        else [],
+        is_complete=bool(data.get("is_complete")),
+    )
+
+
+def _build_agent_step_bridge(
+    callback: Callable[[AgentStepPayload], None] | None,
+) -> Callable[[Any], None] | None:
+    if callback is None:
+        return None
+
+    def emit(event: Any) -> None:
+        payload = _agent_step_payload_from_event(event)
+        if payload is not None and payload.node != CONTENT_AGENT_NODE:
+            _emit_step(callback, payload)
+
+    return emit
+
+
+def _infer_round_from_text(value: Any) -> int | None:
     match = re.search(r"round-(\d+)", str(value or ""))
     if not match:
-        return 0
+        return None
     return int(match.group(1))
+
+
+def _infer_round_from_workspace(
+    *,
+    node: str,
+    backend: BackendProtocol | None,
+) -> int:
+    if node == GENERATE_AGENT_NODE:
+        return 1
+    if backend is not None and node == VERIFY_AGENT_NODE:
+        return infer_next_audit_round(backend)
+    if backend is not None and node == REVISE_AGENT_NODE:
+        return infer_next_revision_round(backend)
+    return 1
 
 
 def _message_text(message: Any) -> str:
@@ -355,6 +413,7 @@ def _normalize_stream_chunk(chunk: Any) -> tuple[tuple[str, ...], str, Any] | No
 def _emit_task_start_if_needed(
     *,
     data: Any,
+    backend: BackendProtocol | None,
     step_callback: Callable[[AgentStepPayload], None] | None,
 ) -> None:
     if not isinstance(data, dict) or data.get("name") != "tools" or "result" in data:
@@ -372,7 +431,8 @@ def _emit_task_start_if_needed(
             step_callback,
             AgentStepPayload(
                 step_type="stream",
-                round=_infer_round_from_text(description),
+                round=_infer_round_from_text(description)
+                or _infer_round_from_workspace(node=subagent_type, backend=backend),
                 node=subagent_type,
                 content="",
                 is_complete=False,
@@ -423,26 +483,7 @@ def _emit_main_message_if_needed(
     data: Any,
     step_callback: Callable[[AgentStepPayload], None] | None,
 ) -> None:
-    if not isinstance(data, tuple) or len(data) != 2:
-        return
-    message, metadata = data
-    if namespace:
-        return
-    if isinstance(metadata, dict) and metadata.get("langgraph_node") != "model":
-        return
-    text = _message_text(message)
-    if not text.strip():
-        return
-    _emit_step(
-        step_callback,
-        AgentStepPayload(
-            step_type="stream",
-            round=0,
-            node=CONTENT_AGENT_NODE,
-            content=text,
-            is_complete=False,
-        ),
-    )
+    return
 
 
 def _relay_runner_stream(
@@ -461,12 +502,15 @@ def _relay_runner_stream(
                 _emit_step(step_callback, chunk)
                 continue
             if isinstance(chunk, dict) and {"node", "content"}.issubset(chunk):
+                node = str(chunk.get("node") or CONTENT_AGENT_NODE)
+                if node == CONTENT_AGENT_NODE:
+                    continue
                 _emit_step(
                     step_callback,
                     AgentStepPayload(
                         step_type=str(chunk.get("step_type") or "stream"),
-                        round=int(chunk.get("round") or 0),
-                        node=str(chunk.get("node") or CONTENT_AGENT_NODE),
+                        round=int(chunk.get("round") or 1),
+                        node=node,
                         content=str(chunk.get("content") or ""),
                         findings=coerce_audit_findings(
                             json.dumps(chunk.get("findings") or [], ensure_ascii=False),
@@ -482,7 +526,12 @@ def _relay_runner_stream(
                 continue
             namespace, mode, data = normalized
             if mode == "tasks":
-                _emit_task_start_if_needed(data=data, step_callback=step_callback)
+                backend = config.get("configurable", {}).get("content_agent_backend")
+                _emit_task_start_if_needed(
+                    data=data,
+                    backend=backend if isinstance(backend, BackendProtocol) else None,
+                    step_callback=step_callback,
+                )
             elif mode == "messages":
                 _emit_main_message_if_needed(
                     namespace=namespace,
@@ -552,6 +601,7 @@ def run_content_agent_generation(
         payload=base_payload,
         backend=backend,
         workspace_dir=workspace_dir,
+        step_callback=step_callback,
     )
     selected_runner = runner or _fake_runner or create_content_agent_runner(
         model_provider,
@@ -591,8 +641,8 @@ def run_content_agent_generation(
     _emit_step(
         step_callback,
         AgentStepPayload(
-            step_type="stream",
-            round=max(last_audit_round, revision_rounds),
+            step_type="final",
+            round=max(1, last_audit_round, revision_rounds),
             node=CONTENT_AGENT_NODE,
             content="智能体生成完成，最终正文已通过文件协议写入 final。",
             is_complete=True,

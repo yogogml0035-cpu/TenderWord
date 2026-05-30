@@ -45,21 +45,6 @@ def _make_agent_step_callback(
         event_data = _build_agent_step_data(payload, task_id=task_id, task_kind=task_kind)
         if callable(callback):
             callback(event_data)
-        try:
-            from backend.core.sse_manager import sse_manager
-
-            sse_manager.send_agent_step_threadsafe(
-                task_id=task_id,
-                task_kind=task_kind,
-                step_type=event_data.step_type,
-                round=event_data.round,
-                node=event_data.node,
-                content=event_data.content,
-                findings=[finding.model_dump(mode="json") for finding in event_data.findings],
-                is_complete=event_data.is_complete,
-            )
-        except Exception:
-            pass
 
     return emit
 

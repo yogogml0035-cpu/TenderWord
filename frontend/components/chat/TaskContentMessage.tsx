@@ -81,7 +81,11 @@ function getContentTitle(message: Message) {
   if (message.metadata?.messageKind === 'agent-step') {
     const node = message.metadata.agentStepNode;
     if (typeof node === 'string' && node.trim()) {
-      return node.trim();
+      if (message.metadata.agentStepType === 'final') {
+        return `${node.trim()} final`;
+      }
+      const round = message.metadata.agentStepRound;
+      return typeof round === 'number' ? `${node.trim()} round-${round}` : node.trim();
     }
     return '智能体过程';
   }
@@ -104,6 +108,10 @@ export function TaskContentMessage({
   const progressText = message.metadata?.progressText;
   const progressPercent = message.metadata?.progressPercent;
   const contentTitle = getContentTitle(message);
+  const isEmptyRunningAgentStep =
+    message.metadata?.messageKind === 'agent-step' &&
+    message.status === 'generating' &&
+    content.length === 0;
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -173,13 +181,18 @@ export function TaskContentMessage({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="overflow-x-hidden overflow-y-auto p-3"
+        className={`overflow-x-hidden overflow-y-auto p-3 ${isEmptyRunningAgentStep ? 'py-2' : ''}`}
         style={{ maxHeight }}
       >
         {content ? (
           <pre className="min-w-0 break-all whitespace-pre-wrap font-mono text-sm text-gray-700">
             {content}
           </pre>
+        ) : isEmptyRunningAgentStep ? (
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+            <span>正在调用...</span>
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-8 text-gray-400">
             <div className="relative mb-3">

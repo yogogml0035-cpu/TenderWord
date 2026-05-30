@@ -6,6 +6,10 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
+from backend.agents.generation.agent_step_events import (
+    emit_agent_step_event,
+    get_configurable,
+)
 from backend.agents.generation.types import GenerationAgentState
 from backend.agents.generation.workspace import (
     DRAFT_PATH,
@@ -14,7 +18,6 @@ from backend.agents.generation.workspace import (
     read_generation_context,
     write_backend_text,
 )
-from backend.models import AgentStepEventData
 from backend.prompts.generate_prompt import render_generate_prompt
 from backend.prompts.types import GeneratePromptInput
 from backend.util.log_util.progress_log import progress_log
@@ -22,6 +25,7 @@ from backend.util.common_util import StreamCallbacks, stream_llm_completion
 
 GENERATE_AGENT_NODE = "content_generate_agent"
 AGENT_STEP_STREAM_INTERVAL_SECONDS = 0.25
+GENERATE_AGENT_ROUND = 1
 
 
 def _run_async(coro):
@@ -36,12 +40,8 @@ def _run_async(coro):
     raise RuntimeError("generate_agent cannot run inside an active event loop")
 
 
-def _get_configurable(config: dict[str, Any] | None) -> dict[str, Any]:
-    return config.get("configurable", {}) if isinstance(config, dict) else {}
-
-
 def _get_generation_context(config: dict[str, Any] | None) -> dict[str, Any]:
-    context = _get_configurable(config).get("generation_agent_context")
+    context = get_configurable(config).get("generation_agent_context")
     return context if isinstance(context, dict) else {}
 
 
@@ -58,48 +58,36 @@ def _emit_agent_step_snapshot(
     config: dict[str, Any] | None,
     content: str,
 ) -> None:
-    configurable = _get_configurable(config)
-    task_id = str(configurable.get("task_id") or "").strip()
-    if not task_id:
-        return
-
-    task_kind = str(configurable.get("task_kind") or "generate")
-    callback = configurable.get("agent_step_callback")
-    event_data = AgentStepEventData(
-        task_id=task_id,
-        task_kind=task_kind,
-        step_type="stream",
-        round=0,
-        node=GENERATE_AGENT_NODE,
-        content=content,
-        is_complete=False,
-    )
-    if callable(callback):
-        try:
-            callback(event_data)
-        except Exception as exc:
-            progress_log.debug(f"警告: content_generate_agent 过程回调失败: {exc}")
-
     try:
-        from backend.core.sse_manager import sse_manager
+        emit_agent_step_event(
+            config,
+            round_index=GENERATE_AGENT_ROUND,
+            node=GENERATE_AGENT_NODE,
+            content=content,
+            is_complete=False,
+        )
+    except Exception as exc:
+        progress_log.debug(f"警告: content_generate_agent 过程回调失败: {exc}")
 
-        if getattr(sse_manager, "_loop", None) is not None:
-            sse_manager.send_agent_step_threadsafe(
-                task_id=task_id,
-                task_kind=task_kind,
-                step_type=event_data.step_type,
-                round=event_data.round,
-                node=event_data.node,
-                content=event_data.content,
-                findings=[],
-                is_complete=event_data.is_complete,
-            )
-    except Exception:
-        pass
+
+def _emit_agent_step_complete(
+    config: dict[str, Any] | None,
+    content: str,
+) -> None:
+    try:
+        emit_agent_step_event(
+            config,
+            round_index=GENERATE_AGENT_ROUND,
+            node=GENERATE_AGENT_NODE,
+            content=content,
+            is_complete=True,
+        )
+    except Exception as exc:
+        progress_log.debug(f"警告: content_generate_agent 完成回调失败: {exc}")
 
 
 def _build_stream_callbacks(config: dict[str, Any] | None) -> StreamCallbacks:
-    configurable = _get_configurable(config)
+    configurable = get_configurable(config)
     stream_callback = configurable.get("llm_stream_callback")
     suppress_llm_stdout = bool(configurable.get("suppress_llm_stdout", False))
     last_agent_step_at = 0.0
@@ -202,50 +190,6 @@ def _generate_draft(
         "structured_response": structured_response,
         **({"draft_path": DRAFT_PATH} if backend else {"draft_text": str(content)}),
     }
-
-
-def _emit_agent_step_complete(
-    config: dict[str, Any] | None,
-    content: str,
-) -> None:
-    configurable = _get_configurable(config)
-    task_id = str(configurable.get("task_id") or "").strip()
-    if not task_id:
-        return
-
-    task_kind = str(configurable.get("task_kind") or "generate")
-    callback = configurable.get("agent_step_callback")
-    event_data = AgentStepEventData(
-        task_id=task_id,
-        task_kind=task_kind,
-        step_type="stream",
-        round=0,
-        node=GENERATE_AGENT_NODE,
-        content=content,
-        is_complete=True,
-    )
-    if callable(callback):
-        try:
-            callback(event_data)
-        except Exception as exc:
-            progress_log.debug(f"警告: content_generate_agent 完成回调失败: {exc}")
-
-    try:
-        from backend.core.sse_manager import sse_manager
-
-        if getattr(sse_manager, "_loop", None) is not None:
-            sse_manager.send_agent_step_threadsafe(
-                task_id=task_id,
-                task_kind=task_kind,
-                step_type=event_data.step_type,
-                round=event_data.round,
-                node=event_data.node,
-                content=event_data.content,
-                findings=[],
-                is_complete=True,
-            )
-    except Exception:
-        pass
 
 
 def create_generate_agent_graph():

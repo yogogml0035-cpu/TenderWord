@@ -309,7 +309,7 @@ describe('useChatSSE', () => {
           task_id: 'task-1',
           task_kind: 'generate',
           step_type: 'stream',
-          round: 0,
+          round: 1,
           node: 'content_generate_agent',
           is_complete: true,
           content: '智能体初稿正文',
@@ -395,28 +395,106 @@ describe('useChatSSE', () => {
     const agentMessages = conversation?.messages.filter(
       (message) => message.metadata?.messageKind === 'agent-step'
     );
-    const auditMessage = agentMessages?.find(
-      (message) => message.metadata?.agentStepNode === 'content_verify_agent'
+    const firstAuditMessage = agentMessages?.find(
+      (message) =>
+        message.metadata?.agentStepNode === 'content_verify_agent' &&
+        message.metadata?.agentStepRound === 1
+    );
+    const secondAuditMessage = agentMessages?.find(
+      (message) =>
+        message.metadata?.agentStepNode === 'content_verify_agent' &&
+        message.metadata?.agentStepRound === 2
     );
     const revisionMessage = agentMessages?.find(
       (message) => message.metadata?.agentStepNode === 'content_revise_agent'
     );
     const group = getTaskGroup();
 
-    expect(agentMessages).toHaveLength(3);
+    expect(agentMessages).toHaveLength(4);
     expect(agentMessages?.map((message) => message.metadata?.agentStepNode)).toEqual([
       'content_generate_agent',
       'content_verify_agent',
       'content_revise_agent',
+      'content_verify_agent',
     ]);
     expect(agentMessages?.[0].content).toBe('智能体初稿正文');
-    expect(auditMessage?.content).toBe('[{"evidence":"验收标准不明确","fix_hint":"补充验收标准"}]');
-    expect(auditMessage?.metadata?.agentStepAuditRounds).toHaveLength(2);
-    expect(auditMessage?.metadata?.agentStepRound).toBe(2);
+    expect(firstAuditMessage?.content).toBe('[{"evidence":"交付地点缺失","fix_hint":"补充交付地点"}]');
+    expect(firstAuditMessage?.metadata?.agentStepAuditRounds).toHaveLength(1);
+    expect(firstAuditMessage?.metadata?.agentStepRound).toBe(1);
     expect(revisionMessage?.content).toBe('第一轮 AI 修改内容');
+    expect(secondAuditMessage?.content).toBe('[{"evidence":"验收标准不明确","fix_hint":"补充验收标准"}]');
+    expect(secondAuditMessage?.metadata?.agentStepAuditRounds).toHaveLength(1);
+    expect(secondAuditMessage?.metadata?.agentStepRound).toBe(2);
     expect(group?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
     expect(group?.contentMessage).toBeUndefined();
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
+  });
+
+  it('keeps empty running verify agent-step compact until final [] arrives', async () => {
+    mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_verify_agent',
+          is_complete: false,
+          content: '',
+          findings: [],
+        },
+      });
+    });
+
+    let conversation = useChatStore.getState().getCurrentConversation();
+    let verifyMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_verify_agent'
+    );
+
+    expect(verifyMessage?.content).toBe('');
+    expect(verifyMessage?.status).toBe('generating');
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_verify_agent',
+          is_complete: true,
+          content: '[]',
+          findings: [],
+        },
+      });
+    });
+
+    conversation = useChatStore.getState().getCurrentConversation();
+    verifyMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_verify_agent'
+    );
+
+    expect(verifyMessage?.content).toBe('[]');
+    expect(verifyMessage?.status).toBe('completed');
   });
 
   it('removes task-content if agent_step arrives after llm snapshot placeholder', async () => {
@@ -459,7 +537,7 @@ describe('useChatSSE', () => {
           task_id: 'task-1',
           task_kind: 'generate',
           step_type: 'stream',
-          round: 0,
+          round: 1,
           node: 'content_generate_agent',
           is_complete: true,
           content: '智能体初稿正文',
@@ -1008,7 +1086,7 @@ describe('useChatSSE', () => {
           task_id: 'task-1',
           task_kind: 'generate',
           step_type: 'stream',
-          round: 0,
+          round: 1,
           node: 'content_generate_agent',
           is_complete: true,
           content: '智能体初稿正文',

@@ -158,7 +158,7 @@ describe('chatStore task message grouping', () => {
     expect(group?.contentMessage?.content).toBe('节点完成内容');
   });
 
-  it('upserts agent-step cards by node and keeps verify JSON raw', () => {
+  it('upserts agent-step cards by node and round and keeps verify JSON raw', () => {
     act(() => {
       useChatStore.getState().startTask('conv-1', 'task-1', {
         task_kind: 'generate',
@@ -169,7 +169,7 @@ describe('chatStore task message grouping', () => {
         task_id: 'task-1',
         task_kind: 'generate',
         step_type: 'stream',
-        round: 0,
+        round: 1,
         node: 'content_generate_agent',
         is_complete: true,
         content: '智能体初稿',
@@ -232,29 +232,91 @@ describe('chatStore task message grouping', () => {
     const draftMessage = agentMessages?.find(
       (message) => message.metadata?.agentStepNode === 'content_generate_agent'
     );
-    const auditMessage = agentMessages?.find(
-      (message) => message.metadata?.agentStepNode === 'content_verify_agent'
+    const firstAuditMessage = agentMessages?.find(
+      (message) =>
+        message.metadata?.agentStepNode === 'content_verify_agent' &&
+        message.metadata?.agentStepRound === 1
+    );
+    const secondAuditMessage = agentMessages?.find(
+      (message) =>
+        message.metadata?.agentStepNode === 'content_verify_agent' &&
+        message.metadata?.agentStepRound === 2
     );
     const revisionMessage = agentMessages?.find(
       (message) => message.metadata?.agentStepNode === 'content_revise_agent'
     );
 
-    expect(agentMessages).toHaveLength(3);
+    expect(agentMessages).toHaveLength(4);
     expect(agentMessages?.map((message) => message.metadata?.agentStepNode)).toEqual([
       'content_generate_agent',
       'content_verify_agent',
       'content_revise_agent',
+      'content_verify_agent',
     ]);
     expect(agentMessages?.[0].content).toBe('智能体初稿');
     expect(draftMessage?.content).toBe('智能体初稿');
     expect(draftMessage?.metadata?.agentStepNode).toBe('content_generate_agent');
-    expect(auditMessage?.content).toBe('[{"evidence":"质保期未明确","fix_hint":"补充质保期"}]');
-    expect(auditMessage?.metadata?.agentStepNode).toBe('content_verify_agent');
-    expect(auditMessage?.metadata?.agentStepRound).toBe(2);
-    expect(auditMessage?.metadata?.agentStepAuditRounds).toHaveLength(2);
+    expect(firstAuditMessage?.content).toBe('[{"evidence":"缺少供货范围","fix_hint":"补充供货范围说明"}]');
+    expect(firstAuditMessage?.metadata?.agentStepNode).toBe('content_verify_agent');
+    expect(firstAuditMessage?.metadata?.agentStepRound).toBe(1);
+    expect(firstAuditMessage?.metadata?.agentStepAuditRounds).toHaveLength(1);
     expect(revisionMessage?.content).toBe('第一轮 AI 修改内容');
     expect(revisionMessage?.metadata?.agentStepNode).toBe('content_revise_agent');
     expect(revisionMessage?.metadata?.agentStepRound).toBe(1);
+    expect(secondAuditMessage?.content).toBe('[{"evidence":"质保期未明确","fix_hint":"补充质保期"}]');
+    expect(secondAuditMessage?.metadata?.agentStepNode).toBe('content_verify_agent');
+    expect(secondAuditMessage?.metadata?.agentStepRound).toBe(2);
+    expect(secondAuditMessage?.metadata?.agentStepAuditRounds).toHaveLength(1);
+  });
+
+  it('does not render empty verify findings as JSON until content or completion findings exist', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'generate',
+        status: 'running',
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_verify_agent',
+        is_complete: false,
+        content: '',
+        findings: [],
+      });
+    });
+
+    let conversation = useChatStore.getState().getCurrentConversation();
+    let verifyMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_verify_agent'
+    );
+
+    expect(verifyMessage?.content).toBe('');
+    expect(verifyMessage?.status).toBe('generating');
+
+    act(() => {
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_verify_agent',
+        is_complete: true,
+        content: '[]',
+        findings: [],
+      });
+    });
+
+    conversation = useChatStore.getState().getCurrentConversation();
+    verifyMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_verify_agent'
+    );
+
+    expect(verifyMessage?.content).toBe('[]');
+    expect(verifyMessage?.status).toBe('completed');
   });
 
   it('removes duplicated task-content card when agent-step cards start streaming', () => {
@@ -273,7 +335,7 @@ describe('chatStore task message grouping', () => {
         task_id: 'task-1',
         task_kind: 'generate',
         step_type: 'stream',
-        round: 0,
+        round: 1,
         node: 'content_generate_agent',
         is_complete: true,
         content: '智能体初稿',
@@ -362,7 +424,7 @@ describe('chatStore task message grouping', () => {
         task_id: 'task-1',
         task_kind: 'generate',
         step_type: 'stream',
-        round: 0,
+        round: 1,
         node: 'content_generate_agent',
         is_complete: true,
         content: '智能体初稿',
@@ -418,7 +480,7 @@ describe('chatStore task message grouping', () => {
         task_id: 'task-1',
         task_kind: 'generate',
         step_type: 'stream',
-        round: 0,
+        round: 1,
         node: 'content_generate_agent',
         is_complete: true,
         content: '智能体初稿',
@@ -469,7 +531,7 @@ describe('chatStore task message grouping', () => {
         task_id: 'task-1',
         task_kind: 'generate',
         step_type: 'stream',
-        round: 0,
+        round: 1,
         node: 'content_generate_agent',
         is_complete: true,
         content: '智能体初稿',

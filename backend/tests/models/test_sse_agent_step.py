@@ -53,3 +53,19 @@ def test_agent_step_revision_event_can_carry_content_snapshot() -> None:
     assert payload["step_type"] == "revision"
     assert payload["content"] == "修复后的采购需求正文"
     assert payload["findings"] == []
+
+
+def test_agent_step_round_is_one_based_contract() -> None:
+    event_data = AgentStepEventData(
+        task_id="task-agent-1",
+        task_kind="generate",
+        step_type="stream",
+        round=1,
+        node="content_generate_agent",
+        content="初稿正文",
+        is_complete=True,
+    )
+
+    payload = event_data.model_dump(mode="json")
+
+    assert payload["round"] == 1

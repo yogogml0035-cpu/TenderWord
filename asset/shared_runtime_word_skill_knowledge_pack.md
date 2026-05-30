@@ -41,9 +41,9 @@
 
 - 智能体生成入口是公共节点 `backend/nodes/common_word_nodes/content_agent_generate.py`，节点调用 `run_content_agent_generation()` 后只向 graph state 写回标准契约：`polished_text` 与 `generate_polished_done=True`。
 - `backend/agents/generation/content_agents.py` 是 DeepAgents 主 runner 真源。生产路径用 `create_deep_agent(..., backend=FilesystemBackend(root_dir=workspace_dir, virtual_mode=True))` 创建单次任务工作区，工作区位于 `backend/prompts_log/content_agent_workspace/{task_id}_{YYYYMMDD-HHMMSS}/`，长期保留完整输入、草稿、审核、修订和最终正文。
-- 工作区虚拟路径是硬协议：`/inputs/generation_context.md`、`/drafts/round-0.md`、`/audits/round-1.json` 至 `/audits/round-3.json`、`/revisions/round-1.md` 至 `/revisions/round-3.md`、`/final/polished_text.md`。`generation_context.md` 是 Markdown，内部 JSON code block 至少包含 `task_id`、`tender_type`、`generation_style`、`project_info`、`origin_tender_params`、`tender_params`、`model_provider`。
+- 工作区虚拟路径是硬协议：`/inputs/generation_context.md`、`/drafts/round-1.md`、`/audits/round-1.json` 至 `/audits/round-3.json`、`/revisions/round-1.md` 至 `/revisions/round-3.md`、`/final/polished_text.md`。`generation_context.md` 是 Markdown，内部 JSON code block 至少包含 `task_id`、`tender_type`、`generation_style`、`project_info`、`origin_tender_params`、`tender_params`、`model_provider`。
 - `content_agent` 是唯一主调度者。它必须用 TodoList 展示计划，通过 task 工具自主调用 `content_generate_agent`、`content_verify_agent`、`content_revise_agent`，最多 3 轮审核 / 修订；只有 `content_agent` 可以写 `/final/polished_text.md`，子 agent 不得写 final。
-- 子 agent 不通过 task prompt 传完整正文，只通过文件读写交接。`content_generate_agent` 读取 `/inputs/generation_context.md`，复用 `backend/prompts/generate_prompt.py` 的 `render_generate_prompt()` 和当前 `generation_style` 写 `/drafts/round-0.md`；`content_verify_agent` 读取上下文和当前正文文件，输出原始 JSON 数组并写 `/audits/round-N.json`；`content_revise_agent` 读取当前正文与对应 audit，只修复 `evidence` / `fix_hint` 指定位置并写 `/revisions/round-N.md`。
+- 子 agent 不通过 task prompt 传完整正文，只通过文件读写交接。`content_generate_agent` 读取 `/inputs/generation_context.md`，复用 `backend/prompts/generate_prompt.py` 的 `render_generate_prompt()` 和当前 `generation_style` 写 `/drafts/round-1.md`；`content_verify_agent` 读取上下文和当前正文文件，输出原始 JSON 数组并写 `/audits/round-N.json`；`content_revise_agent` 读取当前正文与对应 audit，只修复 `evidence` / `fix_hint` 指定位置并写 `/revisions/round-N.md`。当对应 audit 为 `[]` 时，主 `content_agent` 不应再调用 `content_revise_agent`，而是直接写 `/final/polished_text.md`；若子修订节点被单独调用且 audit 为 `[]`，它必须短路返回“无需修订”，不得调用 LLM、输出完整正文或写 `/revisions/round-N.md`。
 - `content_verify_agent` 的事实真源必须与 `generate_by_template_prompt.py` 保持一致：`project_info` 是项目名称、数量、交付和付款等基础事实；`tender_params` 是技术参数、★/▲指标、包件数量和业务要求的原材料事实真源；`origin_tender_params` 只作章节、编号、表格和语气参考，不得被当成技术参数审计依据。审核必须检查技术参数中 ★/▲ 指标不能缺漏或额外增加，且多包件/多标段原材料不能只生成一个包件。
 - `content_verify_agent` 必须返回 JSON 数组，每项包含非空 `evidence` 与 `fix_hint`，不得输出“第 N 轮审核”、Markdown、解释或中文字段名。审核输出先做严格解析；失败后按错误类型走本地 JSON 修复 / 低温 JSON repair prompt 重试 / fallback finding，最终写入工作区的 audit 必须保持合法数组形状。
 - Prompt builder 渲染 `project_info`、`origin_tender_params`、`tender_params` 时不得把 Python `None` 字面量塞进模型提示词；缺失值应渲染为空文本，真实是否缺失通过进度日志中的字符数摘要排查。
@@ -140,8 +140,8 @@
 - `/api/stream/{task_id}` 是任务 SSE 主入口，支持 `Last-Event-ID` 断线续传。
 - 用户态实时展示依赖 `log`、`llm`、`progress`、`done`、`error`。
 - `agent_step` 是智能体 generate 的用户态 SSE 显式例外，用于展示主 agent 计划 / 调用决策 / 验收说明，以及 generate / verify / revise 子 agent 原始流，不替代 `done` / `error` 终态。
-- 后端 `AgentStepEventData` 字段包括 `task_id`、`task_kind`、`step_type`、`round`、`node`、`timestamp`、`is_complete`、可选 `content` 与 `findings`。`step_type` 是通用字符串，当前智能体流统一使用 `stream`；前端按 `node` upsert 同一张过程卡。`content_verify_agent` 卡展示原始 JSON streaming，不做后端格式化，也不额外创建文件产物卡。
-- `DocumentService` 在 graph config 中注入 `agent_step_callback`，`content_agent_generate` 同时通过 callback 与 `SSEManager.send_agent_step_threadsafe()` 发送事件；`SSEManager.send_agent_step()` 会进入缓冲，断线续传时可重放。
+- 后端 `AgentStepEventData` 字段包括 `task_id`、`task_kind`、`step_type`、`round`、`node`、`timestamp`、`is_complete`、可选 `content` 与 `findings`。`round` 是 1-based；当前智能体子 agent 流使用 `step_type=stream`，主 agent 终局事件使用 `step_type=final`。`content_verify_agent` 卡展示原始 JSON streaming，不做后端格式化，也不额外创建文件产物卡。
+- `DocumentService` 在 graph config 中注入 `agent_step_callback`，智能体生成链路统一经 `SSECallback.push_agent_step()` 进入本地缓冲与 `SSEManager.send_agent_step_threadsafe()`；子 agent 与 runner stream 不再各自直连 `sse_manager`，避免同一过程卡双通道重复推送。`SSEManager.send_agent_step()` 会进入缓冲，断线续传时可重放。
 - `frontend/hooks/useChatSSE.ts` 负责接收 done metadata；下载卡片是否展示摘要属于 UI 决策，不能影响任务结果透传契约。
 
 ## 关联测试与验证入口
