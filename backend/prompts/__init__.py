@@ -6,6 +6,12 @@ from backend.prompts.comment_prompt import (
     COMMENT_USER_PROMPT,
     render_comment_prompt,
 )
+from backend.prompts.comment_no_reference_prompt import (
+    COMMENT_NO_REFERENCE_PROMPT_REGISTRY,
+    COMMENT_NO_REFERENCE_SYSTEM_PROMPT,
+    COMMENT_NO_REFERENCE_USER_PROMPT,
+    render_comment_no_reference_prompt,
+)
 from backend.prompts.generate_by_param_prompt import (
     GENERATE_BY_PARAM_PROMPT_REGISTRY,
     PARAM_POLISH_SYSTEM_PROMPT,
@@ -43,6 +49,7 @@ from backend.prompts.template_candidate_ranking_prompt import (
     render_template_candidate_ranking_prompt,
 )
 from backend.prompts.types import (
+    CommentNoReferencePromptInput,
     CommentPromptInput,
     GeneratePromptInput,
     RenderedPrompt,
@@ -61,8 +68,12 @@ from backend.prompts.types import (
 
 __all__ = [
     "COMMENT_PROMPT_REGISTRY",
+    "COMMENT_NO_REFERENCE_PROMPT_REGISTRY",
+    "COMMENT_NO_REFERENCE_SYSTEM_PROMPT",
+    "COMMENT_NO_REFERENCE_USER_PROMPT",
     "COMMENT_SYSTEM_PROMPT",
     "COMMENT_USER_PROMPT",
+    "CommentNoReferencePromptInput",
     "CommentPromptInput",
     "GENERATE_BY_PARAM_PROMPT_REGISTRY",
     "GENERATE_BY_TEMPLATE_PROMPT_REGISTRY",
@@ -96,6 +107,7 @@ __all__ = [
     "build_rewrite_target_selection_bundle",
     "normalize_generation_style",
     "parse_rewrite_target_selection",
+    "render_comment_no_reference_prompt",
     "render_comment_prompt",
     "render_generate_by_param_prompt",
     "render_generate_by_template_prompt",

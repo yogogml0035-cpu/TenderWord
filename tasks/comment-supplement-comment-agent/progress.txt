@@ -10,6 +10,7 @@ Source: prd.json
 - Windows/WSL 共用工作区时，前端浏览器验证前要确认 Linux 原生 optional 依赖已安装；若 `lightningcss` 或 `@tailwindcss/oxide` 只存在 win32 包，在 `frontend/` 运行 `npm install --include=optional` 后重启 dev server。
 - 批注写回 summary/warning 规则统一走 `backend/nodes/common_word_nodes/comment_writeback.py::build_comment_writeback_summary_payload`；update_word 节点只在 `generated > 0 && failed > 0` 时用 `progress_log.warning()`，不要重新加入 0 写入硬失败。
 - `DocumentService._build_rewrite_state_snapshot()` 可以保存后端内部批注依据长数组和 `generation_mode`；`_build_task_result_payload()`、SSE `done` 和前端 `chat-storage` 只能保留白名单摘要字段，不能泄露 `comment_plan_detail`、`strikethrough_plan`、`non_black_font_plan`。
+- 新增 Prompt Layer builder 时同步补 `backend/prompts/types.py` 输入 dataclass、`backend/prompts/__init__.py` 导出和 `backend/tests/prompts/test_*.py` 契约测试；Prompt Layer 仍只做纯渲染，不接日志、LLM 或 Word 副作用。
 
 ## 2026-05-30 13:08 - US-001
 - 建立了 `comment_supplement` 任务类型契约：后端内部/API TaskKind、TaskService 映射、前端 TaskKind union 均已支持。
@@ -54,4 +55,15 @@ Source: prd.json
   - 任务 result / SSE done 是前端可见白名单摘要层，新增内部 state 字段时不要顺手透传到 `_build_task_result_payload()`。
   - `rewrite_state` 是后端会话内部上下文，可以保存后续任务需要的长数组；前端 `sessionStorage` 应通过 store `partialize` 或 metadata 白名单继续阻断这些长数组。
   - `comment_writeback` 应直接复用 update_word 写回 state 的 `comment_writeback_result`，缺失时再用统一 builder 从计数字段补齐摘要。
+---
+## 2026-05-30 14:44 - US-004
+- 新增无参考批注 prompt 契约：`backend/prompts/comment_no_reference_prompt.py` 提供三维审查、纯净 JSON 数组输出和 `reference_text` 精确来自 `polished_text` 的约束，不引入历史参考、送审稿差异、删除线或非黑色字体计划逻辑。
+- 补齐 Prompt Layer 输入类型与统一导出，新增 prompt 单测覆盖三维审查、JSON 契约、锚点约束、无参考逻辑隔离和未知类型错误。
+- 按 Prompt Layer 回写路由更新 `asset/shared_runtime_word_skill_knowledge_pack.md` 与 `asset/README.md`，记录无参考批注 prompt 的长期边界与测试入口。
+- 更改的文件：`backend/prompts/comment_no_reference_prompt.py`、`backend/prompts/types.py`、`backend/prompts/__init__.py`、`backend/tests/prompts/test_comment_no_reference_prompt.py`、`asset/shared_runtime_word_skill_knowledge_pack.md`、`asset/README.md`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m pytest backend/tests/prompts/test_comment_no_reference_prompt.py backend/tests/prompts/test_comment_prompt_reference_contract.py -v` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests -v` 通过，360 passed；`npm run lint` 通过；`npm run type-check` 通过；本轮变更文件 `git diff --check -- ...` 通过。
+- **未来迭代的学习：**
+  - 无参考批注 prompt 只能消费 `polished_text`，后续 comment_supplement/comment_agent 接入时不要把 `comment_plan_detail`、`strikethrough_plan` 或 `non_black_font_plan` 塞回该 prompt。
+  - gngk 子类型仍通过 `get_tender_type_family()` 收敛到 `gngk` prompt registry，新增 prompt builder 要沿用 family 归一化而不是枚举所有后端 form_type。
+  - Prompt Layer 变更也要更新共享知识包；若只新增同一主题内规则，`asset/README.md` 更新适用范围即可，不需要新建知识包。
 ---

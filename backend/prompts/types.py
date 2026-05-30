@@ -34,6 +34,12 @@ class CommentPromptInput:
 
 
 @dataclass(frozen=True)
+class CommentNoReferencePromptInput:
+    tender_type: str = "xjcg"
+    polished_text: str = ""
+
+
+@dataclass(frozen=True)
 class RewriteStateSnapshot:
     project_number: str = ""
     project_name: str = ""

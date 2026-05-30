@@ -5,7 +5,7 @@
 ## 当前有效知识包
 
 - `shared_runtime_word_skill_knowledge_pack.md`
-  - 适用范围：generate / rewrite / edit 运行时、初次生成 `generation_mode` 与 DeepAgents content_agent 自主调度、FilesystemBackend workspace 文件契约、agent_step 1-based 轮次与单入口广播、agent 热重载与输入摘要排障、智能体生成提示词中文化边界、审核 JSON 兜底与事实真源、招标详情 API 数据契约、用户流式 rewrite 路由、Prompt Layer、LLM provider 默认模型与思考模式开关、generate prompt 路由模式契约、模板生成的参考符号零继承、硬换行与冒号挂载列表约束、task skill runtime、task skill 输出范围契约、按参数生成时的无源引导段删除与重编号约束、参考限权、参数表格 schema 真源、商务章去重删除、Word COM、共享 Word helper、批注/样式回写、样式颜色门禁、任务结果与 SSE / agent_step 透传。
+  - 适用范围：generate / rewrite / edit 运行时、初次生成 `generation_mode` 与 DeepAgents content_agent 自主调度、FilesystemBackend workspace 文件契约、agent_step 1-based 轮次与单入口广播、agent 热重载与输入摘要排障、智能体生成提示词中文化边界、审核 JSON 兜底与事实真源、招标详情 API 数据契约、用户流式 rewrite 路由、Prompt Layer、无参考批注 prompt、LLM provider 默认模型与思考模式开关、generate prompt 路由模式契约、模板生成的参考符号零继承、硬换行与冒号挂载列表约束、task skill runtime、task skill 输出范围契约、按参数生成时的无源引导段删除与重编号约束、参考限权、参数表格 schema 真源、商务章去重删除、Word COM、共享 Word helper、批注/样式回写、样式颜色门禁、任务结果与 SSE / agent_step 透传。
 - `tender_type_identity_session_knowledge_pack.md`
   - 适用范围：招标类型 identity、`form_type` / `tender_type` / family、`gngk` 子类型分派、anchor 默认值、`ifzgcg` 对货物财政 graph 分派的影响、graph/node/replacement 特化、国内公开货物自筹替换字段边界、canonical URL、当前页面会话、`generation_mode` 草稿字段、智能体过程卡标题/空态/聚合与草稿恢复。
 - `template_candidate_pipeline_knowledge_pack.md`
