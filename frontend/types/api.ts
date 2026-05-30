@@ -94,20 +94,8 @@ export interface TemplateCandidateSelectRequest {
 
 export type TemplateSelectedFile = UploadedFile;
 
-export interface TemplateSelectedFiles {
-  clean_draft?: TemplateSelectedFile | null;
-  origin_tender?: TemplateSelectedFile | null;
-}
-
-export interface TemplateSelectFailure {
-  slot: 'clean_draft' | 'origin_tender';
-  message: string;
-}
-
 export interface TemplateSelectResponse {
-  selected_files: TemplateSelectedFiles;
-  failed_slots: TemplateSelectFailure[];
-  partial_success: boolean;
+  selected_file: TemplateSelectedFile;
 }
 
 // ============================================

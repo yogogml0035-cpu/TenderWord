@@ -2287,7 +2287,7 @@ describe('TenderFormShared', () => {
     templateCandidateLookup.resolve(buildTemplateCandidateResponse());
 
     await waitFor(() => expect(mockFetchTemplateCandidates).toHaveBeenCalledTimes(1));
-    expect(await within(dialog).findByText('测试模板-送审稿')).toBeInTheDocument();
+    expect(await within(dialog).findByText('测试模板-模板')).toBeInTheDocument();
     expect(
       within(dialog).getByText('已按优先级排序；同优先级模板已按项目名称相关性重排。')
     ).toBeInTheDocument();
@@ -2361,9 +2361,9 @@ describe('TenderFormShared', () => {
     expect(within(dialog).queryByRole('columnheader', { name: '发售稿' })).not.toBeInTheDocument();
     expect(within(dialog).getByRole('columnheader', { name: '推荐模板' })).toBeInTheDocument();
     expect(
-      within(dialog).getByText('从ERP模板库中选择适合模板，将自动回填到发售稿和送审稿的上传区。')
+      within(dialog).getByText('从ERP模板库中选择适合模板，选择后回填模板文件。')
     ).toBeInTheDocument();
-    expect(screen.getByText('测试模板-送审稿')).toBeInTheDocument();
+    expect(screen.getByText('测试模板-模板')).toBeInTheDocument();
     expect(within(dialog).getByText('0811-DSITC260194')).toBeInTheDocument();
     expect(within(dialog).getByText('张三')).toBeInTheDocument();
     expect(within(dialog).getByText('李四')).toBeInTheDocument();
@@ -2473,24 +2473,13 @@ describe('TenderFormShared', () => {
   it('fills the template upload slot after successful template selection without showing template feedback', async () => {
     const user = userEvent.setup();
     mockSelectTemplateCandidate.mockResolvedValue({
-      selected_files: {
-        clean_draft: {
-          file_path: 'D:/UploadFiles/测试模板-送审稿.docx',
-          file_name: '测试模板-送审稿.docx',
-          original_name: '测试模板-送审稿.docx',
-          size: 1024,
-          upload_time: '2026-01-01T00:00:00.000Z',
-        },
-        origin_tender: {
-          file_path: 'D:/UploadFiles/测试模板-送审稿_副本.docx',
-          file_name: '测试模板-送审稿_副本.docx',
-          original_name: '测试模板-送审稿.docx',
-          size: 1024,
-          upload_time: '2026-01-01T00:00:00.000Z',
-        },
+      selected_file: {
+        file_path: 'D:/UploadFiles/测试模板-模板.docx',
+        file_name: '测试模板-模板.docx',
+        original_name: '测试模板-模板.docx',
+        size: 1024,
+        upload_time: '2026-01-01T00:00:00.000Z',
       },
-      failed_slots: [],
-      partial_success: false,
     });
 
     renderSharedForm();
@@ -2510,30 +2499,15 @@ describe('TenderFormShared', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('template-candidate-dialog')).not.toBeInTheDocument()
     );
-    expect(screen.getAllByText('测试模板-送审稿.docx')).toHaveLength(1);
+    expect(screen.getAllByText('测试模板-模板.docx')).toHaveLength(1);
     expect(screen.queryByTestId('template-feedback')).not.toBeInTheDocument();
   });
 
-  it('keeps partial selection result without showing template feedback', async () => {
+  it('shows overall selection failure and keeps the dialog open', async () => {
     const user = userEvent.setup();
-    mockSelectTemplateCandidate.mockResolvedValue({
-      selected_files: {
-        clean_draft: {
-          file_path: 'D:/UploadFiles/测试模板-送审稿.docx',
-          file_name: '测试模板-送审稿.docx',
-          original_name: '测试模板-送审稿.docx',
-          size: 1024,
-          upload_time: '2026-01-01T00:00:00.000Z',
-        },
-      },
-      failed_slots: [
-        {
-          slot: 'origin_tender',
-          message: '下载模板文件失败',
-        },
-      ],
-      partial_success: true,
-    });
+    mockSelectTemplateCandidate.mockRejectedValueOnce(
+      new ApiError('模板文件选择失败', 'TEMPLATE_SELECT_FAILED', 502)
+    );
 
     renderSharedForm();
 
@@ -2541,10 +2515,9 @@ describe('TenderFormShared', () => {
     const dialog = await screen.findByTestId('template-candidate-dialog');
     await user.click(within(dialog).getByRole('button', { name: '选择' }));
 
-    await waitFor(() =>
-      expect(screen.queryByTestId('template-candidate-dialog')).not.toBeInTheDocument()
-    );
-    expect(screen.getByText('测试模板-送审稿.docx')).toBeInTheDocument();
+    expect(screen.getByTestId('template-candidate-dialog')).toBeInTheDocument();
+    expect(within(dialog).getByText('模板文件选择失败')).toBeInTheDocument();
+    expect(screen.queryByText('测试模板-模板.docx')).not.toBeInTheDocument();
     expect(screen.queryByTestId('template-feedback')).not.toBeInTheDocument();
   });
 

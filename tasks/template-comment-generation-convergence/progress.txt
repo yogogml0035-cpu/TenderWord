@@ -14,6 +14,7 @@ Source: prd.json
 - Standard generate graphs now split comments by `generation_mode`: workflow always runs `generate_comments` before `update_word`; agent skips `generate_comments` and runs `comment_agent` after `update_word`, while total-node estimates ignore `origin_tender_path`.
 - Prompt builders should expose the smallest contract needed by the current node; `generate_comments` now forwards only `tender_type` and `polished_text`, and legacy plan fields should be treated as inert state if they still appear in fixtures.
 - `comment_agent` autonomous generation reuses `render_comment_prompt()` for both agent generate and comment_supplement; do not reintroduce separate `comment_no_reference` prompt modules or exports.
+- Template candidate selection is single-file and all-or-nothing: backend returns `selected_file`, frontend fills only `files.template`, and failures surface as `TEMPLATE_SELECT_FAILED` without `partial_success`.
 
 ## 2026-05-31 03:23 - US-001
 - 将共享表单的上传区收敛为“模板文件（必填）”和“技术参数文件（必填）”，并把 draft files 结构改为 `template` + `tender_params`
@@ -155,4 +156,29 @@ Source: prd.json
   - 发现的 patterns：自主生成批注的 Prompt Layer 真源现在只有 `backend/prompts/comment_prompt.py`，节点层只负责判断是否允许生成并把 system/user prompt 透传给 `run_comment_agent`
   - 遇到的陷阱：`comment_agent` 空候选不再一律跳过，只有非 `generation_mode=agent` 的 generate 才保持 skip；测试要区分 workflow 空候选、agent generate 空候选和 comment_supplement 空候选
   - 有用的上下文：`backend/tests/nodes/test_comment_agent_writeback_node.py` 是节点是否允许自主生成和 prompt 透传的回归入口，`backend/tests/agents/test_comment_agent.py` 覆盖 runner 级生成模式工具闭环
+---
+
+## 2026-05-31 06:12 - US-008
+- 将模板候选选择响应从双槽位 `selected_files` 收敛为单文件 `selected_file`，后端只下载并保存一次推荐模板文件
+- 将选择失败改为整体失败，统一返回 `TEMPLATE_SELECT_FAILED`，不再返回 `failed_slots` 或 `partial_success`
+- 将模板候选弹窗文案和下载展示名改为模板文件语义，选择成功后只回填共享表单的 `template` 上传位
+- 更改的文件：
+  - `backend/models/template_candidates.py`
+  - `backend/models/__init__.py`
+  - `backend/api/template_candidates.py`
+  - `backend/tests/api/test_template_candidates.py`
+  - `frontend/types/api.ts`
+  - `frontend/components/forms/TemplateCandidateDialog.tsx`
+  - `frontend/components/forms/TenderFormShared.tsx`
+  - `frontend/__tests__/unit/lib/test_api.test.ts`
+  - `frontend/__tests__/unit/components/forms/test_tender_form_shared.test.tsx`
+  - `asset/template_candidate_pipeline_knowledge_pack.md`
+  - `asset/README.md`
+  - `tasks/template-comment-generation-convergence/prd.json`
+  - `tasks/template-comment-generation-convergence/progress.txt`
+- 验证：`cd backend; .\.venv\Scripts\python.exe -m pytest tests -v` 通过（396 passed）；`cd frontend; npm run lint`、`npm run type-check`、`npm run test -- --runInBand` 均通过；Playwright MCP mock 浏览器验证通过，截图写入 `tasks/template-comment-generation-convergence/screenshots/us-008-template-selection.png`
+- **未来迭代的学习：**
+  - 发现的 patterns：模板候选选择是单文件全成全败契约，后端响应只暴露 `selected_file`，前端只同步 `templateFile` 和 draft `files.template`
+  - 遇到的陷阱：不要在前端为失败槽位保留 partial success 分支；下载、保存和缺少推荐链接都应该整体失败并显示 `TEMPLATE_SELECT_FAILED` 消息
+  - 有用的上下文：`backend/tests/api/test_template_candidates.py` 是选择 API 成功/失败契约入口，`frontend/__tests__/unit/components/forms/test_tender_form_shared.test.tsx` 覆盖弹窗文案和单文件回填
 ---

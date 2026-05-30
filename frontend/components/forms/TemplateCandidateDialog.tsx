@@ -90,7 +90,7 @@ export function TemplateCandidateDialog({
           <div>
             <h3 className="text-lg font-semibold text-slate-900">智能抽取模板</h3>
             <p className="mt-0.5 text-xs leading-5 text-slate-500">
-              从ERP模板库中选择适合模板，将自动回填到发售稿和送审稿的上传区。
+              从ERP模板库中选择适合模板，选择后回填模板文件。
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -171,6 +171,9 @@ export function TemplateCandidateDialog({
                   {candidates.map((candidate, index) => {
                     const rowKey = buildTemplateCandidateRowKey(candidate, index);
                     const isSelecting = selectingRowKey === rowKey;
+                    const displayedTenderName = displayTemplateValue(candidate.tendername);
+                    const downloadName =
+                      displayedTenderName === '--' ? '模板文件' : `${displayedTenderName}-模板`;
                     return (
                       <tr
                         key={rowKey}
@@ -230,15 +233,12 @@ export function TemplateCandidateDialog({
                         <td className="px-2.5 py-2">
                           {candidate.shener ? (
                             <a
-                              href={getDownloadUrl(
-                                candidate.shener,
-                                `${displayTemplateValue(candidate.tendername) === '--' ? '模板' : candidate.tendername}-送审稿`
-                              )}
+                              href={getDownloadUrl(candidate.shener, downloadName)}
                               target="_blank"
                               rel="noreferrer"
                               className="inline-block whitespace-normal break-words text-center leading-5 text-blue-600 underline-offset-2 hover:text-blue-700 hover:underline"
                             >
-                              {`${displayTemplateValue(candidate.tendername) === '--' ? '模板' : candidate.tendername}-送审稿`}
+                              {downloadName}
                             </a>
                           ) : (
                             '--'

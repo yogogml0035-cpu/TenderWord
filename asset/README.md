@@ -9,7 +9,7 @@
 - `tender_type_identity_session_knowledge_pack.md`
   - 适用范围：招标类型 identity、`form_type` / `tender_type` / family、`gngk` 子类型分派、anchor 默认值、`ifzgcg` 对货物财政 graph 分派的影响、graph/node/replacement 特化、国内公开货物自筹替换字段边界、canonical URL、当前页面会话、`generation_mode` 草稿字段、正文智能体结构化过程卡、智能体过程卡标题/空态/聚合、`comment_agent` 过程卡与草稿恢复。
 - `template_candidate_pipeline_knowledge_pack.md`
-  - 适用范围：模板候选获取、同优先级 AI 重排、下载代理、文件落盘、上传槽位回填、模板弹窗缓存与刷新。
+  - 适用范围：模板候选获取、同优先级 AI 重排、下载代理、单文件模板落盘、`template` 上传槽位回填、模板弹窗缓存与刷新。
 
 ## 使用路由
 

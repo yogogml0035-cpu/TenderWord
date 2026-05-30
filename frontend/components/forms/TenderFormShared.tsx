@@ -1466,16 +1466,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
           },
         });
 
-        const selectedFile =
-          response.selected_files.clean_draft || response.selected_files.origin_tender || null;
-        const nextTemplateFile = selectedFile
-          ? toSelectedUploadedFile(selectedFile)
-          : templateFile;
+        const nextTemplateFile = toSelectedUploadedFile(response.selected_file);
 
-        if (selectedFile) {
-          setTemplateFile(nextTemplateFile);
-        }
-
+        setTemplateFile(nextTemplateFile);
         syncDraftFiles(nextTemplateFile, paramFiles);
         setTemplateDialogOpen(false);
         setTemplateDialogError(null);
@@ -1495,7 +1488,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         setSelectingTemplateRowKey(null);
       }
     },
-    [paramFiles, syncDraftFiles, templateFile]
+    [paramFiles, syncDraftFiles]
   );
 
   const uploadSectionAction = (

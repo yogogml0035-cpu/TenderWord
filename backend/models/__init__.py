@@ -84,8 +84,6 @@ from .template_candidates import (
     TemplateCandidateSelectPayload,
     TemplateCandidateSelectRequest,
     TemplateSelectedFile,
-    TemplateSelectedFiles,
-    TemplateSelectFailure,
     TemplateSelectData,
     TemplateSelectResponse,
 )
@@ -101,8 +99,6 @@ __all__ = [
     "TemplateCandidateSelectPayload",
     "TemplateCandidateSelectRequest",
     "TemplateSelectedFile",
-    "TemplateSelectedFiles",
-    "TemplateSelectFailure",
     "TemplateSelectData",
     "TemplateSelectResponse",
     
