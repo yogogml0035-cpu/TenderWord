@@ -1008,33 +1008,8 @@ class DocumentService:
             )
 
         # 文件路径
-        # origin_tender_path: 送审稿（可选）
-        explicit_origin_tender = file_paths.get("origin_tender")
-        origin_tender = explicit_origin_tender or file_paths.get("template")
-        if origin_tender and isinstance(origin_tender, str):
-            state["origin_tender_path"] = origin_tender
-        state["source_origin_tender_path"] = (
-            explicit_origin_tender.strip()
-            if isinstance(explicit_origin_tender, str)
-            else ""
-        )
-
-        # clean_draft_path: 清洁稿（可选）
-        clean_draft = file_paths.get("clean_draft") or file_paths.get("clean_draft_path")
-        if clean_draft and isinstance(clean_draft, str):
-            state["clean_draft_path"] = clean_draft
-
-        # tender_param_paths: 技术参数文件（支持多文件）
-        params = file_paths.get("tender_params") or file_paths.get("params") or []
-        if isinstance(params, str):
-            params = [params]
-        state["tender_param_paths"] = params if isinstance(params, list) else []
-
-        # template: 模板文件（必需）
-        template = file_paths.get("template")
-        if template and isinstance(template, str):
-            # 保存模板路径，后续 prepare_template 节点会处理
-            state["template_path"] = template
+        state["template_path"] = file_paths.template
+        state["tender_param_paths"] = list(file_paths.tender_params)
 
         return state
 

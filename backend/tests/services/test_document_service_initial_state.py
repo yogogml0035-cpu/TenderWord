@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from backend.config.tender_config import get_default_anchor_texts
 from backend.models.generate import (
@@ -22,8 +23,8 @@ from backend.services.document_service import (
 
 def build_request(
     *,
-    origin_tender: str | None,
     template: str | None,
+    tender_params: list[str] | None = None,
     form_type: FormType = FormType.GJGK_TENDER,
     tender_lx: int = 0,
     fund_source_lx: int = 1,
@@ -32,9 +33,9 @@ def build_request(
     style_writeback_mode: StyleWritebackMode = StyleWritebackMode.FULL,
     investment: str = "140",
 ) -> GenerateRequest:
-    file_paths: dict[str, object] = {"tender_params": ["D:/UploadFiles/params.docx"]}
-    if origin_tender is not None:
-        file_paths["origin_tender"] = origin_tender
+    file_paths: dict[str, object] = {
+        "tender_params": tender_params or ["D:/UploadFiles/params.docx"]
+    }
     if template is not None:
         file_paths["template"] = template
 
@@ -66,40 +67,38 @@ def build_request(
     )
 
 
-def test_build_initial_state_prefers_explicit_origin_tender() -> None:
+def test_generate_request_requires_template_path() -> None:
+    with pytest.raises(ValidationError, match="请上传模板文件"):
+        build_request(template=None)
+
+
+def test_build_initial_state_uses_template_and_tender_params_only() -> None:
     service = object.__new__(DocumentService)
     request = build_request(
-        origin_tender=" D:/UploadFiles/review.docx ",
-        template="D:/UploadFiles/template.docx",
+        template=" D:/UploadFiles/template.docx ",
+        tender_params=[
+            "D:/UploadFiles/params1.docx",
+            "D:/UploadFiles/params2.docx",
+        ],
     )
 
     state = service._build_initial_state(request, task_id="task-1")
 
-    assert state["origin_tender_path"] == " D:/UploadFiles/review.docx "
-    assert state["source_origin_tender_path"] == "D:/UploadFiles/review.docx"
     assert state["template_path"] == "D:/UploadFiles/template.docx"
+    assert state["tender_param_paths"] == [
+        "D:/UploadFiles/params1.docx",
+        "D:/UploadFiles/params2.docx",
+    ]
+    assert "origin_tender_path" not in state
+    assert "clean_draft_path" not in state
+    assert "source_origin_tender_path" not in state
     assert state["project_number"] == "254DSITC2512"
     assert "254DSITC2512" in state["tender_invitation"]
-
-
-def test_build_initial_state_falls_back_to_template_without_origin_tender() -> None:
-    service = object.__new__(DocumentService)
-    request = build_request(
-        origin_tender=None,
-        template="D:/UploadFiles/template.docx",
-    )
-
-    state = service._build_initial_state(request, task_id="task-2")
-
-    assert state["origin_tender_path"] == "D:/UploadFiles/template.docx"
-    assert state["source_origin_tender_path"] == ""
-    assert state["template_path"] == "D:/UploadFiles/template.docx"
 
 
 def test_build_initial_state_carries_generation_style() -> None:
     service = object.__new__(DocumentService)
     request = build_request(
-        origin_tender="D:/UploadFiles/review.docx",
         template="D:/UploadFiles/template.docx",
         generation_style=GenerationStyle.PARAM,
     )
@@ -112,7 +111,6 @@ def test_build_initial_state_carries_generation_style() -> None:
 def test_build_initial_state_carries_generation_mode() -> None:
     service = object.__new__(DocumentService)
     request = build_request(
-        origin_tender="D:/UploadFiles/review.docx",
         template="D:/UploadFiles/template.docx",
         generation_mode=GenerationMode.AGENT,
     )
@@ -125,7 +123,6 @@ def test_build_initial_state_carries_generation_mode() -> None:
 def test_build_initial_state_carries_style_writeback_mode() -> None:
     service = object.__new__(DocumentService)
     request = build_request(
-        origin_tender="D:/UploadFiles/review.docx",
         template="D:/UploadFiles/template.docx",
         style_writeback_mode=StyleWritebackMode.BOLD_ONLY,
     )
@@ -138,7 +135,6 @@ def test_build_initial_state_carries_style_writeback_mode() -> None:
 def test_build_initial_state_carries_investment_and_rewrite_snapshot_key() -> None:
     service = object.__new__(DocumentService)
     request = build_request(
-        origin_tender="D:/UploadFiles/review.docx",
         template="D:/UploadFiles/template.docx",
         investment="140.0",
     )
@@ -235,7 +231,6 @@ def test_build_initial_state_uses_gngk_mode_specific_default_anchors(
 ) -> None:
     service = object.__new__(DocumentService)
     request = build_request(
-        origin_tender="D:/UploadFiles/review.docx",
         template="D:/UploadFiles/template.docx",
         form_type=form_type,
         tender_lx=tender_lx,

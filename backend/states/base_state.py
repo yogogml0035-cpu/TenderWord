@@ -39,6 +39,7 @@ class CommentInstruction(TypedDict):
 
 
 class TenderGraphStateBase(BaseState, total=False):
+    template_path: str
     origin_tender_path: str
     tender_param_paths: List[str]
     clean_draft_path: Optional[str]

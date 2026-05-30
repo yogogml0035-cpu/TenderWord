@@ -9,6 +9,7 @@ Source: prd.json
 - `chatStore.mergeConversationDraft()` is the normalization point for `ConversationFormDraft.files`; keep only populated upload slots and let the form own draft writes.
 - Playwright validation can seed `chat-storage` directly and mock `/api/conversations/*/heartbeat` to reach `/tender` without backend or Word COM.
 - Generate payloads now use `file_paths.template` + `file_paths.tender_params` only; edit uploads use `FileType` `edit_source` rather than generate upload slots.
+- Backend generate requests now validate `file_paths` through `GenerateFilePaths`; `DocumentService._build_initial_state()` maps only `template_path` and `tender_param_paths` for generate tasks.
 
 ## 2026-05-31 03:23 - US-001
 - 将共享表单的上传区收敛为“模板文件（必填）”和“技术参数文件（必填）”，并把 draft files 结构改为 `template` + `tender_params`
@@ -46,4 +47,23 @@ Source: prd.json
   - 发现的 patterns：生成转换器只从 `formData.files.template` 和 `formData.files.tender_params` 取路径，旧 `origin_tender` / `clean_draft` 不再属于 generate payload
   - 遇到的陷阱：`FileType` 移除旧生成槽位后，`ChatPanel` 的编辑文件上传也要同步切到独立 `edit_source`，否则类型检查会重新暴露旧契约
   - 有用的上下文：`frontend/__tests__/unit/lib/test_form_data_converter.test.ts` 是三类表单 payload 断言入口；`frontend/__tests__/unit/lib/test_api.test.ts` 里有 typed `GenerateRequest` 夹具，`FilesConfig` 改动会先在这里暴露
+---
+
+## 2026-05-31 04:12 - US-003
+- 将后端 `GenerateRequest.file_paths` 收敛为显式 `GenerateFilePaths` 模型，要求 `template` 非空且 `tender_params` 至少包含一个路径，并拒绝旧上传槽位
+- 将 `DocumentService._build_initial_state()` 的 generate 初始 state 改为只写入 `template_path` 和 `tender_param_paths`
+- 更改的文件：
+  - `backend/models/generate.py`
+  - `backend/models/__init__.py`
+  - `backend/states/base_state.py`
+  - `backend/services/document_service.py`
+  - `backend/tests/services/test_document_service_initial_state.py`
+  - `backend/tests/models/test_generate_request_generation_style.py`
+  - `tasks/template-comment-generation-convergence/prd.json`
+  - `tasks/template-comment-generation-convergence/progress.txt`
+- 验证：`cd backend; .\.venv\Scripts\python.exe -m pytest tests\services\test_document_service_initial_state.py tests\models\test_generate_request_generation_style.py -v` 通过；`cd backend; .\.venv\Scripts\python.exe -m pytest tests -v` 通过（390 passed）
+- **未来迭代的学习：**
+  - 发现的 patterns：生成入口的路径校验应放在 `backend/models/generate.py` 的请求模型层，service 只消费已规范化字段
+  - 遇到的陷阱：`GenerateRequest.file_paths` 从 dict 改成 Pydantic 子模型后，`DocumentService` 不能再使用 `.get()` 读取文件槽位
+  - 有用的上下文：`backend/tests/services/test_document_service_initial_state.py` 是 generate 初始 state 字段契约的主要回归入口
 ---

@@ -29,7 +29,10 @@ def build_payload() -> dict[str, object]:
             tender_lx=0,
             fund_source_lx=1,
         ),
-        "file_paths": {"tender_params": ["D:/UploadFiles/params.docx"]},
+        "file_paths": {
+            "template": "D:/UploadFiles/template.docx",
+            "tender_params": ["D:/UploadFiles/params.docx"],
+        },
         "model": "deepseek",
     }
 
