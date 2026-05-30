@@ -356,6 +356,7 @@ describe('ChatPanel', () => {
 
     await waitFor(() => {
       expect(mockUploadFile).toHaveBeenCalledTimes(1);
+      expect(mockUploadFile).toHaveBeenCalledWith(expect.any(File), 'edit_source');
       const draft = useChatStore.getState().getConversationDraft('conv-1');
       expect(draft?.input_mode).toBe('edit');
       expect(draft?.edit_file?.original_name).toBe('edit.docx');

@@ -97,6 +97,7 @@ const validGenerateRequest: GenerateRequest = {
     fund_source_lx: 1,
   },
   file_paths: {
+    template: '/uploads/template.docx',
     tender_params: ['/uploads/params.xlsx'],
   },
   generation_mode: 'workflow',
@@ -734,7 +735,7 @@ describe('API Client', () => {
 
   describe('uploadFile', () => {
     it('should return uploaded file info on success', async () => {
-      globalThis.fetch = mockFetchJson({
+      const fetchSpy = mockFetchJson({
         success: true,
         data: {
           file_path: '/uploads/test.docx',
@@ -745,12 +746,17 @@ describe('API Client', () => {
         message: 'OK',
         timestamp: new Date().toISOString(),
       });
+      globalThis.fetch = fetchSpy;
 
       const file = new File(['test'], 'test.docx', {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
-      const result = await uploadFile(file, 'clean_draft');
+      const result = await uploadFile(file, 'edit_source');
       expect(result.file_path).toBe('/uploads/test.docx');
+
+      const [, init] = fetchSpy.mock.calls[0];
+      const body = (init as RequestInit).body as FormData;
+      expect(body.get('file_type')).toBe('edit_source');
     });
 
     it('should handle flat upload response without data wrapper', async () => {
@@ -767,7 +773,7 @@ describe('API Client', () => {
       const file = new File(['test'], 'flat-test.docx', {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
-      const result = await uploadFile(file, 'clean_draft');
+      const result = await uploadFile(file, 'edit_source');
       expect(result.file_path).toBe('/uploads/flat-test.docx');
     });
   });

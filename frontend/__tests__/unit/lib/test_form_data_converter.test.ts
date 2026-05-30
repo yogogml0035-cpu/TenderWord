@@ -21,19 +21,11 @@ const baseTenderData = {
 };
 
 const baseFiles = {
-  origin_tender: {
-    id: 'origin',
-    file_path: '/uploads/origin.docx',
-    file_name: 'origin.docx',
-    original_name: 'origin.docx',
-    size: 100,
-    upload_time: '2026-03-01T00:00:00.000Z',
-  },
-  clean_draft: {
-    id: 'clean',
-    file_path: '/uploads/clean.docx',
-    file_name: 'clean.docx',
-    original_name: 'clean.docx',
+  template: {
+    id: 'template',
+    file_path: '/uploads/template.docx',
+    file_name: 'template.docx',
+    original_name: 'template.docx',
     size: 100,
     upload_time: '2026-03-01T00:00:00.000Z',
   },
@@ -100,11 +92,18 @@ describe('formDataConverter', () => {
         },
       })],
   ] as const)(
-    'forwards generation_mode, generation_style and style_writeback_mode for %s converters',
+    'forwards generation settings and template payload for %s converters',
     (_tenderType, buildRequest) => {
-      expect(buildRequest().generation_mode).toBe('agent');
-      expect(buildRequest().generation_style).toBe('param');
-      expect(buildRequest().style_writeback_mode).toBe('bold_only');
+      const request = buildRequest();
+      expect(request.generation_mode).toBe('agent');
+      expect(request.generation_style).toBe('param');
+      expect(request.style_writeback_mode).toBe('bold_only');
+      expect(request.file_paths).toEqual({
+        template: '/uploads/template.docx',
+        tender_params: ['/uploads/params.docx'],
+      });
+      expect(request.file_paths).not.toHaveProperty('origin_tender');
+      expect(request.file_paths).not.toHaveProperty('clean_draft');
     }
   );
 

@@ -49,22 +49,17 @@ function extractFilePaths(files: UploadedFile[] | undefined | null): string[] {
 
 /**
  * 构建 FilesConfig 对象
- * @param originTender - 原始招标文件
- * @param cleanDraft - 清稿文件
+ * @param template - 模板文件
  * @param tenderParams - 技术参数文件数组
  * @returns FilesConfig 对象
  */
 function buildFilesConfig(
-  originTender: UploadedFile | undefined | null,
-  cleanDraft: UploadedFile | undefined | null,
+  template: UploadedFile | undefined | null,
   tenderParams: UploadedFile[] | undefined | null
 ): FilesConfig {
-  const paramPaths = extractFilePaths(tenderParams);
-
   return {
-    origin_tender: extractFilePath(originTender),
-    clean_draft: extractFilePath(cleanDraft),
-    tender_params: paramPaths,
+    template: extractFilePath(template) ?? '',
+    tender_params: extractFilePaths(tenderParams),
   };
 }
 
@@ -89,7 +84,7 @@ function resolveGenerationMode(generationMode: GenerationMode | undefined): Gene
  *   tender_data: { project_name: '测试项目', ... },
  *   model: 'deepseek',
  *   files: {
- *     origin_tender: { file_path: '/uploads/template.docx', ... },
+ *     template: { file_path: '/uploads/template.docx', ... },
  *     tender_params: [{ file_path: '/uploads/params.xlsx', ... }],
  *   },
  *   insertion_config: { before_text: '第三章', after_text: '第四章' },
@@ -99,10 +94,9 @@ function resolveGenerationMode(generationMode: GenerationMode | undefined): Gene
  * // {
  * //   tender_no: 'ZBGG-2024-001',
  * //   tender_data: { ... },
- * //   files: {
- * //     origin_tender_path: '/uploads/template.docx',
- * //     clean_draft_path: undefined,
- * //     tender_param_paths: ['/uploads/params.xlsx'],
+ * //   file_paths: {
+ * //     template: '/uploads/template.docx',
+ * //     tender_params: ['/uploads/params.xlsx'],
  * //   },
  * //   model: 'deepseek',
  * //   insertion_config: { before_text: '第三章', after_text: '第四章' },
@@ -111,8 +105,7 @@ function resolveGenerationMode(generationMode: GenerationMode | undefined): Gene
  */
 export function convertXjcgFormToApiRequest(formData: XjcgTenderFormData): GenerateRequest {
   const filesConfig = buildFilesConfig(
-    formData.files.origin_tender,
-    formData.files.clean_draft,
+    formData.files.template,
     formData.files.tender_params
   );
 
@@ -162,7 +155,7 @@ export interface GngkGenerateRequest extends GenerateRequest {
  *   tender_data: { project_name: '测试项目', ... },
  *   model: 'deepseek',
  *   files: {
- *     origin_tender: { file_path: '/uploads/template.docx', ... },
+ *     template: { file_path: '/uploads/template.docx', ... },
  *     tender_params: [{ file_path: '/uploads/params.xlsx', ... }],
  *     qualification: [{ file_path: '/uploads/qual.pdf', ... }],
  *   },
@@ -174,9 +167,9 @@ export interface GngkGenerateRequest extends GenerateRequest {
  * // {
  * //   tender_no: 'ZBGG-2024-001',
  * //   tender_data: { ... },
- * //   files: {
- * //     origin_tender_path: '/uploads/template.docx',
- * //     tender_param_paths: ['/uploads/params.xlsx'],
+ * //   file_paths: {
+ * //     template: '/uploads/template.docx',
+ * //     tender_params: ['/uploads/params.xlsx'],
  * //   },
  * //   model: 'deepseek',
  * //   insertion_config: { before_text: '第三章', after_text: '第四章' },
@@ -189,8 +182,7 @@ export function convertGngkFormToApiRequest(
   formData: GngkTenderFormData
 ): GngkGenerateRequest {
   const filesConfig = buildFilesConfig(
-    formData.files.origin_tender,
-    formData.files.clean_draft,
+    formData.files.template,
     formData.files.tender_params
   );
 
@@ -221,8 +213,7 @@ export function convertGjgkFormToApiRequest(
   formData: GjgkTenderFormData
 ): GenerateRequest {
   const filesConfig = buildFilesConfig(
-    formData.files.origin_tender,
-    formData.files.clean_draft,
+    formData.files.template,
     formData.files.tender_params
   );
 

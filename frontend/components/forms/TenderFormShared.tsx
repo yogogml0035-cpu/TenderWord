@@ -57,8 +57,6 @@ export interface BaseTenderFormData {
   model: ModelType;
   files: {
     template?: UploadedFile;
-    origin_tender?: UploadedFile;
-    clean_draft?: UploadedFile;
     tender_params: UploadedFile[];
   };
   insertion_config: TenderInsertionConfig;
@@ -1565,7 +1563,6 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         model: selectedModel,
         files: {
           template: templateFile || undefined,
-          clean_draft: templateFile || undefined,
           tender_params: paramFiles,
         },
         insertion_config: insertionConfig,

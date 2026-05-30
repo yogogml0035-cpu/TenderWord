@@ -338,7 +338,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       setComposerNotice(null);
       setIsUploadingEditFile(true);
       try {
-        const uploadedFile = await uploadFile(file, 'origin_tender');
+        const uploadedFile = await uploadFile(file, 'edit_source');
         updateConversationDraft(conversation.id, {
           input_mode: 'edit',
           edit_file: toConversationDraftFile({
