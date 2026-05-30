@@ -1,8 +1,7 @@
 """
 批注生成节点
 
-本模块实现 generate_comments 节点，使用 LLM 基于修改文本和从 Word 文档中提取的
-各种计划详情生成批注指令。
+本模块实现 generate_comments 节点，使用 LLM 基于修改文本生成批注指令。
 
 该节点遵循与 generate_polished_text.py 相同的架构模式，通过提示词注册表系统
 支持多种招标类型（xjcg 和 gngk）。
@@ -213,17 +212,13 @@ def _write_text_if_possible(path, content: str) -> None:
 
 def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     """
-    基于修改文本和计划使用 LLM 生成批注指令。
+    基于修改文本使用 LLM 生成批注指令。
 
-    本函数分析修改文本以及从 Word 文档中提取的批注计划、删除线计划和非黑色字体计划，
-    使用 LLM 生成可插入 Word 文档的结构化批注指令。
+    本函数分析修改文本并使用 LLM 生成可插入 Word 文档的结构化批注指令。
 
     Args:
         state (TenderGraphStateBase): 包含输入字段的当前图状态
             - polished_text: 来自 update_word 节点的精炼文本内容
-            - comment_plan_detail: 批注详情，包含 content 和 scope_text
-            - strikethrough_plan: 包含删除线文本的段落
-            - non_black_font_plan: 包含非黑色字体文本的段落
             - tender_type: 招标文档类型（默认："xjcg"）
         config: 配置字典，包含可选的 model_provider 和回调函数
             - model_provider: LLM 提供商（默认："deepseek"）
@@ -249,9 +244,6 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
 
     # 从 state 读取输入数据，使用防御性默认值
     polished_text = state.get("polished_text", "")
-    comment_plan_detail = state.get("comment_plan_detail", [])
-    strikethrough_plan = state.get("strikethrough_plan", [])
-    non_black_font_plan = state.get("non_black_font_plan", [])
     tender_type = state.get("tender_type", "xjcg")
 
     # 记录正在使用的 tender_type
@@ -262,9 +254,6 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
         CommentPromptInput(
             tender_type=str(tender_type or "xjcg"),
             polished_text=str(polished_text or ""),
-            comment_plan_detail=comment_plan_detail,
-            strikethrough_plan=strikethrough_plan,
-            non_black_font_plan=non_black_font_plan,
         )
     )
     system_prompt = rendered_prompt.system_prompt

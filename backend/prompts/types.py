@@ -28,9 +28,6 @@ class GeneratePromptInput:
 class CommentPromptInput:
     tender_type: str = "xjcg"
     polished_text: str = ""
-    comment_plan_detail: Any = None
-    strikethrough_plan: Any = None
-    non_black_font_plan: Any = None
 
 
 @dataclass(frozen=True)
