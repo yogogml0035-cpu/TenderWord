@@ -230,7 +230,20 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     }
 
     const kind = message.metadata?.messageKind;
-    if (kind === 'task-download') {
+    if (kind === 'task-download' || kind === 'agent-step') {
+      if (kind === 'agent-step') {
+        const node = message.metadata?.agentStepNode;
+        const round = message.metadata?.agentStepRound;
+        const stepKey =
+          typeof node === 'string' && typeof round === 'number' ? `${node}:${round}` : null;
+        const stepSnapshot = stepKey ? stream.agentSteps?.[stepKey] : undefined;
+        if (message.status === 'generating' && stepSnapshot && !stepSnapshot.isComplete) {
+          return {
+            ...message,
+            content: stepSnapshot.content,
+          };
+        }
+      }
       return message;
     }
 

@@ -1,12 +1,11 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Bot, CheckCircle2, Copy, Loader2, RefreshCw, XCircle } from 'lucide-react';
+import { Bot, CheckCircle2, Copy, Loader2, XCircle } from 'lucide-react';
 import type { Message } from '@/types/chat';
 
 interface TaskContentMessageProps {
   message: Message;
-  onRetry?: () => void;
   maxHeight?: number;
   disabled?: boolean;
 }
@@ -78,9 +77,28 @@ function getBorderColor(status: Message['status']) {
   }
 }
 
+function getContentTitle(message: Message) {
+  if (message.metadata?.messageKind === 'agent-step') {
+    const node = message.metadata.agentStepNode;
+    if (typeof node === 'string' && node.trim()) {
+      if (message.metadata.agentStepType === 'final') {
+        return `${node.trim()} final`;
+      }
+      const round = message.metadata.agentStepRound;
+      return typeof round === 'number' ? `${node.trim()} round-${round}` : node.trim();
+    }
+    return '智能体过程';
+  }
+
+  if (message.metadata?.taskKind === 'rewrite' || message.metadata?.taskKind === 'edit') {
+    return 'AI 修改内容';
+  }
+
+  return 'AI 生成内容';
+}
+
 export function TaskContentMessage({
   message,
-  onRetry,
   maxHeight = 320,
   disabled = false,
 }: TaskContentMessageProps) {
@@ -89,8 +107,11 @@ export function TaskContentMessage({
   const content = typeof message.content === 'string' ? message.content : '';
   const progressText = message.metadata?.progressText;
   const progressPercent = message.metadata?.progressPercent;
-  const isRewriteTask = message.metadata?.taskKind === 'rewrite';
-  const retryDisabledByLocalReason = message.metadata?.localTaskReason === 'backend_restart';
+  const contentTitle = getContentTitle(message);
+  const isEmptyRunningAgentStep =
+    message.metadata?.messageKind === 'agent-step' &&
+    message.status === 'generating' &&
+    content.length === 0;
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -122,7 +143,7 @@ export function TaskContentMessage({
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 text-gray-500" />
           <span className="text-sm font-medium text-gray-700">
-            {isRewriteTask ? 'AI 修改内容' : 'AI 生成内容'}
+            {contentTitle}
           </span>
           <div className="ml-1 flex items-center gap-1.5 text-xs text-gray-500">
             {getStatusIcon(message.status)}
@@ -131,16 +152,6 @@ export function TaskContentMessage({
         </div>
 
         <div className="flex items-center gap-2">
-          {message.status === 'error' && onRetry && !retryDisabledByLocalReason && (
-            <button
-              onClick={onRetry}
-              disabled={disabled}
-              className="flex items-center gap-1 rounded bg-blue-50 px-2.5 py-1 text-xs text-blue-600 transition-colors duration-200 hover:bg-blue-100"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              重试
-            </button>
-          )}
           <button
             type="button"
             aria-label="复制AI内容"
@@ -170,13 +181,18 @@ export function TaskContentMessage({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="overflow-x-hidden overflow-y-auto p-3"
+        className={`overflow-x-hidden overflow-y-auto p-3 ${isEmptyRunningAgentStep ? 'py-2' : ''}`}
         style={{ maxHeight }}
       >
         {content ? (
           <pre className="min-w-0 break-all whitespace-pre-wrap font-mono text-sm text-gray-700">
             {content}
           </pre>
+        ) : isEmptyRunningAgentStep ? (
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+            <span>正在调用...</span>
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-8 text-gray-400">
             <div className="relative mb-3">

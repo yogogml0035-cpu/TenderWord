@@ -6,6 +6,7 @@ import { generateLogEntryId } from '@/lib/chat-utils';
 import type {
   SSEDoneEvent,
   SSEErrorEvent,
+  SSEAgentStepEvent,
   SSELLMEvent,
   SSEProgressEvent,
   StyleWritebackSummary,
@@ -93,6 +94,45 @@ function isAIContentCompletedLog(message: string, node: unknown, taskKind: TaskK
   return message.includes('完成');
 }
 
+function hasAgentStepCard(taskId: string): boolean {
+  return useChatStore.getState().conversations.some((conversation) =>
+    conversation.messages.some(
+      (message) => message.taskId === taskId && message.metadata?.messageKind === 'agent-step'
+    )
+  );
+}
+
+function isAgentGenerationConversation(taskId: string, conversationId: string | null): boolean {
+  const state = useChatStore.getState();
+  const conversation =
+    (conversationId
+      ? state.conversations.find((item) => item.id === conversationId)
+      : null) || state.conversations.find((item) => item.currentTaskId === taskId);
+  if (!conversation) {
+    return false;
+  }
+  return state.conversationDrafts[conversation.id]?.generation_mode === 'agent';
+}
+
+function shouldUseAgentStepCards(
+  taskId: string,
+  conversationId: string | null,
+  taskKind: TaskKind
+): boolean {
+  if (hasAgentStepCard(taskId)) {
+    return true;
+  }
+  if (taskKind !== 'generate') {
+    return false;
+  }
+  const currentNode = useChatStore.getState().getTaskSummary(taskId)?.current_node;
+  return currentNode === 'content_agent' || isAgentGenerationConversation(taskId, conversationId);
+}
+
+function getAgentStepKey(step: Pick<SSEAgentStepEvent, 'node' | 'round'>): string {
+  return `${step.node || 'content_agent'}:${step.round || 1}`;
+}
+
 /**
  * Hook that maps SSE events to task-log/task-content/task-download messages.
  */
@@ -103,13 +143,13 @@ export function useChatSSE({
   onComplete,
   onError,
 }: UseChatSSEOptions) {
-  void conversationId;
   const completeTask = useChatStore((state) => state.completeTask);
   const failTask = useChatStore((state) => state.failTask);
   const cancelTask = useChatStore((state) => state.cancelTask);
   const ensureTaskLogMessage = useChatStore((state) => state.ensureTaskLogMessage);
   const ensureTaskContentMessage = useChatStore((state) => state.ensureTaskContentMessage);
   const markTaskContentReady = useChatStore((state) => state.markTaskContentReady);
+  const upsertAgentStepMessage = useChatStore((state) => state.upsertAgentStepMessage);
   const discardStaleTask = useChatStore((state) => state.discardStaleTask);
   const upsertTaskSummary = useChatStore((state) => state.upsertTaskSummary);
   const [connectionTaskId, setConnectionTaskId] = useState<string | null>(null);
@@ -294,6 +334,9 @@ export function useChatSSE({
 
             const taskKind = resolveTaskKind(taskId);
             if (isAIContentCompletedLog(logMessage, logData.node, taskKind)) {
+              if (shouldUseAgentStepCards(taskId, conversationId, taskKind)) {
+                break;
+              }
               const stream = useChatStreamStore.getState().streams[taskId];
               if (taskKind === 'edit' && !stream?.aiComplete) {
                 break;
@@ -313,27 +356,71 @@ export function useChatSSE({
             const llmNode = llmData.node;
             const taskKind = resolveTaskKind(taskId);
             const triggerNode = getAIContentTriggerNode(taskKind);
+            const useAgentStepCards = shouldUseAgentStepCards(taskId, conversationId, taskKind);
 
             if (llmNode !== triggerNode) {
               break;
             }
-
-            ensureTaskContentMessage(taskId);
 
             if (contentMode === 'chunk') {
               const currentText = useChatStreamStore.getState().streams[taskId]?.aiText || '';
               const mergedText = normalizeAIContent(currentText + nextText);
               useChatStreamStore.getState().setAIContent(taskId, mergedText, isComplete);
               if (isComplete) {
-                markTaskContentReady(taskId, mergedText);
+                if (!useAgentStepCards) {
+                  ensureTaskContentMessage(taskId, { suppressForAgentStep: true });
+                  markTaskContentReady(taskId, mergedText);
+                }
+              } else if (!useAgentStepCards) {
+                ensureTaskContentMessage(taskId, { suppressForAgentStep: true });
               }
             } else {
               const normalizedText = normalizeAIContent(nextText);
               useChatStreamStore.getState().setAIContent(taskId, normalizedText, isComplete);
               if (isComplete) {
-                markTaskContentReady(taskId, normalizedText);
+                if (!useAgentStepCards) {
+                  ensureTaskContentMessage(taskId, { suppressForAgentStep: true });
+                  markTaskContentReady(taskId, normalizedText);
+                }
+              } else if (!useAgentStepCards) {
+                ensureTaskContentMessage(taskId, { suppressForAgentStep: true });
               }
             }
+          }
+          break;
+
+        case 'agent_step':
+          if (data && typeof data === 'object') {
+            const agentStepData = data as SSEAgentStepEvent;
+            if (agentStepData.task_id && agentStepData.task_id !== taskId) {
+              break;
+            }
+
+            const taskKind = resolveTaskKind(taskId, agentStepData.task_kind);
+            upsertTaskSummary(taskId, {
+              task_kind: taskKind,
+              status: 'running',
+              current_node: agentStepData.node,
+              current_node_display: agentStepData.node,
+            });
+            if (!agentStepData.is_complete) {
+              useChatStreamStore.getState().setAgentStep(taskId, getAgentStepKey(agentStepData), {
+                content:
+                  typeof agentStepData.content === 'string'
+                    ? normalizeAIContent(agentStepData.content)
+                    : '',
+                isComplete: false,
+              });
+            }
+            upsertAgentStepMessage(taskId, {
+              ...agentStepData,
+              task_id: taskId,
+              task_kind: taskKind,
+              content:
+                typeof agentStepData.content === 'string'
+                  ? normalizeAIContent(agentStepData.content)
+                  : agentStepData.content,
+            });
           }
           break;
 
@@ -360,11 +447,15 @@ export function useChatSSE({
             });
 
             const triggerNode = getAIContentTriggerNode(progressData.task_kind);
+            const progressIsAgentBranch =
+              progressData.task_kind === 'generate' &&
+              (progressData.current_node === 'content_agent' || progressData.node === 'content_agent');
             if (
-              progressData.current_node === triggerNode ||
-              progressData.node === triggerNode
+              !progressIsAgentBranch &&
+              !shouldUseAgentStepCards(taskId, conversationId, progressData.task_kind) &&
+              (progressData.current_node === triggerNode || progressData.node === triggerNode)
             ) {
-              ensureTaskContentMessage(taskId);
+              ensureTaskContentMessage(taskId, { suppressForAgentStep: true });
             }
           }
           break;
@@ -438,6 +529,7 @@ export function useChatSSE({
       cancelTask,
       clearTaskRuntime,
       completeTask,
+      conversationId,
       ensureTaskLogMessage,
       ensureTaskContentMessage,
       failTask,
@@ -446,6 +538,7 @@ export function useChatSSE({
       normalizeLogLevel,
       parseTimestamp,
       rememberEventId,
+      upsertAgentStepMessage,
       upsertTaskSummary,
     ]
   );

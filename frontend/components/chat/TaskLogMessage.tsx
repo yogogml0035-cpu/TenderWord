@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Copy, FileText, Loader2, XCircle } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { CheckCircle2, ChevronDown, ChevronUp, Copy, FileText, Loader2, XCircle } from 'lucide-react';
 import type { LogEntry, Message } from '@/types/chat';
 
 interface TaskLogMessageProps {
@@ -9,6 +9,8 @@ interface TaskLogMessageProps {
   maxHeight?: number;
   disabled?: boolean;
 }
+
+const VISIBLE_LOG_LIMIT = 80;
 
 function formatLogTime(timestamp: number) {
   return new Date(timestamp).toLocaleTimeString('zh-CN', {
@@ -189,19 +191,15 @@ export function TaskLogMessage({
 }: TaskLogMessageProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
+  const [expanded, setExpanded] = useState(message.status !== 'generating');
 
   const logs = normalizeLogs(message.metadata?.logs);
+  const visibleLogs = logs.length > VISIBLE_LOG_LIMIT ? logs.slice(-VISIBLE_LOG_LIMIT) : logs;
+  const latestLog = logs[logs.length - 1];
+  const latestVisibleLogId = visibleLogs[visibleLogs.length - 1]?.id || '';
   const progressText = message.metadata?.progressText;
   const progressPercent = message.metadata?.progressPercent;
   const isRewriteTask = message.metadata?.taskKind === 'rewrite';
-
-  const copyText = useMemo(
-    () =>
-      logs
-        .map((log) => `${formatLogTime(log.timestamp)} [${log.level.toUpperCase()}] ${log.message}`)
-        .join('\n'),
-    [logs]
-  );
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -214,18 +212,25 @@ export function TaskLogMessage({
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || !stickToBottom) {
+    if (!expanded || !el || !stickToBottom) {
       return;
     }
     el.scrollTop = el.scrollHeight;
-  }, [logs.length, stickToBottom]);
+  }, [expanded, latestVisibleLogId, stickToBottom]);
 
   const handleCopyLogs = useCallback(() => {
     if (disabled) {
       return;
     }
+    const copyText = logs
+      .map((log) => `${formatLogTime(log.timestamp)} [${log.level.toUpperCase()}] ${log.message}`)
+      .join('\n');
     void copyPlainText(copyText);
-  }, [copyText, disabled]);
+  }, [disabled, logs]);
+
+  const toggleExpanded = useCallback(() => {
+    setExpanded((current) => !current);
+  }, []);
 
   return (
     <div className={`overflow-hidden rounded border bg-white shadow-sm ${getBorderColor(message.status)}`}>
@@ -240,16 +245,33 @@ export function TaskLogMessage({
             <span>{getStatusLabel(message)}</span>
           </div>
         </div>
-        <button
-          type="button"
-          aria-label="复制进度日志"
-          title="复制进度日志"
-          onClick={handleCopyLogs}
-          disabled={!copyText || disabled}
-          className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 transition-colors duration-200 hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <Copy className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center gap-2">
+          {logs.length > 0 && (
+            <span className="rounded bg-white px-2 py-0.5 text-xs text-gray-400">
+              {logs.length} 条
+            </span>
+          )}
+          <button
+            type="button"
+            aria-label={expanded ? '收起进度日志' : '展开进度日志'}
+            title={expanded ? '收起进度日志' : '展开进度日志'}
+            onClick={toggleExpanded}
+            disabled={disabled}
+            className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 transition-colors duration-200 hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            type="button"
+            aria-label="复制进度日志"
+            title="复制进度日志"
+            onClick={handleCopyLogs}
+            disabled={logs.length === 0 || disabled}
+            className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 transition-colors duration-200 hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       {(typeof progressText === 'string' || typeof progressPercent === 'number') && (
@@ -259,26 +281,42 @@ export function TaskLogMessage({
         </div>
       )}
 
-      <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        className="space-y-2 overflow-x-hidden overflow-y-auto p-3"
-        style={{ maxHeight }}
-      >
-        {logs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-gray-400">
-            <div className="relative mb-3">
-              <div className="absolute inset-0 animate-pulse rounded-full bg-blue-100 opacity-30" />
-              <div className="relative rounded-full bg-white p-2 shadow-sm">
-                <FileText className="h-5 w-5 text-blue-400" />
+      {!expanded && latestLog && (
+        <div className="border-t border-gray-100 bg-white px-4 py-2 text-xs text-gray-500">
+          <span className="mr-2 text-gray-400">最新</span>
+          <span className="block truncate break-all">{latestLog.message}</span>
+        </div>
+      )}
+
+      {expanded && (
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="space-y-2 overflow-x-hidden overflow-y-auto p-3"
+          style={{ maxHeight }}
+        >
+          {logs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-gray-400">
+              <div className="relative mb-3">
+                <div className="absolute inset-0 animate-pulse rounded-full bg-blue-100 opacity-30" />
+                <div className="relative rounded-full bg-white p-2 shadow-sm">
+                  <FileText className="h-5 w-5 text-blue-400" />
+                </div>
               </div>
+              <span className="text-xs">等待日志...</span>
             </div>
-            <span className="text-xs">等待日志...</span>
-          </div>
-        ) : (
-          logs.map((log) => <LogEntryItem key={log.id} log={log} />)
-        )}
-      </div>
+          ) : (
+            <>
+              {logs.length > visibleLogs.length && (
+                <div className="rounded bg-gray-50 px-2 py-1 text-center text-xs text-gray-400">
+                  最近 {visibleLogs.length} / 共 {logs.length} 条
+                </div>
+              )}
+              {visibleLogs.map((log) => <LogEntryItem key={log.id} log={log} />)}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

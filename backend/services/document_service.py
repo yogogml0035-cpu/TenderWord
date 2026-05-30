@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 from backend.models import (
+    AgentStepEventData,
     DoneEventData,
     EditTaskRequest,
     ErrorEventData,
@@ -233,6 +234,11 @@ class SSECallback:
         self._events: List[SSEEvent] = []
         self._lock = threading.Lock()
         self._done = False
+        try:
+            from backend.core.sse_manager import sse_manager
+        except Exception:  # pragma: no cover
+            sse_manager = None
+        self._sse_manager = sse_manager
 
     def push_event(self, event: SSEEvent) -> None:
         """推送事件.
@@ -301,6 +307,33 @@ class SSECallback:
             data=progress_data.model_dump(),
         )
         self.push_event(event)
+
+    def push_agent_step(self, agent_step_data: AgentStepEventData) -> None:
+        """推送智能体步骤事件."""
+        event = SSEEvent(
+            event=SSEEventType.AGENT_STEP,
+            data=agent_step_data.model_dump(mode="json"),
+        )
+        self.push_event(event)
+        if self._sse_manager is not None:
+            try:
+                if getattr(self._sse_manager, "_loop", None) is None:
+                    return
+                self._sse_manager.send_agent_step_threadsafe(
+                    task_id=agent_step_data.task_id,
+                    task_kind=agent_step_data.task_kind,
+                    step_type=agent_step_data.step_type,
+                    round=agent_step_data.round,
+                    node=agent_step_data.node,
+                    content=agent_step_data.content,
+                    findings=[
+                        finding.model_dump(mode="json")
+                        for finding in agent_step_data.findings
+                    ],
+                    is_complete=agent_step_data.is_complete,
+                )
+            except Exception:
+                pass
 
     def push_done(self, done_data: DoneEventData) -> None:
         """推送完成事件.
@@ -730,6 +763,9 @@ class DocumentService:
         generation_style = getattr(request, "generation_style", "template")
         if hasattr(generation_style, "value"):
             generation_style = generation_style.value
+        generation_mode = getattr(request, "generation_mode", "workflow")
+        if hasattr(generation_mode, "value"):
+            generation_mode = generation_mode.value
         style_writeback_mode = getattr(request, "style_writeback_mode", "full")
         if hasattr(style_writeback_mode, "value"):
             style_writeback_mode = style_writeback_mode.value
@@ -743,6 +779,7 @@ class DocumentService:
             "user_session_id": conversation_id,
             "tender_type": tender_type,
             "generation_style": str(generation_style or "template"),
+            "generation_mode": str(generation_mode or "workflow"),
             "style_writeback_mode": str(style_writeback_mode or "full"),
             # 项目信息
             "project_name": tender_data.project_name or "",
@@ -887,6 +924,7 @@ class DocumentService:
                             task_id,
                             callback,
                             model_provider,
+                            task_kind=task_kind,
                             llm_node_name=llm_node_name or TASK_KIND_TO_LLM_NODE.get(task_kind, "generate_polished_text"),
                             task_audit_log_path=task_audit_log_path,
                             rewrite_log_path=rewrite_log_path,
@@ -1147,6 +1185,7 @@ class DocumentService:
         task_id: str,
         callback: SSECallback,
         model_provider: str,
+        task_kind: str = "generate",
         llm_node_name: str = "generate_polished_text",
         task_audit_log_path: Optional[str] = None,
         rewrite_log_path: Optional[str] = None,
@@ -1188,8 +1227,10 @@ class DocumentService:
         config = {
             "configurable": {
                 "task_id": task_id,
+                "task_kind": task_kind,
                 "llm_stream_callback": llm_relay.on_snapshot,
                 "llm_stream_complete_callback": llm_relay.flush,
+                "agent_step_callback": callback.push_agent_step,
                 "suppress_llm_stdout": True,
                 "model_provider": model_provider,
                 "task_audit_log_path": resolved_task_audit_log_path,

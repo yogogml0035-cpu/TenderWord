@@ -4,6 +4,7 @@
 支持从 backend/.env 文件加载配置.
 """
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
@@ -126,17 +127,18 @@ class Settings(BaseSettings):
     )
 
     # ========================================
-    # LangFuse 配置（可选）
+    # LangSmith 配置（可选）
     # ========================================
     LANGSMITH_TRACING: str = Field(default="false", description="LangSmith 追踪开关")
-    LANGFUSE_SECRET_KEY: Optional[str] = Field(
-        default=None, description="LangFuse 密钥"
+    LANGSMITH_ENDPOINT: str = Field(
+        default="https://api.smith.langchain.com",
+        description="LangSmith API 地址",
     )
-    LANGFUSE_PUBLIC_KEY: Optional[str] = Field(
-        default=None, description="LangFuse 公钥"
+    LANGSMITH_API_KEY: Optional[str] = Field(
+        default=None, description="LangSmith API 密钥"
     )
-    LANGFUSE_BASE_URL: Optional[str] = Field(
-        default=None, description="LangFuse 基础 URL"
+    LANGSMITH_PROJECT: str = Field(
+        default="default", description="LangSmith 追踪项目名"
     )
 
     # ========================================
@@ -222,6 +224,14 @@ class Settings(BaseSettings):
         """检查是否启用 LangSmith 追踪."""
         return self.LANGSMITH_TRACING.lower() in ("true", "1", "yes", "on")
 
+    def apply_langsmith_environment(self) -> None:
+        """Expose .env-loaded LangSmith settings to LangChain/LangSmith SDKs."""
+        os.environ["LANGSMITH_TRACING"] = str(self.LANGSMITH_TRACING)
+        os.environ["LANGSMITH_ENDPOINT"] = str(self.LANGSMITH_ENDPOINT)
+        os.environ["LANGSMITH_PROJECT"] = str(self.LANGSMITH_PROJECT)
+        if str(self.LANGSMITH_API_KEY or "").strip():
+            os.environ["LANGSMITH_API_KEY"] = str(self.LANGSMITH_API_KEY)
+
     def get_llm_config(self, provider: str = "deepseek") -> dict:
         """获取指定 LLM 提供商的配置.
 
@@ -265,3 +275,4 @@ def get_settings() -> Settings:
 
 # 导出配置实例供直接使用
 settings = get_settings()
+settings.apply_langsmith_environment()

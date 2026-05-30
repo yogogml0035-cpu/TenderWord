@@ -63,6 +63,17 @@ function createTaskMessages(): Message[] {
   ];
 }
 
+function createGeneratingTaskMessages(): Message[] {
+  return createTaskMessages().map((message) =>
+    message.metadata?.messageKind === 'task-log'
+      ? {
+          ...message,
+          status: 'generating' as const,
+        }
+      : message
+  );
+}
+
 function createStyleWritebackTaskMessages(): Message[] {
   const messages = createTaskMessages();
   messages[0] = {
@@ -148,6 +159,42 @@ describe('MessageList', () => {
     expect(screen.getByText('开始处理')).toHaveClass('break-all', 'whitespace-pre-wrap');
   });
 
+  it('collapses generating task logs to a summary until the user expands them', () => {
+    render(<MessageList messages={createGeneratingTaskMessages()} />);
+
+    expect(screen.getByText('最新')).toBeInTheDocument();
+    expect(screen.getByText('开始处理')).toHaveClass('truncate', 'break-all');
+
+    fireEvent.click(screen.getByRole('button', { name: '展开进度日志' }));
+
+    expect(screen.getByText('开始处理')).toHaveClass('break-all', 'whitespace-pre-wrap');
+    expect(screen.getByRole('button', { name: '收起进度日志' })).toBeInTheDocument();
+  });
+
+  it('renders only recent task logs while keeping the full log count available', () => {
+    const messages = createTaskMessages();
+    messages[0] = {
+      ...messages[0],
+      metadata: {
+        ...(messages[0].metadata || {}),
+        messageKind: 'task-log',
+        logs: Array.from({ length: 130 }, (_, index) => ({
+          id: `log-${index}`,
+          timestamp: Date.now() + index,
+          level: 'info',
+          message: `日志 ${index}`,
+        })),
+      },
+    };
+
+    render(<MessageList messages={messages} />);
+
+    expect(screen.getByText('最近 80 / 共 130 条')).toBeInTheDocument();
+    expect(screen.queryByText('日志 49')).not.toBeInTheDocument();
+    expect(screen.getByText('日志 50')).toBeInTheDocument();
+    expect(screen.getByText('日志 129')).toBeInTheDocument();
+  });
+
   it('renders style writeback logs with clear status badges and concise details', () => {
     render(<MessageList messages={createStyleWritebackTaskMessages()} />);
 
@@ -200,7 +247,7 @@ describe('MessageList', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows retry action on failed task content card and invokes callback', () => {
+  it('does not show retry action on failed task content card', () => {
     const onRetry = jest.fn();
     const messages = createTaskMessages();
     messages[1] = {
@@ -215,9 +262,8 @@ describe('MessageList', () => {
 
     render(<MessageList messages={messages} onRetry={onRetry} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '重试' }));
-
-    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+    expect(onRetry).not.toHaveBeenCalled();
   });
 
   it('renders user messages in a content-sized bubble capped above half of the chat width', () => {

@@ -12,6 +12,7 @@
 - 招标详情数据契约：`backend/api/tender.py`、`backend/models/tender.py`、`backend/util/common_util/fetch_tender_data.py`
 - 生成任务 REST 入口：`backend/api/generate.py`
 - Graph 主干、锁、取消与进度包装：`backend/graphs/base_graph.py`、`backend/task/task_queue_manager.py`
+- 初次生成智能体运行时：`backend/agents/generation/`
 - task skill runtime：`backend/graphs/skill_graph.py`、`backend/skills/`
 - Prompt Layer：`backend/prompts/`
 - Word 业务 helper：`backend/helper/word_helper/`
@@ -32,7 +33,25 @@
 - rewrite 与 edit 走 `SkillGraph.for_skill(...)` 返回的 task graph；当前 task skill 注册以 `backend/skills/rewrite/SKILL.md`、`backend/skills/edit/SKILL.md` 为准。
 - `POST /api/edit` 是显式 edit 入口；`/api/user/stream` 只负责普通聊天与 rewrite 路由，不承接显式 edit。
 - `/api/user/stream` 在已有 rewrite history 且最新消息具备明确修改意图时，应优先走确定性 rewrite fast-path，再进入 rewrite task 创建；普通闲聊、能力询问和不确定语义仍走 LLM 路由/回复。前端构造 user stream `messages` 时必须过滤空内容气泡，避免历史空 AI 消息触发后端请求体验证失败。
-- `generation_style` 与 `style_writeback_mode` 都是 generate-only 字段：`DocumentService._build_initial_state()` 可写入 generate state，edit / rewrite 初始 state 不得注入这两个字段。
+- `generation_mode`、`generation_style` 与 `style_writeback_mode` 都是 generate-only 字段：`DocumentService._build_initial_state()` 可写入 generate state，edit / rewrite 请求模型和初始 state 不得注入这些字段。
+- `generation_mode` 当前只允许 `workflow` 与 `agent`，默认 `workflow`。`workflow` 继续走 `generate_polished_text`，保留 `render_generate_prompt()`、`stream_llm_completion()` 和旧 `llm` snapshot 事件；`agent` 只影响初次 generate 的生成节点选择，最终仍必须产出 `polished_text` 给批注、样式回写、Word 写回和下载主干。
+- 标准生成 graph 的分流只在 `StandardTenderWorkflowGraph` 基类实现：`generation_mode_gate` 后按 `_select_generation_node()` 进入 `generate_polished_text` 或 `content_agent`，两个分支都继续接入 `generate_comments` / `comments_branch_done` 再进入 `update_word`。类型 graph 不应复制这段分流。
+
+### DeepAgents 初次生成
+
+- 智能体生成入口是公共节点 `backend/nodes/common_word_nodes/content_agent_generate.py`，节点调用 `run_content_agent_generation()` 后只向 graph state 写回标准契约：`polished_text` 与 `generate_polished_done=True`。
+- `backend/agents/generation/content_agents.py` 是 DeepAgents 主 runner 真源。生产路径用 `create_deep_agent(..., backend=FilesystemBackend(root_dir=workspace_dir, virtual_mode=True))` 创建单次任务工作区，工作区位于 `backend/prompts_log/content_agent_workspace/{task_id}_{YYYYMMDD-HHMMSS}/`，长期保留完整输入、草稿、审核、修订和最终正文。
+- 工作区虚拟路径是硬协议：`/inputs/generation_context.md`、`/drafts/round-1.md`、`/audits/round-1.json` 至 `/audits/round-3.json`、`/revisions/round-1.md` 至 `/revisions/round-3.md`、`/final/polished_text.md`。`generation_context.md` 是 Markdown，内部 JSON code block 至少包含 `task_id`、`tender_type`、`generation_style`、`project_info`、`origin_tender_params`、`tender_params`、`model_provider`。
+- `content_agent` 是唯一主调度者。它必须用 TodoList 展示计划，通过 task 工具自主调用 `content_generate_agent`、`content_verify_agent`、`content_revise_agent`，最多 3 轮审核 / 修订；只有 `content_agent` 可以写 `/final/polished_text.md`，子 agent 不得写 final。
+- 子 agent 不通过 task prompt 传完整正文，只通过文件读写交接。`content_generate_agent` 读取 `/inputs/generation_context.md`，复用 `backend/prompts/generate_prompt.py` 的 `render_generate_prompt()` 和当前 `generation_style` 写 `/drafts/round-1.md`；`content_verify_agent` 读取上下文和当前正文文件，输出原始 JSON 数组并写 `/audits/round-N.json`；`content_revise_agent` 读取当前正文与对应 audit，只修复 `evidence` / `fix_hint` 指定位置并写 `/revisions/round-N.md`。当对应 audit 为 `[]` 时，主 `content_agent` 不应再调用 `content_revise_agent`，而是直接写 `/final/polished_text.md`；若子修订节点被单独调用且 audit 为 `[]`，它必须短路返回“无需修订”，不得调用 LLM、输出完整正文或写 `/revisions/round-N.md`。
+- `content_verify_agent` 的事实真源必须与 `generate_by_template_prompt.py` 保持一致：`project_info` 是项目名称、数量、交付和付款等基础事实；`tender_params` 是技术参数、★/▲指标、包件数量和业务要求的原材料事实真源；`origin_tender_params` 只作章节、编号、表格和语气参考，不得被当成技术参数审计依据。审核必须检查技术参数中 ★/▲ 指标不能缺漏或额外增加，且多包件/多标段原材料不能只生成一个包件。
+- `content_verify_agent` 必须返回 JSON 数组，每项包含非空 `evidence` 与 `fix_hint`，不得输出“第 N 轮审核”、Markdown、解释或中文字段名。审核输出先做严格解析；失败后按错误类型走本地 JSON 修复 / 低温 JSON repair prompt 重试 / fallback finding，最终写入工作区的 audit 必须保持合法数组形状。
+- Prompt builder 渲染 `project_info`、`origin_tender_params`、`tender_params` 时不得把 Python `None` 字面量塞进模型提示词；缺失值应渲染为空文本，真实是否缺失通过进度日志中的字符数摘要排查。
+- `content_generate_agent` 使用 `stream_llm_completion()` 时要复用 graph config 中的 `llm_stream_callback`，继续产生既有 `llm` snapshot 流；同时通过 `agent_step` 发送 `node=content_generate_agent` 的流式过程卡。
+- 智能体生成链路里面向模型的自然语言提示词必须使用中文，包括 content_agent system prompt、subagent description、generate / verify / revise prompt 的章节标题与步骤说明；但 `content_agent`、`content_generate_agent`、`content_verify_agent`、`content_revise_agent`、`polished_text`、`evidence`、`fix_hint` 等节点名、工具名、状态字段和 JSON 字段属于机器契约，不能为了中文化而改名。
+- 后端 finalizer 不自动返修、不自动兜底写 final。`/final/polished_text.md` 缺失、为空、是占位符、存在 round 4 或非法 audit / revision 路径、或 Word 写回前校验失败时，任务必须失败并进入既有 `error` 终态；保留 workspace 与 agent 过程卡供用户和排障查看。模型 / DeepAgents runner 不支持工具调用时同样失败，不回退 workflow。
+- `set_generation_agent_runner()` 是测试用 fake runner 注入点；fake runner 必须模拟流式事件和 workspace final 文件。生产路径默认通过 `create_content_agent_runner()` 构造 DeepAgents runner，并复用 `MODEL_CONFIGS` 与 `settings.get_llm_config()`。
+- `content_agent` 与 `content_generate_agent` 的运行期日志只记录 `project_info_chars`、`origin_tender_params_chars`、`tender_params_chars` 等摘要，不写完整客户正文；完整输入和正文以 `backend/prompts_log/content_agent_workspace/` 为审计真源。三者全为 0 时应优先检查前端请求文件、`extract_tender_params` 输出、DeepAgents context 透传和服务是否已重载。
 
 ### Skill 声明
 
@@ -44,6 +63,7 @@
 
 - `backend/` 内直接调用 LLM 的能力默认收敛到 `backend/prompts/`；Prompt Layer 只做纯渲染，不做日志、副作用、Word COM 或会话状态变更。
 - generate prompt 路由当前由 `backend/prompts/generate_prompt.py` 分派到 template / param builder。
+- `content_generate_agent` 会复用同一个 generate prompt builder，因此 template / param builder 中的自然语言说明会同时影响 workflow 与 agent 两条初次生成链路；改这些 prompt 时必须同时跑 prompt 路由测试和 DeepAgents content_agent 相关测试。
 - generate prompt 的 builder 路由除了要返回对应文案外，还要保留可观察的模式标识；`generation_style=param` 的渲染结果必须在 prompt 文本里显式表明“参数优先模式”，避免测试、日志或排障时只能回看请求模型才能分辨当前走的是哪条 builder。
 - `backend/prompts/generate_by_param_prompt.py` 必须把“参考内容里的引导句”视为可删除内容而非默认骨架：像“设备用途 / 适用范围 / 项目背景 / 服务目标 / 功能概述”这类句子，只有在 `project_info` 或 `tender_params` 明确提供等价新事实时才能保留或重写；若新材料缺失，必须删除，并把当前章节保留下来的一级条目从 `1` 重新顺排。
 - param builder 里源材料常见的 `2.技术参数 / 2.1 / 2.2` 只代表原始容器层级，不是最终成稿编号真值；Prompt 必须明确要求模型保留相对层级与物理顺序，但按删减后的存活兄弟项重编号，避免删除旧引导段后正文仍从 `2` 起号。
@@ -53,6 +73,7 @@
 - template generate prompt 必须把参考内容行首符号视为不可继承的脏标记：抽取标题壳、编号范式、表格形态或商务框架前先剔除参考里的 `★/▲/*/#` 等符号；凡正文由原材料替换或灌注的输出行，行首符号只能来自对应原材料原子条款，最终输出前要按原材料做逐行符号审计。
 - template generate prompt 必须先把原材料拆成原子条款：物理换行、表格行、Markdown 列表行、显式编号边界都是硬边界；“冒号引导句 + 后续编号列表”要生成父项和下钻子项，不能被枚举保护或长句压缩合并成一行。
 - LLM 流式调用统一经 `backend/util/common_util/llm_stream_utils.py` 的 `stream_llm_completion()`，默认超时使用 `backend/config/settings.py` 的 `LLM_STREAM_TIMEOUT_SECONDS`。
+- LangSmith 配置真源是 `backend/.env` 与 `backend/config/settings.py`。后端启动时会把 `.env` 中的 `LANGSMITH_TRACING`、`LANGSMITH_ENDPOINT`、`LANGSMITH_API_KEY`、`LANGSMITH_PROJECT` 注入 `os.environ`，供 LangChain / LangGraph / DeepAgents SDK 自动上报 tracing；`backend/.env.example` 只保留占位 key，不写真实密钥。
 - DeepSeek 提供商默认使用 `deepseek-v4-flash`，并通过 OpenAI 兼容请求的 `extra_body={"thinking": {"type": "disabled"}}` 固定为非思考模式；新增调用点不得硬编码其它 DeepSeek 模型名。
 - `generate_comments` 的批注 JSON 属于严格机器契约：节点必须先尝试本地提取数组、移除代码块包裹、修正常见尾逗号/非法反斜杠；仍失败时只允许再走一次 Prompt Layer 定义的 JSON 修复调用，然后再决定是否降级为空数组。原始批注输出与修复输出应继续落到 `backend/prompts_log/generate_log/` 便于排障。
 - 批注生成 prompt 的 `reference_text` 必须要求连续、逐字、可精确搜索且尽量唯一；短词或高频词风险要扩展到同句、同分句或同单元格内的连续原文，不能跨行/跨段/跨单元格拼接。无法形成唯一可回填锚点时应输出空数组或删除该条。
@@ -118,6 +139,12 @@
 - `progress_log` 只写用户可理解的进度和状态；排障堆栈、候选打分、淘汰原因、阈值与诊断 marker 留在 `execution_log` 或 debug log。
 - `/api/stream/{task_id}` 是任务 SSE 主入口，支持 `Last-Event-ID` 断线续传。
 - 用户态实时展示依赖 `log`、`llm`、`progress`、`done`、`error`。
+- `agent_step` 是智能体 generate 的用户态 SSE 显式例外，用于展示主 agent 计划 / 调用决策 / 验收说明，以及 generate / verify / revise 子 agent 原始流，不替代 `done` / `error` 终态。
+- 后端 `AgentStepEventData` 字段包括 `task_id`、`task_kind`、`step_type`、`round`、`node`、`timestamp`、`is_complete`、可选 `content` 与 `findings`。`round` 是 1-based；当前智能体子 agent 流使用 `step_type=stream`，主 agent 终局事件使用 `step_type=final`。`content_verify_agent` 卡展示原始 JSON streaming，不做后端格式化，也不额外创建文件产物卡。
+- `DocumentService` 在 graph config 中注入 `agent_step_callback`，智能体生成链路统一经 `SSECallback.push_agent_step()` 进入本地缓冲与 `SSEManager.send_agent_step_threadsafe()`；子 agent 与 runner stream 不再各自直连 `sse_manager`，避免同一过程卡双通道重复推送。`SSEManager.send_agent_step()` 会进入缓冲，断线续传时可重放。
+- 前端合并 `agent_step` 时必须把终态视为单调状态：迟到的 `is_complete=false` 快照不得覆盖已完成卡片；后续子 agent 开始或完成时，上一张仍在 `generating` 的过程卡也要收口为完成态。
+- 高频 `agent_step` 运行中快照只进入 `frontend/stores/chatStreamStore.ts` 的临时 stream，不写入持久化 `chat-storage`；只有完成事件才把最终正文 / JSON 固化到 `chatStore.conversations`。否则每个 SSE 片段都会触发会话数组重写、React 消息列表重渲染和 `sessionStorage` JSON 序列化，长文本或重复任务会让浏览器主线程卡死。
+- 前端实时日志展示要优先降低主线程工作量，而不是只做视觉隐藏：生成中日志明细默认不挂载，复制文本点击时才构造；外层消息列表自动滚动只跟消息数量变化，不跟每个 SSE 内容片段变化。
 - `frontend/hooks/useChatSSE.ts` 负责接收 done metadata；下载卡片是否展示摘要属于 UI 决策，不能影响任务结果透传契约。
 
 ## 关联测试与验证入口
@@ -133,11 +160,18 @@
 - 受保护字段与写回：`backend/tests/nodes/test_protected_fields_strict_matching.py`、`backend/tests/nodes/test_update_word_inline_style_writeback.py`
 - Prompt / LLM stream：`backend/tests/prompts/test_generate_prompt_routing.py`、`backend/tests/util/test_llm_stream_utils.py`
 - 批注 prompt 契约：`backend/tests/prompts/test_comment_prompt_reference_contract.py`
+- generation mode 契约与 workflow 回归：`backend/tests/models/test_generate_request_generation_style.py`、`backend/tests/services/test_document_service_initial_state.py`、`backend/tests/graphs/test_generation_mode_workflow.py`、`backend/tests/nodes/test_generate_polished_text_workflow.py`、`backend/tests/services/test_document_service_llm_snapshot.py`
+- DeepAgents content_agent 与公共节点：`backend/tests/agents/test_generation_content_agent.py`、`backend/tests/nodes/test_content_agent_generate.py`
+- generation mode graph 分流与逐类型闭环：`backend/tests/graphs/test_generation_mode_branching.py`、`backend/tests/graphs/test_xjcg_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_hw_zc_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_hw_cz_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_fw_zc_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_fw_cz_generation_mode_agent.py`、`backend/tests/graphs/test_gjgk_generation_mode_agent.py`
+- agent_step SSE：`backend/tests/models/test_sse_agent_step.py`、`backend/tests/services/test_sse_manager_agent_step.py`、`backend/tests/services/test_document_service_agent_step.py`
+- 前端 SSE / 日志性能边界：`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/components/chat/test_message_list.test.tsx`
 
 ## 回归风险
 
 - 改 skill workflow、dispatch 或 task result 时，容易出现 generate/rewrite/edit 某一条链路漏同步。
 - 改招标详情模型或外部接口解析时，容易把上游字段类型波动误报为编号不存在或数据格式错误；需要覆盖数字预算、缺失可选字段和类型路由三类回归。
+- 改 `generation_mode`、content_agent 或标准 graph 分流时，必须证明默认 `workflow` 不触发 `content_agent`，同时证明 `agent` 分支的 `polished_text` 会继续进入各类型既有 delete / replacement / update / post-update 主干。
+- 改智能体输出协议时，必须同步检查 `backend/agents/generation/json_utils.py`、`backend/agents/generation/types.py`、`content_agent_generate`、`AgentStepEventData` 与前端 `agent-step` 消息格式；审核阶段可以用合法 fallback finding 兜底格式异常，但不要把纯文本最终输出当作成功兜底。
 - 改受保护字段规则时，必须同时检查 `tender_config.py`、`protected_fields.py`、三条 update 路径和严格匹配测试。
-- 改样式回填或 SSE 结果结构时，必须同步检查后端 `DoneEventData`、任务结果 payload、`frontend/hooks/useChatSSE.ts` 和 chat store metadata。
+- 改样式回填或 SSE 结果结构时，必须同步检查后端 `DoneEventData` / `AgentStepEventData`、任务结果 payload、`frontend/hooks/useChatSSE.ts`、`frontend/lib/sse.ts` 和 chat store metadata。
 - 任何新增 Word helper 都要先确认代码真实落地，再写入知识包；不要把目标设计提前写成已完成事实。

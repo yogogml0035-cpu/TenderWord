@@ -158,6 +158,315 @@ describe('chatStore task message grouping', () => {
     expect(group?.contentMessage?.content).toBe('节点完成内容');
   });
 
+  it('upserts agent-step cards by node and round and keeps verify JSON raw', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'generate',
+        status: 'running',
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_generate_agent',
+        is_complete: true,
+        content: '智能体初稿',
+        findings: [],
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_verify_agent',
+        is_complete: true,
+        content: '[{"evidence":"缺少供货范围","fix_hint":"补充供货范围说明"}]',
+        findings: [
+          {
+            evidence: '缺少供货范围',
+            fix_hint: '补充供货范围说明',
+          },
+        ],
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_revise_agent',
+        is_complete: true,
+        content: '第一轮 AI 修改内容',
+        findings: [
+          {
+            evidence: '缺少供货范围',
+            fix_hint: '补充供货范围说明',
+          },
+        ],
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 2,
+        node: 'content_verify_agent',
+        is_complete: true,
+        content: '[{"evidence":"质保期未明确","fix_hint":"补充质保期"}]',
+        findings: [
+          {
+            evidence: '质保期未明确',
+            fix_hint: '补充质保期',
+          },
+        ],
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+    const draftMessage = agentMessages?.find(
+      (message) => message.metadata?.agentStepNode === 'content_generate_agent'
+    );
+    const firstAuditMessage = agentMessages?.find(
+      (message) =>
+        message.metadata?.agentStepNode === 'content_verify_agent' &&
+        message.metadata?.agentStepRound === 1
+    );
+    const secondAuditMessage = agentMessages?.find(
+      (message) =>
+        message.metadata?.agentStepNode === 'content_verify_agent' &&
+        message.metadata?.agentStepRound === 2
+    );
+    const revisionMessage = agentMessages?.find(
+      (message) => message.metadata?.agentStepNode === 'content_revise_agent'
+    );
+
+    expect(agentMessages).toHaveLength(4);
+    expect(agentMessages?.map((message) => message.metadata?.agentStepNode)).toEqual([
+      'content_generate_agent',
+      'content_verify_agent',
+      'content_revise_agent',
+      'content_verify_agent',
+    ]);
+    expect(agentMessages?.[0].content).toBe('智能体初稿');
+    expect(draftMessage?.content).toBe('智能体初稿');
+    expect(draftMessage?.metadata?.agentStepNode).toBe('content_generate_agent');
+    expect(firstAuditMessage?.content).toBe('[{"evidence":"缺少供货范围","fix_hint":"补充供货范围说明"}]');
+    expect(firstAuditMessage?.metadata?.agentStepNode).toBe('content_verify_agent');
+    expect(firstAuditMessage?.metadata?.agentStepRound).toBe(1);
+    expect(firstAuditMessage?.metadata?.agentStepAuditRounds).toHaveLength(1);
+    expect(revisionMessage?.content).toBe('第一轮 AI 修改内容');
+    expect(revisionMessage?.metadata?.agentStepNode).toBe('content_revise_agent');
+    expect(revisionMessage?.metadata?.agentStepRound).toBe(1);
+    expect(secondAuditMessage?.content).toBe('[{"evidence":"质保期未明确","fix_hint":"补充质保期"}]');
+    expect(secondAuditMessage?.metadata?.agentStepNode).toBe('content_verify_agent');
+    expect(secondAuditMessage?.metadata?.agentStepRound).toBe(2);
+    expect(secondAuditMessage?.metadata?.agentStepAuditRounds).toHaveLength(1);
+  });
+
+  it('does not render empty verify findings as JSON until content or completion findings exist', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'generate',
+        status: 'running',
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_verify_agent',
+        is_complete: false,
+        content: '',
+        findings: [],
+      });
+    });
+
+    let conversation = useChatStore.getState().getCurrentConversation();
+    let verifyMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_verify_agent'
+    );
+
+    expect(verifyMessage?.content).toBe('');
+    expect(verifyMessage?.status).toBe('generating');
+
+    act(() => {
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_verify_agent',
+        is_complete: true,
+        content: '[]',
+        findings: [],
+      });
+    });
+
+    conversation = useChatStore.getState().getCurrentConversation();
+    verifyMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_verify_agent'
+    );
+
+    expect(verifyMessage?.content).toBe('[]');
+    expect(verifyMessage?.status).toBe('completed');
+  });
+
+  it('keeps completed agent-step cards completed when a late stream snapshot arrives', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'generate',
+        status: 'running',
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_verify_agent',
+        is_complete: true,
+        content: '[{"evidence":"缺少供货范围","fix_hint":"补充供货范围说明"}]',
+        findings: [
+          {
+            evidence: '缺少供货范围',
+            fix_hint: '补充供货范围说明',
+          },
+        ],
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_verify_agent',
+        is_complete: false,
+        content: '[{"evidence":"迟到的旧快照","fix_hint":"不应覆盖完成卡片"}]',
+        findings: [
+          {
+            evidence: '迟到的旧快照',
+            fix_hint: '不应覆盖完成卡片',
+          },
+        ],
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const verifyMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_verify_agent'
+    );
+
+    expect(verifyMessage?.status).toBe('completed');
+    expect(verifyMessage?.content).toBe(
+      '[{"evidence":"缺少供货范围","fix_hint":"补充供货范围说明"}]'
+    );
+    expect(verifyMessage?.metadata?.agentStepFindings).toEqual([
+      {
+        evidence: '缺少供货范围',
+        fix_hint: '补充供货范围说明',
+      },
+    ]);
+  });
+
+  it('keeps incomplete agent-step card lightweight when the next agent step starts', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'generate',
+        status: 'running',
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_verify_agent',
+        is_complete: false,
+        content: '[{"evidence":"缺少供货范围","fix_hint":"补充供货范围说明"}]',
+        findings: [
+          {
+            evidence: '缺少供货范围',
+            fix_hint: '补充供货范围说明',
+          },
+        ],
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_revise_agent',
+        is_complete: true,
+        content: '第一轮 AI 修改内容',
+        findings: [
+          {
+            evidence: '缺少供货范围',
+            fix_hint: '补充供货范围说明',
+          },
+        ],
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const verifyMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_verify_agent'
+    );
+    const revisionMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_revise_agent'
+    );
+
+    expect(verifyMessage?.status).toBe('completed');
+    expect(verifyMessage?.content).toBe('');
+    expect(revisionMessage?.status).toBe('completed');
+  });
+
+  it('removes duplicated task-content card when agent-step cards start streaming', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'generate',
+        status: 'running',
+      });
+      useChatStore.getState().ensureTaskLogMessage('task-1');
+      useChatStore.getState().ensureTaskContentMessage('task-1', {
+        content: '普通 LLM 快照',
+        status: 'generating',
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_generate_agent',
+        is_complete: true,
+        content: '智能体初稿',
+        findings: [],
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const group = useChatStore.getState().findTaskMessageGroup('task-1');
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+
+    expect(group?.contentMessage).toBeUndefined();
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].content).toBe('智能体初稿');
+    expect(conversation?.messages.some((message) => message.content === '普通 LLM 快照')).toBe(
+      false
+    );
+  });
+
   it('completeTask persists two cards and appends one download card', () => {
     act(() => {
       useChatStore.getState().startTask('conv-1', 'task-1');
@@ -207,6 +516,152 @@ describe('chatStore task message grouping', () => {
       applied_by_style: { bold: 1 },
       skipped_by_reason: { low_confidence: 1 },
     });
+  });
+
+  it('completeTask keeps agent-step process cards and appends the download card', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'generate',
+        status: 'running',
+      });
+      useChatStore.getState().ensureTaskLogMessage('task-1');
+      useChatStore.getState().ensureTaskContentMessage('task-1', {
+        content: '重复的普通内容',
+        status: 'generating',
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_generate_agent',
+        is_complete: true,
+        content: '智能体初稿',
+        findings: [],
+      });
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_revise_agent',
+        is_complete: true,
+        content: '修复后的正文',
+        findings: [],
+      });
+      useChatStore.getState().completeTask('task-1', 'D:/UploadFiles/output.docx', 'output.docx', {
+        logs: [],
+        aiText: '',
+        aiComplete: true,
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+    const group = useChatStore.getState().findTaskMessageGroup('task-1');
+
+    expect(agentMessages).toHaveLength(2);
+    expect(agentMessages?.map((message) => message.content)).toEqual([
+      '智能体初稿',
+      '修复后的正文',
+    ]);
+    expect(group?.contentMessage).toBeUndefined();
+    expect(group?.downloadMessage?.metadata?.messageKind).toBe('task-download');
+    expect(group?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
+    expect(conversation?.messages.some((message) => message.content === '重复的普通内容')).toBe(
+      false
+    );
+  });
+
+  it('failTask keeps agent-step process cards and does not append task-content', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'generate',
+        status: 'running',
+        current_node: 'content_agent',
+      });
+      useChatStore.getState().ensureTaskLogMessage('task-1');
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_generate_agent',
+        is_complete: true,
+        content: '智能体初稿',
+        findings: [],
+      });
+      useChatStore.getState().failTask('task-1', 'Request timed out.', {
+        logs: [
+          {
+            id: 'log-error',
+            timestamp: Date.now(),
+            level: 'error',
+            message: 'Request timed out.',
+          },
+        ],
+        aiText: '不应生成普通 AI 内容卡',
+        aiComplete: false,
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+    const group = useChatStore.getState().findTaskMessageGroup('task-1');
+
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].content).toBe('智能体初稿');
+    expect(group?.logMessage?.status).toBe('error');
+    expect(group?.logMessage?.metadata?.logs).toEqual(
+      expect.arrayContaining([expect.objectContaining({ message: 'Request timed out.' })])
+    );
+    expect(group?.contentMessage).toBeUndefined();
+    expect(
+      conversation?.messages.some((message) => message.content === '不应生成普通 AI 内容卡')
+    ).toBe(false);
+  });
+
+  it('cancelTask keeps agent-step process cards and does not append task-content', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'generate',
+        status: 'running',
+        current_node: 'content_agent',
+      });
+      useChatStore.getState().ensureTaskLogMessage('task-1');
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_generate_agent',
+        is_complete: true,
+        content: '智能体初稿',
+        findings: [],
+      });
+      useChatStore.getState().cancelTask('task-1', {
+        logs: [],
+        aiText: '不应生成普通 AI 内容卡',
+        aiComplete: false,
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const group = useChatStore.getState().findTaskMessageGroup('task-1');
+
+    expect(group?.logMessage?.status).toBe('cancelled');
+    expect(group?.contentMessage).toBeUndefined();
+    expect(
+      conversation?.messages.some((message) => message.content === '不应生成普通 AI 内容卡')
+    ).toBe(false);
   });
 
   it('queued terminal task does not create any chat cards', () => {

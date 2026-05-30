@@ -151,6 +151,9 @@ describe('chatStore conversation scoped selectors', () => {
     expect(useChatStore.getState().getConversationDraft(conversationId)?.generation_style).toBe(
       'template'
     );
+    expect(useChatStore.getState().getConversationDraft(conversationId)?.generation_mode).toBe(
+      'workflow'
+    );
     expect(useChatStore.getState().getConversationDraft(conversationId)?.style_writeback_mode).toBe(
       'full'
     );

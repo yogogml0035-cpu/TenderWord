@@ -31,6 +31,16 @@ class MockEventSource {
   emitError(event: Event = new Event('error')) {
     this.onerror?.(event);
   }
+
+  emit(eventName: string, data: unknown, id?: string) {
+    const event = new MessageEvent(eventName, {
+      data: JSON.stringify(data),
+      lastEventId: id || '',
+    });
+    for (const handler of this.listeners.get(eventName) || []) {
+      handler(event);
+    }
+  }
 }
 
 describe('createSSEConnection', () => {
@@ -97,5 +107,41 @@ describe('createSSEConnection', () => {
 
     expect(consoleErrorSpy).not.toHaveBeenCalled();
     expect(onReconnect).not.toHaveBeenCalled();
+  });
+
+  it('emits named agent_step messages to consumers', () => {
+    const onMessage = jest.fn();
+
+    createSSEConnection('/api/stream/task-1', { onMessage });
+
+    MockEventSource.instances[0].emit(
+      'agent_step',
+      {
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_verify_agent',
+        is_complete: true,
+        content: '[{"evidence":"缺少交付说明","fix_hint":"补充交付范围"}]',
+        findings: [{ evidence: '缺少交付说明', fix_hint: '补充交付范围' }],
+      },
+      'agent-1'
+    );
+
+    expect(onMessage).toHaveBeenCalledWith({
+      event: 'agent_step',
+      id: 'agent-1',
+      data: {
+        task_id: 'task-1',
+        task_kind: 'generate',
+        step_type: 'stream',
+        round: 1,
+        node: 'content_verify_agent',
+        is_complete: true,
+        content: '[{"evidence":"缺少交付说明","fix_hint":"补充交付范围"}]',
+        findings: [{ evidence: '缺少交付说明', fix_hint: '补充交付范围' }],
+      },
+    });
   });
 });

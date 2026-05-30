@@ -56,6 +56,7 @@ describe('formDataConverter', () => {
         tender_no: 'XJCG-001',
         tender_lx: 1,
         fund_lx: 0,
+        generation_mode: 'agent',
         generation_style: 'param',
         style_writeback_mode: 'bold_only',
         tender_data: baseTenderData,
@@ -71,6 +72,7 @@ describe('formDataConverter', () => {
         tender_no: 'GNGK-001',
         tender_lx: 2,
         fund_lx: 1,
+        generation_mode: 'agent',
         generation_style: 'param',
         style_writeback_mode: 'bold_only',
         tender_data: baseTenderData,
@@ -86,6 +88,7 @@ describe('formDataConverter', () => {
         tender_no: 'GJGK-001',
         tender_lx: 1,
         fund_lx: 1,
+        generation_mode: 'agent',
         generation_style: 'param',
         style_writeback_mode: 'bold_only',
         tender_data: baseTenderData,
@@ -97,10 +100,64 @@ describe('formDataConverter', () => {
         },
       })],
   ] as const)(
-    'forwards generation_style and style_writeback_mode for %s converters',
+    'forwards generation_mode, generation_style and style_writeback_mode for %s converters',
     (_tenderType, buildRequest) => {
+      expect(buildRequest().generation_mode).toBe('agent');
       expect(buildRequest().generation_style).toBe('param');
       expect(buildRequest().style_writeback_mode).toBe('bold_only');
+    }
+  );
+
+  it.each([
+    ['xjcg', () =>
+      convertXjcgFormToApiRequest({
+        tender_no: 'XJCG-001',
+        tender_lx: 0,
+        fund_lx: 0,
+        generation_style: 'template',
+        style_writeback_mode: 'full',
+        tender_data: baseTenderData,
+        model: 'deepseek',
+        files: baseFiles,
+        insertion_config: {
+          before_text: '第三章  采购需求',
+          after_text: '第四章  响应文件有关格式',
+        },
+      })],
+    ['gngk', () =>
+      convertGngkFormToApiRequest({
+        tender_no: 'GNGK-001',
+        tender_lx: 0,
+        fund_lx: 0,
+        generation_style: 'template',
+        style_writeback_mode: 'full',
+        tender_data: baseTenderData,
+        model: 'deepseek',
+        files: baseFiles,
+        insertion_config: {
+          before_text: '第三章 招标内容及要求',
+          after_text: '第四章 投标文件有关格式',
+        },
+      })],
+    ['gjgk', () =>
+      convertGjgkFormToApiRequest({
+        tender_no: 'GJGK-001',
+        tender_lx: 0,
+        fund_lx: 1,
+        generation_style: 'template',
+        style_writeback_mode: 'full',
+        tender_data: baseTenderData,
+        model: 'deepseek',
+        files: baseFiles,
+        insertion_config: {
+          before_text: '技术规格及要求',
+          after_text: '附件1：投标文件封面（格式）',
+        },
+      })],
+  ] as const)(
+    'defaults generation_mode to workflow for %s converters',
+    (_tenderType, buildRequest) => {
+      expect(buildRequest().generation_mode).toBe('workflow');
     }
   );
 

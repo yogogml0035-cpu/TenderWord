@@ -42,6 +42,7 @@ async def stream_task_events(
     - `log`: 普通日志消息
     - `llm`: LLM 生成内容流
     - `progress`: 进度更新
+    - `agent_step`: 智能体生成步骤
     - `done`: 任务完成
     - `error`: 错误信息
 

@@ -140,6 +140,7 @@ export interface InsertionConfig {
 }
 
 export type GenerationStyle = 'template' | 'param';
+export type GenerationMode = 'workflow' | 'agent';
 export type StyleWritebackMode = 'full' | 'bold_only';
 
 export interface GenerateRequest {
@@ -154,6 +155,7 @@ export interface GenerateRequest {
   file_paths: FilesConfig;
   insertion_config?: InsertionConfig;
   generation_style?: GenerationStyle;
+  generation_mode: GenerationMode;
   style_writeback_mode: StyleWritebackMode;
   conversation_id?: string;
   model: 'deepseek' | 'qwen' | 'doubao';
@@ -447,6 +449,23 @@ export interface SSEProgressEvent {
   current_node_display?: string;
 }
 
+export interface SSEAgentStepFinding {
+  evidence: string;
+  fix_hint: string;
+}
+
+export interface SSEAgentStepEvent {
+  timestamp: string;
+  task_id: string;
+  task_kind: TaskKind;
+  step_type: string;
+  round: number;
+  node: string;
+  is_complete: boolean;
+  content?: string | null;
+  findings: SSEAgentStepFinding[];
+}
+
 export interface SSEStatusEvent {
   timestamp: string;
   status: TaskStatus;
@@ -486,6 +505,7 @@ export type SSEEventType =
   | 'log'
   | 'llm'
   | 'progress'
+  | 'agent_step'
   | 'status'
   | 'error'
   | 'done'

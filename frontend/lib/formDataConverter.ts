@@ -10,7 +10,7 @@ import type { XjcgTenderFormData } from '@/components/forms/XjcgTenderForm';
 import type { GngkTenderFormData } from '@/components/forms/GngkTenderForm';
 import type { GjgkTenderFormData } from '@/components/forms/GjgkTenderForm';
 import type { UploadedFile } from '@/components/forms/FileUploader';
-import type { GenerateRequest, FilesConfig } from '@/types/api';
+import type { GenerateRequest, FilesConfig, GenerationMode } from '@/types/api';
 import { resolveGngkFormType } from '@/lib/gngkFormType';
 
 // ============================================
@@ -68,6 +68,10 @@ function buildFilesConfig(
   };
 }
 
+function resolveGenerationMode(generationMode: GenerationMode | undefined): GenerationMode {
+  return generationMode || 'workflow';
+}
+
 // ============================================
 // XJCG Converter
 // ============================================
@@ -122,6 +126,7 @@ export function convertXjcgFormToApiRequest(formData: XjcgTenderFormData): Gener
     file_paths: filesConfig,
     insertion_config: formData.insertion_config,
     generation_style: formData.generation_style,
+    generation_mode: resolveGenerationMode(formData.generation_mode),
     style_writeback_mode: formData.style_writeback_mode,
     model: formData.model,
   };
@@ -203,6 +208,7 @@ export function convertGngkFormToApiRequest(
     file_paths: filesConfig,
     insertion_config: formData.insertion_config,
     generation_style: formData.generation_style,
+    generation_mode: resolveGenerationMode(formData.generation_mode),
     style_writeback_mode: formData.style_writeback_mode,
     model: formData.model,
   };
@@ -230,6 +236,7 @@ export function convertGjgkFormToApiRequest(
     file_paths: filesConfig,
     insertion_config: formData.insertion_config,
     generation_style: formData.generation_style,
+    generation_mode: resolveGenerationMode(formData.generation_mode),
     style_writeback_mode: formData.style_writeback_mode,
     model: formData.model,
   };

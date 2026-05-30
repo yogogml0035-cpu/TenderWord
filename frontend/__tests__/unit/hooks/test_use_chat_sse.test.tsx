@@ -108,6 +108,7 @@ function resetStores() {
         logMessageId: 'msg-log-1',
       },
     },
+    conversationDrafts: {},
     isLoading: false,
     error: null,
     selectedTenderType: 'xjcg',
@@ -138,6 +139,7 @@ function setQueueOnlyTaskState() {
     currentConversationId: 'conv-1',
     activeTaskIds: ['task-1'],
     taskMessageMap: {},
+    conversationDrafts: {},
   }));
   useChatStreamStore.setState({ streams: {} });
   useChatTaskSessionStore.setState({ sessions: {} });
@@ -260,7 +262,9 @@ describe('useChatSSE', () => {
     expect(completedGroup?.logMessage?.status).toBe('completed');
     expect(completedGroup?.contentMessage?.status).toBe('completed');
     expect(completedGroup?.contentMessage?.content).toBe('你好啊');
-    expect(completedGroup?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
+    expect(completedGroup?.downloadMessage?.metadata?.outputFile).toBe(
+      'D:/UploadFiles/output.docx'
+    );
     expect(completedGroup?.downloadMessage?.metadata?.styleWriteback).toEqual({
       summary: '样式回填: 抽取=1, 尝试=1, 成功=1, 跳过=0, 失败=0',
       extracted: 1,
@@ -273,6 +277,428 @@ describe('useChatSSE', () => {
     });
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
     expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
+  });
+
+  it('keeps node-based agent_step stream cards after done', async () => {
+    mockGetTaskStatus.mockResolvedValue({
+      ...createRunningTaskStatus(),
+      progress: {
+        ...createRunningTaskStatus().progress,
+        running_nodes: ['content_agent'],
+        current_node: 'content_agent',
+      },
+    });
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_generate_agent',
+          is_complete: true,
+          content: '智能体初稿正文',
+          findings: [],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_verify_agent',
+          is_complete: true,
+          content: '[{"evidence":"交付地点缺失","fix_hint":"补充交付地点"}]',
+          findings: [
+            {
+              evidence: '交付地点缺失',
+              fix_hint: '补充交付地点',
+            },
+          ],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '3',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_revise_agent',
+          is_complete: true,
+          content: '第一轮 AI 修改内容',
+          findings: [
+            {
+              evidence: '交付地点缺失',
+              fix_hint: '补充交付地点',
+            },
+          ],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '4',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 2,
+          node: 'content_verify_agent',
+          is_complete: true,
+          content: '[{"evidence":"验收标准不明确","fix_hint":"补充验收标准"}]',
+          findings: [
+            {
+              evidence: '验收标准不明确',
+              fix_hint: '补充验收标准',
+            },
+          ],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'done',
+        id: '5',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          success: true,
+          message: '任务完成',
+          output_file: 'D:/UploadFiles/output.docx',
+          processing_time: 12.5,
+        },
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+    const firstAuditMessage = agentMessages?.find(
+      (message) =>
+        message.metadata?.agentStepNode === 'content_verify_agent' &&
+        message.metadata?.agentStepRound === 1
+    );
+    const secondAuditMessage = agentMessages?.find(
+      (message) =>
+        message.metadata?.agentStepNode === 'content_verify_agent' &&
+        message.metadata?.agentStepRound === 2
+    );
+    const revisionMessage = agentMessages?.find(
+      (message) => message.metadata?.agentStepNode === 'content_revise_agent'
+    );
+    const group = getTaskGroup();
+
+    expect(agentMessages).toHaveLength(4);
+    expect(agentMessages?.map((message) => message.metadata?.agentStepNode)).toEqual([
+      'content_generate_agent',
+      'content_verify_agent',
+      'content_revise_agent',
+      'content_verify_agent',
+    ]);
+    expect(agentMessages?.[0].content).toBe('智能体初稿正文');
+    expect(firstAuditMessage?.content).toBe('[{"evidence":"交付地点缺失","fix_hint":"补充交付地点"}]');
+    expect(firstAuditMessage?.metadata?.agentStepAuditRounds).toHaveLength(1);
+    expect(firstAuditMessage?.metadata?.agentStepRound).toBe(1);
+    expect(revisionMessage?.content).toBe('第一轮 AI 修改内容');
+    expect(secondAuditMessage?.content).toBe('[{"evidence":"验收标准不明确","fix_hint":"补充验收标准"}]');
+    expect(secondAuditMessage?.metadata?.agentStepAuditRounds).toHaveLength(1);
+    expect(secondAuditMessage?.metadata?.agentStepRound).toBe(2);
+    expect(group?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
+    expect(group?.contentMessage).toBeUndefined();
+    expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
+  });
+
+  it('keeps empty running verify agent-step compact until final [] arrives', async () => {
+    mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_verify_agent',
+          is_complete: false,
+          content: '',
+          findings: [],
+        },
+      });
+    });
+
+    let conversation = useChatStore.getState().getCurrentConversation();
+    let verifyMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_verify_agent'
+    );
+
+    expect(verifyMessage?.content).toBe('');
+    expect(verifyMessage?.status).toBe('generating');
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_verify_agent',
+          is_complete: true,
+          content: '[]',
+          findings: [],
+        },
+      });
+    });
+
+    conversation = useChatStore.getState().getCurrentConversation();
+    verifyMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_verify_agent'
+    );
+
+    expect(verifyMessage?.content).toBe('[]');
+    expect(verifyMessage?.status).toBe('completed');
+  });
+
+  it('buffers incomplete agent_step snapshots outside the persisted chat store', async () => {
+    mockGetTaskStatus.mockResolvedValue({
+      ...createRunningTaskStatus(),
+      progress: {
+        ...createRunningTaskStatus().progress,
+        running_nodes: ['content_agent'],
+        current_node: 'content_agent',
+      },
+    });
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_generate_agent',
+          is_complete: false,
+          content: '第一段',
+          findings: [],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_generate_agent',
+          is_complete: false,
+          content: '第一段\n第二段',
+          findings: [],
+        },
+      });
+    });
+
+    let conversation = useChatStore.getState().getCurrentConversation();
+    let agentMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_generate_agent'
+    );
+    expect(agentMessage?.content).toBe('');
+    expect(agentMessage?.status).toBe('generating');
+    expect(useChatStreamStore.getState().streams['task-1']?.agentSteps).toEqual({
+      'content_generate_agent:1': {
+        content: '第一段\n第二段',
+        isComplete: false,
+      },
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '3',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_generate_agent',
+          is_complete: true,
+          content: '第一段\n第二段',
+          findings: [],
+        },
+      });
+    });
+
+    conversation = useChatStore.getState().getCurrentConversation();
+    agentMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'content_generate_agent'
+    );
+    expect(agentMessage?.content).toBe('第一段\n第二段');
+    expect(agentMessage?.status).toBe('completed');
+  });
+
+  it('removes task-content if agent_step arrives after llm snapshot placeholder', async () => {
+    mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'llm',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          node: 'generate_polished_text',
+          content: '普通 LLM 快照',
+          content_mode: 'snapshot',
+          is_complete: false,
+        },
+      });
+    });
+
+    expect(getTaskGroup()?.contentMessage?.status).toBe('generating');
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_generate_agent',
+          is_complete: true,
+          content: '智能体初稿正文',
+          findings: [],
+        },
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+
+    expect(getTaskGroup()?.contentMessage).toBeUndefined();
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].content).toBe('智能体初稿正文');
+    expect(conversation?.messages.some((message) => message.content === '普通 LLM 快照')).toBe(
+      false
+    );
+  });
+
+  it('does not create task-content from llm snapshot when conversation uses agent mode', async () => {
+    mockGetTaskStatus.mockResolvedValue({
+      ...createRunningTaskStatus(),
+      progress: {
+        ...createRunningTaskStatus().progress,
+        running_nodes: ['content_agent'],
+        current_node: 'content_agent',
+      },
+    });
+    useChatStore.setState((state) => ({
+      ...state,
+      conversationDrafts: {
+        ...state.conversationDrafts,
+        'conv-1': {
+          generation_mode: 'agent',
+        },
+      },
+    }));
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'llm',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          node: 'generate_polished_text',
+          content: '普通 LLM 快照',
+          content_mode: 'snapshot',
+          is_complete: false,
+        },
+      });
+    });
+
+    expect(useChatStreamStore.getState().streams['task-1']?.aiText).toBe('普通 LLM 快照');
+    expect(getTaskGroup()?.contentMessage).toBeUndefined();
   });
 
   it('keeps SSE disconnected while queued and creates task-log only when running', async () => {
@@ -721,6 +1147,79 @@ describe('useChatSSE', () => {
     expect(onError).toHaveBeenCalledWith('生成失败');
   });
 
+  it('keeps agent-step cards without task-content when a fatal agent error arrives', async () => {
+    const onError = jest.fn();
+    mockGetTaskStatus.mockResolvedValue({
+      ...createRunningTaskStatus(),
+      progress: {
+        ...createRunningTaskStatus().progress,
+        running_nodes: ['content_agent'],
+        current_node: 'content_agent',
+      },
+    });
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+        onError,
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'content_generate_agent',
+          is_complete: true,
+          content: '智能体初稿正文',
+          findings: [],
+        },
+      });
+      useChatStreamStore.getState().setAIContent('task-1', '不应出现的普通 AI 内容卡', true);
+      latestOptions?.onMessage?.({
+        event: 'error',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          error: 'Request timed out.',
+          is_fatal: true,
+        },
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+    const group = getTaskGroup();
+
+    expect(latestCloseMock).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith('Request timed out.');
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].content).toBe('智能体初稿正文');
+    expect(group?.logMessage?.status).toBe('error');
+    expect(group?.logMessage?.metadata?.logs).toEqual(
+      expect.arrayContaining([expect.objectContaining({ message: 'Request timed out.' })])
+    );
+    expect(group?.contentMessage).toBeUndefined();
+    expect(
+      conversation?.messages.some((message) => message.content === '不应出现的普通 AI 内容卡')
+    ).toBe(false);
+  });
+
   it('closes the active SSE connection when a non-fatal cancel event arrives', async () => {
     const onComplete = jest.fn();
     mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
@@ -1057,9 +1556,7 @@ describe('useChatSSE', () => {
       });
     });
 
-    expect(useChatStreamStore.getState().streams['task-1']?.aiText).toBe(
-      '第一段\n第二段\n第三段'
-    );
+    expect(useChatStreamStore.getState().streams['task-1']?.aiText).toBe('第一段\n第二段\n第三段');
     expect(getTaskGroup()?.contentMessage?.status).toBe('completed');
     expect(getTaskGroup()?.contentMessage?.content).toBe('第一段\n第二段\n第三段');
 

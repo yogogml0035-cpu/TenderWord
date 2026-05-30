@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FormPanel } from '@/components/chat/FormPanel';
 import { useChatStore } from '@/stores/chatStore';
@@ -422,6 +422,42 @@ describe('FormPanel', () => {
       });
     });
     expect(mockConvertGngkFormToApiRequest).not.toHaveBeenCalled();
+  });
+
+  it('ignores duplicate generate submits while task creation is pending', async () => {
+    let resolveCreateTask!: (value: {
+      task_id: string;
+      task_kind: 'generate';
+      status: 'queued';
+      queue_position: number;
+      waiting_count: number;
+    }) => void;
+    mockCreateGenerateTask.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCreateTask = resolve;
+        })
+    );
+
+    render(<FormPanel />);
+
+    const submitButton = screen.getByRole('button', { name: '提交XJCG表单' });
+    fireEvent.click(submitButton);
+    fireEvent.click(submitButton);
+
+    expect(mockCreateGenerateTask).toHaveBeenCalledTimes(1);
+
+    resolveCreateTask({
+      task_id: 'task-created',
+      task_kind: 'generate',
+      status: 'queued',
+      queue_position: 1,
+      waiting_count: 0,
+    });
+
+    await waitFor(() => {
+      expect(useChatStore.getState().getCurrentConversation()?.currentTaskId).toBe('task-created');
+    });
   });
 
   it('adds a generate placeholder ai message and binds it to the created task', async () => {

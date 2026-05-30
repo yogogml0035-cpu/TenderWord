@@ -206,6 +206,10 @@ export function createSSEConnection(endpoint: string, options: SSEOptions = {}):
       emitMessage('progress', event as MessageEvent);
     });
 
+    eventSource.addEventListener('agent_step', (event) => {
+      emitMessage('agent_step', event as MessageEvent);
+    });
+
     eventSource.addEventListener('status', (event) => {
       emitMessage('status', event as MessageEvent);
     });

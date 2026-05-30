@@ -395,6 +395,7 @@ describe('ChatPanel', () => {
         'conv-1': {
           chat_input: '请把交付日期改成合同签订后 30 天内',
           input_mode: 'edit',
+          generation_mode: 'agent',
           edit_file: {
             id: 'file-1',
             file_path: 'D:/UploadFiles/edit.docx',
@@ -463,7 +464,8 @@ describe('ChatPanel', () => {
       });
     });
 
-    expect(mockCreateEditTask).toHaveBeenCalledWith({
+    const editPayload = mockCreateEditTask.mock.calls[0]?.[0];
+    expect(editPayload).toEqual({
       conversation_id: 'conv-1',
       form_type: 'xjcg_tender',
       model: 'deepseek',
@@ -479,6 +481,7 @@ describe('ChatPanel', () => {
         project_name: '示例项目',
       }),
     });
+    expect(editPayload).not.toHaveProperty('generation_mode');
   });
 
   it('routes gngk goods fiscal edit with ifzgcg=2 to the self-funded goods graph', async () => {
@@ -693,6 +696,7 @@ describe('ChatPanel', () => {
       conversationDrafts: {
         'conv-1': {
           chat_input: '请帮我修改这一段内容',
+          generation_mode: 'agent',
         },
       },
     }));
@@ -738,6 +742,7 @@ describe('ChatPanel', () => {
       model: 'deepseek',
       messages: [{ role: 'user', content: '请帮我修改这一段内容' }],
     });
+    expect(mockStreamUserMessage.mock.calls[0]?.[0]).not.toHaveProperty('generation_mode');
   });
 
   it('keeps ordinary chat on the streaming path without creating a task', async () => {

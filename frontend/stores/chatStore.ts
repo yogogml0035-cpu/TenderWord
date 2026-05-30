@@ -2,7 +2,9 @@ import { create } from 'zustand';
 import { createJSONStorage, devtools, persist } from 'zustand/middleware';
 import type { TenderType, FundLx, TenderLx } from '@/types';
 import type {
+  GenerationMode,
   GenerationStyle,
+  SSEAgentStepEvent,
   StyleWritebackMode,
   StyleWritebackSummary,
   TaskKind,
@@ -15,6 +17,8 @@ import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useChatTaskSessionStore } from '@/stores/chatTaskSessionStore';
 import {
   isDualColumnContent,
+  type AgentAuditRound,
+  type AgentStepFinding,
   type Conversation,
   type LocalTaskReason,
   type LogEntry,
@@ -32,6 +36,7 @@ import { syncBrowserUrlToConversation } from '@/utils/tenderTypeMapper';
 const TASK_LOG_KIND: TaskMessageKind = 'task-log';
 const TASK_CONTENT_KIND: TaskMessageKind = 'task-content';
 const TASK_DOWNLOAD_KIND: TaskMessageKind = 'task-download';
+const TASK_AGENT_STEP_KIND: TaskMessageKind = 'agent-step';
 const BACKEND_RESTART_LOCAL_REASON: LocalTaskReason = 'backend_restart';
 const BACKEND_RESTART_TASK_MESSAGE = '服务已重启，任务已中断，可重试';
 
@@ -80,6 +85,7 @@ export interface ConversationFormDraft {
   tender_lx?: TenderLx;
   fund_lx?: FundLx;
   model?: 'deepseek' | 'qwen' | 'doubao';
+  generation_mode?: GenerationMode;
   generation_style?: GenerationStyle;
   gngk_generation_styles?: {
     0?: GenerationStyle;
@@ -346,6 +352,31 @@ function buildInterruptedLogs(
   ];
 }
 
+function buildTaskFailureLogs(
+  existingLogs: unknown,
+  runtimeLogs: LogEntry[] | undefined,
+  errorMessage: string
+): LogEntry[] {
+  const baseLogs =
+    runtimeLogs && runtimeLogs.length > 0 ? runtimeLogs : normalizeLogEntries(existingLogs);
+  if (
+    !errorMessage ||
+    baseLogs.some((log) => log.level === 'error' && log.message === errorMessage)
+  ) {
+    return baseLogs;
+  }
+
+  return [
+    ...baseLogs,
+    {
+      id: generateMessageId(),
+      timestamp: Date.now(),
+      level: 'error',
+      message: errorMessage,
+    },
+  ];
+}
+
 function collectBackendRestartTaskIds(state: Pick<
   ChatStore,
   'conversations' | 'activeTaskIds' | 'taskSummaries' | 'conversationDrafts'
@@ -467,10 +498,117 @@ function getLatestActiveTaskIdFromState(state: TaskScopeState): string | null {
 
 function getTaskMessageKind(message: Message): TaskMessageKind | undefined {
   const kind = message.metadata?.messageKind;
-  if (kind === TASK_LOG_KIND || kind === TASK_CONTENT_KIND || kind === TASK_DOWNLOAD_KIND) {
+  if (
+    kind === TASK_LOG_KIND ||
+    kind === TASK_CONTENT_KIND ||
+    kind === TASK_DOWNLOAD_KIND ||
+    kind === TASK_AGENT_STEP_KIND
+  ) {
     return kind;
   }
   return undefined;
+}
+
+function normalizeAgentStepFindings(findings: unknown): AgentStepFinding[] {
+  if (!Array.isArray(findings)) {
+    return [];
+  }
+
+  return findings
+    .map((item) => {
+      if (typeof item !== 'object' || item === null) {
+        return null;
+      }
+      const finding = item as Partial<AgentStepFinding>;
+      return {
+        evidence: String(finding.evidence || ''),
+        fix_hint: String(finding.fix_hint || ''),
+      };
+    })
+    .filter((finding): finding is AgentStepFinding => {
+      return !!finding && (!!finding.evidence || !!finding.fix_hint);
+    });
+}
+
+function normalizeAgentAuditRounds(rounds: unknown): AgentAuditRound[] {
+  if (!Array.isArray(rounds)) {
+    return [];
+  }
+
+  return rounds
+    .map((item) => {
+      if (typeof item !== 'object' || item === null) {
+        return null;
+      }
+      const round = (item as Partial<AgentAuditRound>).round;
+      if (typeof round !== 'number') {
+        return null;
+      }
+      return {
+        round,
+        findings: normalizeAgentStepFindings((item as Partial<AgentAuditRound>).findings),
+      };
+    })
+    .filter((round): round is AgentAuditRound => !!round)
+    .sort((a, b) => a.round - b.round);
+}
+
+function formatAgentFindingsJson(findings: AgentStepFinding[]): string {
+  return JSON.stringify(findings, null, 2);
+}
+
+function shouldShowVerifyFindingsJson(
+  step: { content?: unknown; is_complete?: boolean },
+  findings: AgentStepFinding[]
+): boolean {
+  if (typeof step.content === 'string' && step.content.length > 0) {
+    return true;
+  }
+  return !!step.is_complete || findings.length > 0;
+}
+
+function findAgentStepMessage(
+  messages: Message[],
+  taskId: string,
+  node: string,
+  round: number
+): Message | undefined {
+  return messages.find((message) => {
+    if (message.taskId !== taskId || message.metadata?.messageKind !== TASK_AGENT_STEP_KIND) {
+      return false;
+    }
+    return message.metadata.agentStepNode === node && message.metadata.agentStepRound === round;
+  });
+}
+
+function hasAgentStepMessages(messages: Message[], taskId: string): boolean {
+  return messages.some(
+    (message) => message.taskId === taskId && message.metadata?.messageKind === TASK_AGENT_STEP_KIND
+  );
+}
+
+function shouldUseAgentProcessCards(
+  state: Pick<ChatStore, 'conversations' | 'conversationDrafts' | 'taskSummaries'>,
+  taskId: string,
+  conversationId?: string | null
+): boolean {
+  const conversation =
+    (conversationId ? state.conversations.find((item) => item.id === conversationId) : null) ||
+    findConversationByTaskIdFromState(state, taskId);
+  const summary = state.taskSummaries[taskId];
+
+  if (summary?.task_kind && summary.task_kind !== 'generate') {
+    return false;
+  }
+  if (conversation && hasAgentStepMessages(conversation.messages, taskId)) {
+    return true;
+  }
+  if (summary?.current_node === 'content_agent') {
+    return true;
+  }
+  return conversation
+    ? state.conversationDrafts[conversation.id]?.generation_mode === 'agent'
+    : false;
 }
 
 function getMessageById(messages: Message[], messageId?: string): Message | undefined {
@@ -650,9 +788,11 @@ interface ChatStore {
       status?: Message['status'];
       content?: string;
       error?: string;
+      suppressForAgentStep?: boolean;
     }
   ) => string | null;
   markTaskContentReady: (taskId: string, aiText?: string) => void;
+  upsertAgentStepMessage: (taskId: string, step: SSEAgentStepEvent) => string | null;
   completeTask: (
     taskId: string,
     outputFile?: string,
@@ -722,6 +862,7 @@ export const useChatStore = create<ChatStore>()(
             conversationDrafts: {
               ...state.conversationDrafts,
               [conversation.id]: {
+                generation_mode: 'workflow',
                 generation_style: 'template',
                 style_writeback_mode: 'full',
                 model: 'deepseek',
@@ -1040,6 +1181,16 @@ export const useChatStore = create<ChatStore>()(
           if (locatedTaskGroup.contentMessage) {
             return locatedTaskGroup.contentMessage.id;
           }
+          const conversation = get().conversations.find(
+            (item) => item.id === locatedTaskGroup.conversationId
+          );
+          if (
+            options?.suppressForAgentStep &&
+            conversation &&
+            hasAgentStepMessages(conversation.messages, taskId)
+          ) {
+            return null;
+          }
 
           const contentMessageId = get().addMessage(locatedTaskGroup.conversationId, {
             type: 'ai',
@@ -1101,6 +1252,107 @@ export const useChatStore = create<ChatStore>()(
           });
         },
 
+        upsertAgentStepMessage: (taskId, step) => {
+          get().ensureTaskLogMessage(taskId, { status: 'generating' });
+          const locatedTaskGroup = get().findTaskMessageGroup(taskId);
+          if (
+            locatedTaskGroup?.contentMessage &&
+            getTaskMessageKind(locatedTaskGroup.contentMessage) === TASK_CONTENT_KIND
+          ) {
+            get().deleteMessage(locatedTaskGroup.conversationId, locatedTaskGroup.contentMessage.id);
+            const nextGroup = { ...locatedTaskGroup.group };
+            delete nextGroup.contentMessageId;
+            set((state) => ({
+              taskMessageMap: {
+                ...state.taskMessageMap,
+                [taskId]: nextGroup,
+              },
+            }));
+          }
+
+          const conversation = findConversationByTaskIdFromState(get(), taskId);
+          if (!conversation) {
+            return null;
+          }
+
+          const stepType = step.step_type || 'stream';
+          const stepRound = step.round;
+          const findings = normalizeAgentStepFindings(step.findings);
+          const taskKind = step.task_kind || get().taskSummaries[taskId]?.task_kind;
+          const incomingStatus: Message['status'] = step.is_complete ? 'completed' : 'generating';
+          const node = step.node || 'content_agent';
+          const existing = findAgentStepMessage(conversation.messages, taskId, node, stepRound);
+          if (existing && isTerminalMessageStatus(existing.status) && incomingStatus === 'generating') {
+            return existing.id;
+          }
+          const status = incomingStatus;
+
+          conversation.messages.forEach((message) => {
+            if (
+              message.taskId !== taskId ||
+              message.status !== 'generating' ||
+              message.metadata?.messageKind !== TASK_AGENT_STEP_KIND ||
+              (message.metadata.agentStepNode === node &&
+                message.metadata.agentStepRound === stepRound)
+            ) {
+              return;
+            }
+            get().updateMessage(conversation.id, message.id, { status: 'completed' });
+          });
+
+          let content = typeof step.content === 'string' ? step.content : '';
+          let auditRounds: AgentAuditRound[] | undefined;
+
+          if (node === 'content_verify_agent') {
+            const existingRounds = normalizeAgentAuditRounds(existing?.metadata?.agentStepAuditRounds);
+            const nextRound: AgentAuditRound = { round: stepRound, findings };
+            auditRounds = [
+              ...existingRounds.filter((round) => round.round !== stepRound),
+              nextRound,
+            ].sort((a, b) => a.round - b.round);
+            content = shouldShowVerifyFindingsJson(step, findings)
+              ? typeof step.content === 'string' && step.content.length > 0
+                ? step.content
+                : formatAgentFindingsJson(findings)
+              : typeof existing?.content === 'string'
+                ? existing.content
+                : '';
+          }
+
+          const metadata = {
+            messageKind: TASK_AGENT_STEP_KIND,
+            ...(taskKind ? { taskKind } : {}),
+            agentStepType: stepType,
+            agentStepRound: stepRound,
+            agentStepNode: node,
+            agentStepFindings: findings,
+            ...(auditRounds ? { agentStepAuditRounds: auditRounds } : {}),
+          };
+
+          const persistedContent = step.is_complete ? content : '';
+
+          if (existing) {
+            if (!step.is_complete && typeof step.content === 'string' && step.content.length > 0) {
+              return existing.id;
+            }
+            get().updateMessage(conversation.id, existing.id, {
+              content: persistedContent,
+              status,
+              error: undefined,
+              metadata,
+            });
+            return existing.id;
+          }
+
+          return get().addMessage(conversation.id, {
+            type: 'ai',
+            content: persistedContent,
+            status,
+            taskId,
+            metadata,
+          });
+        },
+
         completeTask: (taskId, outputFile, fileName, content, styleWriteback) => {
           const locatedTaskGroup = get().findTaskMessageGroup(taskId);
           let nextGroup: TaskMessageGroupIds | undefined;
@@ -1112,6 +1364,15 @@ export const useChatStore = create<ChatStore>()(
             const hasLogs = Array.isArray(content?.logs);
             const hasAiText = typeof content?.aiText === 'string';
             const hasNonEmptyAiText = hasAiText && (content?.aiText?.length || 0) > 0;
+            const usesAgentStepCards = shouldUseAgentProcessCards(get(), taskId, conversationId);
+
+            if (
+              usesAgentStepCards &&
+              contentMessage &&
+              getTaskMessageKind(contentMessage) === TASK_CONTENT_KIND
+            ) {
+              get().deleteMessage(conversationId, contentMessage.id);
+            }
 
             if (logMessage) {
               get().updateMessage(conversationId, logMessage.id, {
@@ -1124,14 +1385,16 @@ export const useChatStore = create<ChatStore>()(
               });
             }
 
-            let contentMessageId: string | undefined = contentMessage?.id;
-            if (!contentMessage && hasNonEmptyAiText) {
+            let contentMessageId: string | undefined = usesAgentStepCards
+              ? undefined
+              : contentMessage?.id;
+            if (!usesAgentStepCards && !contentMessage && hasNonEmptyAiText) {
               contentMessageId =
                 get().ensureTaskContentMessage(taskId, {
                   status: 'completed',
                   content: content?.aiText || '',
                 }) || undefined;
-            } else if (contentMessage) {
+            } else if (!usesAgentStepCards && contentMessage) {
               get().updateMessage(conversationId, contentMessage.id, {
                 status: 'completed',
                 ...(hasAiText ? { content: content?.aiText || '' } : {}),
@@ -1180,7 +1443,14 @@ export const useChatStore = create<ChatStore>()(
               }
             }
 
-            nextGroup = mergeTaskMessageGroup(group, {
+            const baseGroup = usesAgentStepCards
+              ? (() => {
+                  const nextBaseGroup = { ...group };
+                  delete nextBaseGroup.contentMessageId;
+                  return nextBaseGroup;
+                })()
+              : group;
+            nextGroup = mergeTaskMessageGroup(baseGroup, {
               ...(logMessage ? { logMessageId: logMessage.id } : {}),
               ...(contentMessageId ? { contentMessageId } : {}),
               ...(downloadMessageId ? { downloadMessageId } : {}),
@@ -1232,6 +1502,12 @@ export const useChatStore = create<ChatStore>()(
             const hasLogs = Array.isArray(content?.logs);
             const hasAiText = typeof content?.aiText === 'string';
             const hasNonEmptyAiText = hasAiText && (content?.aiText?.length || 0) > 0;
+            const nextLogs = buildTaskFailureLogs(
+              logMessage?.metadata?.logs,
+              hasLogs ? content?.logs : undefined,
+              error
+            );
+            const usesAgentStepCards = shouldUseAgentProcessCards(get(), taskId, conversationId);
 
             if (logMessage && getTaskMessageKind(logMessage) === TASK_LOG_KIND) {
               get().updateMessage(conversationId, logMessage.id, {
@@ -1239,20 +1515,30 @@ export const useChatStore = create<ChatStore>()(
                 metadata: {
                   messageKind: TASK_LOG_KIND,
                   taskKind: get().taskSummaries[taskId]?.task_kind,
-                  ...(hasLogs ? { logs: content?.logs } : {}),
+                  logs: nextLogs,
                 },
               });
             }
 
-            let contentMessageId: string | undefined = contentMessage?.id;
-            if (!contentMessage && hasNonEmptyAiText) {
+            if (
+              usesAgentStepCards &&
+              contentMessage &&
+              getTaskMessageKind(contentMessage) === TASK_CONTENT_KIND
+            ) {
+              get().deleteMessage(conversationId, contentMessage.id);
+            }
+
+            let contentMessageId: string | undefined = usesAgentStepCards
+              ? undefined
+              : contentMessage?.id;
+            if (!usesAgentStepCards && !contentMessage && hasNonEmptyAiText) {
               contentMessageId =
                 get().ensureTaskContentMessage(taskId, {
                   status: 'error',
                   content: content?.aiText || '',
                   error,
                 }) || undefined;
-            } else if (contentMessage) {
+            } else if (!usesAgentStepCards && contentMessage) {
               get().updateMessage(conversationId, contentMessage.id, {
                 status: 'error',
                 error,
@@ -1264,7 +1550,14 @@ export const useChatStore = create<ChatStore>()(
               });
             }
 
-            nextGroup = mergeTaskMessageGroup(group, {
+            const baseGroup = usesAgentStepCards
+              ? (() => {
+                  const nextBaseGroup = { ...group };
+                  delete nextBaseGroup.contentMessageId;
+                  return nextBaseGroup;
+                })()
+              : group;
+            nextGroup = mergeTaskMessageGroup(baseGroup, {
               ...(logMessage ? { logMessageId: logMessage.id } : {}),
               ...(contentMessageId ? { contentMessageId } : {}),
             });
@@ -1314,6 +1607,7 @@ export const useChatStore = create<ChatStore>()(
             const hasLogs = Array.isArray(content?.logs);
             const hasAiText = typeof content?.aiText === 'string';
             const hasNonEmptyAiText = hasAiText && (content?.aiText?.length || 0) > 0;
+            const usesAgentStepCards = shouldUseAgentProcessCards(get(), taskId, conversationId);
 
             if (logMessage && getTaskMessageKind(logMessage) === TASK_LOG_KIND) {
               get().updateMessage(conversationId, logMessage.id, {
@@ -1325,14 +1619,24 @@ export const useChatStore = create<ChatStore>()(
               });
             }
 
-            let contentMessageId: string | undefined = contentMessage?.id;
-            if (!contentMessage && hasNonEmptyAiText) {
+            if (
+              usesAgentStepCards &&
+              contentMessage &&
+              getTaskMessageKind(contentMessage) === TASK_CONTENT_KIND
+            ) {
+              get().deleteMessage(conversationId, contentMessage.id);
+            }
+
+            let contentMessageId: string | undefined = usesAgentStepCards
+              ? undefined
+              : contentMessage?.id;
+            if (!usesAgentStepCards && !contentMessage && hasNonEmptyAiText) {
               contentMessageId =
                 get().ensureTaskContentMessage(taskId, {
                   status: 'cancelled',
                   content: content?.aiText || '',
                 }) || undefined;
-            } else if (contentMessage) {
+            } else if (!usesAgentStepCards && contentMessage) {
               get().updateMessage(conversationId, contentMessage.id, {
                 status: 'cancelled',
                 ...(hasAiText ? { content: content?.aiText || '' } : {}),
@@ -1343,7 +1647,14 @@ export const useChatStore = create<ChatStore>()(
               });
             }
 
-            nextGroup = mergeTaskMessageGroup(group, {
+            const baseGroup = usesAgentStepCards
+              ? (() => {
+                  const nextBaseGroup = { ...group };
+                  delete nextBaseGroup.contentMessageId;
+                  return nextBaseGroup;
+                })()
+              : group;
+            nextGroup = mergeTaskMessageGroup(baseGroup, {
               ...(logMessage ? { logMessageId: logMessage.id } : {}),
               ...(contentMessageId ? { contentMessageId } : {}),
             });
@@ -1404,7 +1715,11 @@ export const useChatStore = create<ChatStore>()(
 
           if (locatedTaskGroup) {
             const { conversationId, logMessage, contentMessage, group } = locatedTaskGroup;
-            const nextLogs = buildInterruptedLogs(logMessage?.metadata?.logs, runtimeSnapshot?.logs);
+            const usesAgentStepCards = shouldUseAgentProcessCards(get(), taskId, conversationId);
+            const nextLogs = buildInterruptedLogs(
+              logMessage?.metadata?.logs,
+              runtimeSnapshot?.logs
+            );
             const nextProgressText =
               runtimeSnapshot?.progressText ||
               taskSummary?.progress_text ||
@@ -1460,8 +1775,18 @@ export const useChatStore = create<ChatStore>()(
                   : '';
             const hasNonEmptyAiText = nextAiText.length > 0;
 
-            let contentMessageId: string | undefined = contentMessage?.id;
-            if (!contentMessage && hasNonEmptyAiText) {
+            if (
+              usesAgentStepCards &&
+              contentMessage &&
+              getTaskMessageKind(contentMessage) === TASK_CONTENT_KIND
+            ) {
+              get().deleteMessage(conversationId, contentMessage.id);
+            }
+
+            let contentMessageId: string | undefined = usesAgentStepCards
+              ? undefined
+              : contentMessage?.id;
+            if (!usesAgentStepCards && !contentMessage && hasNonEmptyAiText) {
               contentMessageId =
                 get().ensureTaskContentMessage(taskId, {
                   status: 'error',
@@ -1492,7 +1817,7 @@ export const useChatStore = create<ChatStore>()(
                   },
                 });
               }
-            } else if (contentMessage) {
+            } else if (!usesAgentStepCards && contentMessage) {
               get().updateMessage(conversationId, contentMessage.id, {
                 status: 'error',
                 ...(hasNonEmptyAiText ? { content: nextAiText } : {}),
@@ -1517,7 +1842,14 @@ export const useChatStore = create<ChatStore>()(
               });
             }
 
-            nextGroup = mergeTaskMessageGroup(group, {
+            const baseGroup = usesAgentStepCards
+              ? (() => {
+                  const nextBaseGroup = { ...group };
+                  delete nextBaseGroup.contentMessageId;
+                  return nextBaseGroup;
+                })()
+              : group;
+            nextGroup = mergeTaskMessageGroup(baseGroup, {
               ...(logMessage ? { logMessageId: logMessage.id } : {}),
               ...(contentMessageId ? { contentMessageId } : {}),
             });

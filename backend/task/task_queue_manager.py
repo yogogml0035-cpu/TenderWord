@@ -44,6 +44,7 @@ class NodeName(Enum):
     GET_REPLACEMENTS = "get_replacements"
     REPLACE_CONTENT = "replace_content"
     GENERATE_POLISHED_TEXT = "generate_polished_text"
+    CONTENT_AGENT = "content_agent"
     GENERATE_COMMENTS = "generate_comments"
     RESOLVE_REWRITE_TARGET = "resolve_rewrite_target"
     RESOLVE_EDIT_TARGET = "resolve_edit_target"
@@ -65,6 +66,7 @@ NODE_DISPLAY_NAMES = {
     NodeName.GET_REPLACEMENTS: "获取原始项目信息",
     NodeName.REPLACE_CONTENT: "替换最新项目信息",
     NodeName.GENERATE_POLISHED_TEXT: "AI生成采购需求",
+    NodeName.CONTENT_AGENT: "智能体生成采购需求",
     NodeName.GENERATE_COMMENTS: "AI生成批注建议",
     NodeName.RESOLVE_REWRITE_TARGET: "选择修改版本",
     NodeName.RESOLVE_EDIT_TARGET: "准备编辑副本",

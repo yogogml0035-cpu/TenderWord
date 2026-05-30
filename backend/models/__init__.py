@@ -30,6 +30,7 @@ from .generate import (
     FileRequirement,
     FormRequirementsResponse,
     FormType,
+    GenerationMode,
     GenerationStyle,
     GenerateRequest,
     GenerateResponse,
@@ -48,6 +49,8 @@ from .upload import (
 
 # SSE 事件模型
 from .sse import (
+    AgentStepEventData,
+    AgentStepFindingData,
     DoneEventData,
     ErrorEventData,
     HeartbeatEventData,
@@ -111,6 +114,7 @@ __all__ = [
     # 生成相关
     "LLMModel",
     "FormType",
+    "GenerationMode",
     "GenerationStyle",
     "EditTaskRequest",
     "GenerateRequest",
@@ -129,6 +133,8 @@ __all__ = [
     # SSE 事件
     "SSEEventType",
     "SSEEvent",
+    "AgentStepEventData",
+    "AgentStepFindingData",
     "LogEventData",
     "LLMEventData",
     "ProgressEventData",
