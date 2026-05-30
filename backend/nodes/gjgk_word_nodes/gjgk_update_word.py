@@ -30,6 +30,7 @@ from backend.config.tender_config import (  # noqa: E402
     get_default_anchor_texts,
 )
 from backend.nodes.common_word_nodes.comment_writeback import (  # noqa: E402
+    build_comment_writeback_summary_payload,
     write_polished_comments,
 )
 from backend.states import GjgkTenderGraphState  # noqa: E402
@@ -1101,6 +1102,7 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
     comment_writeback_failed = 0
     comment_writeback_skipped = 0
     comment_writeback_errors: list[dict[str, str]] = []
+    comment_writeback_result_payload = None
     style_writeback_summary = ""
     style_writeback_result = None
 
@@ -1425,26 +1427,25 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
             step_label=comment_step_label,
         )
 
-        # Extract writeback stats
-        added = comment_writeback_result.get("added", 0)
-        failed = comment_writeback_result.get("failed", 0)
-        skipped = comment_writeback_result.get("skipped", 0)
+        summary_payload = build_comment_writeback_summary_payload(
+            generated_count=generated_count,
+            writeback_result=comment_writeback_result,
+        )
+        added = summary_payload["added"]
+        failed = summary_payload["failed"]
+        skipped = summary_payload["skipped"]
         issues = comment_writeback_result.get("issues", [])
 
-        # Build summary for logging and state
-        summary = f"AI批注写入: 生成={generated_count}, 成功={added}, 失败={failed}, 跳过={skipped}"
+        summary = summary_payload["summary"]
         if not suppress_comment_progress_logs:
-            progress_log.info(summary)
-
-        # Hard fail: if AI generated comments exist but zero were written back
-        if generated_count > 0 and added == 0:
-            error_msg = f"批注生成成功但写入失败: 生成{generated_count}条, 成功写入0条"
-            if not suppress_comment_progress_logs:
-                progress_log.error(error_msg)
-            raise ValueError(error_msg)
+            if summary_payload["warning"]:
+                progress_log.warning(summary)
+            else:
+                progress_log.info(summary)
 
         # Store detailed results in state for visibility
         comment_writeback_summary = summary
+        comment_writeback_result_payload = summary_payload
         comment_writeback_added = added
         comment_writeback_failed = failed
         comment_writeback_skipped = skipped
@@ -1490,6 +1491,7 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
     new_state["comment_writeback_failed"] = comment_writeback_failed
     new_state["comment_writeback_skipped"] = comment_writeback_skipped
     new_state["comment_writeback_errors"] = comment_writeback_errors
+    new_state["comment_writeback_result"] = comment_writeback_result_payload
     new_state["style_writeback_summary"] = style_writeback_summary
     new_state["style_writeback_result"] = style_writeback_result
     return GjgkTenderGraphState(**new_state)

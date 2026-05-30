@@ -118,10 +118,10 @@
 - `backend/states/base_state.py` 是 `comment_writeback_*`、`style_writeback_*` state 字段真源。
 - `common update_word`、`gjgk_update_word`、`gngk_fw_zc_update_word` 都要把批注和样式回写摘要写回 state。
 - `gngk_hw_cz_update_word` 虽然改为 direct replace，但仍要复用现有样式回填安全门禁，并把 `style_writeback_result`、`style_writeback_summary`、`comment_writeback_*` 摘要完整写回 state / 任务结果 / SSE done metadata。
-- 当 `generated_comment_count > 0` 且最终成功写入数为 `0` 时，update 路径必须硬失败，错误文本包含“批注生成成功但写入失败”。
+- AI 批注写回是可降级增强项：正文已成功写入并可下载时，`generated_comment_count > 0` 且最终成功写入数为 `0` 不再让 update 路径硬失败；统一 `comment_writeback` 摘要由共享 helper 计算，`warning` 只在 `generated > 0 && failed > 0` 时为 true，`generated=0` 和 skipped-only 不警告，用户可见统计在 warning 条件下走 `progress_log.warning()`。
 - 批注写回的重试只覆盖 Word `Comments.Add` 的 COM / RPC 写入异常；`reference_text` 未匹配属于定位失败，不会靠重试恢复。
 - 批注定位先走 Word 精确 `Find`；精确未命中时，共享 `comment_writeback` 可用规范化唯一匹配兜底，忽略空白、控制符、常见标点和换行。锚点范围内唯一命中才插入；若锚点范围疑似漂移，只允许全文唯一命中兜底；多处命中必须失败，避免把批注错插到其它章节。
-- 样式回填是 best-effort：低相似度、0 命中或片段跳过不硬失败；批注写回硬失败契约保持不变。
+- 样式回填是 best-effort：低相似度、0 命中或片段跳过不硬失败；批注写回同样不得阻断已成功写入正文的下载主流程，只通过 `comment_writeback` 统计和 warning 暴露。
 - `style_writeback_mode=bold_only` 时，样式回填必须先在共享 `inline_style_ops` 中裁剪片段：只保留 `bold=True`，并清空下划线、斜体、删除线、字体颜色、高亮和 `underline_style`；裁剪后不再含加粗的片段不得进入 extracted/attempted 计数或写回流程。
 - `replace_content` 给首个正文 `project_name` 插入 `PROJECT_NAME_FIRST_HIT_COMMENT` 时，必须先按规范化后的批注文案做去重；只跳过“同文案”重复批注，其他文案批注不影响新增。Word 若把既有批注暴露成零宽或贴边锚点，也要视为同一落点参与判重。
 - `DocumentService._build_task_result_payload()` 与 SSE `done` 事件必须继续透传 `style_writeback`。

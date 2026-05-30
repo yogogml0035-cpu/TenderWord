@@ -18,7 +18,10 @@ from backend.helper.word_helper.delete_ops import (
     delete_range_content_preserving_locked_blocks as _delete_original_content,
     trim_leading_layout_controls_preserving_locked_blocks as _trim_leading_layout_controls,
 )
-from backend.nodes.common_word_nodes.comment_writeback import write_polished_comments
+from backend.nodes.common_word_nodes.comment_writeback import (
+    build_comment_writeback_summary_payload,
+    write_polished_comments,
+)
 from backend.nodes.gjgk_word_nodes.gjgk_update_word import (
     _build_insert_items,
     _describe_range_state,
@@ -124,6 +127,7 @@ def gngk_hw_cz_update_word(
     comment_writeback_failed = 0
     comment_writeback_skipped = 0
     comment_writeback_errors: list[dict[str, str]] = []
+    comment_writeback_result_payload = None
     style_writeback_summary = ""
     style_writeback_result: dict[str, Any] | None = None
 
@@ -443,21 +447,24 @@ def gngk_hw_cz_update_word(
             step_label=comment_step_label,
         )
 
-        added = comment_writeback_result.get("added", 0)
-        failed = comment_writeback_result.get("failed", 0)
-        skipped = comment_writeback_result.get("skipped", 0)
+        summary_payload = build_comment_writeback_summary_payload(
+            generated_count=generated_count,
+            writeback_result=comment_writeback_result,
+        )
+        added = summary_payload["added"]
+        failed = summary_payload["failed"]
+        skipped = summary_payload["skipped"]
         issues = comment_writeback_result.get("issues", [])
 
-        summary = f"AI批注写入: 生成={generated_count}, 成功={added}, 失败={failed}, 跳过={skipped}"
+        summary = summary_payload["summary"]
         if not suppress_comment_progress_logs:
-            progress_log.info(summary)
-        if generated_count > 0 and added == 0:
-            error_msg = f"批注生成成功但写入失败: 生成{generated_count}条, 成功写入0条"
-            if not suppress_comment_progress_logs:
-                progress_log.error(error_msg)
-            raise ValueError(error_msg)
+            if summary_payload["warning"]:
+                progress_log.warning(summary)
+            else:
+                progress_log.info(summary)
 
         comment_writeback_summary = summary
+        comment_writeback_result_payload = summary_payload
         comment_writeback_added = added
         comment_writeback_failed = failed
         comment_writeback_skipped = skipped
@@ -502,6 +509,7 @@ def gngk_hw_cz_update_word(
     new_state["comment_writeback_failed"] = comment_writeback_failed
     new_state["comment_writeback_skipped"] = comment_writeback_skipped
     new_state["comment_writeback_errors"] = comment_writeback_errors
+    new_state["comment_writeback_result"] = comment_writeback_result_payload
     new_state["style_writeback_summary"] = style_writeback_summary
     new_state["style_writeback_result"] = style_writeback_result
     return GngkTenderGraphState(**new_state)

@@ -8,6 +8,7 @@ Source: prd.json
 - 后端任务类型需要同时更新内部 `backend/task/task_queue_manager.py::TaskKind`、API `backend/models/task.py::TaskKind` 和 `backend/services/task_service.py` 的转换映射。
 - SSE `done` 新增结构字段时，需要同步后端模型 `backend/models/sse.py`、发送入口 `backend/core/sse_manager.py`、前端 `frontend/types/api.ts` 与类型契约测试。
 - Windows/WSL 共用工作区时，前端浏览器验证前要确认 Linux 原生 optional 依赖已安装；若 `lightningcss` 或 `@tailwindcss/oxide` 只存在 win32 包，在 `frontend/` 运行 `npm install --include=optional` 后重启 dev server。
+- 批注写回 summary/warning 规则统一走 `backend/nodes/common_word_nodes/comment_writeback.py::build_comment_writeback_summary_payload`；update_word 节点只在 `generated > 0 && failed > 0` 时用 `progress_log.warning()`，不要重新加入 0 写入硬失败。
 
 ## 2026-05-30 13:08 - US-001
 - 建立了 `comment_supplement` 任务类型契约：后端内部/API TaskKind、TaskService 映射、前端 TaskKind union 均已支持。
@@ -29,4 +30,15 @@ Source: prd.json
   - Windows 与 WSL 交替使用同一个 `frontend/node_modules` 时，平台原生 optional dependency 可能停留在 win32 版本，Next/Tailwind 编译会报缺少 Linux `.node` 文件；用锁文件恢复 optional 依赖后要重启 dev server。
   - 根路径 `/` 当前会 307 重定向到 `/tender`，浏览器或 curl 健康检查应检查 `/tender` 或启用跟随跳转，避免把正常 redirect 当失败。
   - 当前工作树已有与本需求无关的 `backend/.env.example` 和 `scripts/start-dev.ps1` 空白改动，提交时仍应只暂存本轮需求文件。
+---
+## 2026-05-30 14:04 - US-002
+- 将现有批注写回硬失败降级为 warning：common、gjgk、gngk_fw_zc、gngk_hw_cz 四条 update_word 路径不再在 `generated_comment_count > 0` 且 0 条写入时抛异常，改为写入 `comment_writeback_result` 摘要并在失败数大于 0 时输出 warning 级进度。
+- 新增统一 `build_comment_writeback_summary_payload`，集中计算 `summary/generated/added/failed/skipped/warning`，确保 `generated=0` 和 skipped-only 不触发 warning。
+- 同步修正批注写回相关测试、根级 AGENTS 约束和 `asset/shared_runtime_word_skill_knowledge_pack.md` 中的长期规则。
+- 更改的文件：`AGENTS.md`、`asset/shared_runtime_word_skill_knowledge_pack.md`、`backend/nodes/common_word_nodes/comment_writeback.py`、`backend/nodes/common_word_nodes/update_word.py`、`backend/nodes/gjgk_word_nodes/gjgk_update_word.py`、`backend/nodes/gngk_word_nodes/gngk_fw_zc_update_word.py`、`backend/nodes/gngk_word_nodes/gngk_hw_cz_update_word.py`、`backend/tests/nodes/test_comment_writeback.py`、`backend/tests/nodes/test_update_word_inline_style_writeback.py`、`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m pip install -r backend/requirements.txt` 补齐 Linux venv 中缺失的声明依赖；`backend/.venv-linux/bin/python -m pytest backend/tests/nodes/test_comment_writeback.py backend/tests/nodes/test_update_word_inline_style_writeback.py backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py backend/tests/nodes/test_gngk_fw_zc_update_word.py -v` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests -v` 通过，352 passed；`npm run lint` 通过；`npm run type-check` 通过；本轮变更文件 `git diff --check -- ...` 通过。
+- **未来迭代的学习：**
+  - 批注写回统计现在有统一 builder，新增 task result 或 SSE 透传时应复用 `comment_writeback_result` / builder 输出，不要在 DocumentService 或前端重新推断 warning。
+  - 0 条成功写入不再等价任务失败；真正应阻断的仍是正文写回、受保护字段、锁定范围和保存等主流程强契约。
+  - Linux venv 若只装了部分 LangChain 依赖，导入 `backend.nodes.common_word_nodes` 会因 `deepagents` 缺失在测试收集阶段失败；按 `backend/requirements.txt` 补齐后再跑后端测试。
 ---

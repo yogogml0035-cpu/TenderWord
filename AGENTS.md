@@ -104,7 +104,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - `execution_log` 只写排障细节、异常栈、关键参数摘要。
 - `sse_log_handler` 负责把进度日志转为前端可消费事件；任务失败时必须收敛成 `error` 或 `done`，不能让 SSE 静默中断。
 - 新增 SSE 事件类型时，必须同步更新前端底层 named event 注册、解析、类型定义和测试。
-- 批注与样式回写结果属于共享任务契约：`comment_writeback_*`、`style_writeback_*` 摘要不得在 state、任务结果或 SSE `done` 事件里丢失；当 `generated_comment_count > 0` 且 `comment_writeback_added == 0` 时任务必须硬失败。
+- 批注与样式回写结果属于共享任务契约：`comment_writeback_*`、`style_writeback_*` 摘要不得在 state、任务结果或 SSE `done` 事件里丢失；AI 批注写回是可降级增强项，正文已成功写入并可下载时不得因 `generated_comment_count > 0` 且 `comment_writeback_added == 0` 硬失败，`comment_writeback.warning` 只在 `generated > 0 && failed > 0` 时为 true，skipped-only 不警告。
 - 前端用户态 SSE 进度只展示 outcome-first 的精简信息；候选打分、淘汰原因、阈值和其它排障诊断继续留在 `execution_log` 或 debug log，不能直接暴露到用户态日志或额外新增逐片段样式 UI。
 
 ### 前后端调用约束

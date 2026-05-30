@@ -133,6 +133,8 @@ def _patch_update_runtime(
     module,
     fake_doc: _FakeDoc,
     fields: dict[str, _FakeRange],
+    *,
+    comment_result: dict[str, Any] | None = None,
 ) -> None:
     fake_word = _FakeWord(fake_doc)
     monkeypatch.setattr(
@@ -197,7 +199,8 @@ def _patch_update_runtime(
     monkeypatch.setattr(
         module,
         "write_polished_comments",
-        lambda **_kwargs: {"added": 0, "failed": 0, "skipped": 0, "issues": []},
+        lambda **_kwargs: comment_result
+        or {"added": 0, "failed": 0, "skipped": 0, "issues": []},
     )
     monkeypatch.setattr(module, "close_word_application", lambda **_kwargs: None)
 
@@ -371,6 +374,92 @@ def test_update_word_applies_inline_styles_with_anchor_bounds_and_summary(
     assert style_call["step_label"] == expected_step
     assert result["style_writeback_result"] == _style_result()
     assert result["style_writeback_summary"] == "样式摘要"
+    assert fake_doc.saved is True
+
+
+@pytest.mark.parametrize(
+    ("module", "function_name", "polished_text", "marker_ranges"),
+    [
+        (
+            common_update_module,
+            "update_word",
+            "交付日期：合同签订后30天\n付款方式：按季度结算",
+            [
+                ("DELIVERY_DATE_MARKER", 30, 42, "交付日期：旧值\r"),
+                ("PAYMENT_METHOD_MARKER", 60, 72, "付款方式：旧值\r"),
+            ],
+        ),
+        (
+            gngk_fw_zc_update_module,
+            "gngk_fw_zc_update_word",
+            "服务地点：上海院区\n服务期限：12个月\n付款方式：按季度结算",
+            [
+                ("SERVICE_LOCATION_MARKER", 30, 42, "服务地点：旧值\r"),
+                ("SERVICE_TERM_MARKER", 50, 62, "服务期限：旧值\r"),
+                ("PAYMENT_METHOD_MARKER", 70, 82, "付款方式：旧值\r"),
+            ],
+        ),
+    ],
+)
+def test_update_word_warns_instead_of_hard_failing_when_no_comments_written(
+    monkeypatch,
+    module,
+    function_name: str,
+    polished_text: str,
+    marker_ranges: list[tuple[str, int, int, str]],
+) -> None:
+    fake_doc = _FakeDoc()
+    fields = {
+        getattr(module, marker_name): _FakeRange(fake_doc, start, end, text)
+        for marker_name, start, end, text in marker_ranges
+    }
+    _patch_update_runtime(
+        monkeypatch,
+        module,
+        fake_doc,
+        fields,
+        comment_result={"added": 0, "failed": 2, "skipped": 0, "issues": []},
+    )
+
+    progress_warnings: list[str] = []
+    progress_errors: list[str] = []
+    monkeypatch.setattr(
+        module.progress_log,
+        "warning",
+        lambda message, *args: progress_warnings.append(
+            message % args if args else str(message)
+        ),
+    )
+    monkeypatch.setattr(
+        module.progress_log,
+        "error",
+        lambda message, *args: progress_errors.append(message % args if args else str(message)),
+    )
+
+    result = getattr(module, function_name)(
+        {
+            "prepared_doc_path": "fake.docx",
+            "polished_text": polished_text,
+            "insertion_before_text": "前锚点",
+            "insertion_after_text": "后锚点",
+            "generated_comment_count": 2,
+            "polished_comments": [
+                {"reference_text": "条款A", "comment_text": "批注A"},
+            ],
+        },
+        config=None,
+    )
+
+    assert result["comment_writeback_result"] == {
+        "summary": "AI批注写入: 生成=2, 成功=0, 失败=2, 跳过=0",
+        "generated": 2,
+        "added": 0,
+        "failed": 2,
+        "skipped": 0,
+        "warning": True,
+    }
+    assert progress_warnings == ["AI批注写入: 生成=2, 成功=0, 失败=2, 跳过=0"]
+    assert progress_errors == []
     assert fake_doc.saved is True
 
 
