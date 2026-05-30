@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import pathlib
 import threading
@@ -30,6 +31,9 @@ from backend.models import (
 )
 from backend.helper.word_helper.inline_style_ops import (
     build_style_writeback_summary_payload,
+)
+from backend.nodes.common_word_nodes.comment_writeback import (
+    build_comment_writeback_summary_payload,
 )
 from backend.services.conversation_service import get_conversation_service
 from backend.task.task_queue_manager import get_task_queue
@@ -77,6 +81,12 @@ REWRITE_STATE_KEYS = [
     "fund_source_lx",
     "tender_invitation",
     "delivery_location",
+]
+
+REWRITE_STATE_DETAIL_KEYS = [
+    "comment_plan_detail",
+    "strikethrough_plan",
+    "non_black_font_plan",
 ]
 
 REWRITE_DEFAULT_ANCHORS = {
@@ -983,8 +993,10 @@ class DocumentService:
                 )
                 self._task_queue.complete_task(task_id, result=completion_result, error=None)
                 style_writeback_summary = None
+                comment_writeback_summary = None
                 if isinstance(completion_result, dict):
                     style_writeback_summary = completion_result.get("style_writeback")
+                    comment_writeback_summary = completion_result.get("comment_writeback")
 
                 callback.push_done(
                     DoneEventData(
@@ -1000,6 +1012,7 @@ class DocumentService:
                         ),
                         processing_time=elapsed_time,
                         style_writeback=style_writeback_summary,
+                        comment_writeback=comment_writeback_summary,
                     )
                 )
                 progress_log.info(f"[Task] 任务执行完成: {task_id}")
@@ -1020,6 +1033,7 @@ class DocumentService:
                         ),
                         processing_time=elapsed_time,
                         style_writeback=style_writeback_summary,
+                        comment_writeback=comment_writeback_summary,
                     )
                 except Exception:
                     pass
@@ -1125,7 +1139,50 @@ class DocumentService:
             snapshot.setdefault("insertion_after_text", default_after)
 
         snapshot.setdefault("polished_text", str(result_state.get("polished_text") or ""))
+
+        generation_mode = result_state.get("generation_mode")
+        if generation_mode in (None, ""):
+            generation_mode = initial_state.get("generation_mode")
+        if isinstance(generation_mode, str) and generation_mode.strip():
+            snapshot["generation_mode"] = generation_mode.strip()
+
+        for key in REWRITE_STATE_DETAIL_KEYS:
+            value = result_state.get(key)
+            if value is None:
+                value = initial_state.get(key)
+            if isinstance(value, list):
+                snapshot[key] = copy.deepcopy(value)
+
         return snapshot
+
+    @staticmethod
+    def _build_comment_writeback_payload(result_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        raw_payload = result_state.get("comment_writeback_result")
+        if isinstance(raw_payload, dict):
+            return {
+                "summary": str(raw_payload.get("summary") or ""),
+                "generated": int(raw_payload.get("generated") or 0),
+                "added": int(raw_payload.get("added") or 0),
+                "failed": int(raw_payload.get("failed") or 0),
+                "skipped": int(raw_payload.get("skipped") or 0),
+                "warning": bool(raw_payload.get("warning")),
+            }
+
+        if "generated_comment_count" not in result_state:
+            return None
+
+        generated_count = result_state.get("generated_comment_count")
+        writeback_result = {
+            "added": result_state.get("comment_writeback_added"),
+            "failed": result_state.get("comment_writeback_failed"),
+            "skipped": result_state.get("comment_writeback_skipped"),
+        }
+        return dict(
+            build_comment_writeback_summary_payload(
+                generated_count=generated_count,
+                writeback_result=writeback_result,
+            )
+        )
 
     def _build_task_result_payload(
         self,
@@ -1153,6 +1210,7 @@ class DocumentService:
             result_state.get("style_writeback_result"),
             str(result_state.get("style_writeback_summary") or ""),
         )
+        comment_writeback = self._build_comment_writeback_payload(result_state)
 
         payload: Dict[str, Any] = {
             "output_file": output_file,
@@ -1163,6 +1221,8 @@ class DocumentService:
         }
         if style_writeback is not None:
             payload["style_writeback"] = style_writeback
+        if comment_writeback is not None:
+            payload["comment_writeback"] = comment_writeback
         return payload
 
     def _cleanup_temporary_output(self, file_path: Optional[str]) -> None:
