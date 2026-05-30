@@ -51,6 +51,7 @@ from .upload import (
 from .sse import (
     AgentStepEventData,
     AgentStepFindingData,
+    CommentWritebackSummaryData,
     DoneEventData,
     ErrorEventData,
     HeartbeatEventData,
@@ -135,6 +136,7 @@ __all__ = [
     "SSEEvent",
     "AgentStepEventData",
     "AgentStepFindingData",
+    "CommentWritebackSummaryData",
     "LogEventData",
     "LLMEventData",
     "ProgressEventData",

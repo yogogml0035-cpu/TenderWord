@@ -223,6 +223,7 @@ class TaskService:
             InternalTaskKind.GENERATE: TaskKind.GENERATE,
             InternalTaskKind.REWRITE: TaskKind.REWRITE,
             InternalTaskKind.EDIT: TaskKind.EDIT,
+            InternalTaskKind.COMMENT_SUPPLEMENT: TaskKind.COMMENT_SUPPLEMENT,
         }
         return kind_map.get(task_kind, TaskKind.GENERATE)
 

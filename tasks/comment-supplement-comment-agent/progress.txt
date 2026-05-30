@@ -5,3 +5,17 @@ Started: 2026-05-30 00:00
 Source: prd.json
 
 ## Codebase Patterns
+- 后端任务类型需要同时更新内部 `backend/task/task_queue_manager.py::TaskKind`、API `backend/models/task.py::TaskKind` 和 `backend/services/task_service.py` 的转换映射。
+- SSE `done` 新增结构字段时，需要同步后端模型 `backend/models/sse.py`、发送入口 `backend/core/sse_manager.py`、前端 `frontend/types/api.ts` 与类型契约测试。
+
+## 2026-05-30 13:08 - US-001
+- 建立了 `comment_supplement` 任务类型契约：后端内部/API TaskKind、TaskService 映射、前端 TaskKind union 均已支持。
+- 建立了 `comment_writeback` 摘要契约：后端 `DoneEventData`、`SSEManager.send_done` / `send_done_threadsafe`、前端 `TaskResult` / `SSEDoneEvent` 均可透传 summary/generated/added/failed/skipped/warning。
+- 更改的文件：`backend/task/task_queue_manager.py`、`backend/models/task.py`、`backend/models/sse.py`、`backend/models/__init__.py`、`backend/services/task_service.py`、`backend/core/sse_manager.py`、`frontend/types/api.ts`、`frontend/lib/api.ts`、`frontend/hooks/useChatSSE.ts`、`backend/tests/services/test_task_service_task_kind.py`、`backend/tests/services/test_sse_manager_agent_step.py`、`backend/tests/models/test_sse_agent_step.py`、`frontend/__tests__/unit/types/test_api_sse_agent_step.test.ts`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m pytest backend/tests/services/test_task_service_task_kind.py backend/tests/services/test_sse_manager_agent_step.py backend/tests/models/test_sse_agent_step.py -v` 通过；`npm test -- --runTestsByPath __tests__/unit/types/test_api_sse_agent_step.test.ts` 通过；`npm run lint` 通过；`npm run type-check` 通过；本轮触达文件的 `git diff --check -- ...` 通过。
+- 全仓 `git diff --check` 因进入本轮前已有的 `backend/.env.example`、`scripts/start-dev.ps1` trailing whitespace 失败，未改动这些既有文件。
+- **未来迭代的学习：**
+  - 任务类型是双枚举结构，新增 task kind 时不要只改 API 类型，还要改队列内部枚举和 TaskService 映射。
+  - SSE done 的结构字段需要同时覆盖 Pydantic 模型、SSEManager 直接发送入口和前端 API 类型，避免断线重放/任务状态/前端卡片三处契约漂移。
+  - 当前工作树已有与本需求无关的 `.env.example` 和 PowerShell 脚本空白改动，提交时应只暂存本轮文件。
+---

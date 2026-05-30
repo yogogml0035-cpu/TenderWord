@@ -9,7 +9,7 @@
 // ============================================
 
 export type TaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-export type TaskKind = 'generate' | 'rewrite' | 'edit';
+export type TaskKind = 'generate' | 'rewrite' | 'edit' | 'comment_supplement';
 
 // ============================================
 // Tender Data Types
@@ -199,6 +199,15 @@ export interface StyleWritebackSummary {
   skipped_by_reason: Record<string, number>;
 }
 
+export interface CommentWritebackSummary {
+  summary: string;
+  generated: number;
+  added: number;
+  failed: number;
+  skipped: number;
+  warning: boolean;
+}
+
 export interface TaskResult {
   output_file: string;
   file_name: string;
@@ -206,6 +215,7 @@ export interface TaskResult {
   model_used: string;
   total_time_seconds: number;
   style_writeback?: StyleWritebackSummary;
+  comment_writeback?: CommentWritebackSummary;
 }
 
 // ============================================
@@ -493,6 +503,7 @@ export interface SSEDoneEvent {
   download_url?: string;
   processing_time?: number;
   style_writeback?: StyleWritebackSummary;
+  comment_writeback?: CommentWritebackSummary;
 }
 
 export interface SSEHeartbeatEvent {

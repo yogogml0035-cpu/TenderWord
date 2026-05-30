@@ -53,7 +53,12 @@ function getAIContentTriggerNode(taskKind: TaskKind): string {
 }
 
 function resolveTaskKind(taskId: string, eventTaskKind?: unknown): TaskKind {
-  if (eventTaskKind === 'rewrite' || eventTaskKind === 'generate' || eventTaskKind === 'edit') {
+  if (
+    eventTaskKind === 'rewrite' ||
+    eventTaskKind === 'generate' ||
+    eventTaskKind === 'edit' ||
+    eventTaskKind === 'comment_supplement'
+  ) {
     return eventTaskKind;
   }
   return useChatStore.getState().getTaskSummary(taskId)?.task_kind || 'generate';

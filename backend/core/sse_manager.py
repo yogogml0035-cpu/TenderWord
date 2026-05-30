@@ -206,6 +206,7 @@ class SSEManager:
         download_url: Optional[str] = None,
         processing_time: Optional[float] = None,
         style_writeback: Optional[dict] = None,
+        comment_writeback: Optional[dict] = None,
     ) -> None:
         self._schedule(
             self.send_done(
@@ -218,6 +219,7 @@ class SSEManager:
                 download_url=download_url,
                 processing_time=processing_time,
                 style_writeback=style_writeback,
+                comment_writeback=comment_writeback,
             )
         )
 
@@ -673,6 +675,7 @@ class SSEManager:
         download_url: Optional[str] = None,
         processing_time: Optional[float] = None,
         style_writeback: Optional[dict] = None,
+        comment_writeback: Optional[dict] = None,
     ) -> int:
         """发送完成事件.
 
@@ -700,6 +703,7 @@ class SSEManager:
                 "download_url": download_url,
                 "processing_time": processing_time,
                 "style_writeback": style_writeback,
+                "comment_writeback": comment_writeback,
                 "timestamp": datetime.now().isoformat(),
             },
         )

@@ -175,6 +175,17 @@ class StyleWritebackSummaryData(BaseModel):
     skipped_by_reason: Dict[str, int] = Field(default_factory=dict, description="按原因跳过数")
 
 
+class CommentWritebackSummaryData(BaseModel):
+    """AI 批注写回摘要。"""
+
+    summary: str = Field(default="", description="摘要文本")
+    generated: int = Field(default=0, description="生成批注数")
+    added: int = Field(default=0, description="成功写入数")
+    failed: int = Field(default=0, description="失败数")
+    skipped: int = Field(default=0, description="跳过数")
+    warning: bool = Field(default=False, description="是否存在降级 warning")
+
+
 class DoneEventData(BaseModel):
     """
     完成事件数据模型
@@ -191,6 +202,10 @@ class DoneEventData(BaseModel):
     style_writeback: Optional[StyleWritebackSummaryData] = Field(
         default=None,
         description="样式回填摘要",
+    )
+    comment_writeback: Optional[CommentWritebackSummaryData] = Field(
+        default=None,
+        description="AI 批注写回摘要",
     )
     timestamp: str = Field(
         default_factory=lambda: datetime.now().isoformat(), description="时间戳"

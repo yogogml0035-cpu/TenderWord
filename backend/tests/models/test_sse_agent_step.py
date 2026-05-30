@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend.models.sse import AgentStepEventData, SSEEventType
+from backend.models.sse import AgentStepEventData, DoneEventData, SSEEventType
 
 
 def test_agent_step_event_data_contains_audit_findings_contract() -> None:
@@ -69,3 +69,31 @@ def test_agent_step_round_is_one_based_contract() -> None:
     payload = event_data.model_dump(mode="json")
 
     assert payload["round"] == 1
+
+def test_done_event_data_contains_comment_writeback_contract() -> None:
+    event_data = DoneEventData(
+        task_id="task-comment-1",
+        task_kind="comment_supplement",
+        success=True,
+        message="任务完成",
+        comment_writeback={
+            "summary": "AI批注写入: 生成=2, 成功=1, 失败=1, 跳过=0",
+            "generated": 2,
+            "added": 1,
+            "failed": 1,
+            "skipped": 0,
+            "warning": True,
+        },
+    )
+
+    payload = event_data.model_dump(mode="json")
+
+    assert payload["task_kind"] == "comment_supplement"
+    assert payload["comment_writeback"] == {
+        "summary": "AI批注写入: 生成=2, 成功=1, 失败=1, 跳过=0",
+        "generated": 2,
+        "added": 1,
+        "failed": 1,
+        "skipped": 0,
+        "warning": True,
+    }
