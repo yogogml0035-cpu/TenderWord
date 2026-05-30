@@ -70,6 +70,23 @@ function createEditRunningTaskStatus() {
   };
 }
 
+function createCommentSupplementRunningTaskStatus() {
+  return {
+    task_id: 'task-1',
+    task_kind: 'comment_supplement' as const,
+    status: 'running' as const,
+    created_at: new Date().toISOString(),
+    progress: {
+      completed_nodes: ['prepare_comment_supplement'],
+      running_nodes: ['comment_agent'],
+      current_node: 'comment_agent',
+      completed_count: 1,
+      total_nodes: 4,
+      progress_percent: 25,
+    },
+  };
+}
+
 function resetStores() {
   window.localStorage.clear();
   window.sessionStorage.clear();
@@ -240,6 +257,7 @@ describe('useChatSSE', () => {
         data: {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
+          task_kind: 'generate',
           success: true,
           message: '任务完成',
           output_file: 'D:/UploadFiles/output.docx',
@@ -253,6 +271,14 @@ describe('useChatSSE', () => {
             failed: 0,
             applied_by_style: { strikethrough: 1 },
             skipped_by_reason: {},
+          },
+          comment_writeback: {
+            summary: 'AI 批注写入: 生成=3, 成功=1, 跳过=0, 失败=2',
+            generated: 3,
+            added: 1,
+            failed: 2,
+            skipped: 0,
+            warning: true,
           },
         },
       });
@@ -274,6 +300,14 @@ describe('useChatSSE', () => {
       failed: 0,
       applied_by_style: { strikethrough: 1 },
       skipped_by_reason: {},
+    });
+    expect(completedGroup?.downloadMessage?.metadata?.commentWriteback).toEqual({
+      summary: 'AI 批注写入: 生成=3, 成功=1, 跳过=0, 失败=2',
+      generated: 3,
+      added: 1,
+      failed: 2,
+      skipped: 0,
+      warning: true,
     });
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
     expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
@@ -428,6 +462,324 @@ describe('useChatSSE', () => {
     expect(group?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/output.docx');
     expect(group?.contentMessage).toBeUndefined();
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
+  });
+
+  it('keeps comment_agent incomplete snapshots transient and persists final snapshot', async () => {
+    mockGetTaskStatus.mockResolvedValue({
+      ...createRunningTaskStatus(),
+      progress: {
+        ...createRunningTaskStatus().progress,
+        running_nodes: ['comment_agent'],
+        current_node: 'comment_agent',
+      },
+    });
+    useChatStore.setState((state) => ({
+      ...state,
+      conversationDrafts: {
+        ...state.conversationDrafts,
+        'conv-1': {
+          generation_mode: 'agent',
+        },
+      },
+    }));
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'tool_snapshot',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: false,
+          content: '工具轮次 1：批注锚点校验快照',
+          findings: [],
+          comment_agent: {
+            phase: 'validation_round',
+            rounds: [
+              {
+                round: 1,
+                label: '第 1 轮锚点校验',
+                passed: 0,
+                failed: 1,
+                skipped: 0,
+                highlights: [
+                  {
+                    index: 1,
+                    status: '需修复',
+                    reason: '当前锚点未在最终正文中精确匹配',
+                    original_reference_text: '★7.投标人须提供售后服务承诺',
+                    reference_text: '★7.投标人须提供售后服务承诺',
+                    candidate_fragments: ['7.投标人须提供售后服务承诺'],
+                  },
+                ],
+              },
+            ],
+            highlights: [],
+          },
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'tool_snapshot',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: false,
+          content: '工具轮次 2：批注锚点校验快照',
+          findings: [],
+          comment_agent: {
+            phase: 'validation_round',
+            rounds: [
+              {
+                round: 1,
+                label: '第 1 轮锚点校验',
+                passed: 0,
+                failed: 1,
+                skipped: 0,
+                highlights: [],
+              },
+              {
+                round: 2,
+                label: '第 2 轮修复复核',
+                passed: 1,
+                failed: 0,
+                skipped: 0,
+                highlights: [
+                  {
+                    index: 1,
+                    status: '已修复',
+                    reason: '锚点已通过校验',
+                    original_reference_text: '★7.投标人须提供售后服务承诺',
+                    reference_text: '7.投标人须提供售后服务承诺',
+                    candidate_fragments: [],
+                  },
+                ],
+              },
+            ],
+            highlights: [],
+          },
+        },
+      });
+    });
+
+    let conversation = useChatStore.getState().getCurrentConversation();
+    let commentAgentMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'comment_agent'
+    );
+
+    expect(commentAgentMessage?.content).toBe('');
+    expect(commentAgentMessage?.status).toBe('generating');
+    expect(useChatStreamStore.getState().streams['task-1']?.agentSteps).toEqual({
+      'comment_agent:1': {
+        content: '工具轮次 2：批注锚点校验快照',
+        commentAgent: expect.objectContaining({
+          phase: 'validation_round',
+          rounds: expect.arrayContaining([
+            expect.objectContaining({ label: '第 2 轮修复复核' }),
+          ]),
+        }),
+        isComplete: false,
+      },
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '3',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'final',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: true,
+          content: 'comment_agent 最终写入统计',
+          findings: [],
+          comment_agent: {
+            phase: 'final',
+            rounds: [
+              {
+                round: 1,
+                label: '第 1 轮锚点校验',
+                passed: 0,
+                failed: 1,
+                skipped: 0,
+                highlights: [],
+              },
+              {
+                round: 2,
+                label: '第 2 轮修复复核',
+                passed: 1,
+                failed: 0,
+                skipped: 0,
+                highlights: [],
+              },
+            ],
+            highlights: [],
+            final_validation: {
+              round: 0,
+              label: '最终静默复校验',
+              passed: 1,
+              failed: 0,
+              skipped: 0,
+              highlights: [],
+            },
+            writeback: {
+              attempted: 1,
+              added: 1,
+              failed: 0,
+              skipped: 0,
+              issues: [],
+            },
+          },
+        },
+      });
+    });
+
+    conversation = useChatStore.getState().getCurrentConversation();
+    commentAgentMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'comment_agent'
+    );
+
+    expect(commentAgentMessage?.content).toBe('comment_agent 最终写入统计');
+    expect(commentAgentMessage?.status).toBe('completed');
+    expect(commentAgentMessage?.metadata?.commentAgent?.rounds).toHaveLength(2);
+    expect(commentAgentMessage?.metadata?.commentAgent?.writeback?.added).toBe(1);
+  });
+
+  it('shows comment_agent card for comment_supplement tasks and keeps one download card', async () => {
+    mockGetTaskStatus.mockResolvedValue(createCommentSupplementRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'comment_supplement',
+          step_type: 'tool_snapshot',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: false,
+          content: '工具轮次 1：批注锚点校验快照',
+          findings: [],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '2',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'comment_supplement',
+          step_type: 'final',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: true,
+          content: 'comment_agent 最终写入统计',
+          findings: [],
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'done',
+        id: '3',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'comment_supplement',
+          success: true,
+          message: '任务完成',
+          output_file: 'D:/UploadFiles/commented.docx',
+          file_name: 'commented.docx',
+          processing_time: 12.5,
+        },
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+    const group = getTaskGroup();
+
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].metadata?.agentStepNode).toBe('comment_agent');
+    expect(agentMessages?.[0].metadata?.taskKind).toBe('comment_supplement');
+    expect(agentMessages?.[0].content).toBe('comment_agent 最终写入统计');
+    expect(agentMessages?.[0].status).toBe('completed');
+    expect(group?.contentMessage).toBeUndefined();
+    expect(group?.downloadMessage?.metadata?.taskKind).toBe('comment_supplement');
+    expect(group?.downloadMessage?.metadata?.outputFile).toBe('D:/UploadFiles/commented.docx');
+  });
+
+  it('ignores comment_agent agent_step events for workflow generate tasks', async () => {
+    mockGetTaskStatus.mockResolvedValue(createRunningTaskStatus());
+
+    renderHook(() =>
+      useChatSSE({
+        taskId: 'task-1',
+        conversationId: 'conv-1',
+      })
+    );
+
+    await waitFor(() => {
+      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
+    });
+
+    act(() => {
+      latestOptions?.onMessage?.({
+        event: 'agent_step',
+        id: '1',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'generate',
+          step_type: 'stream',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: false,
+          content: 'workflow 不应展示的批注智能体内容',
+          findings: [],
+        },
+      });
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    expect(
+      conversation?.messages.some((message) => message.metadata?.agentStepNode === 'comment_agent')
+    ).toBe(false);
   });
 
   it('keeps empty running verify agent-step compact until final [] arrives', async () => {
@@ -957,6 +1309,14 @@ describe('useChatSSE', () => {
           applied_by_style: { bold: 1 },
           skipped_by_reason: { low_confidence: 1 },
         },
+        comment_writeback: {
+          summary: 'AI 批注写入: 生成=2, 成功=2, 跳过=0, 失败=0',
+          generated: 2,
+          added: 2,
+          failed: 0,
+          skipped: 0,
+          warning: false,
+        },
       },
     });
 
@@ -999,6 +1359,14 @@ describe('useChatSSE', () => {
       failed: 0,
       applied_by_style: { bold: 1 },
       skipped_by_reason: { low_confidence: 1 },
+    });
+    expect(group?.downloadMessage?.metadata?.commentWriteback).toEqual({
+      summary: 'AI 批注写入: 生成=2, 成功=2, 跳过=0, 失败=0',
+      generated: 2,
+      added: 2,
+      failed: 0,
+      skipped: 0,
+      warning: false,
     });
     expect(latestOptions?.endpoint).toBe('');
   });

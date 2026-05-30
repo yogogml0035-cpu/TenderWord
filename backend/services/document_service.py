@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import pathlib
 import threading
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 from backend.models import (
     AgentStepEventData,
+    CommentSupplementRequest,
     DoneEventData,
     EditTaskRequest,
     ErrorEventData,
@@ -30,6 +32,9 @@ from backend.models import (
 )
 from backend.helper.word_helper.inline_style_ops import (
     build_style_writeback_summary_payload,
+)
+from backend.nodes.common_word_nodes.comment_writeback import (
+    build_comment_writeback_summary_payload,
 )
 from backend.services.conversation_service import get_conversation_service
 from backend.task.task_queue_manager import get_task_queue
@@ -79,6 +84,12 @@ REWRITE_STATE_KEYS = [
     "delivery_location",
 ]
 
+REWRITE_STATE_DETAIL_KEYS = [
+    "comment_plan_detail",
+    "strikethrough_plan",
+    "non_black_font_plan",
+]
+
 REWRITE_DEFAULT_ANCHORS = {
     "xjcg": ("第三章  采购需求", "第四章  响应文件有关格式"),
     "gngk": ("第三章 招标内容及要求", "第四章 投标文件有关格式"),
@@ -95,6 +106,7 @@ TASK_KIND_TO_LLM_NODE = {
     "generate": "generate_polished_text",
     "rewrite": "rewrite_text",
     "edit": "edit_text",
+    "comment_supplement": "generate_comments",
 }
 
 class _DiscardingWriter:
@@ -184,16 +196,23 @@ REWRITE_SKILL_ID = "rewrite"
 EDIT_SKILL_ID = "edit"
 REWRITE_SKILL_GRAPH_CLASS: Optional[type] = None
 EDIT_SKILL_GRAPH_CLASS: Optional[type] = None
+COMMENT_SUPPLEMENT_GRAPH_CLASS: Optional[type] = None
 
 
 def _init_graph_registry():
     """初始化 Graph 注册表（延迟加载）."""
-    global GRAPH_REGISTRY, TASK_SKILL_GRAPH_CLASSES, REWRITE_SKILL_GRAPH_CLASS, EDIT_SKILL_GRAPH_CLASS
-    if GRAPH_REGISTRY and REWRITE_SKILL_GRAPH_CLASS is not None and EDIT_SKILL_GRAPH_CLASS is not None:
+    global GRAPH_REGISTRY, TASK_SKILL_GRAPH_CLASSES, REWRITE_SKILL_GRAPH_CLASS, EDIT_SKILL_GRAPH_CLASS, COMMENT_SUPPLEMENT_GRAPH_CLASS
+    if (
+        GRAPH_REGISTRY
+        and REWRITE_SKILL_GRAPH_CLASS is not None
+        and EDIT_SKILL_GRAPH_CLASS is not None
+        and COMMENT_SUPPLEMENT_GRAPH_CLASS is not None
+    ):
         return
 
     try:
         from backend.graphs import (
+            CommentSupplementGraph,
             GjgkTenderGraph,
             GngkFwCzTenderGraph,
             GngkFwZcTenderGraph,
@@ -213,6 +232,7 @@ def _init_graph_registry():
         TASK_SKILL_GRAPH_CLASSES[EDIT_SKILL_ID] = SkillGraph.for_skill(EDIT_SKILL_ID)
         REWRITE_SKILL_GRAPH_CLASS = TASK_SKILL_GRAPH_CLASSES[REWRITE_SKILL_ID]
         EDIT_SKILL_GRAPH_CLASS = TASK_SKILL_GRAPH_CLASSES[EDIT_SKILL_ID]
+        COMMENT_SUPPLEMENT_GRAPH_CLASS = CommentSupplementGraph
         logger.info("Graph 注册表初始化完成")
     except ImportError as e:
         logger.error(f"初始化 Graph 注册表失败: {e}")
@@ -330,6 +350,11 @@ class SSECallback:
                         finding.model_dump(mode="json")
                         for finding in agent_step_data.findings
                     ],
+                    comment_agent=(
+                        agent_step_data.comment_agent.model_dump(mode="json")
+                        if agent_step_data.comment_agent is not None
+                        else None
+                    ),
                     is_complete=agent_step_data.is_complete,
                 )
             except Exception:
@@ -597,6 +622,114 @@ class DocumentService:
             llm_node_name=TASK_KIND_TO_LLM_NODE["edit"],
         )
 
+    async def create_comment_supplement_task(
+        self,
+        request: CommentSupplementRequest,
+    ) -> GenerateResponse:
+        """创建独立补充批注任务。"""
+        task_id, callback = self._allocate_task_callback_pair()
+
+        normalized_conversation_id = str(request.conversation_id or "").strip()
+        normalized_source_file = str(request.source_file or "").strip()
+        if not normalized_conversation_id:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="conversation_id 不能为空",
+                error="REQ_MISSING_FIELD",
+            )
+        if not normalized_source_file:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="source_file 不能为空",
+                error="REQ_MISSING_FIELD",
+            )
+
+        latest_rewrite_state = self._conversation_service.get_latest_rewrite_state(
+            normalized_conversation_id
+        )
+        if not latest_rewrite_state:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="当前会话没有可补充批注的文档，请先完成一次生成",
+                error="COMMENT_SUPPLEMENT_NO_DOCUMENT",
+            )
+
+        polished_text = str(latest_rewrite_state.get("polished_text") or "").strip()
+        if not polished_text:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="当前会话缺少可用于补充批注的正文上下文",
+                error="COMMENT_SUPPLEMENT_MISSING_CONTEXT",
+            )
+
+        latest_prepared_doc_path = str(
+            latest_rewrite_state.get("prepared_doc_path") or ""
+        ).strip()
+        if not latest_prepared_doc_path:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="当前会话缺少最新 Word 文件路径",
+                error="COMMENT_SUPPLEMENT_NO_DOCUMENT",
+            )
+
+        source_path = pathlib.Path(normalized_source_file).expanduser()
+        latest_path = pathlib.Path(latest_prepared_doc_path).expanduser()
+        if not source_path.is_file():
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="当前文件不存在，无法补充批注",
+                error="COMMENT_SUPPLEMENT_SOURCE_NOT_FOUND",
+            )
+        if not latest_path.is_file():
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="会话最新文件不存在，无法补充批注",
+                error="COMMENT_SUPPLEMENT_SOURCE_NOT_FOUND",
+            )
+
+        resolved_source = source_path.resolve()
+        resolved_latest = latest_path.resolve()
+        if str(resolved_source).casefold() != str(resolved_latest).casefold():
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="当前文件不是会话最新文件，请刷新后重试",
+                error="COMMENT_SUPPLEMENT_SOURCE_MISMATCH",
+            )
+
+        if COMMENT_SUPPLEMENT_GRAPH_CLASS is None:
+            return GenerateResponse(
+                success=False,
+                task_id=task_id,
+                message="CommentSupplement Graph 未初始化",
+                error="COMMENT_SUPPLEMENT_TARGET_NOT_RESOLVED",
+            )
+
+        initial_state = self._build_comment_supplement_initial_state(
+            task_id=task_id,
+            conversation_id=normalized_conversation_id,
+            latest_rewrite_state=latest_rewrite_state,
+            source_file=str(resolved_source),
+        )
+
+        return self._submit_graph_task(
+            task_id=task_id,
+            graph_class=COMMENT_SUPPLEMENT_GRAPH_CLASS,
+            initial_state=initial_state,
+            callback=callback,
+            model_provider=request.model.value,
+            task_kind="comment_supplement",
+            conversation_id=normalized_conversation_id,
+            llm_node_name=TASK_KIND_TO_LLM_NODE["comment_supplement"],
+        )
+
     def _allocate_task_callback_pair(self) -> tuple[str, SSECallback]:
         task_id = f"task-{uuid.uuid4().hex[:8]}-{uuid.uuid4().hex[:4]}"
         callback = SSECallback(task_id)
@@ -745,6 +878,51 @@ class DocumentService:
             )
         return state
 
+    def _build_comment_supplement_initial_state(
+        self,
+        *,
+        task_id: str,
+        conversation_id: str,
+        latest_rewrite_state: Dict[str, Any],
+        source_file: str,
+    ) -> Dict[str, Any]:
+        state: Dict[str, Any] = {}
+        for key, value in latest_rewrite_state.items():
+            if isinstance(value, (str, int)):
+                state[key] = value
+            elif isinstance(value, list):
+                state[key] = copy.deepcopy(value)
+
+        state.update(
+            {
+                "task_id": task_id,
+                "conversation_id": conversation_id,
+                "user_session_id": conversation_id,
+                "task_kind": "comment_supplement",
+                "comment_supplement_source_file": source_file,
+                "source_prepared_doc_path": source_file,
+                "prepared_doc_path": source_file,
+                "origin_tender_path": source_file,
+                "clean_draft_path": source_file,
+                "polished_text": str(latest_rewrite_state.get("polished_text") or ""),
+            }
+        )
+
+        tender_type = str(
+            state.get("tender_type") or latest_rewrite_state.get("tender_type") or "xjcg"
+        ).strip()
+        state["tender_type"] = tender_type or "xjcg"
+        if not state.get("insertion_before_text") or not state.get("insertion_after_text"):
+            default_before, default_after = REWRITE_DEFAULT_ANCHORS.get(
+                state["tender_type"],
+                REWRITE_DEFAULT_ANCHORS["xjcg"],
+            )
+            if not state.get("insertion_before_text"):
+                state["insertion_before_text"] = default_before
+            if not state.get("insertion_after_text"):
+                state["insertion_after_text"] = default_after
+        return state
+
     def _build_initial_state(self, request: GenerateRequest, task_id: str) -> Dict[str, Any]:
         """构建 Graph 初始状态.
 
@@ -887,11 +1065,13 @@ class DocumentService:
             "generate": "文档生成任务",
             "rewrite": "修改任务",
             "edit": "文档修改任务",
+            "comment_supplement": "补充批注任务",
         }.get(task_kind, "文档任务")
         success_message = {
             "generate": "文档生成完成",
             "rewrite": "修改任务完成",
             "edit": "文档修改完成",
+            "comment_supplement": "补充批注完成",
         }.get(task_kind, "任务完成")
         callback.push_log(f"开始执行{task_label}: {task_id}")
         progress_log.info(f"[Task] 开始执行任务: {task_id}")
@@ -960,6 +1140,12 @@ class DocumentService:
                                 rewrite_state=rewrite_state,
                                 model=model_provider,
                             )
+                        elif task_kind == "comment_supplement":
+                            self._conversation_service.append_comment_supplement_success(
+                                conversation_id=conversation_id,
+                                rewrite_state=rewrite_state,
+                                model=model_provider,
+                            )
                         else:
                             self._conversation_service.seed_generate_success(
                                 conversation_id=conversation_id,
@@ -983,8 +1169,10 @@ class DocumentService:
                 )
                 self._task_queue.complete_task(task_id, result=completion_result, error=None)
                 style_writeback_summary = None
+                comment_writeback_summary = None
                 if isinstance(completion_result, dict):
                     style_writeback_summary = completion_result.get("style_writeback")
+                    comment_writeback_summary = completion_result.get("comment_writeback")
 
                 callback.push_done(
                     DoneEventData(
@@ -1000,6 +1188,7 @@ class DocumentService:
                         ),
                         processing_time=elapsed_time,
                         style_writeback=style_writeback_summary,
+                        comment_writeback=comment_writeback_summary,
                     )
                 )
                 progress_log.info(f"[Task] 任务执行完成: {task_id}")
@@ -1020,6 +1209,7 @@ class DocumentService:
                         ),
                         processing_time=elapsed_time,
                         style_writeback=style_writeback_summary,
+                        comment_writeback=comment_writeback_summary,
                     )
                 except Exception:
                     pass
@@ -1090,7 +1280,7 @@ class DocumentService:
             except Exception:
                 pass
 
-            if task_kind in {"rewrite", "edit"}:
+            if task_kind in {"rewrite", "edit", "comment_supplement"}:
                 self._cleanup_temporary_output(rewrite_cleanup_holder.get("path"))
 
             # 更新任务队列状态
@@ -1125,7 +1315,50 @@ class DocumentService:
             snapshot.setdefault("insertion_after_text", default_after)
 
         snapshot.setdefault("polished_text", str(result_state.get("polished_text") or ""))
+
+        generation_mode = result_state.get("generation_mode")
+        if generation_mode in (None, ""):
+            generation_mode = initial_state.get("generation_mode")
+        if isinstance(generation_mode, str) and generation_mode.strip():
+            snapshot["generation_mode"] = generation_mode.strip()
+
+        for key in REWRITE_STATE_DETAIL_KEYS:
+            value = result_state.get(key)
+            if value is None:
+                value = initial_state.get(key)
+            if isinstance(value, list):
+                snapshot[key] = copy.deepcopy(value)
+
         return snapshot
+
+    @staticmethod
+    def _build_comment_writeback_payload(result_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        raw_payload = result_state.get("comment_writeback_result")
+        if isinstance(raw_payload, dict):
+            return {
+                "summary": str(raw_payload.get("summary") or ""),
+                "generated": int(raw_payload.get("generated") or 0),
+                "added": int(raw_payload.get("added") or 0),
+                "failed": int(raw_payload.get("failed") or 0),
+                "skipped": int(raw_payload.get("skipped") or 0),
+                "warning": bool(raw_payload.get("warning")),
+            }
+
+        if "generated_comment_count" not in result_state:
+            return None
+
+        generated_count = result_state.get("generated_comment_count")
+        writeback_result = {
+            "added": result_state.get("comment_writeback_added"),
+            "failed": result_state.get("comment_writeback_failed"),
+            "skipped": result_state.get("comment_writeback_skipped"),
+        }
+        return dict(
+            build_comment_writeback_summary_payload(
+                generated_count=generated_count,
+                writeback_result=writeback_result,
+            )
+        )
 
     def _build_task_result_payload(
         self,
@@ -1153,6 +1386,7 @@ class DocumentService:
             result_state.get("style_writeback_result"),
             str(result_state.get("style_writeback_summary") or ""),
         )
+        comment_writeback = self._build_comment_writeback_payload(result_state)
 
         payload: Dict[str, Any] = {
             "output_file": output_file,
@@ -1163,6 +1397,8 @@ class DocumentService:
         }
         if style_writeback is not None:
             payload["style_writeback"] = style_writeback
+        if comment_writeback is not None:
+            payload["comment_writeback"] = comment_writeback
         return payload
 
     def _cleanup_temporary_output(self, file_path: Optional[str]) -> None:

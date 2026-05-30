@@ -11,8 +11,11 @@
 - 任务创建与运行时装配：`backend/services/document_service.py`
 - 招标详情数据契约：`backend/api/tender.py`、`backend/models/tender.py`、`backend/util/common_util/fetch_tender_data.py`
 - 生成任务 REST 入口：`backend/api/generate.py`
+- 补充批注任务 REST 入口：`backend/api/comment_supplement.py`
 - Graph 主干、锁、取消与进度包装：`backend/graphs/base_graph.py`、`backend/task/task_queue_manager.py`
+- 补充批注 Graph：`backend/graphs/comment_supplement_graph.py`
 - 初次生成智能体运行时：`backend/agents/generation/`
+- 批注锚点智能体运行时：`backend/agents/comments/`
 - task skill runtime：`backend/graphs/skill_graph.py`、`backend/skills/`
 - Prompt Layer：`backend/prompts/`
 - Word 业务 helper：`backend/helper/word_helper/`
@@ -32,10 +35,15 @@
 - `GET /api/generate/{task_id}` 必须通过 `backend.services.task_service` 查询任务状态；API 路由中的函数内延迟导入也要使用 `backend.*` 包绝对路径，避免在不同启动/测试入口下退化为 `ModuleNotFoundError`。
 - rewrite 与 edit 走 `SkillGraph.for_skill(...)` 返回的 task graph；当前 task skill 注册以 `backend/skills/rewrite/SKILL.md`、`backend/skills/edit/SKILL.md` 为准。
 - `POST /api/edit` 是显式 edit 入口；`/api/user/stream` 只负责普通聊天与 rewrite 路由，不承接显式 edit。
+- `POST /api/comment-supplement` 是独立补充批注入口；请求只携带会话、当前下载卡文件路径和模型。`DocumentService.create_comment_supplement_task()` 必须校验 latest `rewrite_state`、`polished_text`、当前文件存在且等于 latest `prepared_doc_path` 后才创建任务。
 - `/api/user/stream` 在已有 rewrite history 且最新消息具备明确修改意图时，应优先走确定性 rewrite fast-path，再进入 rewrite task 创建；普通闲聊、能力询问和不确定语义仍走 LLM 路由/回复。前端构造 user stream `messages` 时必须过滤空内容气泡，避免历史空 AI 消息触发后端请求体验证失败。
 - `generation_mode`、`generation_style` 与 `style_writeback_mode` 都是 generate-only 字段：`DocumentService._build_initial_state()` 可写入 generate state，edit / rewrite 请求模型和初始 state 不得注入这些字段。
 - `generation_mode` 当前只允许 `workflow` 与 `agent`，默认 `workflow`。`workflow` 继续走 `generate_polished_text`，保留 `render_generate_prompt()`、`stream_llm_completion()` 和旧 `llm` snapshot 事件；`agent` 只影响初次 generate 的生成节点选择，最终仍必须产出 `polished_text` 给批注、样式回写、Word 写回和下载主干。
+- generate 成功后的后端 `rewrite_state` 可以保留 `comment_plan_detail`、`strikethrough_plan`、`non_black_font_plan` 和 `generation_mode`，供后续补批注 / rewrite / edit 链路读取；这些三组批注依据长数组不得进入任务 result、SSE `done`、前端下载卡 metadata 或 `sessionStorage`。
 - 标准生成 graph 的分流只在 `StandardTenderWorkflowGraph` 基类实现：`generation_mode_gate` 后按 `_select_generation_node()` 进入 `generate_polished_text` 或 `content_agent`，两个分支都继续接入 `generate_comments` / `comments_branch_done` 再进入 `update_word`。类型 graph 不应复制这段分流。
+- `generation_mode=agent` 的 `update_word` 只负责正文、样式和保存：`comments_branch_done` 会设置 `suppress_ai_comment_writeback=True`，各类型 update 节点必须跳过确定性 AI 批注写回；`update_word` 完成后由标准 graph 路由到公共 `comment_agent` 节点，workflow 分支不得进入该节点。
+- 公共 `comment_agent` graph 节点位于 `backend/nodes/common_word_nodes/comment_agent.py`，只作为批注增强项运行：它重新按锚点解析 Word 正文范围，调用 `backend/agents/comments/run_comment_agent()`，并把结果收敛成 `comment_writeback` 摘要；节点异常、保存失败或上下文缺失只能降级为 warning，不能让已保存正文的 generate 任务失败。
+- 独立 `comment_supplement` 任务通过 `CommentSupplementGraph` 执行，节点顺序为 `prepare_comment_supplement -> generate_comments -> comment_agent -> finalize_comment_supplement`。准备节点复制 latest 文档为新副本，生成节点只使用无参考批注 prompt 和 latest `rewrite_state.polished_text`，完成后会话最新 `rewrite_state.prepared_doc_path` 指向补充批注后的副本，后续 rewrite / edit 应继续使用该路径。
 
 ### DeepAgents 初次生成
 
@@ -77,6 +85,8 @@
 - DeepSeek 提供商默认使用 `deepseek-v4-flash`，并通过 OpenAI 兼容请求的 `extra_body={"thinking": {"type": "disabled"}}` 固定为非思考模式；新增调用点不得硬编码其它 DeepSeek 模型名。
 - `generate_comments` 的批注 JSON 属于严格机器契约：节点必须先尝试本地提取数组、移除代码块包裹、修正常见尾逗号/非法反斜杠；仍失败时只允许再走一次 Prompt Layer 定义的 JSON 修复调用，然后再决定是否降级为空数组。原始批注输出与修复输出应继续落到 `backend/prompts_log/generate_log/` 便于排障。
 - 批注生成 prompt 的 `reference_text` 必须要求连续、逐字、可精确搜索且尽量唯一；短词或高频词风险要扩展到同句、同分句或同单元格内的连续原文，不能跨行/跨段/跨单元格拼接。无法形成唯一可回填锚点时应输出空数组或删除该条。
+- 无参考批注 prompt 的真源是 `backend/prompts/comment_no_reference_prompt.py`。它只依据 `polished_text` 做合规性、公平性、严谨性三维审查，输出纯净 JSON 数组，元素只包含 `reference_text` 和 `comment_text`；`reference_text` 必须精确来自 `polished_text`，不得引入批注计划、删除线计划、非黑色字体计划、历史参考或送审稿差异逻辑。
+- `comment_agent` 运行时真源是 `backend/agents/comments/`。生产 runner 必须用 `langchain.agents.create_agent(..., name="comment_agent")` 创建，并用 `ToolCallLimitMiddleware` 按工具名限制 `validate_comment_references` 最多 2 次、`write_validated_comments_to_word` 最多 1 次；测试注入点是 `set_comment_agent_runner()`。
 
 ## Word / Queue / Helper 边界
 
@@ -118,13 +128,16 @@
 - `backend/states/base_state.py` 是 `comment_writeback_*`、`style_writeback_*` state 字段真源。
 - `common update_word`、`gjgk_update_word`、`gngk_fw_zc_update_word` 都要把批注和样式回写摘要写回 state。
 - `gngk_hw_cz_update_word` 虽然改为 direct replace，但仍要复用现有样式回填安全门禁，并把 `style_writeback_result`、`style_writeback_summary`、`comment_writeback_*` 摘要完整写回 state / 任务结果 / SSE done metadata。
-- 当 `generated_comment_count > 0` 且最终成功写入数为 `0` 时，update 路径必须硬失败，错误文本包含“批注生成成功但写入失败”。
+- AI 批注写回是可降级增强项：正文已成功写入并可下载时，`generated_comment_count > 0` 且最终成功写入数为 `0` 不再让 update 路径硬失败；统一 `comment_writeback` 摘要由共享 helper 计算，`warning` 只在 `generated > 0 && failed > 0` 时为 true，`generated=0` 和 skipped-only 不警告，用户可见统计在 warning 条件下走 `progress_log.warning()`。
 - 批注写回的重试只覆盖 Word `Comments.Add` 的 COM / RPC 写入异常；`reference_text` 未匹配属于定位失败，不会靠重试恢复。
 - 批注定位先走 Word 精确 `Find`；精确未命中时，共享 `comment_writeback` 可用规范化唯一匹配兜底，忽略空白、控制符、常见标点和换行。锚点范围内唯一命中才插入；若锚点范围疑似漂移，只允许全文唯一命中兜底；多处命中必须失败，避免把批注错插到其它章节。
-- 样式回填是 best-effort：低相似度、0 命中或片段跳过不硬失败；批注写回硬失败契约保持不变。
+- `comment_agent` 的确定性校验只看 `polished_text`，AI 只能在同 index 上修改 `reference_text`，`comment_text` 必须与初始 JSON 原样一致；校验失败反馈要保留 index、原始 reference、失败原因和相近候选片段。`write_validated_comments_to_word` agent 工具名保留为协议入口，但工具线程只重新校验并提交最终候选，不直接访问 Word COM，也不得记录成第 3 个用户可见工具轮次；真正 Word 写入必须在 `run_comment_agent()` 的 runner 结束后，由当前 graph 节点线程调用 `write_validated_comment_candidates_to_word()` 完成，只在传入锚点边界内查找并写入已通过且目标范围无既有批注的条目，不使用全文兜底；已有批注位置计入 skipped。
+- `comment_agent` 审计日志默认写入 `backend/prompts_log/comment_agent_audit/`，至少记录初始 JSON、raw AIMessage 内容、最多两轮工具快照、最终候选、最终 passed/failed/skipped 和 Word 写入统计。对外 `agent_step` 增量扩展 `comment_agent` 结构字段，展示 `phase`、两轮 `rounds`、异常/修复/跳过 `highlights`、`final_validation` 静默复校验统计和 `writeback` 统计；`content` 只作旧前端 fallback，不展示 raw AIMessage、工具原始 JSON、token 或排障栈。普通通过项只计数，失败、修复、跳过项才进入主视图明细。
+- `frontend/e2e/test_comment_supplement.spec.ts` 是补充批注与 `comment_agent` 用户可见契约的 mock E2E 入口：覆盖初次 generate 下载卡点击“补充批注”后创建 `comment_supplement`、显示 `comment_agent` 卡并生成新下载卡，也覆盖 agent generate 显示正文 agent + `comment_agent` 卡、workflow generate 不显示 `comment_agent` 卡。
+- 样式回填是 best-effort：低相似度、0 命中或片段跳过不硬失败；批注写回同样不得阻断已成功写入正文的下载主流程，只通过 `comment_writeback` 统计和 warning 暴露。
 - `style_writeback_mode=bold_only` 时，样式回填必须先在共享 `inline_style_ops` 中裁剪片段：只保留 `bold=True`，并清空下划线、斜体、删除线、字体颜色、高亮和 `underline_style`；裁剪后不再含加粗的片段不得进入 extracted/attempted 计数或写回流程。
 - `replace_content` 给首个正文 `project_name` 插入 `PROJECT_NAME_FIRST_HIT_COMMENT` 时，必须先按规范化后的批注文案做去重；只跳过“同文案”重复批注，其他文案批注不影响新增。Word 若把既有批注暴露成零宽或贴边锚点，也要视为同一落点参与判重。
-- `DocumentService._build_task_result_payload()` 与 SSE `done` 事件必须继续透传 `style_writeback`。
+- `DocumentService._build_task_result_payload()` 与 SSE `done` 事件必须继续透传 `style_writeback` 与 `comment_writeback`；两者都应是面向前端的摘要白名单，不得夹带批注依据长数组或逐条排障明细。
 
 ### 生成文本基础格式与样式门禁
 
@@ -139,8 +152,8 @@
 - `progress_log` 只写用户可理解的进度和状态；排障堆栈、候选打分、淘汰原因、阈值与诊断 marker 留在 `execution_log` 或 debug log。
 - `/api/stream/{task_id}` 是任务 SSE 主入口，支持 `Last-Event-ID` 断线续传。
 - 用户态实时展示依赖 `log`、`llm`、`progress`、`done`、`error`。
-- `agent_step` 是智能体 generate 的用户态 SSE 显式例外，用于展示主 agent 计划 / 调用决策 / 验收说明，以及 generate / verify / revise 子 agent 原始流，不替代 `done` / `error` 终态。
-- 后端 `AgentStepEventData` 字段包括 `task_id`、`task_kind`、`step_type`、`round`、`node`、`timestamp`、`is_complete`、可选 `content` 与 `findings`。`round` 是 1-based；当前智能体子 agent 流使用 `step_type=stream`，主 agent 终局事件使用 `step_type=final`。`content_verify_agent` 卡展示原始 JSON streaming，不做后端格式化，也不额外创建文件产物卡。
+- `agent_step` 是智能体 generate 的用户态 SSE 显式例外，用于展示主 agent 计划 / 调用决策 / 验收说明、generate / verify / revise 子 agent 原始流，以及 `comment_agent` 的结构化锚点校验、修复复核和最终写入统计，不替代 `done` / `error` 终态。
+- 后端 `AgentStepEventData` 字段包括 `task_id`、`task_kind`、`step_type`、`round`、`node`、`timestamp`、`is_complete`、可选 `content`、`findings` 与 `comment_agent`。`round` 是 1-based；当前智能体子 agent 流使用 `step_type=stream`，主 agent 终局事件使用 `step_type=final`。`comment_agent` 过程事件使用 `step_type=tool_snapshot` / `final`，`comment_agent` 是主展示数据，`content` 是完整快照 fallback 而非增量追加。`content_verify_agent` 卡展示原始 JSON streaming，不做后端格式化，也不额外创建文件产物卡。
 - `DocumentService` 在 graph config 中注入 `agent_step_callback`，智能体生成链路统一经 `SSECallback.push_agent_step()` 进入本地缓冲与 `SSEManager.send_agent_step_threadsafe()`；子 agent 与 runner stream 不再各自直连 `sse_manager`，避免同一过程卡双通道重复推送。`SSEManager.send_agent_step()` 会进入缓冲，断线续传时可重放。
 - 前端合并 `agent_step` 时必须把终态视为单调状态：迟到的 `is_complete=false` 快照不得覆盖已完成卡片；后续子 agent 开始或完成时，上一张仍在 `generating` 的过程卡也要收口为完成态。
 - 高频 `agent_step` 运行中快照只进入 `frontend/stores/chatStreamStore.ts` 的临时 stream，不写入持久化 `chat-storage`；只有完成事件才把最终正文 / JSON 固化到 `chatStore.conversations`。否则每个 SSE 片段都会触发会话数组重写、React 消息列表重渲染和 `sessionStorage` JSON 序列化，长文本或重复任务会让浏览器主线程卡死。
@@ -157,9 +170,13 @@
 - Word helper：`backend/tests/helper/test_content_ops.py`、`backend/tests/helper/test_paragraph_boundary_ops.py`、`backend/tests/helper/test_inline_style_ops.py`
 - 锁感知删除 helper：`backend/tests/helper/test_delete_ops.py`、`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`
 - 批注写回：`backend/tests/nodes/test_comment_writeback.py`
+- 批注锚点智能体：`backend/tests/agents/test_comment_agent.py`
+- agent generate 批注节点降级：`backend/tests/nodes/test_comment_agent_writeback_node.py`
+- 补充批注任务闭环：`backend/tests/api/test_comment_supplement_api.py`、`backend/tests/graphs/test_comment_supplement_graph.py`、`backend/tests/services/test_document_service_comment_supplement.py`
+- 补充批注与 `comment_agent` 前端 mock E2E：`frontend/e2e/test_comment_supplement.spec.ts`
 - 受保护字段与写回：`backend/tests/nodes/test_protected_fields_strict_matching.py`、`backend/tests/nodes/test_update_word_inline_style_writeback.py`
 - Prompt / LLM stream：`backend/tests/prompts/test_generate_prompt_routing.py`、`backend/tests/util/test_llm_stream_utils.py`
-- 批注 prompt 契约：`backend/tests/prompts/test_comment_prompt_reference_contract.py`
+- 批注 prompt 契约：`backend/tests/prompts/test_comment_prompt_reference_contract.py`、`backend/tests/prompts/test_comment_no_reference_prompt.py`
 - generation mode 契约与 workflow 回归：`backend/tests/models/test_generate_request_generation_style.py`、`backend/tests/services/test_document_service_initial_state.py`、`backend/tests/graphs/test_generation_mode_workflow.py`、`backend/tests/nodes/test_generate_polished_text_workflow.py`、`backend/tests/services/test_document_service_llm_snapshot.py`
 - DeepAgents content_agent 与公共节点：`backend/tests/agents/test_generation_content_agent.py`、`backend/tests/nodes/test_content_agent_generate.py`
 - generation mode graph 分流与逐类型闭环：`backend/tests/graphs/test_generation_mode_branching.py`、`backend/tests/graphs/test_xjcg_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_hw_zc_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_hw_cz_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_fw_zc_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_fw_cz_generation_mode_agent.py`、`backend/tests/graphs/test_gjgk_generation_mode_agent.py`

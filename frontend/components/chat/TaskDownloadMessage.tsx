@@ -1,22 +1,30 @@
 'use client';
 
 import React from 'react';
-import { CheckCircle2, Download, FileText } from 'lucide-react';
+import { CheckCircle2, Download, FileText, MessageSquarePlus, TriangleAlert } from 'lucide-react';
 import type { Message } from '@/types/chat';
 
 interface TaskDownloadMessageProps {
   message: Message;
   onDownload?: (filePath: string, fileName?: string) => void;
+  onCommentSupplement?: (message: Message) => void;
   disabled?: boolean;
+  commentSupplementDisabled?: boolean;
 }
 
 export function TaskDownloadMessage({
   message,
   onDownload,
+  onCommentSupplement,
   disabled = false,
+  commentSupplementDisabled = false,
 }: TaskDownloadMessageProps) {
-  const outputFile = typeof message.metadata?.outputFile === 'string' ? message.metadata.outputFile : '';
-  const isModifyTask = message.metadata?.taskKind === 'rewrite' || message.metadata?.taskKind === 'edit';
+  const outputFile =
+    typeof message.metadata?.outputFile === 'string' ? message.metadata.outputFile : '';
+  const taskKind = message.metadata?.taskKind;
+  const isModifyTask = taskKind === 'rewrite' || taskKind === 'edit';
+  const isGenerateTask = taskKind === 'generate';
+  const commentWarning = message.metadata?.commentWriteback?.warning === true;
   const fileName =
     typeof message.metadata?.fileName === 'string' && message.metadata.fileName.length > 0
       ? message.metadata.fileName
@@ -32,6 +40,13 @@ export function TaskDownloadMessage({
       return;
     }
     onDownload(outputFile, fileName);
+  };
+
+  const handleCommentSupplement = () => {
+    if (!outputFile || !onCommentSupplement || commentSupplementDisabled) {
+      return;
+    }
+    onCommentSupplement(message);
   };
 
   return (
@@ -53,11 +68,28 @@ export function TaskDownloadMessage({
         </button>
       </div>
 
-      <div className="px-4 py-3 text-sm text-gray-600">
+      <div className="space-y-3 px-4 py-3 text-sm text-gray-600">
+        {commentWarning && (
+          <div className="flex items-start gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
+            <TriangleAlert className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <span>文档已生成，部分批注未写入</span>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-gray-400" />
           <span className="truncate">{fileName}</span>
         </div>
+        {isGenerateTask && (
+          <button
+            type="button"
+            onClick={handleCommentSupplement}
+            disabled={!outputFile || !onCommentSupplement || commentSupplementDisabled}
+            className="inline-flex items-center gap-1.5 rounded border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 transition-colors duration-200 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <MessageSquarePlus className="h-4 w-4" />
+            补充批注
+          </button>
+        )}
       </div>
     </div>
   );

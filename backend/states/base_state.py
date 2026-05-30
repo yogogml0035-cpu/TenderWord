@@ -43,6 +43,10 @@ class TenderGraphStateBase(BaseState, total=False):
     tender_param_paths: List[str]
     clean_draft_path: Optional[str]
     prepared_doc_path: str
+    source_prepared_doc_path: str
+    comment_supplement_source_file: str
+    comment_supplement_temp_output_path: str
+    comment_supplement_completed: bool
     generation_style: str
     generation_mode: str
     style_writeback_mode: str
@@ -52,6 +56,7 @@ class TenderGraphStateBase(BaseState, total=False):
     inline_style_fragments: List[Dict[str, Any]]
     verbose_style_progress_logs: bool
     suppress_comment_progress_logs: bool
+    suppress_ai_comment_writeback: bool
 
     replacements: List[Tuple[str, str]]
     placeholder_mapping: Dict[str, str]

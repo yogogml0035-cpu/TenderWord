@@ -195,6 +195,13 @@ class EditTaskRequest(BaseModel):
         return int(value)
 
 
+class CommentSupplementRequest(BaseModel):
+    """补充批注文档任务请求模型。"""
+
+    conversation_id: str = Field(default="", description="会话ID")
+    source_file: str = Field(default="", description="当前下载卡对应的 Word 文件路径")
+    model: LLMModel = Field(default=LLMModel.DEEPSEEK, description="使用的 LLM 模型")
+
 class GenerateResponse(BaseModel):
     """
     文档生成响应模型

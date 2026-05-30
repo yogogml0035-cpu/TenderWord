@@ -28,6 +28,7 @@ from typing import Callable, Any, Optional, TextIO, Type, TypedDict
 
 from backend.config.settings import settings
 from backend.util.log_util.progress_log import progress_log
+from backend.nodes.common_word_nodes.comment_agent import comment_agent_writeback
 from backend.nodes.common_word_nodes.content_agent_generate import content_agent_generate
 from abc import ABC, abstractmethod
 from langgraph.graph import END, START, StateGraph
@@ -45,6 +46,7 @@ from backend.util.log_util.progress_log import progress_log
 
 NODE_GENERATE_POLISHED_TEXT = "generate_polished_text"
 NODE_CONTENT_AGENT = "content_agent"
+NODE_COMMENT_AGENT = "comment_agent"
 
 
 # ============================================================================
@@ -265,6 +267,9 @@ TRACKED_PROGRESS_NODES = {
     NODE_GENERATE_POLISHED_TEXT,
     NODE_CONTENT_AGENT,
     "generate_comments",
+    NODE_COMMENT_AGENT,
+    "prepare_comment_supplement",
+    "finalize_comment_supplement",
     "update_word",
 }
 
@@ -490,6 +495,7 @@ class StandardTenderWorkflowGraph(BaseGraph):
     NODE_CONTENT_AGENT_GENERATE: Callable = content_agent_generate
     NODE_GENERATE_COMMENTS: Callable
     NODE_UPDATE_WORD: Callable
+    NODE_COMMENT_AGENT: Callable = comment_agent_writeback
 
     def get_state_class(self) -> Type[TypedDict]:
         return self.STATE_CLS
@@ -515,6 +521,8 @@ class StandardTenderWorkflowGraph(BaseGraph):
             generation_node,
             "update_word",
         }
+        if generation_mode == "agent":
+            base_nodes.add(NODE_COMMENT_AGENT)
         if has_origin_for_comments:
             base_nodes.update({"get_comments", "copy_comments", "generate_comments"})
         base_nodes.update(
@@ -541,9 +549,12 @@ class StandardTenderWorkflowGraph(BaseGraph):
         node_content_agent_generate = getattr(type(self), "NODE_CONTENT_AGENT_GENERATE")
         node_generate_comments = getattr(type(self), "NODE_GENERATE_COMMENTS")
         node_update_word = getattr(type(self), "NODE_UPDATE_WORD")
+        node_comment_agent = getattr(type(self), "NODE_COMMENT_AGENT")
 
         def comments_branch_done(state, config):
-            return state
+            return {
+                "suppress_ai_comment_writeback": state.get("generation_mode") == "agent",
+            }
 
         def generation_mode_gate(state, config):
             return {}
@@ -577,6 +588,7 @@ class StandardTenderWorkflowGraph(BaseGraph):
         builder.add_node("comments_branch_done", self.wrap_node("comments_branch_done", comments_branch_done))
         builder.add_node("generate_comments", self.wrap_node("generate_comments", node_generate_comments))
         builder.add_node("update_word", self.wrap_node("update_word", node_update_word))
+        builder.add_node(NODE_COMMENT_AGENT, self.wrap_node(NODE_COMMENT_AGENT, node_comment_agent))
         post_update_steps = self.get_post_update_steps()
         for node_name, node_func in post_update_steps:
             builder.add_node(node_name, self.wrap_node(node_name, node_func))
@@ -632,20 +644,31 @@ class StandardTenderWorkflowGraph(BaseGraph):
         )
         builder.add_edge("generate_comments", "comments_branch_done")
         builder.add_edge(["word_operations_subgraph", "comments_branch_done"], "update_word")
+        after_update_target = post_update_steps[0][0] if post_update_steps else END
+        builder.add_conditional_edges(
+            "update_word",
+            self._select_after_update_node,
+            {
+                NODE_COMMENT_AGENT: NODE_COMMENT_AGENT,
+                "after_update": after_update_target,
+            },
+        )
+        builder.add_edge(NODE_COMMENT_AGENT, after_update_target)
         if post_update_steps:
             first_post_node = post_update_steps[0][0]
-            builder.add_edge("update_word", first_post_node)
             for current_step, next_step in zip(post_update_steps, post_update_steps[1:]):
                 builder.add_edge(current_step[0], next_step[0])
             builder.add_edge(post_update_steps[-1][0], END)
-        else:
-            builder.add_edge("update_word", END)
 
         return builder
 
     @staticmethod
     def _select_generation_node(state) -> str:
         return NODE_CONTENT_AGENT if state.get("generation_mode") == "agent" else NODE_GENERATE_POLISHED_TEXT
+
+    @staticmethod
+    def _select_after_update_node(state) -> str:
+        return NODE_COMMENT_AGENT if state.get("generation_mode") == "agent" else "after_update"
 
     def _build_word_operations_subgraph(self):
         state_cls = self.STATE_CLS

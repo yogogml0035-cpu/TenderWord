@@ -9,6 +9,7 @@ import pytest
 
 from backend.nodes.common_word_nodes.comment_writeback import (
     _build_search_texts,
+    build_comment_writeback_summary_payload,
     write_polished_comments,
 )
 
@@ -126,6 +127,41 @@ class _FakeDocument:
 
     def Range(self, start: int, end: int) -> _FakeRange:
         return _FakeRange(self, start, end)
+
+
+def test_build_comment_writeback_summary_payload_warns_only_on_generated_failures() -> None:
+    payload = build_comment_writeback_summary_payload(
+        generated_count=3,
+        writeback_result={"added": 0, "failed": 3, "skipped": 0},
+    )
+
+    assert payload == {
+        "summary": "AI批注写入: 生成=3, 成功=0, 失败=3, 跳过=0",
+        "generated": 3,
+        "added": 0,
+        "failed": 3,
+        "skipped": 0,
+        "warning": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("generated_count", "writeback_result"),
+    [
+        (0, {"added": 0, "failed": 2, "skipped": 0}),
+        (2, {"added": 0, "failed": 0, "skipped": 2}),
+    ],
+)
+def test_build_comment_writeback_summary_payload_does_not_warn_without_failures(
+    generated_count,
+    writeback_result,
+) -> None:
+    payload = build_comment_writeback_summary_payload(
+        generated_count=generated_count,
+        writeback_result=writeback_result,
+    )
+
+    assert payload["warning"] is False
 
 
 # =============================================================================
@@ -968,10 +1004,10 @@ def _patch_gjgk_node(monkeypatch, fake_doc, writeback_result):
     )
 
 
-def test_gjgk_update_word_hard_fails_when_zero_of_n_comments_written(
+def test_gjgk_update_word_warns_when_zero_of_n_comments_written(
     monkeypatch,
 ) -> None:
-    """generated_comment_count > 0 but added == 0 → task must fail."""
+    """generated_comment_count > 0 but added == 0 → task completes with warning."""
     fake_doc = _FakeDocument("x" * 120)
     zero_added_result = {
         "total": 3,
@@ -1002,20 +1038,47 @@ def test_gjgk_update_word_hard_fails_when_zero_of_n_comments_written(
     }
     _patch_gjgk_node(monkeypatch, fake_doc, zero_added_result)
 
-    with pytest.raises(RuntimeError, match="批注生成成功但写入失败"):
-        gjgk_update_word_module.gjgk_update_word(
-            {
-                "prepared_doc_path": "fake.docx",
-                "polished_text": "新的正文",
-                "polished_comments": [
-                    {"reference_text": "a", "comment_text": "c1"},
-                ],
-                "generated_comment_count": 3,
-                "insertion_before_text": "前锚点",
-                "insertion_after_text": "后锚点",
-            },
-            config=None,
-        )
+    progress_warnings: list[str] = []
+    progress_errors: list[str] = []
+    monkeypatch.setattr(
+        gjgk_update_word_module.progress_log,
+        "warning",
+        lambda message, *args: progress_warnings.append(
+            message % args if args else str(message)
+        ),
+    )
+    monkeypatch.setattr(
+        gjgk_update_word_module.progress_log,
+        "error",
+        lambda message, *args: progress_errors.append(message % args if args else str(message)),
+    )
+
+    result = gjgk_update_word_module.gjgk_update_word(
+        {
+            "prepared_doc_path": "fake.docx",
+            "polished_text": "新的正文",
+            "polished_comments": [
+                {"reference_text": "a", "comment_text": "c1"},
+            ],
+            "generated_comment_count": 3,
+            "insertion_before_text": "前锚点",
+            "insertion_after_text": "后锚点",
+        },
+        config=None,
+    )
+
+    assert result["comment_writeback_result"] == {
+        "summary": "AI批注写入: 生成=3, 成功=0, 失败=3, 跳过=0",
+        "generated": 3,
+        "added": 0,
+        "failed": 3,
+        "skipped": 0,
+        "warning": True,
+    }
+    assert result["comment_writeback_added"] == 0
+    assert result["comment_writeback_failed"] == 3
+    assert progress_warnings == ["AI批注写入: 生成=3, 成功=0, 失败=3, 跳过=0"]
+    assert progress_errors == []
 
 
 def test_gjgk_update_word_partial_writeback_succeeds_with_summary(monkeypatch) -> None:
@@ -1062,6 +1125,7 @@ def test_gjgk_update_word_partial_writeback_succeeds_with_summary(monkeypatch) -
     assert result["comment_writeback_added"] == 2
     assert result["comment_writeback_failed"] == 1
     assert result["comment_writeback_skipped"] == 0
+    assert result["comment_writeback_result"]["warning"] is True
 
 
 def test_gjgk_update_word_no_hard_fail_when_zero_generated(monkeypatch) -> None:
@@ -1096,6 +1160,7 @@ def test_gjgk_update_word_no_hard_fail_when_zero_generated(monkeypatch) -> None:
         result["comment_writeback_summary"]
         == "AI批注写入: 生成=0, 成功=0, 失败=0, 跳过=0"
     )
+    assert result["comment_writeback_result"]["warning"] is False
 
 
 def test_gjgk_update_word_hides_comment_progress_logs_in_verbose_edit_mode(monkeypatch) -> None:
@@ -1118,6 +1183,7 @@ def test_gjgk_update_word_hides_comment_progress_logs_in_verbose_edit_mode(monke
     _patch_gjgk_node(monkeypatch, fake_doc, partial_result)
 
     progress_messages: list[str] = []
+    progress_warnings: list[str] = []
     progress_errors: list[str] = []
 
     monkeypatch.setattr(
@@ -1129,6 +1195,13 @@ def test_gjgk_update_word_hides_comment_progress_logs_in_verbose_edit_mode(monke
         gjgk_update_word_module.progress_log,
         "error",
         lambda message, *args: progress_errors.append(message % args if args else str(message)),
+    )
+    monkeypatch.setattr(
+        gjgk_update_word_module.progress_log,
+        "warning",
+        lambda message, *args: progress_warnings.append(
+            message % args if args else str(message)
+        ),
     )
 
     def _fake_apply_inline_style_fragments(**kwargs):
@@ -1173,6 +1246,7 @@ def test_gjgk_update_word_hides_comment_progress_logs_in_verbose_edit_mode(monke
 
     assert any("样式回填成功[1/1]" in message for message in progress_messages)
     assert not any("AI批注写入" in message for message in progress_messages)
+    assert progress_warnings == []
     assert progress_errors == []
     assert result["comment_writeback_summary"] == "AI批注写入: 生成=2, 成功=1, 失败=1, 跳过=0"
     assert result["style_writeback_result"] == {
@@ -1266,10 +1340,18 @@ def test_gjgk_update_word_keeps_comment_progress_logs_outside_edit_verbose_mode(
     _patch_gjgk_node(monkeypatch, fake_doc, partial_result)
 
     progress_messages: list[str] = []
+    progress_warnings: list[str] = []
     monkeypatch.setattr(
         gjgk_update_word_module.progress_log,
         "info",
         lambda message, *args: progress_messages.append(message % args if args else str(message)),
+    )
+    monkeypatch.setattr(
+        gjgk_update_word_module.progress_log,
+        "warning",
+        lambda message, *args: progress_warnings.append(
+            message % args if args else str(message)
+        ),
     )
 
     result = gjgk_update_word_module.gjgk_update_word(
@@ -1286,5 +1368,6 @@ def test_gjgk_update_word_keeps_comment_progress_logs_outside_edit_verbose_mode(
         config=None,
     )
 
-    assert any("AI批注写入: 生成=2, 成功=1, 失败=1, 跳过=0" in message for message in progress_messages)
+    assert not any("AI批注写入" in message for message in progress_messages)
+    assert progress_warnings == ["AI批注写入: 生成=2, 成功=1, 失败=1, 跳过=0"]
     assert result["comment_writeback_summary"] == "AI批注写入: 生成=2, 成功=1, 失败=1, 跳过=0"

@@ -8,7 +8,12 @@
 // ============================================
 
 import type { TenderType } from './index';
-import type { StyleWritebackSummary, TaskKind } from './api';
+import type {
+  CommentWritebackSummary,
+  SSECommentAgentStep,
+  StyleWritebackSummary,
+  TaskKind,
+} from './api';
 
 export type MessageType = 'user' | 'ai' | 'system';
 
@@ -90,12 +95,14 @@ export interface Message {
     agentStepNode?: string;
     agentStepFindings?: AgentStepFinding[];
     agentStepAuditRounds?: AgentAuditRound[];
+    commentAgent?: SSECommentAgentStep;
     progressPercent?: number;
     progressText?: string;
     currentNode?: string;
     currentNodeDisplay?: string;
     lastEventId?: string;
     styleWriteback?: StyleWritebackSummary;
+    commentWriteback?: CommentWritebackSummary;
     localTaskReason?: LocalTaskReason;
     [key: string]: unknown;
   };

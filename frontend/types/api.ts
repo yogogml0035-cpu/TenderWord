@@ -9,7 +9,7 @@
 // ============================================
 
 export type TaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-export type TaskKind = 'generate' | 'rewrite' | 'edit';
+export type TaskKind = 'generate' | 'rewrite' | 'edit' | 'comment_supplement';
 
 // ============================================
 // Tender Data Types
@@ -173,6 +173,12 @@ export interface EditTaskRequest {
   tender_data_snapshot?: TenderData;
 }
 
+export interface CommentSupplementTaskRequest {
+  conversation_id: string;
+  source_file: string;
+  model: GenerateRequest['model'];
+}
+
 // ============================================
 // Task Progress Types
 // ============================================
@@ -199,6 +205,15 @@ export interface StyleWritebackSummary {
   skipped_by_reason: Record<string, number>;
 }
 
+export interface CommentWritebackSummary {
+  summary: string;
+  generated: number;
+  added: number;
+  failed: number;
+  skipped: number;
+  warning: boolean;
+}
+
 export interface TaskResult {
   output_file: string;
   file_name: string;
@@ -206,6 +221,7 @@ export interface TaskResult {
   model_used: string;
   total_time_seconds: number;
   style_writeback?: StyleWritebackSummary;
+  comment_writeback?: CommentWritebackSummary;
 }
 
 // ============================================
@@ -454,6 +470,40 @@ export interface SSEAgentStepFinding {
   fix_hint: string;
 }
 
+export interface SSECommentAgentHighlight {
+  index: number;
+  status: string;
+  reason: string;
+  original_reference_text: string;
+  reference_text: string;
+  candidate_fragments: string[];
+}
+
+export interface SSECommentAgentRound {
+  round: number;
+  label: string;
+  passed: number;
+  failed: number;
+  skipped: number;
+  highlights: SSECommentAgentHighlight[];
+}
+
+export interface SSECommentAgentWriteback {
+  attempted: number;
+  added: number;
+  failed: number;
+  skipped: number;
+  issues: SSECommentAgentHighlight[];
+}
+
+export interface SSECommentAgentStep {
+  phase: 'validation_round' | 'final';
+  rounds: SSECommentAgentRound[];
+  highlights: SSECommentAgentHighlight[];
+  final_validation?: SSECommentAgentRound | null;
+  writeback?: SSECommentAgentWriteback | null;
+}
+
 export interface SSEAgentStepEvent {
   timestamp: string;
   task_id: string;
@@ -464,6 +514,7 @@ export interface SSEAgentStepEvent {
   is_complete: boolean;
   content?: string | null;
   findings: SSEAgentStepFinding[];
+  comment_agent?: SSECommentAgentStep | null;
 }
 
 export interface SSEStatusEvent {
@@ -493,6 +544,7 @@ export interface SSEDoneEvent {
   download_url?: string;
   processing_time?: number;
   style_writeback?: StyleWritebackSummary;
+  comment_writeback?: CommentWritebackSummary;
 }
 
 export interface SSEHeartbeatEvent {

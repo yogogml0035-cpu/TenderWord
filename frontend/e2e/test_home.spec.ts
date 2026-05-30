@@ -5,35 +5,33 @@ import { test, expect } from '@playwright/test';
  */
 
 test.describe('Homepage', () => {
-  test('homepage loads successfully', async ({ page }) => {
+  test('homepage redirects to the tender workspace', async ({ page }) => {
     await page.goto('/');
 
-    // Check page title
     await expect(page).toHaveTitle(/TenderWord|招标文档/);
-
-    // Check main heading exists
-    const heading = page.getByRole('heading', { level: 1 });
-    await expect(heading).toBeVisible();
+    await expect(page).toHaveURL(/\/tender/);
+    await expect(page.getByText('类型', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '选择招标类型' })).toBeVisible();
   });
 
-  test('main content elements exist', async ({ page }) => {
+  test('workspace content elements exist after root redirect', async ({ page }) => {
     await page.goto('/');
 
-    await expect(page.locator('main').first()).toBeVisible();
-    await expect(page.getByRole('heading', { name: '功能特性' })).toBeVisible();
-    await expect(page.getByRole('link', { name: /进入使用/ })).toBeVisible();
+    await expect(page.getByText('类型', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '欢迎使用体验' })).toBeVisible();
+    await expect(page.getByText('开始新对话：')).toBeVisible();
   });
 
-  test('tender type selection is available', async ({ page }) => {
+  test('tender type selection is available after root redirect', async ({ page }) => {
     await page.goto('/');
 
-    const chatLink = page.getByRole('link', { name: /进入使用/ });
-    await expect(chatLink).toBeVisible();
+    await expect(page.getByTestId('tender-type-button-xjcg')).toBeVisible();
+    await expect(page.getByTestId('tender-type-button-gngk')).toBeVisible();
+    await expect(page.getByTestId('tender-type-button-gjgk')).toBeVisible();
   });
 
-  test('can navigate to tender workspace from homepage', async ({ page }) => {
+  test('root route keeps the tender workspace usable', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('link', { name: /进入使用/ }).click();
 
     await expect(page).toHaveURL(/\/tender/);
     await expect(page.getByText('类型', { exact: true })).toBeVisible();

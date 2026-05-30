@@ -5,3 +5,153 @@ Started: 2026-05-30 00:00
 Source: prd.json
 
 ## Codebase Patterns
+- 后端任务类型需要同时更新内部 `backend/task/task_queue_manager.py::TaskKind`、API `backend/models/task.py::TaskKind` 和 `backend/services/task_service.py` 的转换映射。
+- SSE `done` 新增结构字段时，需要同步后端模型 `backend/models/sse.py`、发送入口 `backend/core/sse_manager.py`、前端 `frontend/types/api.ts` 与类型契约测试。
+- Windows/WSL 共用工作区时，前端浏览器验证前要确认 Linux 原生 optional 依赖已安装；若 `lightningcss` 或 `@tailwindcss/oxide` 只存在 win32 包，在 `frontend/` 运行 `npm install --include=optional` 后重启 dev server。
+- 批注写回 summary/warning 规则统一走 `backend/nodes/common_word_nodes/comment_writeback.py::build_comment_writeback_summary_payload`；update_word 节点只在 `generated > 0 && failed > 0` 时用 `progress_log.warning()`，不要重新加入 0 写入硬失败。
+- `DocumentService._build_rewrite_state_snapshot()` 可以保存后端内部批注依据长数组和 `generation_mode`；`_build_task_result_payload()`、SSE `done` 和前端 `chat-storage` 只能保留白名单摘要字段，不能泄露 `comment_plan_detail`、`strikethrough_plan`、`non_black_font_plan`。
+- 新增 Prompt Layer builder 时同步补 `backend/prompts/types.py` 输入 dataclass、`backend/prompts/__init__.py` 导出和 `backend/tests/prompts/test_*.py` 契约测试；Prompt Layer 仍只做纯渲染，不接日志、LLM 或 Word 副作用。
+- `comment_agent` 采用“纯确定性函数 + LangChain StructuredTool factory”的分层：校验只读取 `polished_text`，Word 写入工具必须重新校验并限制在 `bound_start/bound_end` 内，不复用全文兜底写回。
+- agent generate 批注链路由 `StandardTenderWorkflowGraph` 统一编排：`comments_branch_done` 设置 `suppress_ai_comment_writeback=True`，各类型 `update_word` 只写正文/样式/保存，随后进入公共 `comment_agent` 节点；不要在类型 graph 里复制该分流。
+- `comment_supplement` 后端闭环固定走 `POST /api/comment-supplement -> DocumentService.create_comment_supplement_task -> CommentSupplementGraph`；创建任务前必须校验传入 `source_file` 等于 latest `rewrite_state.prepared_doc_path` 且文件存在。
+- 补充批注成功后通过 `ConversationService.append_comment_supplement_success()` 追加 assistant rewrite_state，使 latest `prepared_doc_path` 指向补充批注副本，后续 rewrite/edit 继续读取 latest rewrite_state。
+- 前端任务完成入口有两条：`useChatSSE` 的 SSE `done` 与 task status fallback、`FormPanel.syncTaskTerminalState()`；新增 result 摘要字段时两条路径都要传给 `chatStore.completeTask()`。
+- 下载卡的用户动作以 `message.metadata.taskKind` 判定任务来源；`comment_supplement` 从 generate 下载卡进入 `ChatPanel -> createCommentSupplementTask -> startTask`，不要在卡片组件内直接访问 store 或裸 `fetch`。
+- `comment_agent` 的 `agent_step` 事件是一组同 node/round 的 AIMessage 内容片段，前端应按顺序追加到同一张卡；最终 `is_complete=true` 且 `content` 为空时只收尾，不清空已追加内容。
+- Next dev 会自动把 `.next/dev/types/**/*.ts` 加回主 `tsconfig.json`；前端稳定类型检查走 `frontend/tsconfig.typecheck.json`，避免 dev 生成缓存里的 validator 语法问题影响 `npm run type-check`。
+- 当前根路径 `/` 直接重定向到 `/tender` 工作台；首页类 E2E 应断言 tender workspace 的真实入口元素，不要继续依赖历史 landing page 的 `进入使用` 链接或 `main` 内容。
+- Playwright E2E 若写 requirement 证据，artifact root 必须指向当前任务目录；不要把新截图或 console 日志写入旧 Ralph 任务目录。
+
+## 2026-05-30 13:08 - US-001
+- 建立了 `comment_supplement` 任务类型契约：后端内部/API TaskKind、TaskService 映射、前端 TaskKind union 均已支持。
+- 建立了 `comment_writeback` 摘要契约：后端 `DoneEventData`、`SSEManager.send_done` / `send_done_threadsafe`、前端 `TaskResult` / `SSEDoneEvent` 均可透传 summary/generated/added/failed/skipped/warning。
+- 更改的文件：`backend/task/task_queue_manager.py`、`backend/models/task.py`、`backend/models/sse.py`、`backend/models/__init__.py`、`backend/services/task_service.py`、`backend/core/sse_manager.py`、`frontend/types/api.ts`、`frontend/lib/api.ts`、`frontend/hooks/useChatSSE.ts`、`backend/tests/services/test_task_service_task_kind.py`、`backend/tests/services/test_sse_manager_agent_step.py`、`backend/tests/models/test_sse_agent_step.py`、`frontend/__tests__/unit/types/test_api_sse_agent_step.test.ts`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m pytest backend/tests/services/test_task_service_task_kind.py backend/tests/services/test_sse_manager_agent_step.py backend/tests/models/test_sse_agent_step.py -v` 通过；`npm test -- --runTestsByPath __tests__/unit/types/test_api_sse_agent_step.test.ts` 通过；`npm run lint` 通过；`npm run type-check` 通过；本轮触达文件的 `git diff --check -- ...` 通过。
+- 全仓 `git diff --check` 因进入本轮前已有的 `backend/.env.example`、`scripts/start-dev.ps1` trailing whitespace 失败，未改动这些既有文件。
+- **未来迭代的学习：**
+  - 任务类型是双枚举结构，新增 task kind 时不要只改 API 类型，还要改队列内部枚举和 TaskService 映射。
+  - SSE done 的结构字段需要同时覆盖 Pydantic 模型、SSEManager 直接发送入口和前端 API 类型，避免断线重放/任务状态/前端卡片三处契约漂移。
+  - 当前工作树已有与本需求无关的 `.env.example` 和 PowerShell 脚本空白改动，提交时应只暂存本轮文件。
+---
+## 2026-05-30 13:31 - US-001
+- 修复了 Validator 上次记录的浏览器验证环境问题：`frontend/node_modules` 只有 Windows 原生 optional package，已通过 `npm install --include=optional` 恢复 Linux 平台的 `lightningcss-linux-x64-gnu` 与 `@tailwindcss/oxide-linux-x64-gnu`。
+- 重启前端 dev server 后验证 `/tender` 页面返回 200，Playwright 打开页面成功，DOM 不再是 Next error，console 无 error/warning；截图保存到 `tasks/comment-supplement-comment-agent/screenshots/validator-us-001-pass-1.png`，console 和 requests 证据保存到 `tasks/comment-supplement-comment-agent/logs/validator-us-001-retry-console.log`、`tasks/comment-supplement-comment-agent/logs/validator-us-001-retry-requests.log`。
+- 更改的文件：`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m pytest backend/tests/services/test_task_service_task_kind.py backend/tests/services/test_sse_manager_agent_step.py backend/tests/models/test_sse_agent_step.py -v` 通过；`npm test -- --runTestsByPath __tests__/unit/types/test_api_sse_agent_step.test.ts` 通过；`npm run lint` 通过；`npm run type-check` 通过；`playwright-cli -s=validator-us-001-retry open http://localhost:8502/tender`、截图、console、requests 采集通过；`curl -sS -L -o /tmp/tenderword_tender_probe.html -w '%{http_code}\n' http://localhost:8502/tender` 返回 200。
+- **未来迭代的学习：**
+  - Windows 与 WSL 交替使用同一个 `frontend/node_modules` 时，平台原生 optional dependency 可能停留在 win32 版本，Next/Tailwind 编译会报缺少 Linux `.node` 文件；用锁文件恢复 optional 依赖后要重启 dev server。
+  - 根路径 `/` 当前会 307 重定向到 `/tender`，浏览器或 curl 健康检查应检查 `/tender` 或启用跟随跳转，避免把正常 redirect 当失败。
+  - 当前工作树已有与本需求无关的 `backend/.env.example` 和 `scripts/start-dev.ps1` 空白改动，提交时仍应只暂存本轮需求文件。
+---
+## 2026-05-30 14:04 - US-002
+- 将现有批注写回硬失败降级为 warning：common、gjgk、gngk_fw_zc、gngk_hw_cz 四条 update_word 路径不再在 `generated_comment_count > 0` 且 0 条写入时抛异常，改为写入 `comment_writeback_result` 摘要并在失败数大于 0 时输出 warning 级进度。
+- 新增统一 `build_comment_writeback_summary_payload`，集中计算 `summary/generated/added/failed/skipped/warning`，确保 `generated=0` 和 skipped-only 不触发 warning。
+- 同步修正批注写回相关测试、根级 AGENTS 约束和 `asset/shared_runtime_word_skill_knowledge_pack.md` 中的长期规则。
+- 更改的文件：`AGENTS.md`、`asset/shared_runtime_word_skill_knowledge_pack.md`、`backend/nodes/common_word_nodes/comment_writeback.py`、`backend/nodes/common_word_nodes/update_word.py`、`backend/nodes/gjgk_word_nodes/gjgk_update_word.py`、`backend/nodes/gngk_word_nodes/gngk_fw_zc_update_word.py`、`backend/nodes/gngk_word_nodes/gngk_hw_cz_update_word.py`、`backend/tests/nodes/test_comment_writeback.py`、`backend/tests/nodes/test_update_word_inline_style_writeback.py`、`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m pip install -r backend/requirements.txt` 补齐 Linux venv 中缺失的声明依赖；`backend/.venv-linux/bin/python -m pytest backend/tests/nodes/test_comment_writeback.py backend/tests/nodes/test_update_word_inline_style_writeback.py backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py backend/tests/nodes/test_gngk_fw_zc_update_word.py -v` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests -v` 通过，352 passed；`npm run lint` 通过；`npm run type-check` 通过；本轮变更文件 `git diff --check -- ...` 通过。
+- **未来迭代的学习：**
+  - 批注写回统计现在有统一 builder，新增 task result 或 SSE 透传时应复用 `comment_writeback_result` / builder 输出，不要在 DocumentService 或前端重新推断 warning。
+  - 0 条成功写入不再等价任务失败；真正应阻断的仍是正文写回、受保护字段、锁定范围和保存等主流程强契约。
+  - Linux venv 若只装了部分 LangChain 依赖，导入 `backend.nodes.common_word_nodes` 会因 `deepagents` 缺失在测试收集阶段失败；按 `backend/requirements.txt` 补齐后再跑后端测试。
+---
+## 2026-05-30 14:29 - US-003
+- 扩展了任务结果与 SSE done 主干：`DocumentService._build_task_result_payload()` 现在透传 `comment_writeback` 摘要，并继续用白名单输出，避免把三组批注依据长数组放进 result；任务完成时本地 callback 和 `SSEManager.send_done_threadsafe()` 都会携带同一份 `comment_writeback`。
+- 扩展了后端会话 `rewrite_state`：generate 成功快照会保留 `comment_plan_detail`、`strikethrough_plan`、`non_black_font_plan` 和 `generation_mode`，供后续补批注、rewrite/edit 链路读取；edit/rewrite 初始 state 仍不注入 `generation_mode`。
+- 前端 `chatStore` 持久化前会清洗消息 metadata 中的三组内部批注依据字段，确保下载卡 metadata 和 `sessionStorage` 不保存长数组。
+- 同步更新了 `asset/shared_runtime_word_skill_knowledge_pack.md`，记录内部 rewrite_state 与外部 result/SSE/前端持久化的边界。
+- 更改的文件：`backend/services/document_service.py`、`backend/tests/services/test_document_service_task_result.py`、`backend/tests/services/test_document_service_agent_step.py`、`frontend/stores/chatStore.ts`、`frontend/__tests__/unit/stores/test_session_persistence.test.ts`、`asset/shared_runtime_word_skill_knowledge_pack.md`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m pytest backend/tests/services/test_document_service_task_result.py backend/tests/services/test_document_service_agent_step.py backend/tests/services/test_sse_manager_agent_step.py backend/tests/models/test_sse_agent_step.py backend/tests/services/test_document_service_initial_state.py -v` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests -v` 通过，355 passed；`npm test -- --runTestsByPath __tests__/unit/stores/test_session_persistence.test.ts` 通过；`npm test -- --runInBand` 通过，31 suites / 355 tests；`npm run lint` 通过；`npm run type-check` 通过；本轮变更文件 `git diff --check -- ...` 通过。
+- **未来迭代的学习：**
+  - 任务 result / SSE done 是前端可见白名单摘要层，新增内部 state 字段时不要顺手透传到 `_build_task_result_payload()`。
+  - `rewrite_state` 是后端会话内部上下文，可以保存后续任务需要的长数组；前端 `sessionStorage` 应通过 store `partialize` 或 metadata 白名单继续阻断这些长数组。
+  - `comment_writeback` 应直接复用 update_word 写回 state 的 `comment_writeback_result`，缺失时再用统一 builder 从计数字段补齐摘要。
+---
+## 2026-05-30 14:44 - US-004
+- 新增无参考批注 prompt 契约：`backend/prompts/comment_no_reference_prompt.py` 提供三维审查、纯净 JSON 数组输出和 `reference_text` 精确来自 `polished_text` 的约束，不引入历史参考、送审稿差异、删除线或非黑色字体计划逻辑。
+- 补齐 Prompt Layer 输入类型与统一导出，新增 prompt 单测覆盖三维审查、JSON 契约、锚点约束、无参考逻辑隔离和未知类型错误。
+- 按 Prompt Layer 回写路由更新 `asset/shared_runtime_word_skill_knowledge_pack.md` 与 `asset/README.md`，记录无参考批注 prompt 的长期边界与测试入口。
+- 更改的文件：`backend/prompts/comment_no_reference_prompt.py`、`backend/prompts/types.py`、`backend/prompts/__init__.py`、`backend/tests/prompts/test_comment_no_reference_prompt.py`、`asset/shared_runtime_word_skill_knowledge_pack.md`、`asset/README.md`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m pytest backend/tests/prompts/test_comment_no_reference_prompt.py backend/tests/prompts/test_comment_prompt_reference_contract.py -v` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests -v` 通过，360 passed；`npm run lint` 通过；`npm run type-check` 通过；本轮变更文件 `git diff --check -- ...` 通过。
+- **未来迭代的学习：**
+  - 无参考批注 prompt 只能消费 `polished_text`，后续 comment_supplement/comment_agent 接入时不要把 `comment_plan_detail`、`strikethrough_plan` 或 `non_black_font_plan` 塞回该 prompt。
+  - gngk 子类型仍通过 `get_tender_type_family()` 收敛到 `gngk` prompt registry，新增 prompt builder 要沿用 family 归一化而不是枚举所有后端 form_type。
+  - Prompt Layer 变更也要更新共享知识包；若只新增同一主题内规则，`asset/README.md` 更新适用范围即可，不需要新建知识包。
+---
+## 2026-05-30 15:04 - US-005
+- 新增 `comment_agent` 运行时包：固定 `name="comment_agent"` 调用 `langchain.agents.create_agent`，并用 `ToolCallLimitMiddleware` 将 `validate_comment_references` 限制为最多 3 次、`write_validated_comments_to_word` 限制为最多 1 次。
+- 实现确定性校验与写入工具：AI 只能按同 index 修改 `reference_text`，`comment_text` 必须保持初始 JSON 原样；校验只基于 `polished_text`，失败反馈包含 index、原 reference、失败原因和相近片段；写入工具会重新校验，只在 Word 锚点边界内写入无既有批注的通过项。
+- 增加 `comment_agent` 审计日志：记录初始 JSON、AIMessage 内容、每轮校验结果、最终 passed/failed/skipped 和 Word 写入统计；`agent_step` 只转发 AIMessage 内容，过滤工具消息。
+- 更改的文件：`backend/agents/comments/__init__.py`、`backend/agents/comments/comment_agent.py`、`backend/agents/comments/tools.py`、`backend/agents/comments/types.py`、`backend/agents/comments/workspace.py`、`backend/tests/agents/test_comment_agent.py`、`asset/shared_runtime_word_skill_knowledge_pack.md`、`asset/README.md`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m pytest backend/tests/agents/test_comment_agent.py -v` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests/agents/test_comment_agent.py backend/tests/nodes/test_comment_writeback.py -v` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests -v` 通过，368 passed；`npm run lint` 通过；`npm run type-check` 通过；`npm test -- --runInBand` 通过，31 suites / 355 tests；本轮改动文件的 staged `git diff --cached --check` 通过。
+- 全仓 `git diff --check` 仍因进入本轮前已有的 `backend/.env.example`、`scripts/start-dev.ps1` trailing whitespace 失败，未改动这些既有文件。
+- 本 story 只新增后端运行时与测试，无 UI 改动，未执行浏览器验证。
+- **未来迭代的学习：**
+  - `comment_agent` 的 LangChain 工具限制按工具名配置；后续接入 graph 时必须继续使用 `validate_comment_references` 和 `write_validated_comments_to_word` 这两个稳定工具名。
+  - 批注候选校验不要把 Word 文档当兜底来源；AI 修复锚点的唯一文本依据是 `polished_text`，Word 工具只负责在已限定锚点边界内写入。
+  - 工具消息和排障细节只进审计日志，前端过程卡只能展示 `AIMessage.content`。
+---
+## 2026-05-30 15:27 - US-006
+- 接入 agent generate 的后置 `comment_agent` 分支：workflow 继续走 `generate_polished_text/generate_comments/update_word` 旧路径，agent 继续走 `content_agent`，并在 `update_word` 保存正文后进入公共 `comment_agent` 节点。
+- 给 common、gjgk、gngk_fw_zc、gngk_hw_cz 四类 `update_word` 增加 `suppress_ai_comment_writeback` 开关，agent 路径只写正文、样式和保存，不直接写 AI 批注；公共 `comment_agent` 节点把失败/缺上下文/保存失败收敛为 `comment_writeback` warning，不阻断已保存正文文件下载。
+- 同步更新任务进度节点显示、state 字段、graph 分流测试、节点降级测试，以及共享运行时知识包。
+- 更改的文件：`backend/graphs/base_graph.py`、`backend/states/base_state.py`、`backend/task/task_queue_manager.py`、`backend/nodes/common_word_nodes/comment_agent.py`、`backend/nodes/common_word_nodes/update_word.py`、`backend/nodes/gjgk_word_nodes/gjgk_update_word.py`、`backend/nodes/gngk_word_nodes/gngk_fw_zc_update_word.py`、`backend/nodes/gngk_word_nodes/gngk_hw_cz_update_word.py`、`backend/tests/graphs/test_generation_mode_branching.py`、`backend/tests/nodes/test_comment_agent_writeback_node.py`、`asset/shared_runtime_word_skill_knowledge_pack.md`、`asset/README.md`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m pytest backend/tests/graphs/test_generation_mode_branching.py backend/tests/graphs/test_generation_mode_workflow.py backend/tests/graphs/test_xjcg_generation_mode_agent.py backend/tests/agents/test_comment_agent.py backend/tests/nodes/test_comment_agent_writeback_node.py -v` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests/graphs -v` 通过，28 passed；`backend/.venv-linux/bin/python -m pytest backend/tests -v` 通过，370 passed；`npm run lint` 通过；`npm run type-check` 通过；`npm test -- --runInBand` 通过，31 suites / 355 tests；本轮文件 `git diff --check -- ...` 通过。
+- 全仓 `git diff --check` 仍因进入本轮前已有的 `backend/.env.example`、`scripts/start-dev.ps1` trailing whitespace 失败，未改动这些既有文件。
+- 本 story 只改后端 graph / Word 节点 / 测试与知识包，无 UI 改动，未执行浏览器验证。
+- **未来迭代的学习：**
+  - `comment_agent` graph 节点不要从 `backend.nodes.common_word_nodes.__init__` re-export；`backend.agents.comments.tools` 会导入 `comment_writeback`，包级提前导出会形成 `backend.agents.comments` 与 `common_word_nodes` 的循环初始化。
+  - agent generate 的批注增强失败必须在节点内降级成 `comment_writeback.warning`，不能向 graph 外抛出导致任务失败；正文保存成功才是 generate 下载主流程的强契约。
+  - 逐类型 `update_word` 都要识别 `suppress_ai_comment_writeback`，否则某个类型会在 agent 路径提前写批注并绕过 `comment_agent` 工具门禁。
+---
+## 2026-05-30 15:54 - US-007
+- 新增 `comment_supplement` 后端任务闭环：`POST /api/comment-supplement` 创建 `task_kind=comment_supplement` 任务，校验 `conversation_id`、latest `rewrite_state`、`polished_text`、当前源文件存在且匹配 latest `prepared_doc_path`。
+- 新增 `CommentSupplementGraph`，通过 BaseGraph 执行 `prepare_comment_supplement -> generate_comments -> comment_agent -> finalize_comment_supplement`，准备节点复制当前文档为新副本，无参考批注节点基于 latest `rewrite_state.polished_text` 生成候选，并复用现有 `comment_agent` 写回与 warning 摘要。
+- 任务完成后新增 `ConversationService.append_comment_supplement_success()` 追加最新 assistant rewrite_state，使 `prepared_doc_path` 指向补充批注后的副本；任务 result 和 SSE done 继续包含 `output_file`、`file_name`、`comment_writeback`。
+- 更新共享运行时知识包，记录补充批注 API、Graph、latest rewrite_state 更新和测试入口。
+- 更改的文件：`backend/models/generate.py`、`backend/models/__init__.py`、`backend/api/comment_supplement.py`、`backend/main.py`、`backend/services/document_service.py`、`backend/services/conversation_service.py`、`backend/graphs/comment_supplement_graph.py`、`backend/graphs/__init__.py`、`backend/graphs/base_graph.py`、`backend/nodes/common_word_nodes/comment_supplement.py`、`backend/states/base_state.py`、`backend/task/task_queue_manager.py`、`backend/tests/api/test_comment_supplement_api.py`、`backend/tests/graphs/test_comment_supplement_graph.py`、`backend/tests/services/test_document_service_comment_supplement.py`、`asset/shared_runtime_word_skill_knowledge_pack.md`、`asset/README.md`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/api/comment_supplement.py backend/graphs/comment_supplement_graph.py backend/nodes/common_word_nodes/comment_supplement.py backend/services/document_service.py backend/models/generate.py backend/services/conversation_service.py backend/task/task_queue_manager.py backend/states/base_state.py` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests/api/test_comment_supplement_api.py backend/tests/graphs/test_comment_supplement_graph.py backend/tests/services/test_document_service_comment_supplement.py -v` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests -v` 通过，380 passed；`npm run lint` 通过；`npm run type-check` 通过；`npm test -- --runInBand` 通过，31 suites / 355 tests；本轮变更文件 `git diff --check -- ...` 通过。
+- 全仓 `git diff --check` 仍受进入本轮前已有的 `backend/.env.example`、`scripts/start-dev.ps1` trailing whitespace 影响，未改动这些既有文件。
+- **未来迭代的学习：**
+  - `comment_supplement` 不应信任前端传入任意 Word 路径；service 层必须把 `source_file` 与 latest `rewrite_state.prepared_doc_path` 解析后比较，再让 graph 复制副本。
+  - 独立补充批注任务不直接更新旧文件；`prepare_comment_supplement` 创建副本并把 `prepared_doc_path` 指向副本，完成后 conversation latest rewrite_state 才成为后续 rewrite/edit 的真源。
+  - 无参考补充批注生成可以复用 `generate_comments` 的 JSON 解析工具，但 prompt 只能来自 `comment_no_reference_prompt`，不要把三组内部批注依据重新塞进 supplement prompt。
+---
+## 2026-05-30 16:19 - US-008
+- 实现了前端补充批注入口：`frontend/lib/api.ts` 新增 `createCommentSupplementTask()`，ChatPanel 从初次 generate 下载卡调用 `/api/comment-supplement` 并通过现有 `startTask` 进入任务/SSE 链路。
+- 将 `comment_writeback` 前端摘要贯通到下载卡 metadata：task status fallback、SSE done、FormPanel 终态同步和 `chatStore.completeTask()` 都会保存 `commentWriteback`。
+- 更新下载卡 UI：仅 generate 成功卡展示 `补充批注`，rewrite/edit/comment_supplement 不展示；`commentWriteback.warning=true` 时显示“文档已生成，部分批注未写入”，下载按钮仍可点击。
+- 更改的文件：`frontend/types/api.ts`、`frontend/types/chat.ts`、`frontend/lib/api.ts`、`frontend/hooks/useChatSSE.ts`、`frontend/stores/chatStore.ts`、`frontend/components/chat/FormPanel.tsx`、`frontend/components/chat/TaskDownloadMessage.tsx`、`frontend/components/chat/MessageList.tsx`、`frontend/components/chat/ChatPanel.tsx`、`frontend/__tests__/unit/lib/test_api.test.ts`、`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`、`frontend/__tests__/unit/components/chat/test_message_list.test.tsx`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`npm test -- --runTestsByPath __tests__/unit/lib/test_api.test.ts __tests__/unit/hooks/test_use_chat_sse.test.tsx __tests__/unit/stores/test_chat_store_task_messages.test.ts __tests__/unit/components/chat/test_message_list.test.tsx __tests__/unit/components/chat/test_chat_panel.test.tsx --runInBand` 通过；`npm run lint` 通过；`npm run type-check` 通过；`npm test -- --runInBand` 通过，31 suites / 362 tests；浏览器 mock 验证通过，截图保存到 `tasks/comment-supplement-comment-agent/screenshots/us-008-browser-mocked-flow.png`，断言保存到 `tasks/comment-supplement-comment-agent/logs/us-008-browser-mocked-assertions.json`；本轮变更文件 `git diff --check -- ...` 通过。
+- 全仓 `git diff --check` 仍受进入本轮前已有的 `backend/.env.example`、`scripts/start-dev.ps1` trailing whitespace 影响，未改动这些既有文件。
+- 本 story 只改前端任务入口和展示，未运行后端 pytest。
+- **未来迭代的学习：**
+  - `comment_writeback` 前端透传不能只改 SSE `done`；任务状态补拉和 FormPanel 终态同步也会创建下载卡。
+  - 下载卡只负责展示和回调分发，创建补充批注任务应留在 ChatPanel，继续走统一 API helper、placeholder log message 和 `startTask`。
+  - 真实浏览器验证可用 sessionStorage 种入完成的 generate 下载卡，并用 Playwright route mock `/api/comment-supplement`、task status、heartbeat，避免未启动后端造成 console 噪声。
+---
+## 2026-05-30 17:01 - US-009
+- 展示 `comment_agent` 过程卡：`TaskContentMessage` 对 `comment_agent` 使用精确标题，不再显示 `comment_agent round-1`。
+- 扩展 `useChatSSE` 和 `chatStore` 的 agent-step 分组规则：agent generate 与 `comment_supplement` 可显示 `comment_agent` 卡；同一 node/round 的多条 AIMessage 内容按顺序追加；最终空完成事件保留已追加内容；workflow generate 的 `comment_agent` 事件会被过滤。
+- 新增稳定 typecheck 配置 `frontend/tsconfig.typecheck.json`，并让 `npm run type-check` 使用该配置，避免 Next dev 自动生成的 `.next/dev/types/validator.ts` 破坏本地类型检查。
+- 同步回写 `asset/tender_type_identity_session_knowledge_pack.md` 与 `asset/README.md`，记录 `comment_agent` 过程卡追加、标题和 gating 边界。
+- 更改的文件：`frontend/hooks/useChatSSE.ts`、`frontend/stores/chatStore.ts`、`frontend/components/chat/TaskContentMessage.tsx`、`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`、`frontend/__tests__/unit/components/chat/test_task_content_message.test.tsx`、`frontend/package.json`、`frontend/tsconfig.typecheck.json`、`asset/tender_type_identity_session_knowledge_pack.md`、`asset/README.md`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`npm test -- --runTestsByPath __tests__/unit/hooks/test_use_chat_sse.test.tsx __tests__/unit/stores/test_chat_store_task_messages.test.ts __tests__/unit/components/chat/test_task_content_message.test.tsx --runInBand` 通过；`npm run lint` 通过；`npm run type-check` 通过；`npm test -- --runInBand` 通过，31 suites / 367 tests；Playwright MCP mock 浏览器验证通过，截图保存到 `tasks/comment-supplement-comment-agent/screenshots/us-009-comment-agent-card.png`，断言与 console 保存到 `tasks/comment-supplement-comment-agent/logs/us-009-browser-assertions.json`、`tasks/comment-supplement-comment-agent/logs/us-009-browser-console.log`；本轮变更文件 `git diff --check -- ...` 通过。
+- 全仓 `git diff --check` 仍受进入本轮前已有的 `backend/.env.example`、`scripts/start-dev.ps1` trailing whitespace 影响，未改动这些既有文件。
+- 本 story 只改前端 agent-step 展示与 type-check 配置，未运行后端 pytest。
+- **未来迭代的学习：**
+  - `comment_agent` 的 AIMessage 内容不是普通 snapshot；前端需要追加同一张卡并在最终空完成事件保留内容。
+  - `comment_supplement` 是允许 agent-step 过程卡的任务类型，但 rewrite/edit 仍不应启用 agent-step 卡。
+  - UI mock 浏览器验证应 route heartbeat，避免未启动后端时产生无关 console error。
+---
+## 2026-05-30 17:34 - US-010
+- 新增 `frontend/e2e/test_comment_supplement.spec.ts`，用 Playwright mock 覆盖三条用户可见契约：初次 generate 下载卡点击“补充批注”后创建 `comment_supplement`、展示 `comment_agent` 卡并生成新下载卡；agent generate 同时展示正文 agent 卡和 `comment_agent` 卡；workflow generate 过滤 `comment_agent` 卡。
+- 更新已有 E2E：`test_generation_mode_agent.spec.ts` 的证据目录改为当前任务路径；`test_home.spec.ts` 和 `test_url_conversation.spec.ts` 改为断言当前 `/` 到 `/tender` 的真实入口，不再依赖历史 landing page。
+- 回写 `asset/shared_runtime_word_skill_knowledge_pack.md` 与 `asset/README.md`，记录补充批注 / `comment_agent` mock E2E 回归入口。
+- 更改的文件：`frontend/e2e/test_comment_supplement.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`、`frontend/e2e/test_home.spec.ts`、`frontend/e2e/test_url_conversation.spec.ts`、`asset/shared_runtime_word_skill_knowledge_pack.md`、`asset/README.md`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`npm run test:e2e -- e2e/test_comment_supplement.spec.ts` 通过，3 passed；`npm run test:e2e` 通过，27 passed；`npm run lint` 通过；`npm run type-check` 通过；`npm test -- --runTestsByPath __tests__/unit/types/test_api_sse_agent_step.test.ts __tests__/unit/lib/test_api.test.ts __tests__/unit/hooks/test_use_chat_sse.test.tsx __tests__/unit/stores/test_chat_store_task_messages.test.ts __tests__/unit/components/chat/test_message_list.test.tsx __tests__/unit/components/chat/test_chat_panel.test.tsx __tests__/unit/components/chat/test_task_content_message.test.tsx --runInBand` 通过，7 suites / 128 tests；`npm test -- --runInBand` 通过，31 suites / 367 tests；`backend/.venv-linux/bin/python -m pytest backend/tests/nodes/test_comment_writeback.py backend/tests/services/test_document_service_task_result.py backend/tests/services/test_document_service_comment_supplement.py backend/tests/api/test_comment_supplement_api.py backend/tests/graphs/test_comment_supplement_graph.py backend/tests/agents/test_comment_agent.py backend/tests/prompts/test_comment_no_reference_prompt.py -v` 通过，61 passed；`backend/.venv-linux/bin/python -m pytest backend/tests -v` 通过，380 passed；`git diff --check` 通过。
+- 证据：截图写入 `tasks/comment-supplement-comment-agent/screenshots/us-010-comment-supplement-flow.png`、`us-010-agent-generate-comment-agent.png`、`us-010-workflow-no-comment-agent.png`；console 日志写入 `tasks/comment-supplement-comment-agent/logs/us-010-comment-supplement-console.log`、`us-010-agent-generate-console.log`、`us-010-workflow-generate-console.log`。
+- **未来迭代的学习：**
+  - 补充批注 E2E 可以完全 mock `/api/comment-supplement`、task status、heartbeat 和 SSE；不需要后端或 Word COM 即可覆盖 UI 任务链路。
+  - `comment_agent` 在前端标题中保持精确节点名；正文子 agent 仍会按 round 显示，例如 `content_generate_agent round-1`。
+  - 全量 E2E 里根路径已经是工作台重定向，旧首页断言会误报失败；新增导航测试应以 `/tender` 的 sidebar 和空态为真源。
+---

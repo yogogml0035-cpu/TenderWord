@@ -32,6 +32,7 @@ class TaskKind(Enum):
     GENERATE = "generate"
     REWRITE = "rewrite"
     EDIT = "edit"
+    COMMENT_SUPPLEMENT = "comment_supplement"
 
 
 class NodeName(Enum):
@@ -46,6 +47,9 @@ class NodeName(Enum):
     GENERATE_POLISHED_TEXT = "generate_polished_text"
     CONTENT_AGENT = "content_agent"
     GENERATE_COMMENTS = "generate_comments"
+    COMMENT_AGENT = "comment_agent"
+    PREPARE_COMMENT_SUPPLEMENT = "prepare_comment_supplement"
+    FINALIZE_COMMENT_SUPPLEMENT = "finalize_comment_supplement"
     RESOLVE_REWRITE_TARGET = "resolve_rewrite_target"
     RESOLVE_EDIT_TARGET = "resolve_edit_target"
     GET_REWRITE_COMMENTS = "get_rewrite_comments"
@@ -68,6 +72,9 @@ NODE_DISPLAY_NAMES = {
     NodeName.GENERATE_POLISHED_TEXT: "AI生成采购需求",
     NodeName.CONTENT_AGENT: "智能体生成采购需求",
     NodeName.GENERATE_COMMENTS: "AI生成批注建议",
+    NodeName.COMMENT_AGENT: "智能体补充批注",
+    NodeName.PREPARE_COMMENT_SUPPLEMENT: "准备补充批注副本",
+    NodeName.FINALIZE_COMMENT_SUPPLEMENT: "完成补充批注任务",
     NodeName.RESOLVE_REWRITE_TARGET: "选择修改版本",
     NodeName.RESOLVE_EDIT_TARGET: "准备编辑副本",
     NodeName.GET_REWRITE_COMMENTS: "提取原批注",

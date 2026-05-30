@@ -4,7 +4,7 @@ import path from 'node:path';
 
 const taskId = 'task-agent-e2e';
 const conversationId = 'conv-agent-e2e';
-const artifactRoot = path.resolve(__dirname, '../../tasks/deepagents-generation-mode-refactor');
+const artifactRoot = path.resolve(__dirname, '../../tasks/comment-supplement-comment-agent');
 const screenshotsDir = path.join(artifactRoot, 'screenshots');
 const logsDir = path.join(artifactRoot, 'logs');
 

@@ -180,6 +180,7 @@ class SSEManager:
         task_kind: str = "generate",
         content: Optional[str] = None,
         findings: Optional[List[dict[str, str]]] = None,
+        comment_agent: Optional[dict[str, Any]] = None,
         is_complete: bool = False,
     ) -> None:
         self._schedule(
@@ -191,6 +192,7 @@ class SSEManager:
                 node=node,
                 content=content,
                 findings=findings,
+                comment_agent=comment_agent,
                 is_complete=is_complete,
             )
         )
@@ -206,6 +208,7 @@ class SSEManager:
         download_url: Optional[str] = None,
         processing_time: Optional[float] = None,
         style_writeback: Optional[dict] = None,
+        comment_writeback: Optional[dict] = None,
     ) -> None:
         self._schedule(
             self.send_done(
@@ -218,6 +221,7 @@ class SSEManager:
                 download_url=download_url,
                 processing_time=processing_time,
                 style_writeback=style_writeback,
+                comment_writeback=comment_writeback,
             )
         )
 
@@ -647,6 +651,7 @@ class SSEManager:
         task_kind: str = "generate",
         content: Optional[str] = None,
         findings: Optional[List[dict[str, str]]] = None,
+        comment_agent: Optional[dict[str, Any]] = None,
         is_complete: bool = False,
     ) -> int:
         """发送智能体步骤事件."""
@@ -658,6 +663,7 @@ class SSEManager:
             node=node,
             content=content,
             findings=findings or [],
+            comment_agent=comment_agent,
             is_complete=is_complete,
         ).model_dump(mode="json")
         return await self.broadcast(task_id, SSEEventType.AGENT_STEP, data)
@@ -673,6 +679,7 @@ class SSEManager:
         download_url: Optional[str] = None,
         processing_time: Optional[float] = None,
         style_writeback: Optional[dict] = None,
+        comment_writeback: Optional[dict] = None,
     ) -> int:
         """发送完成事件.
 
@@ -700,6 +707,7 @@ class SSEManager:
                 "download_url": download_url,
                 "processing_time": processing_time,
                 "style_writeback": style_writeback,
+                "comment_writeback": comment_writeback,
                 "timestamp": datetime.now().isoformat(),
             },
         )

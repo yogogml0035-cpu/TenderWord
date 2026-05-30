@@ -33,6 +33,43 @@ class CommentWritebackResult(TypedDict):
     issues: list[CommentWritebackIssue]
 
 
+class CommentWritebackSummaryPayload(TypedDict):
+    summary: str
+    generated: int
+    added: int
+    failed: int
+    skipped: int
+    warning: bool
+
+
+def _coerce_non_negative_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def build_comment_writeback_summary_payload(
+    *,
+    generated_count: Any,
+    writeback_result: Mapping[str, Any] | None,
+) -> CommentWritebackSummaryPayload:
+    generated = _coerce_non_negative_int(generated_count)
+    result = writeback_result or {}
+    added = _coerce_non_negative_int(result.get("added"))
+    failed = _coerce_non_negative_int(result.get("failed"))
+    skipped = _coerce_non_negative_int(result.get("skipped"))
+    summary = f"AI批注写入: 生成={generated}, 成功={added}, 失败={failed}, 跳过={skipped}"
+    return {
+        "summary": summary,
+        "generated": generated,
+        "added": added,
+        "failed": failed,
+        "skipped": skipped,
+        "warning": generated > 0 and failed > 0,
+    }
+
+
 def _ranges_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
     return not (int(a_end) <= int(b_start) or int(b_end) <= int(a_start))
 

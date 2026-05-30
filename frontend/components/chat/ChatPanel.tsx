@@ -10,6 +10,7 @@ import { ChatInput } from './ChatInput';
 import {
   ApiError,
   cancelTask,
+  createCommentSupplementTask,
   createEditTask,
   downloadFile,
   streamUserMessage,
@@ -241,6 +242,10 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           return {
             ...message,
             content: stepSnapshot.content,
+            metadata: {
+              ...(message.metadata || {}),
+              ...(stepSnapshot.commentAgent ? { commentAgent: stepSnapshot.commentAgent } : {}),
+            },
           };
         }
       }
@@ -785,6 +790,62 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     }
   };
 
+  const handleCommentSupplement = useCallback(
+    (message: Message) => {
+      if (!conversation || isBusy) {
+        return;
+      }
+      const outputFile =
+        typeof message.metadata?.outputFile === 'string' ? message.metadata.outputFile : '';
+      if (!outputFile || message.metadata?.taskKind !== 'generate') {
+        return;
+      }
+
+      const placeholderMessageId = addMessage(conversation.id, {
+        type: 'ai',
+        content: '正在创建补充批注任务',
+        status: 'completed',
+        metadata: {
+          chatKind: 'task-notice',
+        },
+      });
+
+      setComposerNotice(null);
+
+      void (async () => {
+        try {
+          const result = await createCommentSupplementTask({
+            conversation_id: conversation.id,
+            source_file: outputFile,
+            model: selectedModel,
+          });
+          startTask(
+            conversation.id,
+            result.task_id,
+            {
+              task_kind: result.task_kind,
+              status: result.status || 'queued',
+              queue_position: result.queue_position,
+              waiting_count: result.waiting_count,
+            },
+            { logMessageId: placeholderMessageId }
+          );
+        } catch (error) {
+          deleteMessage(conversation.id, placeholderMessageId);
+          const errorMessage =
+            error instanceof ApiError ? error.message : '创建补充批注任务失败，请稍后重试';
+          setComposerNotice(errorMessage);
+          addMessage(conversation.id, {
+            type: 'system',
+            content: errorMessage,
+            status: 'completed',
+          });
+        }
+      })();
+    },
+    [addMessage, conversation, deleteMessage, isBusy, selectedModel, startTask]
+  );
+
   const handleStopAction = useCallback(async () => {
     if (!conversation) {
       return;
@@ -1052,9 +1113,13 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         <MessageList
           messages={mergedMessages}
           onDownload={handleDownload}
+          onCommentSupplement={handleCommentSupplement}
           onRetry={handleRetry}
           interactionDisabled={isTaskQueueStage}
-          emptyState={isCurrentTaskQueued || isCurrentTaskStarting ? <div className="h-full" /> : undefined}
+          commentSupplementDisabled={isBusy}
+          emptyState={
+            isCurrentTaskQueued || isCurrentTaskStarting ? <div className="h-full" /> : undefined
+          }
         />
 
         {isTaskQueueStage && (

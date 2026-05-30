@@ -30,6 +30,7 @@ from backend.config.tender_config import (  # noqa: E402
     get_default_anchor_texts,
 )
 from backend.nodes.common_word_nodes.comment_writeback import (  # noqa: E402
+    build_comment_writeback_summary_payload,
     write_polished_comments,
 )
 from backend.states import GjgkTenderGraphState  # noqa: E402
@@ -1075,6 +1076,7 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
     insertion_after_text = state.get("insertion_after_text")
     verbose_style_progress_logs = bool(state.get("verbose_style_progress_logs"))
     suppress_comment_progress_logs = bool(state.get("suppress_comment_progress_logs"))
+    suppress_ai_comment_writeback = bool(state.get("suppress_ai_comment_writeback"))
 
     if not prepared_doc_path:
         raise ValueError("需要 prepared_doc_path 来插入 gjgk 内容")
@@ -1101,6 +1103,7 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
     comment_writeback_failed = 0
     comment_writeback_skipped = 0
     comment_writeback_errors: list[dict[str, str]] = []
+    comment_writeback_result_payload = None
     style_writeback_summary = ""
     style_writeback_result = None
 
@@ -1412,50 +1415,54 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
             )
             comment_step_label = "步骤7"
 
-        # Capture comment writeback result for tracking and failure detection
-        polished_comments = state.get("polished_comments") or []
-        generated_count = state.get("generated_comment_count", 0)
+        if suppress_ai_comment_writeback:
+            log_parts.append(
+                f"{comment_step_label}：agent 模式跳过确定性批注写入，交由 comment_agent 处理。"
+            )
+        else:
+            # Capture comment writeback result for tracking and failure detection
+            polished_comments = state.get("polished_comments") or []
+            generated_count = state.get("generated_comment_count", 0)
 
-        comment_writeback_result = write_polished_comments(
-            doc=doc,
-            polished_comments=polished_comments,
-            bound_start=int(range_start),
-            bound_end=int(get_insertion_bound_end()),
-            log_parts=log_parts,
-            step_label=comment_step_label,
-        )
+            comment_writeback_result = write_polished_comments(
+                doc=doc,
+                polished_comments=polished_comments,
+                bound_start=int(range_start),
+                bound_end=int(get_insertion_bound_end()),
+                log_parts=log_parts,
+                step_label=comment_step_label,
+            )
 
-        # Extract writeback stats
-        added = comment_writeback_result.get("added", 0)
-        failed = comment_writeback_result.get("failed", 0)
-        skipped = comment_writeback_result.get("skipped", 0)
-        issues = comment_writeback_result.get("issues", [])
+            summary_payload = build_comment_writeback_summary_payload(
+                generated_count=generated_count,
+                writeback_result=comment_writeback_result,
+            )
+            added = summary_payload["added"]
+            failed = summary_payload["failed"]
+            skipped = summary_payload["skipped"]
+            issues = comment_writeback_result.get("issues", [])
 
-        # Build summary for logging and state
-        summary = f"AI批注写入: 生成={generated_count}, 成功={added}, 失败={failed}, 跳过={skipped}"
-        if not suppress_comment_progress_logs:
-            progress_log.info(summary)
-
-        # Hard fail: if AI generated comments exist but zero were written back
-        if generated_count > 0 and added == 0:
-            error_msg = f"批注生成成功但写入失败: 生成{generated_count}条, 成功写入0条"
+            summary = summary_payload["summary"]
             if not suppress_comment_progress_logs:
-                progress_log.error(error_msg)
-            raise ValueError(error_msg)
+                if summary_payload["warning"]:
+                    progress_log.warning(summary)
+                else:
+                    progress_log.info(summary)
 
-        # Store detailed results in state for visibility
-        comment_writeback_summary = summary
-        comment_writeback_added = added
-        comment_writeback_failed = failed
-        comment_writeback_skipped = skipped
-        comment_writeback_errors = [
-            {
-                "reference_text": issue.get("reference_text", ""),
-                "reason": issue.get("reason", ""),
-                "error": issue.get("error", "")
-            }
-            for issue in issues
-        ]
+            # Store detailed results in state for visibility
+            comment_writeback_summary = summary
+            comment_writeback_result_payload = summary_payload
+            comment_writeback_added = added
+            comment_writeback_failed = failed
+            comment_writeback_skipped = skipped
+            comment_writeback_errors = [
+                {
+                    "reference_text": issue.get("reference_text", ""),
+                    "reason": issue.get("reason", ""),
+                    "error": issue.get("error", "")
+                }
+                for issue in issues
+            ]
 
         save_document_with_retry(doc, node_name=NODE_NAME)
         log_parts.append("文档已保存")
@@ -1490,6 +1497,7 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
     new_state["comment_writeback_failed"] = comment_writeback_failed
     new_state["comment_writeback_skipped"] = comment_writeback_skipped
     new_state["comment_writeback_errors"] = comment_writeback_errors
+    new_state["comment_writeback_result"] = comment_writeback_result_payload
     new_state["style_writeback_summary"] = style_writeback_summary
     new_state["style_writeback_result"] = style_writeback_result
     return GjgkTenderGraphState(**new_state)

@@ -19,6 +19,7 @@ import type {
   TaskHeartbeatData,
   TaskListData,
   CancelTaskData,
+  CommentSupplementTaskRequest,
   CreateTaskData,
   EditTaskRequest,
   GenerateRequest,
@@ -190,7 +191,12 @@ function parseUserStreamEvent(payload: unknown): UserStreamEvent | null {
     case 'task_accepted': {
       const taskKind = payload.data.task_kind;
       const taskId = payload.data.task_id;
-      if (taskKind !== 'generate' && taskKind !== 'rewrite' && taskKind !== 'edit') {
+      if (
+        taskKind !== 'generate' &&
+        taskKind !== 'rewrite' &&
+        taskKind !== 'edit' &&
+        taskKind !== 'comment_supplement'
+      ) {
         return null;
       }
       if (typeof taskId !== 'string' || !taskId) {
@@ -613,6 +619,15 @@ export async function createGenerateTask(params: GenerateRequest): Promise<Creat
 
 export async function createEditTask(params: EditTaskRequest): Promise<CreateTaskData> {
   return request<CreateTaskData>('/api/edit', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function createCommentSupplementTask(
+  params: CommentSupplementTaskRequest
+): Promise<CreateTaskData> {
+  return request<CreateTaskData>('/api/comment-supplement', {
     method: 'POST',
     body: JSON.stringify(params),
   });

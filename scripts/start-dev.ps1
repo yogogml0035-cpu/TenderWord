@@ -52,6 +52,34 @@ function Assert-WindowsVenvCompatible {
     }
 }
 
+function Assert-PathWithinDirectory {
+    param(
+        [string]$Path,
+        [string]$Directory
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $fullDirectory = [System.IO.Path]::GetFullPath($Directory).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+
+    if (-not $fullPath.StartsWith($fullDirectory, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Fail "拒绝清理目录外路径：$fullPath"
+    }
+}
+
+function Remove-DirectoryIfPresent {
+    param(
+        [string]$Path,
+        [string]$ContainingDirectory
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    Assert-PathWithinDirectory -Path $Path -Directory $ContainingDirectory
+    Remove-Item -LiteralPath $Path -Recurse -Force
+}
+
 function Get-CommandPath {
     param(
         [string]$Name,
@@ -85,6 +113,111 @@ function Get-PowerShellHostPath {
     }
 
     Fail "未找到可用的 PowerShell 可执行文件。"
+}
+
+function Test-WindowsFrontendDependenciesReady {
+    param(
+        [string]$FrontendDir,
+        [string]$NodeExe
+    )
+
+    $nextCmd = Join-Path $FrontendDir "node_modules\.bin\next.cmd"
+    if (-not (Test-Path -LiteralPath $nextCmd)) {
+        return $false
+    }
+
+    Push-Location $FrontendDir
+    try {
+        & $NodeExe -e "require('lightningcss')" *> $null
+        return ($LASTEXITCODE -eq 0)
+    } finally {
+        Pop-Location
+    }
+}
+
+function Test-ReparsePoint {
+    param([Parameter(Mandatory = $true)]$Item)
+
+    return (($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+}
+
+function Get-NodeModulesPlatform {
+    param([string]$Path)
+
+    if (Test-Path -LiteralPath (Join-Path $Path "lightningcss-win32-x64-msvc")) {
+        return "win"
+    }
+
+    if ((Test-Path -LiteralPath (Join-Path $Path "lightningcss-linux-x64-gnu")) -or
+        (Test-Path -LiteralPath (Join-Path $Path "lightningcss-linux-x64-musl"))) {
+        return "wsl"
+    }
+
+    return ""
+}
+
+function Remove-NodeModulesForRepair {
+    param([string]$FrontendDir)
+
+    $nodeModules = Join-Path $FrontendDir "node_modules"
+    if (-not (Test-Path -LiteralPath $nodeModules)) {
+        return
+    }
+
+    $item = Get-Item -LiteralPath $nodeModules -Force
+    if ($item.LinkType -in @("Junction", "SymbolicLink") -or (Test-ReparsePoint $item)) {
+        [System.IO.Directory]::Delete($nodeModules)
+        return
+    }
+
+    $platform = Get-NodeModulesPlatform -Path $nodeModules
+    if ($platform -and $platform -ne "win") {
+        $preservePath = Join-Path $FrontendDir "node_modules-$platform"
+        if (Test-Path -LiteralPath $preservePath) {
+            Fail "frontend\node_modules 是 $platform 依赖目录，且 frontend\node_modules-$platform 已存在。请先手动确认后移走其中一个目录。"
+        }
+
+        Rename-Item -LiteralPath $nodeModules -NewName "node_modules-$platform"
+        return
+    }
+
+    Remove-DirectoryIfPresent -Path $nodeModules -ContainingDirectory $FrontendDir
+}
+
+function Repair-WindowsFrontendDependencies {
+    param(
+        [string]$RepoRoot,
+        [string]$FrontendDir,
+        [string]$NpmCmd
+    )
+
+    $nodeModulesWin = Join-Path $FrontendDir "node_modules-win"
+    $nodeModules = Join-Path $FrontendDir "node_modules"
+
+    Write-Info "正在安装 Windows 前端依赖到 frontend\node_modules..."
+    Remove-NodeModulesForRepair -FrontendDir $FrontendDir
+    Remove-DirectoryIfPresent -Path $nodeModulesWin -ContainingDirectory $FrontendDir
+    Remove-DirectoryIfPresent -Path (Join-Path $FrontendDir ".next") -ContainingDirectory $FrontendDir
+
+    Push-Location $FrontendDir
+    try {
+        & $NpmCmd ci
+        if ($LASTEXITCODE -ne 0) {
+            Fail "npm ci 失败，无法安装 Windows 前端依赖。"
+        }
+
+        if (-not (Test-Path -LiteralPath $nodeModules)) {
+            Fail "npm ci 完成后未生成 frontend\node_modules。"
+        }
+
+        if (Test-Path -LiteralPath $nodeModulesWin) {
+            Remove-DirectoryIfPresent -Path $nodeModulesWin -ContainingDirectory $FrontendDir
+        }
+    } finally {
+        Pop-Location
+    }
+
+    Write-Info "Windows 前端依赖已安装到 frontend\node_modules。"
 }
 
 function Get-PortOccupant {
@@ -234,8 +367,7 @@ $backendPyVenvConfig = Join-Path $backendDir ".venv\pyvenv.cfg"
 $frontendPackage = Join-Path $frontendDir "package.json"
 $backendEnv = Join-Path $backendDir ".env"
 $frontendEnv = Join-Path $frontendDir ".env.local"
-$frontendNodeModules = Join-Path $frontendDir "node_modules"
-$frontendNextCmd = Join-Path $frontendNodeModules ".bin\next.cmd"
+$frontendDepsLinkScript = Join-Path $repoRoot "scripts\set-frontend-deps-link-win.ps1"
 
 Assert-PathExists -Path $backendEntry -FailureMessage "未找到 backend\main.py。请确认当前目录是项目根目录。"
 Assert-PathExists -Path $backendPython -FailureMessage "缺少 backend\.venv\Scripts\python.exe。请先在 backend 目录创建并安装虚拟环境。"
@@ -249,7 +381,7 @@ $frontendNpmCmd = $null
 if ($launchFrontend) {
     Assert-PathExists -Path $frontendPackage -FailureMessage "未找到 frontend\package.json。请确认当前目录是项目根目录。"
     Assert-PathExists -Path $frontendEnv -FailureMessage "缺少 frontend\.env.local。请先参考 frontend\.env.local.example 创建环境文件。"
-    Assert-PathExists -Path $frontendNodeModules -FailureMessage "缺少 frontend\node_modules。请先进入 frontend 执行 npm install。"
+    Assert-PathExists -Path $frontendDepsLinkScript -FailureMessage "缺少 scripts\set-frontend-deps-link-win.ps1。"
     $frontendNodeExe = Get-CommandPath -Name "node.exe" -FailureMessage "未找到 node.exe 命令。请先安装 Windows Node.js 或确保 node.exe 在 PATH 中。"
     $frontendNpmCmd = Get-CommandPath -Name "npm.cmd" -FailureMessage "未找到 npm.cmd 命令。请先安装 Windows Node.js 或确保 npm.cmd 在 PATH 中。"
 }
@@ -259,40 +391,30 @@ if ($launchFrontend) {
     Assert-PortFree -Port 8502
 }
 
-$frontendNodeExeLiteral = "'" + (Escape-SingleQuotedText -Text $frontendNodeExe) + "'"
-$frontendNpmCmdLiteral = "'" + (Escape-SingleQuotedText -Text $frontendNpmCmd) + "'"
-$frontendCommandText = @"
-if (-not (Test-Path -LiteralPath "node_modules\.bin\next.cmd")) {
-    Write-Host "[frontend] 检测到缺少 Windows Node.js shim，正在执行 npm ci..." -ForegroundColor Yellow
-    & $frontendNpmCmdLiteral ci
-    if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
-} else {
-    & $frontendNodeExeLiteral -e "require('lightningcss')" *> `$null
-    if (`$LASTEXITCODE -ne 0) {
-        Write-Host "[frontend] 检测到 Windows 原生前端依赖缺失或平台不匹配，正在执行 npm ci..." -ForegroundColor Yellow
-        & $frontendNpmCmdLiteral ci
-        if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+if ($launchFrontend) {
+    Write-Info "切换前端依赖到 Windows 模式..."
+    & $frontendDepsLinkScript -Target win -RepoRoot $repoRoot
+    if ($LASTEXITCODE -ne 0) {
+        Fail "无法切换 frontend\node_modules 到 node_modules-win。"
+    }
+
+    if (-not (Test-WindowsFrontendDependenciesReady -FrontendDir $frontendDir -NodeExe $frontendNodeExe)) {
+        Write-Info "检测到 Windows 原生前端依赖缺失或平台不匹配，将执行 npm ci 修复。"
+        Repair-WindowsFrontendDependencies -RepoRoot $repoRoot -FrontendDir $frontendDir -NpmCmd $frontendNpmCmd
     }
 }
+
+$frontendNpmCmdLiteral = "'" + (Escape-SingleQuotedText -Text $frontendNpmCmd) + "'"
+$frontendCommandText = @"
 if (Test-Path -LiteralPath ".next") {
     Write-Host "[frontend] 正在清理 Next.js 缓存..." -ForegroundColor Yellow
     Remove-Item -LiteralPath ".next" -Recurse -Force
-}
-& $frontendNodeExeLiteral -e "require('lightningcss')" *> `$null
-if (`$LASTEXITCODE -ne 0) {
-    Write-Host "[frontend] 检测到 Windows 原生前端依赖缺失或平台不匹配，正在执行 npm ci..." -ForegroundColor Yellow
-    & $frontendNpmCmdLiteral ci
-    if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
 }
 & $frontendNpmCmdLiteral run dev
 "@
 $frontendBanner = "[frontend] 正在执行 npm run dev"
 $frontendTitle = "TenderWord Frontend Dev (8502)"
 $frontendSummary = "dev (npm run dev)"
-
-if ($launchFrontend -and -not (Test-Path -LiteralPath $frontendNextCmd)) {
-    Write-Info "检测到 frontend\\node_modules 已存在，但缺少 Windows next.cmd shim；启动时会先执行 npm ci 进行修复。"
-}
 
 Write-Info "运行后端预检查..."
 $backendCheckOutput = & $backendPython -c "import asyncio; import fastapi; import uvicorn; import pydantic_settings; import backend.main" 2>&1

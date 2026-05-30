@@ -1,6 +1,7 @@
 import {
   ApiError,
   cancelTask,
+  createCommentSupplementTask,
   createEditTask,
   createGenerateTask,
   downloadFile,
@@ -15,7 +16,13 @@ import {
   streamUserMessage,
   uploadFile,
 } from '@/lib/api';
-import type { EditTaskRequest, GenerateRequest, TemplateCandidateSelectRequest, UserStreamEvent } from '@/types/api';
+import type {
+  CommentSupplementTaskRequest,
+  EditTaskRequest,
+  GenerateRequest,
+  TemplateCandidateSelectRequest,
+  UserStreamEvent,
+} from '@/types/api';
 
 type FetchMock = jest.MockedFunction<typeof fetch>;
 
@@ -119,6 +126,12 @@ const validEditTaskRequest: EditTaskRequest = {
   tender_lx: 0,
   fund_source_lx: 1,
   tender_data_snapshot: validGenerateRequest.tender_data,
+};
+
+const validCommentSupplementTaskRequest: CommentSupplementTaskRequest = {
+  conversation_id: 'conv-1',
+  source_file: 'D:/UploadFiles/output.docx',
+  model: 'deepseek',
 };
 
 describe('API Client', () => {
@@ -226,6 +239,36 @@ describe('API Client', () => {
       const [, init] = fetchSpy.mock.calls[0];
       const body = (init as RequestInit).body as string;
       expect(JSON.parse(body)).toEqual(validEditTaskRequest);
+    });
+  });
+
+  describe('createCommentSupplementTask', () => {
+    it('should create a comment supplement task through the project API', async () => {
+      const fetchSpy = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 202,
+        json: async () => ({
+          success: true,
+          task_id: 'comment-task-123',
+          task_kind: 'comment_supplement',
+          status: 'queued',
+          queue_position: 0,
+          waiting_count: 0,
+        }),
+      } as unknown as Response) as unknown as FetchMock;
+      globalThis.fetch = fetchSpy;
+
+      const result = await createCommentSupplementTask(validCommentSupplementTaskRequest);
+
+      expect(result.task_id).toBe('comment-task-123');
+      expect(result.task_kind).toBe('comment_supplement');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchSpy.mock.calls[0];
+      expect(String(url)).toContain('/api/comment-supplement');
+      expect((init as RequestInit).method).toBe('POST');
+      expect(JSON.parse((init as RequestInit).body as string)).toEqual(
+        validCommentSupplementTaskRequest
+      );
     });
   });
 

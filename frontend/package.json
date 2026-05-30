@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start -p 8502",
     "lint": "eslint",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc -p tsconfig.typecheck.json --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "jest",

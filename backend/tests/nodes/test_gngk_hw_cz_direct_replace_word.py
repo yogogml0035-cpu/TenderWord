@@ -641,7 +641,7 @@ def test_update_node_uses_state_tender_type_for_anchor_mode_and_style_bounds(
     assert result["style_writeback_summary"] == "样式摘要"
 
 
-def test_update_node_hard_fails_when_comments_generated_but_none_written(
+def test_update_node_warns_when_comments_generated_but_none_written(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -660,13 +660,38 @@ def test_update_node_hard_fails_when_comments_generated_but_none_written(
         },
     )
 
-    with pytest.raises(RuntimeError, match="批注生成成功但写入失败"):
-        update_module.gngk_hw_cz_update_word(
-            {
-                "prepared_doc_path": str(doc_path),
-                "polished_text": "新的正文",
-                "polished_comments": [{"reference_text": "条款A", "comment_text": "批注A"}],
-                "generated_comment_count": 2,
-            },
-            config=None,
-        )
+    progress_warnings: list[str] = []
+    progress_errors: list[str] = []
+    monkeypatch.setattr(
+        update_module.progress_log,
+        "warning",
+        lambda message, *args: progress_warnings.append(
+            message % args if args else str(message)
+        ),
+    )
+    monkeypatch.setattr(
+        update_module.progress_log,
+        "error",
+        lambda message, *args: progress_errors.append(message % args if args else str(message)),
+    )
+
+    result = update_module.gngk_hw_cz_update_word(
+        {
+            "prepared_doc_path": str(doc_path),
+            "polished_text": "新的正文",
+            "polished_comments": [{"reference_text": "条款A", "comment_text": "批注A"}],
+            "generated_comment_count": 2,
+        },
+        config=None,
+    )
+
+    assert result["comment_writeback_result"] == {
+        "summary": "AI批注写入: 生成=2, 成功=0, 失败=2, 跳过=0",
+        "generated": 2,
+        "added": 0,
+        "failed": 2,
+        "skipped": 0,
+        "warning": True,
+    }
+    assert progress_warnings == ["AI批注写入: 生成=2, 成功=0, 失败=2, 跳过=0"]
+    assert progress_errors == []

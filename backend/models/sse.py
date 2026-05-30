@@ -141,6 +141,48 @@ class AgentStepFindingData(BaseModel):
     fix_hint: str = Field(..., description="修复建议")
 
 
+class CommentAgentHighlightData(BaseModel):
+    """批注智能体用户可见重点项。"""
+
+    index: int = Field(..., ge=1, description="批注序号")
+    status: str = Field(..., description="中文业务状态")
+    reason: str = Field(default="", description="中文原因")
+    original_reference_text: str = Field(default="", description="原始锚点")
+    reference_text: str = Field(default="", description="当前锚点")
+    candidate_fragments: List[str] = Field(default_factory=list, description="候选片段")
+
+
+class CommentAgentRoundData(BaseModel):
+    """批注智能体单轮校验摘要。"""
+
+    round: int = Field(..., ge=0, description="校验轮次；0 表示最终静默复校验")
+    label: str = Field(default="", description="轮次展示名")
+    passed: int = Field(default=0, ge=0, description="通过数")
+    failed: int = Field(default=0, ge=0, description="失败数")
+    skipped: int = Field(default=0, ge=0, description="跳过数")
+    highlights: List[CommentAgentHighlightData] = Field(default_factory=list, description="重点项")
+
+
+class CommentAgentWritebackData(BaseModel):
+    """批注智能体 Word 写入摘要。"""
+
+    attempted: int = Field(default=0, ge=0, description="尝试写入数")
+    added: int = Field(default=0, ge=0, description="成功写入数")
+    failed: int = Field(default=0, ge=0, description="失败数")
+    skipped: int = Field(default=0, ge=0, description="跳过数")
+    issues: List[CommentAgentHighlightData] = Field(default_factory=list, description="写入问题")
+
+
+class CommentAgentStepData(BaseModel):
+    """批注智能体结构化过程数据。"""
+
+    phase: Literal["validation_round", "final"] = Field(..., description="过程阶段")
+    rounds: List[CommentAgentRoundData] = Field(default_factory=list, description="校验轮次")
+    highlights: List[CommentAgentHighlightData] = Field(default_factory=list, description="当前重点项")
+    final_validation: Optional[CommentAgentRoundData] = Field(default=None, description="最终静默复校验")
+    writeback: Optional[CommentAgentWritebackData] = Field(default=None, description="Word 写入结果")
+
+
 class AgentStepEventData(BaseModel):
     """
     智能体步骤事件数据模型
@@ -156,6 +198,10 @@ class AgentStepEventData(BaseModel):
     findings: List[AgentStepFindingData] = Field(
         default_factory=list,
         description="审核意见列表",
+    )
+    comment_agent: Optional[CommentAgentStepData] = Field(
+        default=None,
+        description="批注智能体结构化过程数据",
     )
     timestamp: str = Field(
         default_factory=lambda: datetime.now().isoformat(), description="时间戳"
@@ -175,6 +221,17 @@ class StyleWritebackSummaryData(BaseModel):
     skipped_by_reason: Dict[str, int] = Field(default_factory=dict, description="按原因跳过数")
 
 
+class CommentWritebackSummaryData(BaseModel):
+    """AI 批注写回摘要。"""
+
+    summary: str = Field(default="", description="摘要文本")
+    generated: int = Field(default=0, description="生成批注数")
+    added: int = Field(default=0, description="成功写入数")
+    failed: int = Field(default=0, description="失败数")
+    skipped: int = Field(default=0, description="跳过数")
+    warning: bool = Field(default=False, description="是否存在降级 warning")
+
+
 class DoneEventData(BaseModel):
     """
     完成事件数据模型
@@ -191,6 +248,10 @@ class DoneEventData(BaseModel):
     style_writeback: Optional[StyleWritebackSummaryData] = Field(
         default=None,
         description="样式回填摘要",
+    )
+    comment_writeback: Optional[CommentWritebackSummaryData] = Field(
+        default=None,
+        description="AI 批注写回摘要",
     )
     timestamp: str = Field(
         default_factory=lambda: datetime.now().isoformat(), description="时间戳"

@@ -4,6 +4,7 @@ import type { TenderType, FundLx, TenderLx } from '@/types';
 import type {
   GenerationMode,
   GenerationStyle,
+  CommentWritebackSummary,
   SSEAgentStepEvent,
   StyleWritebackMode,
   StyleWritebackSummary,
@@ -169,6 +170,11 @@ interface TaskScopeState {
 
 const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(['completed', 'failed', 'cancelled']);
 const TERMINAL_MESSAGE_STATUSES = new Set<Message['status']>(['completed', 'error', 'cancelled']);
+const REWRITE_STATE_DETAIL_METADATA_KEYS = [
+  'comment_plan_detail',
+  'strikethrough_plan',
+  'non_black_font_plan',
+] as const;
 
 function isTerminalTaskStatus(status?: TaskStatus): boolean {
   if (!status) {
@@ -182,6 +188,42 @@ function isTerminalMessageStatus(status?: Message['status']): boolean {
     return false;
   }
   return TERMINAL_MESSAGE_STATUSES.has(status);
+}
+
+function sanitizeMessageMetadataForPersistence(
+  metadata: Message['metadata'] | undefined
+): Message['metadata'] | undefined {
+  if (!metadata) {
+    return metadata;
+  }
+
+  let changed = false;
+  const nextMetadata = { ...metadata };
+  for (const key of REWRITE_STATE_DETAIL_METADATA_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(nextMetadata, key)) {
+      delete nextMetadata[key];
+      changed = true;
+    }
+  }
+
+  return changed ? nextMetadata : metadata;
+}
+
+function sanitizeConversationForPersistence(conversation: Conversation): Conversation {
+  let changed = false;
+  const messages = conversation.messages.map((message) => {
+    const metadata = sanitizeMessageMetadataForPersistence(message.metadata);
+    if (metadata === message.metadata) {
+      return message;
+    }
+    changed = true;
+    return {
+      ...message,
+      metadata,
+    };
+  });
+
+  return changed ? { ...conversation, messages } : conversation;
 }
 
 function normalizeDraftFile(file: ConversationDraftFile | undefined): ConversationDraftFile | undefined {
@@ -557,6 +599,17 @@ function formatAgentFindingsJson(findings: AgentStepFinding[]): string {
   return JSON.stringify(findings, null, 2);
 }
 
+function normalizeCommentAgentStep(value: unknown): SSEAgentStepEvent['comment_agent'] {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const payload = value as SSEAgentStepEvent['comment_agent'];
+  if (!payload || (payload.phase !== 'validation_round' && payload.phase !== 'final')) {
+    return undefined;
+  }
+  return payload;
+}
+
 function shouldShowVerifyFindingsJson(
   step: { content?: unknown; is_complete?: boolean },
   findings: AgentStepFinding[]
@@ -587,6 +640,10 @@ function hasAgentStepMessages(messages: Message[], taskId: string): boolean {
   );
 }
 
+function isAgentProcessTaskKind(taskKind?: TaskKind): boolean {
+  return taskKind === 'generate' || taskKind === 'comment_supplement';
+}
+
 function shouldUseAgentProcessCards(
   state: Pick<ChatStore, 'conversations' | 'conversationDrafts' | 'taskSummaries'>,
   taskId: string,
@@ -597,18 +654,41 @@ function shouldUseAgentProcessCards(
     findConversationByTaskIdFromState(state, taskId);
   const summary = state.taskSummaries[taskId];
 
-  if (summary?.task_kind && summary.task_kind !== 'generate') {
+  if (summary?.task_kind && !isAgentProcessTaskKind(summary.task_kind)) {
     return false;
   }
   if (conversation && hasAgentStepMessages(conversation.messages, taskId)) {
     return true;
   }
-  if (summary?.current_node === 'content_agent') {
+  if (summary?.current_node === 'content_agent' || summary?.current_node === 'comment_agent') {
+    return true;
+  }
+  if (summary?.task_kind === 'comment_supplement') {
     return true;
   }
   return conversation
     ? state.conversationDrafts[conversation.id]?.generation_mode === 'agent'
     : false;
+}
+
+function completeGeneratingAgentStepMessages(
+  conversation: Conversation,
+  taskId: string,
+  terminalStatus: Extract<Message['status'], 'completed' | 'error' | 'cancelled'>
+): Conversation {
+  let changed = false;
+  const messages = conversation.messages.map((message) => {
+    if (
+      message.taskId === taskId &&
+      message.status === 'generating' &&
+      message.metadata?.messageKind === TASK_AGENT_STEP_KIND
+    ) {
+      changed = true;
+      return { ...message, status: terminalStatus };
+    }
+    return message;
+  });
+  return changed ? { ...conversation, messages } : conversation;
 }
 
 function getMessageById(messages: Message[], messageId?: string): Message | undefined {
@@ -798,7 +878,8 @@ interface ChatStore {
     outputFile?: string,
     fileName?: string,
     content?: TaskMessageSnapshot,
-    styleWriteback?: StyleWritebackSummary
+    styleWriteback?: StyleWritebackSummary,
+    commentWriteback?: CommentWritebackSummary
   ) => void;
   failTask: (taskId: string, error: string, content?: TaskMessageSnapshot) => void;
   cancelTask: (taskId: string, content?: TaskMessageSnapshot) => void;
@@ -1278,6 +1359,7 @@ export const useChatStore = create<ChatStore>()(
           const stepType = step.step_type || 'stream';
           const stepRound = step.round;
           const findings = normalizeAgentStepFindings(step.findings);
+          const commentAgent = normalizeCommentAgentStep(step.comment_agent);
           const taskKind = step.task_kind || get().taskSummaries[taskId]?.task_kind;
           const incomingStatus: Message['status'] = step.is_complete ? 'completed' : 'generating';
           const node = step.node || 'content_agent';
@@ -1326,13 +1408,19 @@ export const useChatStore = create<ChatStore>()(
             agentStepRound: stepRound,
             agentStepNode: node,
             agentStepFindings: findings,
+            ...(commentAgent ? { commentAgent } : {}),
             ...(auditRounds ? { agentStepAuditRounds: auditRounds } : {}),
           };
 
-          const persistedContent = step.is_complete ? content : '';
+          const existingContent = typeof existing?.content === 'string' ? existing.content : '';
+          const persistedContent = step.is_complete ? content : existingContent;
 
           if (existing) {
-            if (!step.is_complete && typeof step.content === 'string' && step.content.length > 0) {
+            if (
+              !step.is_complete &&
+              typeof step.content === 'string' &&
+              step.content.length > 0
+            ) {
               return existing.id;
             }
             get().updateMessage(conversation.id, existing.id, {
@@ -1353,7 +1441,7 @@ export const useChatStore = create<ChatStore>()(
           });
         },
 
-        completeTask: (taskId, outputFile, fileName, content, styleWriteback) => {
+        completeTask: (taskId, outputFile, fileName, content, styleWriteback, commentWriteback) => {
           const locatedTaskGroup = get().findTaskMessageGroup(taskId);
           let nextGroup: TaskMessageGroupIds | undefined;
           const terminalConversationId: string | null = locatedTaskGroup?.conversationId || null;
@@ -1423,6 +1511,7 @@ export const useChatStore = create<ChatStore>()(
                     outputFile,
                     fileName: resolvedFileName,
                     ...(styleWriteback ? { styleWriteback } : {}),
+                    ...(commentWriteback ? { commentWriteback } : {}),
                   },
                 });
                 downloadMessageId = downloadMessage.id;
@@ -1438,6 +1527,7 @@ export const useChatStore = create<ChatStore>()(
                     outputFile,
                     fileName: resolvedFileName,
                     ...(styleWriteback ? { styleWriteback } : {}),
+                    ...(commentWriteback ? { commentWriteback } : {}),
                   },
                 });
               }
@@ -1477,9 +1567,13 @@ export const useChatStore = create<ChatStore>()(
 
             return {
               conversations: state.conversations.map((conversation) =>
-                conversation.currentTaskId === taskId
-                  ? { ...conversation, currentTaskId: undefined, updatedAt: Date.now() }
-                  : conversation
+                completeGeneratingAgentStepMessages(
+                  conversation.currentTaskId === taskId
+                    ? { ...conversation, currentTaskId: undefined, updatedAt: Date.now() }
+                    : conversation,
+                  taskId,
+                  'completed'
+                )
               ),
               activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
               taskMessageMap: nextTaskMessageMap,
@@ -1583,9 +1677,13 @@ export const useChatStore = create<ChatStore>()(
 
             return {
               conversations: state.conversations.map((conversation) =>
-                conversation.currentTaskId === taskId
-                  ? { ...conversation, currentTaskId: undefined, updatedAt: Date.now() }
-                  : conversation
+                completeGeneratingAgentStepMessages(
+                  conversation.currentTaskId === taskId
+                    ? { ...conversation, currentTaskId: undefined, updatedAt: Date.now() }
+                    : conversation,
+                  taskId,
+                  'error'
+                )
               ),
               activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
               taskMessageMap: nextTaskMessageMap,
@@ -1680,9 +1778,13 @@ export const useChatStore = create<ChatStore>()(
 
             return {
               conversations: state.conversations.map((conversation) =>
-                conversation.currentTaskId === taskId
-                  ? { ...conversation, currentTaskId: undefined, updatedAt: Date.now() }
-                  : conversation
+                completeGeneratingAgentStepMessages(
+                  conversation.currentTaskId === taskId
+                    ? { ...conversation, currentTaskId: undefined, updatedAt: Date.now() }
+                    : conversation,
+                  taskId,
+                  'cancelled'
+                )
               ),
               activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
               taskMessageMap: nextTaskMessageMap,
@@ -2203,7 +2305,7 @@ export const useChatStore = create<ChatStore>()(
         name: 'chat-storage',
         storage: createJSONStorage(() => sessionStorage),
         partialize: (state) => ({
-          conversations: state.conversations,
+          conversations: state.conversations.map(sanitizeConversationForPersistence),
           currentConversationId: state.currentConversationId,
           selectedTenderType: state.selectedTenderType,
           conversationDrafts: state.conversationDrafts,

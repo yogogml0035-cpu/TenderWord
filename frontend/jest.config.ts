@@ -27,11 +27,13 @@ const config: Config = {
   },
   testPathIgnorePatterns: [
     '<rootDir>/node_modules/',
+    '<rootDir>/node_modules-wsl/',
     '<rootDir>/.next/',
     '<rootDir>/e2e/',
     '<rootDir>/__tests__/mocks/',
     '<rootDir>/__tests__/utils/',
   ],
+  modulePathIgnorePatterns: ['<rootDir>/node_modules-wsl/'],
   collectCoverageFrom: [
     'components/**/*.{js,jsx,ts,tsx}',
     'hooks/**/*.{js,jsx,ts,tsx}',

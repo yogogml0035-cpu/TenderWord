@@ -34,6 +34,7 @@ class TaskKind(str, Enum):
     GENERATE = "generate"
     REWRITE = "rewrite"
     EDIT = "edit"
+    COMMENT_SUPPLEMENT = "comment_supplement"
 
 
 class NodeStatus(str, Enum):
