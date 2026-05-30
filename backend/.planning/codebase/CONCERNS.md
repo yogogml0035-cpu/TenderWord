@@ -1,6 +1,6 @@
 # 后端风险事实地图
 
-**分析日期：** 2026-05-30
+**分析日期：** 2026-05-31
 
 **范围：** `backend/` 当前技术债、脆弱点、安全边界和测试缺口。
 
@@ -25,6 +25,11 @@
 - 文件：`backend/agents/generation/`、`backend/nodes/common_word_nodes/content_agent_generate.py`、`backend/core/sse_manager.py`
 - 风险：如果子 agent 绕过统一 callback 直发 SSE，或运行中快照写入错误存储，会造成重复过程卡、断线重放异常或浏览器持久化膨胀。
 - 安全修改：智能体步骤统一走 `agent_step_callback` -> `SSEManager.send_agent_step()`；运行日志只记录摘要，完整输入与中间产物留在 content agent 工作区。
+
+**补充批注依赖 latest 会话快照：**
+- 文件：`backend/api/comment_supplement.py`、`backend/services/document_service.py`、`backend/graphs/comment_supplement_graph.py`
+- 风险：如果 source file 不是 latest `rewrite_state.prepared_doc_path`，或会话缺少 `polished_text`，补充批注会基于过期正文写回。
+- 安全修改：创建任务前继续校验 latest `rewrite_state`、当前文件存在且路径匹配；成功后必须把新副本写回 latest `rewrite_state`，避免后续 rewrite/edit 回退到旧文件。
 
 ## 已知脆弱区
 
@@ -98,4 +103,4 @@
 
 ---
 
-*后端风险审计：2026-05-23*
+*后端风险审计：2026-05-31*

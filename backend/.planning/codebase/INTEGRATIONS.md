@@ -1,6 +1,6 @@
 # 后端集成事实地图
 
-**分析日期：** 2026-05-30
+**分析日期：** 2026-05-31
 
 **范围：** `backend/` 对外部服务、浏览器客户端、文件系统、Word COM 和运行环境的集成边界。
 
@@ -10,7 +10,7 @@
 
 - 后端 API 前缀是 `/api`，router 注册在 `backend/main.py`。
 - 前端应只通过 `frontend/lib/api.ts` 调用后端。
-- 生成、edit、任务、SSE、用户流式、上传、下载、招标详情、模板候选都在 `backend/api/` 下暴露。
+- 生成、edit、补充批注、任务、SSE、用户流式、上传、下载、招标详情、模板候选都在 `backend/api/` 下暴露。
 
 ### LLM Provider
 
@@ -27,6 +27,14 @@
 - `DocumentService` 在 graph config 中注入 `agent_step_callback`，公共 `content_agent` 节点和子 agent 通过该 callback 进入 `SSEManager`。
 - `SSEManager.send_agent_step()` 会进入事件缓冲，断线重连时可随 `Last-Event-ID` 重放。
 - 前端必须在 `frontend/lib/sse.ts` 显式监听 `agent_step` named event，再由 `frontend/hooks/useChatSSE.ts` 映射为过程卡。
+
+### 补充批注任务
+
+- 后端入口：`POST /api/comment-supplement`。
+- 任务类型：`comment_supplement`，复用任务状态、心跳、SSE、下载和 `agent_step` 事件通道。
+- Service 边界：`DocumentService.create_comment_supplement_task()` 校验会话 latest `rewrite_state`、`polished_text` 和当前下载文件路径，拒绝缺失或过期来源。
+- Graph 边界：`CommentSupplementGraph` 只处理当前文档副本的补充批注，不重新生成正文；成功后更新会话 latest `rewrite_state.prepared_doc_path`。
+- 前端触发来自初次生成下载卡，rewrite/edit/comment_supplement 下载卡不应再次显示补充批注动作。
 
 ### 招标详情接口
 
@@ -102,4 +110,4 @@
 
 ---
 
-*后端集成分析：2026-05-23*
+*后端集成分析：2026-05-31*

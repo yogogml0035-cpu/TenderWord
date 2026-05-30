@@ -1,6 +1,6 @@
 # 前端集成事实地图
 
-**分析日期：** 2026-05-30
+**分析日期：** 2026-05-31
 
 **范围：** `frontend/` 对后端 API、浏览器运行时、存储、测试工具和本地启动环境的集成边界。
 
@@ -16,6 +16,7 @@
 
 - `createGenerateTask()`
 - `createEditTask()`
+- `createCommentSupplementTask()`
 - `getTaskStatus()`
 - `getTaskList()`
 - `cancelTask()`
@@ -34,6 +35,7 @@
 - `frontend/lib/sse.ts` 包装 `EventSource`，支持 heartbeat timeout、last event id、去重和重连。
 - `frontend/hooks/useChatSSE.ts` 把后端 SSE 事件映射到 `chatStreamStore` 与 `chatStore`。
 - `agent_step` 是 named SSE event，必须由 `frontend/lib/sse.ts` 显式注册 `addEventListener` 后才能到达 `useChatSSE`。
+- `comment_supplement` 任务的 `comment_agent` 过程卡也走 `agent_step`；完成态才持久化为会话消息。
 - 用户流式聊天/rewrite 通过 `streamUserMessage()` 解析 NDJSON。
 
 ## 浏览器存储
@@ -49,6 +51,7 @@
 - 文件上传通过 `FormData` 发往后端 upload API。
 - 下载通过后端 download API 或模板候选代理下载 URL。
 - 模板候选外部文件 URL 不应在前端直接请求。
+- 初次生成下载卡可以触发补充批注任务；该任务必须通过项目内 `POST /api/comment-supplement` 创建，不能直接在前端修改文档。
 
 ## 模板候选
 
@@ -92,4 +95,4 @@
 
 ---
 
-*前端集成分析：2026-05-23*
+*前端集成分析：2026-05-31*

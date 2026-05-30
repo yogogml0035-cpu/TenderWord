@@ -1,17 +1,17 @@
 # TenderWord 系统地图
 
-**生成日期：** 2026-05-30
+**生成日期：** 2026-05-31
 
 本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它不替代代码真源、不替代根级 `AGENTS.md` 的执行红线，也不替代 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 的子系统事实文档。
 
 ## 系统目的与仓库形态
 
-TenderWord 是前后端分离的招标文档生成、修改和模板复用系统。完整运行依赖 Windows + Word COM：前端负责会话、表单、任务进度和文件交互，后端负责 API、任务队列、LangGraph 工作流、LLM 调用、模板候选代理和 Word 文件生成。
+TenderWord 是前后端分离的招标文档生成、修改、补充批注和模板复用系统。完整运行依赖 Windows + Word COM：前端负责会话、表单、任务进度和文件交互，后端负责 API、任务队列、LangGraph 工作流、LLM 调用、模板候选代理和 Word 文件生成。
 
 | 子项目 | 职责 | 事实文档 |
 | --- | --- | --- |
-| `backend/` | FastAPI API、任务队列、SSE、LangGraph、Prompt Layer、DeepAgents content_agent、Word COM、模板候选代理、上传与下载。 | `backend/.planning/codebase/` |
-| `frontend/` | Next.js 工作台、招标类型表单、会话与 URL 身份、任务 SSE / agent-step 展示、模板候选弹窗、上传下载交互。 | `frontend/.planning/codebase/` |
+| `backend/` | FastAPI API、任务队列、SSE、LangGraph、补充批注图、Prompt Layer、DeepAgents content_agent、Word COM、模板候选代理、上传与下载。 | `backend/.planning/codebase/` |
+| `frontend/` | Next.js 工作台、招标类型表单、会话与 URL 身份、任务 SSE / agent-step 展示、补充批注动作、模板候选弹窗、上传下载交互。 | `frontend/.planning/codebase/` |
 
 长期业务规则和跨主题回归风险沉淀在 `asset/`，当前索引是 `asset/README.md`。首次安装和启动入口保留在 `README.md`。
 
@@ -44,6 +44,14 @@ TenderWord 是前后端分离的招标文档生成、修改和模板复用系统
 - 后端 `backend/api/user.py` 返回 NDJSON，路由和 prompt 逻辑收敛在 `backend/services/user_routing_service.py`、`backend/graphs/user_graph.py` 和 `backend/prompts/`。
 - rewrite / edit 是 task skill runtime，声明和 workflow 在 `backend/skills/rewrite/`、`backend/skills/edit/`，执行图在 `backend/graphs/skill_graph.py`。
 - edit 只走 `POST /api/edit`，前端入口在 `ChatPanel.tsx`，后端入口在 `backend/api/edit.py`。
+
+### 补充批注任务
+
+- 初次生成下载卡在前端触发补充批注，入口从 `TaskDownloadMessage` 经 `MessageList` 回到 `ChatPanel`。
+- `frontend/lib/api.ts` 调用 `POST /api/comment-supplement` 创建 `comment_supplement` 任务。
+- 后端 `DocumentService` 校验当前会话 latest `rewrite_state`、`polished_text` 和 source file 后，提交 `CommentSupplementGraph`。
+- `CommentSupplementGraph` 复制当前文档副本，调用 `comment_agent` 生成/校验/写回补充批注，完成后更新会话 latest `rewrite_state.prepared_doc_path` 并通过同一 SSE / 下载链路返回结果。
+- rewrite、edit 和 comment_supplement 下载卡不应再次显示补充批注动作。
 
 ### 模板候选
 
@@ -89,6 +97,7 @@ TenderWord 是前后端分离的招标文档生成、修改和模板复用系统
 
 - 任务与队列：`backend/task/task_queue_manager.py`、`backend/services/document_service.py`
 - SSE：`backend/core/sse_manager.py`、`backend/api/stream.py`
+- 补充批注：`backend/api/comment_supplement.py`、`backend/graphs/comment_supplement_graph.py`、`backend/nodes/common_word_nodes/comment_supplement.py`
 - Prompt / skill / 内容智能体：`backend/prompts/`、`backend/skills/`、`backend/agents/generation/`
 - Word 业务：`asset/shared_runtime_word_skill_knowledge_pack.md`
 
@@ -110,6 +119,7 @@ TenderWord 是前后端分离的招标文档生成、修改和模板复用系统
 - 表单：`frontend/components/forms/TenderFormShared.tsx`
 - 聊天任务：`frontend/components/chat/ChatPanel.tsx`、`frontend/components/chat/FormPanel.tsx`
 - 智能体过程卡：`frontend/hooks/useChatSSE.ts`、`frontend/stores/chatStore.ts`、`frontend/stores/chatStreamStore.ts`、`frontend/components/chat/TaskContentMessage.tsx`
+- 补充批注动作：`frontend/components/chat/TaskDownloadMessage.tsx`、`frontend/components/chat/MessageList.tsx`、`frontend/components/chat/ChatPanel.tsx`
 
 ### 跨系统接口修改
 
@@ -156,6 +166,7 @@ TenderWord 是前后端分离的招标文档生成、修改和模板复用系统
 - API 形状变化是否同步后端模型、前端类型、API client 和测试。
 - `gngk` 的 `tender_lx + fund_lx + ifzgcg` 分派是否集中在 `frontend/lib/gngkFormType.ts`，且 `formDataConverter.ts` 与 `ChatPanel.tsx` 是否都调用该 helper。
 - 新增或修改 SSE 事件是否同步后端事件模型、前端事件 union、`frontend/lib/sse.ts` named event、`useChatSSE` 和测试。
+- 新增或修改任务类型是否同步 `TaskKind`、任务状态、SSE `done` payload、下载卡和会话结果语义。
 - Word COM 相关改动是否仍然经过任务队列、graph 锁、取消检查和进度包装。
 - Prompt、LLM 流式或 content_agent 改动是否复用 `LLM_STREAM_TIMEOUT_SECONDS`，并保留 Prompt Layer 与智能体协议边界。
 - 模板候选改动是否仍由后端代理外部列表、文件下载和白名单校验。

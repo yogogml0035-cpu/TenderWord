@@ -1,7 +1,7 @@
-<!-- refreshed: 2026-05-30 -->
+<!-- refreshed: 2026-05-31 -->
 # 后端架构事实地图
 
-**分析日期：** 2026-05-30
+**分析日期：** 2026-05-31
 
 **范围：** 仅覆盖 `backend/`，并在启动、验证和 Windows/WSL 运行边界上参考根级 `AGENTS.md`、`README.md` 与 `scripts/`。
 
@@ -12,7 +12,7 @@ FastAPI /api
   -> API 路由
   -> service 编排
   -> 任务队列 + SSE
-  -> LangGraph 生成 / rewrite / edit / 用户路由
+  -> LangGraph 生成 / rewrite / edit / 补充批注 / 用户路由
   -> Prompt Layer + LLM provider / DeepAgents content_agent
   -> Word helper + Word COM utility
   -> 上传目录中的产物与下载接口
@@ -24,12 +24,12 @@ FastAPI /api
 
 | 层 | 职责 | 关键路径 |
 | --- | --- | --- |
-| API 层 | 暴露 `/api` 下的生成、编辑、任务、SSE、上传下载、招标详情和模板候选接口 | `backend/api/` |
+| API 层 | 暴露 `/api` 下的生成、编辑、补充批注、任务、SSE、上传下载、招标详情和模板候选接口 | `backend/api/` |
 | 模型层 | 定义 Pydantic 请求、响应、任务、SSE 和模板候选模型 | `backend/models/` |
 | Service 层 | 任务创建、graph 选择、会话快照、用户路由、模板候选 AI 重排 | `backend/services/` |
 | 任务层 | 队列、串行化、取消、心跳、进度、任务状态快照 | `backend/task/task_queue_manager.py` |
 | SSE 层 | 事件缓存、客户端连接、重放、日志桥接 | `backend/core/sse_manager.py`, `backend/api/stream.py`, `backend/util/log_util/sse_log_handler.py` |
-| Graph 层 | 标准生成图、rewrite/edit skill 图、用户路由图 | `backend/graphs/` |
+| Graph 层 | 标准生成图、补充批注图、rewrite/edit skill 图、用户路由图 | `backend/graphs/` |
 | State 层 | 公共 graph state 与类型专属 state | `backend/states/` |
 | Node 层 | Word 准备、抽参、删除、替换、生成、批注、写回等 graph 节点 | `backend/nodes/` |
 | Word 业务 helper | 受保护字段、正文边界、插入、cleanup、样式回填、范围工具 | `backend/helper/word_helper/` |
@@ -67,12 +67,14 @@ FastAPI /api
 - `backend/agents/generation/workspace.py` 管理单次生成工作区，默认写入 `backend/prompts_log/content_agent_workspace/`，用于审计输入、草稿、审核、修订和最终正文。
 - `agent_step` 事件由 graph config 注入的 callback 进入 `SSEManager`，不由子 agent 直接连接 SSE manager。
 
-### 普通聊天、rewrite 与 edit
+### 普通聊天、rewrite、edit 与补充批注
 
 - 普通聊天和 rewrite 判路走 `POST /api/user/stream`，返回 NDJSON。
 - 用户路由由 `backend/services/user_routing_service.py`、`backend/graphs/user_graph.py` 与 `backend/prompts/routing_prompt.py` 负责。
 - rewrite/edit 是 task skill runtime，声明在 `backend/skills/rewrite/` 与 `backend/skills/edit/`，执行图由 `backend/graphs/skill_graph.py` 构造。
 - edit 是显式入口，只走 `POST /api/edit`，不并回 user stream 的模型判路链路。
+- 补充批注是独立任务入口，只走 `POST /api/comment-supplement`；`DocumentService.create_comment_supplement_task()` 校验 latest `rewrite_state` 和当前下载文件后，提交 `CommentSupplementGraph`。
+- `CommentSupplementGraph` 的节点顺序是 `prepare_comment_supplement -> comment_agent -> finalize_comment_supplement`，成功后会把新的 `prepared_doc_path` 写回会话 latest `rewrite_state`，后续 rewrite/edit 应继续基于该副本。
 
 ### 模板候选
 
@@ -93,6 +95,7 @@ FastAPI /api
 - `FormType` -> `GRAPH_REGISTRY`：`xjcg_tender`、四个 `gngk_*_tender` 和 `gjgk_tender` 到 graph class 的延迟注册，位于 `backend/services/document_service.py`。
 - `TenderGraphStateBase`：生成与 task skill 写回共享 state 底座，位于 `backend/states/base_state.py`。
 - `StandardTenderWorkflowGraph`：标准 tender 生成拓扑，类型 graph 通过 class attribute 绑定差异节点。
+- `CommentSupplementGraph`：补充批注任务图，复用任务队列、SSE、`comment_agent` 和会话 rewrite_state 更新机制。
 - `content_agent`：标准生成 graph 的智能体生成节点，不能在各类型 graph 里复制分流逻辑。
 - `TaskQueueManager`：长任务队列、串行化、心跳和进度真源。
 - `SSEManager`：任务事件缓存、跨线程发送和重连重放。
@@ -135,4 +138,4 @@ FastAPI /api
 
 ---
 
-*后端架构分析：2026-05-23*
+*后端架构分析：2026-05-31*

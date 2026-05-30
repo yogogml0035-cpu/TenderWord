@@ -2,7 +2,7 @@
 
 ## 背景与范围
 
-本包适用于后端 generate / rewrite / edit 运行时、Prompt Layer、task skill runtime、Word COM、共享 Word helper、批注/样式回写、任务结果与 SSE 透传相关改动。
+本包适用于后端 generate / rewrite / edit / comment_supplement 运行时、Prompt Layer、task skill runtime、Word COM、共享 Word helper、批注/样式回写、任务结果与 SSE 透传相关改动。
 
 本包只记录当前仍存在的共享主干、稳定契约、验证入口和回归风险；实现细节以代码为准，不保留历史分叉、临时脚本或已删除文件名。
 

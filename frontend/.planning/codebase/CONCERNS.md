@@ -1,6 +1,6 @@
 # 前端风险事实地图
 
-**分析日期：** 2026-05-30
+**分析日期：** 2026-05-31
 
 **范围：** `frontend/` 当前技术债、脆弱点、安全边界和测试缺口。
 
@@ -32,6 +32,11 @@
 - 文件：`frontend/types/api.ts`、`frontend/hooks/useChatSSE.ts`、`frontend/lib/sse.ts`
 - 风险：后端新增事件或 payload 字段，前端未同步会丢进度或终态。
 - 安全修改：同步 union 类型、底层 named event 注册、解析、store 映射和测试。
+
+**补充批注动作只应出现在初次生成下载卡：**
+- 文件：`frontend/components/chat/MessageList.tsx`、`frontend/components/chat/TaskDownloadMessage.tsx`、`frontend/components/chat/ChatPanel.tsx`
+- 风险：如果 rewrite/edit/comment_supplement 下载卡也允许继续补充批注，会重复基于衍生文件创建任务，且后端 latest `rewrite_state` 校验可能拒绝或产生用户困惑。
+- 安全修改：保持 UI 只在 generate 下载卡暴露动作；创建任务时只传会话 id、当前 output_file 和模型，后端负责最新文件校验。
 
 **模板候选安全边界在后端：**
 - 文件：`frontend/components/forms/TemplateCandidateDialog.tsx`、`frontend/components/forms/TenderFormShared.tsx`、`frontend/lib/api.ts`
@@ -80,4 +85,4 @@
 
 ---
 
-*前端风险审计：2026-05-23*
+*前端风险审计：2026-05-31*

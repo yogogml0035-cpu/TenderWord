@@ -1,6 +1,6 @@
 # TenderWord 接口边界
 
-**生成日期：** 2026-05-30
+**生成日期：** 2026-05-31
 
 本文件记录 TenderWord 当前已确认的系统级接口边界。具体模型和行为以 `backend/api/`、`backend/models/`、`frontend/types/api.ts` 和 `frontend/lib/api.ts` 为准。
 
@@ -65,6 +65,7 @@
 - 任务失败必须最终表现为 `error` 或 `done`，不能让 SSE 静默中断。
 - `comment_writeback_*` 和 `style_writeback_*` 摘要属于任务结果契约，不得在 state、任务结果或 `done` 事件中丢失。
 - `agent_step` 是智能体生成过程事件，允许断线重放和前端过程卡展示，但不替代 `done` / `error` 终态。
+- `comment_supplement` 任务复用同一 SSE 通道，`comment_agent` 过程卡仍通过 `agent_step` 展示。
 
 ### 用户流式、聊天与 Rewrite
 
@@ -96,6 +97,23 @@
 同步要求：
 - Edit 是显式入口，只走 `POST /api/edit`。
 - edit request / response 变化必须同步 `frontend/types/api.ts`、`frontend/lib/api.ts` 和后端模型。
+
+### 补充批注任务
+
+| 项 | 当前边界 |
+| --- | --- |
+| 前端触发 | `frontend/components/chat/TaskDownloadMessage.tsx`, `frontend/components/chat/MessageList.tsx`, `frontend/components/chat/ChatPanel.tsx` |
+| API client | `frontend/lib/api.ts` 中的 `createCommentSupplementTask()` |
+| 后端路由 | `backend/api/comment_supplement.py` 中的 `POST /api/comment-supplement` |
+| 后端 service | `DocumentService.create_comment_supplement_task()` |
+| Graph | `backend/graphs/comment_supplement_graph.py` |
+| 共享节点 | `backend/nodes/common_word_nodes/comment_supplement.py`, `backend/nodes/common_word_nodes/comment_agent.py` |
+
+同步要求：
+- 补充批注只从初次生成下载卡触发；rewrite、edit 和 comment_supplement 下载卡不应再显示补充批注动作。
+- 请求只携带当前会话、当前下载文件路径和模型；后端负责校验 latest `rewrite_state`、`polished_text` 和 source file 是否仍是当前最新文档。
+- 成功后必须更新会话 latest `rewrite_state.prepared_doc_path`，让后续 rewrite/edit 基于补充批注后的副本。
+- `TaskKind`、任务状态、SSE `done` payload、下载消息和 `agent_step` 过程卡变化必须同步前后端类型与测试。
 
 ### 招标详情查询
 
@@ -220,7 +238,7 @@ Word COM 只存在于后端：
 ## 排查建议
 
 - 接口返回异常：先看 `frontend/lib/api.ts` 的 `ApiError` 包装，再看对应 `backend/api/` route 和 `backend/models/`。
-- SSE 卡住：先区分任务是否还存在、队列是否运行、后端是否发出 `error` / `done`，再看 `backend/core/sse_manager.py` 和 `frontend/hooks/useChatSSE.ts`；`agent_step` 不显示时还要检查 `frontend/lib/sse.ts` 是否监听 named event。
+- SSE 卡住：先区分任务是否还存在、队列是否运行、后端是否发出 `error` / `done`，再看 `backend/core/sse_manager.py` 和 `frontend/hooks/useChatSSE.ts`；`agent_step` 不显示时还要检查 `frontend/lib/sse.ts` 是否监听 named event，补充批注还要确认任务类型是 `comment_supplement` 且过程卡来自 `comment_agent`。
 - `gngk` 类型不对：同时检查 URL 参数、draft、`gngkFormType`、`formDataConverter`、`ChatPanel` edit 调用点、后端 `FormType` 和 `GRAPH_REGISTRY`。
 - 模板候选不可选：检查 `year`、blocked reason、后端归一化、AI row_index 重排和前端选择按钮状态。
 - Word 写回异常：先看任务队列、graph 锁、protected fields、paragraph boundary helper，再看类型专属 node。

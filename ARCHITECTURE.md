@@ -1,6 +1,6 @@
 # TenderWord 架构地图
 
-**生成日期：** 2026-05-30
+**生成日期：** 2026-05-31
 
 本文件是根级系统架构地图，描述 TenderWord 的系统边界、子系统职责和推荐理解路径。实现细节仍以代码为准；子系统内部事实以 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 为准。
 
@@ -12,7 +12,7 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 浏览器 / Next.js 工作台
   -> FastAPI /api
   -> 任务队列 + SSE
-  -> LangGraph tender 或 skill workflow
+  -> LangGraph tender / skill / comment_supplement workflow
   -> Prompt Layer + LLM provider / DeepAgents content_agent
   -> Word COM 文档操作
   -> 生成文件 / 任务结果 / 下载
@@ -30,6 +30,7 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 - 招标类型侧栏、表单面板、聊天和任务面板。
 - 会话、草稿、历史、任务摘要与 SSE resume 元数据的 `sessionStorage` 持久化。
 - 初次生成 `generation_mode` 草稿、生成方式控件和智能体 `agent-step` 过程卡展示。
+- 初次生成下载卡上的补充批注动作和 `comment_agent` 过程卡展示。
 - 前端 `TenderType`、URL canonical 化、`gngk` 子类型身份匹配。
 - 通过 `frontend/lib/api.ts` 调用后端 JSON、上传、下载、NDJSON 和 SSE helper。
 - 模板候选弹窗、候选选择、后端文件回填和下载链接展示。
@@ -45,7 +46,7 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 
 `backend/` 是 FastAPI + LangGraph + Word COM 后端。它负责：
 
-- `/api` 前缀下的生成、编辑、任务、SSE、用户流式、会话心跳、上传下载和模板候选接口。
+- `/api` 前缀下的生成、编辑、补充批注、任务、SSE、用户流式、会话心跳、上传下载和模板候选接口。
 - `DocumentService` 任务创建、graph 选择、初始 state 构造、任务提交和结果 payload。
 - `TaskQueueManager` 串行化文档任务、跟踪进度、取消、心跳和清理。
 - `SSEManager` 事件缓冲、客户端管理和重连重放。
@@ -180,6 +181,18 @@ Edit 是显式 task 入口，只走 `POST /api/edit`。它复用任务队列、S
 - `backend/services/document_service.py`
 - `backend/skills/edit/`
 
+### 补充批注
+
+补充批注是独立 task 入口，只走 `POST /api/comment-supplement`。前端从初次生成下载卡触发，后端校验 latest `rewrite_state` 和当前下载文件后，执行 `CommentSupplementGraph`：复制当前文档副本、通过 `comment_agent` 生成/校验/写回批注，再更新会话 latest `rewrite_state.prepared_doc_path` 和新的下载结果。
+
+关键入口：
+- `frontend/components/chat/TaskDownloadMessage.tsx`
+- `frontend/components/chat/ChatPanel.tsx`
+- `frontend/lib/api.ts`
+- `backend/api/comment_supplement.py`
+- `backend/services/document_service.py`
+- `backend/graphs/comment_supplement_graph.py`
+
 ### 模板候选
 
 模板候选由后端代理外部列表、AI 重排、下载和落盘，前端只通过项目内 API helper 交互。
@@ -241,5 +254,5 @@ Edit 是显式 task 入口，只走 `POST /api/edit`。它复用任务队列、S
 - 根级文档保留系统边界和阅读路径，不复制子项目内部实现细节。
 - 子项目事实变化应先更新对应 `.planning/codebase/` 文档。
 - 长期业务规则进入 `asset/`；影响多数未来需求的规则再上提到 `AGENTS.md`。
-- 接口变化必须同步 `INTERFACES.md`、前后端类型和测试。
+- 接口变化必须同步 `INTERFACES.md`、前后端类型和测试；新增任务类型还要同步任务状态、SSE、下载卡和会话结果语义。
 - 仅文档变更至少运行 `git diff --check` 和密钥模式扫描。

@@ -1,6 +1,6 @@
 # 前端测试事实地图
 
-**分析日期：** 2026-05-30
+**分析日期：** 2026-05-31
 
 **范围：** `frontend/__tests__/`、`frontend/e2e/` 与前端验证命令。
 
@@ -44,6 +44,7 @@ frontend/e2e/
 - store：`frontend/__tests__/unit/stores/`。
 - URL 映射：`frontend/__tests__/unit/utils/test_tender_type_mapper.test.ts`。
 - E2E：`frontend/e2e/test_home.spec.ts`、`frontend/e2e/test_url_conversation.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`。
+- 补充批注：`frontend/__tests__/unit/lib/test_api.test.ts`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`、`frontend/__tests__/unit/components/chat/test_message_list.test.tsx`、`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/e2e/test_comment_supplement.spec.ts`。
 
 ## Mock 与测试夹具
 
@@ -103,6 +104,7 @@ git diff --check
 - 模板候选：表单与 API client 测试，必要时补弹窗交互测试。
 - UI/页面：相关组件测试，真实浏览器契约补 Playwright。
 - 智能体生成方式：`test_tender_form_shared.test.tsx`、`test_form_data_converter.test.ts`、`test_chat_panel.test.tsx`、`test_generation_mode_agent.spec.ts`。
+- 补充批注：API client、下载卡动作、`comment_agent` 过程卡、任务下载卡和 mock E2E。
 
 ## 覆盖缺口
 
@@ -112,4 +114,4 @@ git diff --check
 
 ---
 
-*前端测试分析：2026-05-27*
+*前端测试分析：2026-05-31*

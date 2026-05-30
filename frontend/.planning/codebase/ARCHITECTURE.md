@@ -1,7 +1,7 @@
-<!-- refreshed: 2026-05-30 -->
+<!-- refreshed: 2026-05-31 -->
 # 前端架构事实地图
 
-**分析日期：** 2026-05-30
+**分析日期：** 2026-05-31
 
 **范围：** `frontend/`，并在启动、验证和 API 边界上参考根级 `AGENTS.md`、`README.md` 与 `scripts/`。
 
@@ -16,7 +16,7 @@ Next.js App Router
   -> FastAPI /api
 ```
 
-前端是 TenderWord 的浏览器工作台。它负责招标类型选择、URL 深链、会话和草稿、文件上传、模板候选弹窗、生成任务创建、智能体生成方式选择、普通聊天、rewrite/edit 任务创建、SSE 进度与智能体过程卡展示和下载入口。
+前端是 TenderWord 的浏览器工作台。它负责招标类型选择、URL 深链、会话和草稿、文件上传、模板候选弹窗、生成任务创建、智能体生成方式选择、普通聊天、rewrite/edit/补充批注任务创建、SSE 进度与智能体过程卡展示和下载入口。
 
 ## 主要层次
 
@@ -61,6 +61,13 @@ Next.js App Router
 - edit 的 `form_type` 在 `ChatPanel` 中按当前页面类型和 draft 调用 `resolveGngkFormType()`，必须与生成链路共用 `frontend/lib/gngkFormType.ts`。
 - `chat_input` 在消息受理时立即清空；中断恢复才使用 `pending_rewrite_prompt` / `pending_edit_prompt`。
 
+### 补充批注
+
+- 初次生成完成后的下载卡可触发补充批注，入口在 `TaskDownloadMessage` 经 `MessageList` 回调到 `ChatPanel`。
+- `ChatPanel` 调用 `createCommentSupplementTask()`，只提交当前会话 id、当前下载文件路径和模型。
+- `comment_supplement` 任务复用任务状态、SSE 和下载消息；`comment_agent` 过程卡通过 `agent_step` 展示。
+- rewrite、edit 和补充批注任务自己的下载卡不显示再次补充批注动作，避免重复基于衍生副本创建任务。
+
 ### 模板候选
 
 - `TenderFormShared` 打开 `TemplateCandidateDialog`。
@@ -74,6 +81,7 @@ Next.js App Router
 - `GenerateRequest` / `EditTaskRequest`：前端镜像后端任务创建 payload，位于 `frontend/types/api.ts`。
 - `ConversationFormDraft`：每个会话的表单、文件、锚点、`generation_mode`、聊天输入和 pending 恢复状态。
 - `TaskMessageGroupIds`：一个 task id 对应 log/content/download 三类任务消息；智能体 `agent-step` 过程卡不纳入该三卡分组。
+- `TaskKind`：任务类型包含 `generate`、`rewrite`、`edit`、`comment_supplement`；补充批注复用任务消息组和独立 `agent-step` 过程卡。
 - `chatStreamStore`：运行中任务的 transient logs、AI 文本、agent step 快照、进度、当前节点和 `lastEventId`。
 - `buildCanonicalSearchParams()`：会话身份到浏览器 URL 的唯一构造入口。
 - `tenderFormRegistry`：TenderType 到显示名、表单组件和 generate converter 的注册表。
@@ -115,4 +123,4 @@ Next.js App Router
 
 ---
 
-*前端架构分析：2026-05-23*
+*前端架构分析：2026-05-31*

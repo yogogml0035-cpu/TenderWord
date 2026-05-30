@@ -13,7 +13,7 @@
 
 ## 使用路由
 
-- 改招标详情 API 数据契约、Prompt Layer、task skill、generate / rewrite / edit runtime、`generation_mode` 后端分流、DeepAgents content_agent、Word COM、SSE、任务结果透传、批注/样式回写或 `backend/helper/word_helper/` 时，优先读取 `shared_runtime_word_skill_knowledge_pack.md`。
+- 改招标详情 API 数据契约、Prompt Layer、task skill、generate / rewrite / edit / comment_supplement runtime、`generation_mode` 后端分流、DeepAgents content_agent、Word COM、SSE、任务结果透传、批注/样式回写或 `backend/helper/word_helper/` 时，优先读取 `shared_runtime_word_skill_knowledge_pack.md`。
 - 改招标类型 identity、`form_type` 分派、anchor config、graph/state/node/replacement 收敛、URL 判型、当前页面会话、`sessionStorage` 语义、`generation_mode` 草稿、智能体过程卡、聊天草稿与排队恢复时，优先读取 `tender_type_identity_session_knowledge_pack.md`。
 - 改模板候选、AI 重排、下载代理、文件回填与模板弹窗时，优先读取 `template_candidate_pipeline_knowledge_pack.md`。
 

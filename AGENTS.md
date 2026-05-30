@@ -62,7 +62,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - 后端 `FormType`：`xjcg_tender`、`gngk_hw_zc_tender`、`gngk_hw_cz_tender`、`gngk_fw_zc_tender`、`gngk_fw_cz_tender`、`gjgk_tender`
 - `gngk` 在前端共享 helper `frontend/lib/gngkFormType.ts` 中根据 `tender_lx + fund_lx + ifzgcg` 分派到“货物 / 服务（含工程复用）× 自筹 / 财政”四套后端 `form_type`
 - 当前真实 API 前缀：`/api`
-- 当前真实关键链路：创建任务 -> 任务队列 -> SSE 推送 -> 完成 / 失败 -> 下载 / rewrite
+- 当前真实关键链路：创建任务 -> 任务队列 -> SSE 推送 -> 完成 / 失败 -> 下载 / rewrite / edit / 补充批注
 
 ### 真实入口
 
@@ -77,6 +77,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 - SSE：`backend/api/stream.py`
 - 用户流式路由：`backend/api/user.py`
 - 会话心跳：`backend/api/conversations.py`
+- 补充批注：`backend/api/comment_supplement.py`
 - 模板候选：`backend/api/template_candidates.py`
 - Graph 注册：`backend/services/document_service.py`
 
@@ -299,7 +300,7 @@ TenderWord 是面向招标文件生成、修改和模板复用的系统，完整
 
 ### 需求修改后的知识回写路由
 
-- 改 Prompt Layer、task skill、generate/rewrite/edit runtime、`generation_mode` 后端分流、DeepAgents `content_agent`、Word COM、批注/样式回写、`backend/helper/word_helper/` 业务 helper、任务结果或 SSE 主干：更新 `asset/shared_runtime_word_skill_knowledge_pack.md`。
+- 改 Prompt Layer、task skill、generate/rewrite/edit/comment_supplement runtime、`generation_mode` 后端分流、DeepAgents `content_agent`、Word COM、批注/样式回写、`backend/helper/word_helper/` 业务 helper、任务结果或 SSE 主干：更新 `asset/shared_runtime_word_skill_knowledge_pack.md`。
 - 改招标类型 identity、URL 判型、`form_type` 分派、anchor config、graph/state/node/replacement 收敛、当前页面会话范围、左侧栏展开与切换、`sessionStorage` 语义、`generation_mode` 草稿、智能体过程卡、聊天草稿或排队恢复：更新 `asset/tender_type_identity_session_knowledge_pack.md`。
 - 改模板候选、AI 重排、下载代理、文件回填与模板弹窗链路：更新 `asset/template_candidate_pipeline_knowledge_pack.md`。
 - 若新规则会影响未来多数需求，再把它从知识包提升写回 `AGENTS.md`。

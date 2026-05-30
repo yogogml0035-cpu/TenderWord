@@ -1,6 +1,6 @@
 # 后端测试事实地图
 
-**分析日期：** 2026-05-30
+**分析日期：** 2026-05-31
 
 **范围：** `backend/tests/` 与后端验证命令。
 
@@ -44,6 +44,7 @@ backend/tests/
 - prompt：`backend/tests/prompts/test_generate_prompt_routing.py`、`test_comment_prompt_reference_contract.py`。
 - service：`backend/tests/services/test_document_service_initial_state.py`、`test_document_service_task_result.py`、`test_user_routing_service.py`。
 - agent_step SSE：`backend/tests/models/test_sse_agent_step.py`、`backend/tests/services/test_sse_manager_agent_step.py`、`backend/tests/services/test_document_service_agent_step.py`。
+- 补充批注任务：`backend/tests/api/test_comment_supplement_api.py`、`backend/tests/graphs/test_comment_supplement_graph.py`、`backend/tests/services/test_document_service_comment_supplement.py`、`backend/tests/nodes/test_comment_agent_writeback_node.py`。
 
 ## Mock 与 fixture 模式
 
@@ -103,8 +104,9 @@ git diff --check
 - Word 节点：相关 `backend/tests/nodes/`，必要时全量 pytest。
 - prompt：`backend/tests/prompts/` 与调用该 prompt 的节点/service 测试。
 - content_agent / agent_step：`backend/tests/agents/`、`backend/tests/nodes/test_content_agent_generate.py`、`backend/tests/services/test_sse_manager_agent_step.py`、`backend/tests/services/test_document_service_agent_step.py`。
+- comment_supplement：补充批注 API、graph、service 和 `comment_agent` 写回节点测试。
 - 任务/SSE：`backend/tests/services/`、`backend/tests/progress/`、相关 API 测试。
 
 ---
 
-*后端测试分析：2026-05-23*
+*后端测试分析：2026-05-31*

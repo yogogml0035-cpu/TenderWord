@@ -1,6 +1,6 @@
 # 后端结构事实地图
 
-**分析日期：** 2026-05-30
+**分析日期：** 2026-05-31
 
 **范围：** `backend/` 源码、测试与后端相关启动脚本。
 
@@ -32,15 +32,15 @@ backend/
 
 | 目录 | 当前职责 |
 | --- | --- |
-| `backend/api/` | `/api` router：生成、edit、任务、SSE、用户流式、会话心跳、上传、下载、招标详情、模板候选。 |
+| `backend/api/` | `/api` router：生成、edit、补充批注、任务、SSE、用户流式、会话心跳、上传、下载、招标详情、模板候选。 |
 | `backend/agents/generation/` | 初次生成 `generation_mode=agent` 的 DeepAgents 主/子智能体、JSON 协议、模型工厂和工作区管理。 |
 | `backend/models/` | `GenerateRequest`、`EditTaskRequest`、任务状态、SSE 事件、上传与模板候选模型。 |
 | `backend/services/` | `DocumentService`、任务状态展示、会话快照、用户路由、模板候选 AI 重排。 |
 | `backend/task/` | `TaskQueueManager`、任务实体、进度、取消、心跳。 |
 | `backend/core/` | `SSEManager` 与 SSE 客户端/事件缓存。 |
-| `backend/graphs/` | 标准 tender graph、rewrite/edit skill graph、user graph、base graph 锁与进度包装。 |
+| `backend/graphs/` | 标准 tender graph、补充批注 graph、rewrite/edit skill graph、user graph、base graph 锁与进度包装。 |
 | `backend/states/` | 公共和类型专属 graph state。 |
-| `backend/nodes/common_word_nodes/` | 共享 Word 节点：准备模板、抽参、替换、生成、批注、写回等。 |
+| `backend/nodes/common_word_nodes/` | 共享 Word 节点：准备模板、抽参、替换、生成、批注、补充批注、写回等。 |
 | `backend/nodes/gngk_word_nodes/` | 国内公开特化节点；包含 `gngk_hw_cz` direct-replace delete/update。 |
 | `backend/nodes/gjgk_word_nodes/` | 国际公开特化节点。 |
 | `backend/nodes/xjcg_word_nodes/` | 询价采购特化 replacement 节点。 |
@@ -65,6 +65,7 @@ backend/
 
 - `backend/api/generate.py`：`POST /api/generate`。
 - `backend/api/edit.py`：`POST /api/edit`。
+- `backend/api/comment_supplement.py`：`POST /api/comment-supplement`。
 - `backend/api/user.py`：`POST /api/user/stream` NDJSON。
 - `backend/api/tasks.py`：任务查询、取消、心跳。
 - `backend/api/stream.py`：任务 SSE。
@@ -76,6 +77,7 @@ backend/
 ### Graph、State 与 Node
 
 - `backend/graphs/base_graph.py`：`BaseGraph`、`StandardTenderWorkflowGraph`、跨进程锁、进度包装、取消检查。
+- `backend/graphs/comment_supplement_graph.py`：补充批注任务图，串联准备副本、`comment_agent` 和完成节点。
 - `backend/graphs/xjcg_tender_graph.py`：询价采购节点绑定。
 - `backend/graphs/gngk_hw_zc_tender_graph.py`：国内公开货物自筹主干。
 - `backend/graphs/gngk_hw_cz_tender_graph.py`：财政货物 graph，覆写 direct-replace delete/update。
@@ -85,6 +87,7 @@ backend/
 - `backend/graphs/skill_graph.py`：rewrite/edit skill workflow 执行。
 - `backend/graphs/user_graph.py`：用户消息路由。
 - `backend/nodes/common_word_nodes/content_agent_generate.py`：智能体生成公共节点，调用 `run_content_agent_generation()` 并写回标准 `polished_text` 契约。
+- `backend/nodes/common_word_nodes/comment_supplement.py`：补充批注任务的源文件复制和完成态收敛节点。
 
 ### 内容智能体
 
@@ -112,6 +115,7 @@ backend/
 
 - `backend/tests/api/`：API 层。
 - `backend/tests/agents/`：DeepAgents 内容智能体运行时。
+- `backend/tests/api/test_comment_supplement_api.py`、`backend/tests/graphs/test_comment_supplement_graph.py`、`backend/tests/services/test_document_service_comment_supplement.py`：补充批注任务闭环。
 - `backend/tests/config/`：配置与 profile。
 - `backend/tests/graphs/`：graph 注册与节点绑定。
 - `backend/tests/helper/`：Word helper。
@@ -149,4 +153,4 @@ backend/
 
 ---
 
-*后端结构分析：2026-05-23*
+*后端结构分析：2026-05-31*
