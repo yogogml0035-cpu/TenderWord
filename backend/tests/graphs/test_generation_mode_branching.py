@@ -31,7 +31,24 @@ def _build_graph(calls: list[str]) -> StandardTenderWorkflowGraph:
 
     def _update_node(state, config=None):
         calls.append("update_word")
+        if state.get("generation_mode") == "agent":
+            assert state.get("suppress_ai_comment_writeback") is True
+        else:
+            assert state.get("suppress_ai_comment_writeback") is False
         return {"prepared_doc_path": "D:/UploadFiles/output.docx"}
+
+    def _comment_agent_node(state, config=None):
+        calls.append("comment_agent")
+        return {
+            "comment_writeback_result": {
+                "summary": "AI 批注写入：生成 0 条，成功 0 条，失败 0 条，跳过 0 条",
+                "generated": 0,
+                "added": 0,
+                "failed": 0,
+                "skipped": 0,
+                "warning": False,
+            }
+        }
 
     class _GenerationModeGraph(StandardTenderWorkflowGraph):
         STATE_CLS = TenderGraphStateBase
@@ -46,6 +63,7 @@ def _build_graph(calls: list[str]) -> StandardTenderWorkflowGraph:
         NODE_CONTENT_AGENT_GENERATE = _content_node
         NODE_GENERATE_COMMENTS = _comments_node
         NODE_UPDATE_WORD = _update_node
+        NODE_COMMENT_AGENT = _comment_agent_node
 
     return _GenerationModeGraph()
 
@@ -69,6 +87,7 @@ def test_workflow_branch_uses_generate_polished_text_and_skips_content() -> None
 
     assert "generate_polished_text" in calls
     assert "content_agent" not in calls
+    assert "comment_agent" not in calls
     assert "word_operation" in calls
     assert calls[-1] == "update_word"
     assert result["polished_text"] == "workflow text"
@@ -81,7 +100,7 @@ def test_agent_branch_uses_content_and_skips_generate_polished_text() -> None:
     assert "content_agent" in calls
     assert "generate_polished_text" not in calls
     assert "word_operation" in calls
-    assert calls[-1] == "update_word"
+    assert calls[-2:] == ["update_word", "comment_agent"]
     assert result["polished_text"] == "agent text"
     assert result["generate_polished_done"] is True
 
@@ -100,7 +119,7 @@ def test_generation_branches_continue_to_comments_when_origin_tender_exists() ->
 
     assert "content_agent" in calls
     assert "generate_comments" in calls
-    assert calls[-1] == "update_word"
+    assert calls[-2:] == ["update_word", "comment_agent"]
     assert result["polished_text"] == "agent text"
 
 
@@ -108,4 +127,4 @@ def test_estimate_total_nodes_uses_selected_generation_branch() -> None:
     graph = _build_graph([])
 
     assert graph.estimate_total_nodes({"generation_mode": "workflow"}) == 7
-    assert graph.estimate_total_nodes({"generation_mode": "agent"}) == 7
+    assert graph.estimate_total_nodes({"generation_mode": "agent"}) == 8

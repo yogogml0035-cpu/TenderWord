@@ -52,6 +52,7 @@ class TenderGraphStateBase(BaseState, total=False):
     inline_style_fragments: List[Dict[str, Any]]
     verbose_style_progress_logs: bool
     suppress_comment_progress_logs: bool
+    suppress_ai_comment_writeback: bool
 
     replacements: List[Tuple[str, str]]
     placeholder_mapping: Dict[str, str]

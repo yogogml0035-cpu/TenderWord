@@ -38,6 +38,8 @@
 - `generation_mode` 当前只允许 `workflow` 与 `agent`，默认 `workflow`。`workflow` 继续走 `generate_polished_text`，保留 `render_generate_prompt()`、`stream_llm_completion()` 和旧 `llm` snapshot 事件；`agent` 只影响初次 generate 的生成节点选择，最终仍必须产出 `polished_text` 给批注、样式回写、Word 写回和下载主干。
 - generate 成功后的后端 `rewrite_state` 可以保留 `comment_plan_detail`、`strikethrough_plan`、`non_black_font_plan` 和 `generation_mode`，供后续补批注 / rewrite / edit 链路读取；这些三组批注依据长数组不得进入任务 result、SSE `done`、前端下载卡 metadata 或 `sessionStorage`。
 - 标准生成 graph 的分流只在 `StandardTenderWorkflowGraph` 基类实现：`generation_mode_gate` 后按 `_select_generation_node()` 进入 `generate_polished_text` 或 `content_agent`，两个分支都继续接入 `generate_comments` / `comments_branch_done` 再进入 `update_word`。类型 graph 不应复制这段分流。
+- `generation_mode=agent` 的 `update_word` 只负责正文、样式和保存：`comments_branch_done` 会设置 `suppress_ai_comment_writeback=True`，各类型 update 节点必须跳过确定性 AI 批注写回；`update_word` 完成后由标准 graph 路由到公共 `comment_agent` 节点，workflow 分支不得进入该节点。
+- 公共 `comment_agent` graph 节点位于 `backend/nodes/common_word_nodes/comment_agent.py`，只作为批注增强项运行：它重新按锚点解析 Word 正文范围，调用 `backend/agents/comments/run_comment_agent()`，并把结果收敛成 `comment_writeback` 摘要；节点异常、保存失败或上下文缺失只能降级为 warning，不能让已保存正文的 generate 任务失败。
 
 ### DeepAgents 初次生成
 
@@ -164,6 +166,7 @@
 - 锁感知删除 helper：`backend/tests/helper/test_delete_ops.py`、`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`
 - 批注写回：`backend/tests/nodes/test_comment_writeback.py`
 - 批注锚点智能体：`backend/tests/agents/test_comment_agent.py`
+- agent generate 批注节点降级：`backend/tests/nodes/test_comment_agent_writeback_node.py`
 - 受保护字段与写回：`backend/tests/nodes/test_protected_fields_strict_matching.py`、`backend/tests/nodes/test_update_word_inline_style_writeback.py`
 - Prompt / LLM stream：`backend/tests/prompts/test_generate_prompt_routing.py`、`backend/tests/util/test_llm_stream_utils.py`
 - 批注 prompt 契约：`backend/tests/prompts/test_comment_prompt_reference_contract.py`、`backend/tests/prompts/test_comment_no_reference_prompt.py`

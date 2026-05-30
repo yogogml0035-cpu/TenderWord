@@ -12,6 +12,7 @@ Source: prd.json
 - `DocumentService._build_rewrite_state_snapshot()` 可以保存后端内部批注依据长数组和 `generation_mode`；`_build_task_result_payload()`、SSE `done` 和前端 `chat-storage` 只能保留白名单摘要字段，不能泄露 `comment_plan_detail`、`strikethrough_plan`、`non_black_font_plan`。
 - 新增 Prompt Layer builder 时同步补 `backend/prompts/types.py` 输入 dataclass、`backend/prompts/__init__.py` 导出和 `backend/tests/prompts/test_*.py` 契约测试；Prompt Layer 仍只做纯渲染，不接日志、LLM 或 Word 副作用。
 - `comment_agent` 采用“纯确定性函数 + LangChain StructuredTool factory”的分层：校验只读取 `polished_text`，Word 写入工具必须重新校验并限制在 `bound_start/bound_end` 内，不复用全文兜底写回。
+- agent generate 批注链路由 `StandardTenderWorkflowGraph` 统一编排：`comments_branch_done` 设置 `suppress_ai_comment_writeback=True`，各类型 `update_word` 只写正文/样式/保存，随后进入公共 `comment_agent` 节点；不要在类型 graph 里复制该分流。
 
 ## 2026-05-30 13:08 - US-001
 - 建立了 `comment_supplement` 任务类型契约：后端内部/API TaskKind、TaskService 映射、前端 TaskKind union 均已支持。
@@ -80,4 +81,17 @@ Source: prd.json
   - `comment_agent` 的 LangChain 工具限制按工具名配置；后续接入 graph 时必须继续使用 `validate_comment_references` 和 `write_validated_comments_to_word` 这两个稳定工具名。
   - 批注候选校验不要把 Word 文档当兜底来源；AI 修复锚点的唯一文本依据是 `polished_text`，Word 工具只负责在已限定锚点边界内写入。
   - 工具消息和排障细节只进审计日志，前端过程卡只能展示 `AIMessage.content`。
+---
+## 2026-05-30 15:27 - US-006
+- 接入 agent generate 的后置 `comment_agent` 分支：workflow 继续走 `generate_polished_text/generate_comments/update_word` 旧路径，agent 继续走 `content_agent`，并在 `update_word` 保存正文后进入公共 `comment_agent` 节点。
+- 给 common、gjgk、gngk_fw_zc、gngk_hw_cz 四类 `update_word` 增加 `suppress_ai_comment_writeback` 开关，agent 路径只写正文、样式和保存，不直接写 AI 批注；公共 `comment_agent` 节点把失败/缺上下文/保存失败收敛为 `comment_writeback` warning，不阻断已保存正文文件下载。
+- 同步更新任务进度节点显示、state 字段、graph 分流测试、节点降级测试，以及共享运行时知识包。
+- 更改的文件：`backend/graphs/base_graph.py`、`backend/states/base_state.py`、`backend/task/task_queue_manager.py`、`backend/nodes/common_word_nodes/comment_agent.py`、`backend/nodes/common_word_nodes/update_word.py`、`backend/nodes/gjgk_word_nodes/gjgk_update_word.py`、`backend/nodes/gngk_word_nodes/gngk_fw_zc_update_word.py`、`backend/nodes/gngk_word_nodes/gngk_hw_cz_update_word.py`、`backend/tests/graphs/test_generation_mode_branching.py`、`backend/tests/nodes/test_comment_agent_writeback_node.py`、`asset/shared_runtime_word_skill_knowledge_pack.md`、`asset/README.md`、`tasks/comment-supplement-comment-agent/prd.json`、`tasks/comment-supplement-comment-agent/progress.txt`。
+- 验证：`backend/.venv-linux/bin/python -m pytest backend/tests/graphs/test_generation_mode_branching.py backend/tests/graphs/test_generation_mode_workflow.py backend/tests/graphs/test_xjcg_generation_mode_agent.py backend/tests/agents/test_comment_agent.py backend/tests/nodes/test_comment_agent_writeback_node.py -v` 通过；`backend/.venv-linux/bin/python -m pytest backend/tests/graphs -v` 通过，28 passed；`backend/.venv-linux/bin/python -m pytest backend/tests -v` 通过，370 passed；`npm run lint` 通过；`npm run type-check` 通过；`npm test -- --runInBand` 通过，31 suites / 355 tests；本轮文件 `git diff --check -- ...` 通过。
+- 全仓 `git diff --check` 仍因进入本轮前已有的 `backend/.env.example`、`scripts/start-dev.ps1` trailing whitespace 失败，未改动这些既有文件。
+- 本 story 只改后端 graph / Word 节点 / 测试与知识包，无 UI 改动，未执行浏览器验证。
+- **未来迭代的学习：**
+  - `comment_agent` graph 节点不要从 `backend.nodes.common_word_nodes.__init__` re-export；`backend.agents.comments.tools` 会导入 `comment_writeback`，包级提前导出会形成 `backend.agents.comments` 与 `common_word_nodes` 的循环初始化。
+  - agent generate 的批注增强失败必须在节点内降级成 `comment_writeback.warning`，不能向 graph 外抛出导致任务失败；正文保存成功才是 generate 下载主流程的强契约。
+  - 逐类型 `update_word` 都要识别 `suppress_ai_comment_writeback`，否则某个类型会在 agent 路径提前写批注并绕过 `comment_agent` 工具门禁。
 ---

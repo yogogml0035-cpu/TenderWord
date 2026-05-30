@@ -271,6 +271,7 @@ def gngk_fw_zc_update_word(
     protected_profile = get_protected_field_profile(str(tender_type or "gngk_fw_zc"))
     verbose_style_progress_logs = bool(state.get("verbose_style_progress_logs"))
     suppress_comment_progress_logs = bool(state.get("suppress_comment_progress_logs"))
+    suppress_ai_comment_writeback = bool(state.get("suppress_ai_comment_writeback"))
 
     if not prepared_doc_path:
         raise ValueError("需要 prepared_doc_path 来插入内容到 Word 文档")
@@ -1126,47 +1127,52 @@ def gngk_fw_zc_update_word(
                     )
                     comment_step_label = "步骤6"
 
-                polished_comments = state.get("polished_comments") or []
-                generated_count = state.get("generated_comment_count", 0)
+                if suppress_ai_comment_writeback:
+                    insertion_log_parts.append(
+                        f"{comment_step_label}：agent 模式跳过确定性批注写入，交由 comment_agent 处理。"
+                    )
+                else:
+                    polished_comments = state.get("polished_comments") or []
+                    generated_count = state.get("generated_comment_count", 0)
 
-                comment_writeback_result = write_polished_comments(
-                    doc=doc,
-                    polished_comments=polished_comments,
-                    bound_start=int(insertion_bound_start),
-                    bound_end=int(get_insertion_bound_end()),
-                    log_parts=insertion_log_parts,
-                    step_label=comment_step_label,
-                )
+                    comment_writeback_result = write_polished_comments(
+                        doc=doc,
+                        polished_comments=polished_comments,
+                        bound_start=int(insertion_bound_start),
+                        bound_end=int(get_insertion_bound_end()),
+                        log_parts=insertion_log_parts,
+                        step_label=comment_step_label,
+                    )
 
-                summary_payload = build_comment_writeback_summary_payload(
-                    generated_count=generated_count,
-                    writeback_result=comment_writeback_result,
-                )
-                added = summary_payload["added"]
-                failed = summary_payload["failed"]
-                skipped = summary_payload["skipped"]
-                issues = comment_writeback_result.get("issues", [])
+                    summary_payload = build_comment_writeback_summary_payload(
+                        generated_count=generated_count,
+                        writeback_result=comment_writeback_result,
+                    )
+                    added = summary_payload["added"]
+                    failed = summary_payload["failed"]
+                    skipped = summary_payload["skipped"]
+                    issues = comment_writeback_result.get("issues", [])
 
-                summary = summary_payload["summary"]
-                if not suppress_comment_progress_logs:
-                    if summary_payload["warning"]:
-                        progress_log.warning(summary)
-                    else:
-                        progress_log.info(summary)
+                    summary = summary_payload["summary"]
+                    if not suppress_comment_progress_logs:
+                        if summary_payload["warning"]:
+                            progress_log.warning(summary)
+                        else:
+                            progress_log.info(summary)
 
-                comment_writeback_summary = summary
-                comment_writeback_result_payload = summary_payload
-                comment_writeback_added = added
-                comment_writeback_failed = failed
-                comment_writeback_skipped = skipped
-                comment_writeback_errors = [
-                    {
-                        "reference_text": issue.get("reference_text", ""),
-                        "reason": issue.get("reason", ""),
-                        "error": issue.get("error", ""),
-                    }
-                    for issue in issues
-                ]
+                    comment_writeback_summary = summary
+                    comment_writeback_result_payload = summary_payload
+                    comment_writeback_added = added
+                    comment_writeback_failed = failed
+                    comment_writeback_skipped = skipped
+                    comment_writeback_errors = [
+                        {
+                            "reference_text": issue.get("reference_text", ""),
+                            "reason": issue.get("reason", ""),
+                            "error": issue.get("error", ""),
+                        }
+                        for issue in issues
+                    ]
 
             doc.Save()
             insertion_log_parts.append("文档已保存。")
