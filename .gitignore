@@ -54,6 +54,7 @@ out/
 # Node.js
 node_modules/
 node_modules.*
+node_modules-*/
 *.tsbuildinfo
 
 # 文档和测试目录
@@ -83,4 +84,3 @@ tasks/*/logs/
 .playwright-mcp/
 .playwright-cli/
 frontend/.playwright-cli/
-
