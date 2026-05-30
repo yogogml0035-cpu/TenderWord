@@ -46,6 +46,7 @@ def _build_agent_step_data(
         node=payload.node,
         content=payload.content,
         findings=[finding.model_dump(mode="json") for finding in payload.findings],
+        comment_agent=payload.comment_agent,
         is_complete=payload.is_complete,
     )
 
@@ -68,6 +69,45 @@ def _make_agent_step_callback(
             callback(event_data)
 
     return emit
+
+
+def _emit_comment_agent_final_warning(
+    state: TenderGraphStateBase,
+    config: dict[str, Any] | None,
+    *,
+    message: str,
+    warning: bool = True,
+) -> None:
+    callback = _make_agent_step_callback(state, config)
+    if callback is None:
+        return
+    content = (
+        "comment_agent 已结束，批注写入降级为 warning。\n"
+        f"原因：{message}"
+        if warning
+        else f"comment_agent 已结束。\n{message}"
+    )
+    callback(
+        AgentStepPayload(
+            step_type="final",
+            round=1,
+            node=NODE_NAME,
+            content=content,
+            comment_agent={
+                "phase": "final",
+                "rounds": [],
+                "highlights": [],
+                "writeback": {
+                    "attempted": 0,
+                    "added": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                    "issues": [],
+                },
+            },
+            is_complete=True,
+        )
+    )
 
 
 def _coerce_generated_count(state: TenderGraphStateBase, comments: list[Any]) -> int:
@@ -169,6 +209,12 @@ def comment_agent_writeback(
 
     if not comments:
         log_parts.append("没有可写入的 AI 批注，跳过 comment_agent")
+        _emit_comment_agent_final_warning(
+            state,
+            config,
+            message="没有可写入的 AI 批注，已跳过。",
+            warning=False,
+        )
         return _state_from_writeback(
             state,
             generated_count=generated_count,
@@ -182,6 +228,7 @@ def comment_agent_writeback(
     if not prepared_doc_path or not before_text or not after_text:
         error = "缺少 prepared_doc_path 或插入锚点，comment_agent 批注写入已降级为 warning"
         log_parts.append(error)
+        _emit_comment_agent_final_warning(state, config, message=error)
         return _state_from_writeback(
             state,
             generated_count=generated_count,
@@ -280,6 +327,8 @@ def comment_agent_writeback(
     except Exception as error:
         log_parts.append(f"comment_agent 批注写入失败，已降级为 warning: {error}")
         progress_log.exception("[comment_agent] 批注写入失败，任务继续完成")
+        if not getattr(error, "_comment_agent_final_emitted", False):
+            _emit_comment_agent_final_warning(state, config, message=str(error))
         return _state_from_writeback(
             state,
             generated_count=generated_count,

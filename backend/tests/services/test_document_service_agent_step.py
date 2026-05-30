@@ -37,6 +37,40 @@ def test_sse_callback_push_agent_step_keeps_json_payload_contract() -> None:
     ]
 
 
+def test_sse_callback_push_agent_step_preserves_comment_agent_payload() -> None:
+    callback = SSECallback("task-comment-1")
+
+    callback.push_agent_step(
+        AgentStepEventData(
+            task_id="task-comment-1",
+            task_kind="comment_supplement",
+            step_type="final",
+            round=1,
+            node="comment_agent",
+            content="comment_agent 最终写入统计",
+            is_complete=True,
+            comment_agent={
+                "phase": "final",
+                "rounds": [],
+                "highlights": [],
+                "writeback": {
+                    "attempted": 2,
+                    "added": 1,
+                    "failed": 0,
+                    "skipped": 1,
+                    "issues": [],
+                },
+            },
+        )
+    )
+
+    events = callback.get_events()
+
+    assert len(events) == 1
+    assert events[0].event is SSEEventType.AGENT_STEP
+    assert events[0].data["comment_agent"]["writeback"]["added"] == 1
+
+
 def test_sse_callback_push_done_keeps_comment_writeback_contract() -> None:
     callback = SSECallback("task-comment-1")
     comment_writeback = {

@@ -108,16 +108,6 @@ function hasAgentStepCard(taskId: string): boolean {
   );
 }
 
-function appendCommentAgentContent(current: string, next: string): string {
-  if (!next) {
-    return current;
-  }
-  if (!current) {
-    return next;
-  }
-  return `${current}\n\n${next}`;
-}
-
 function isAgentGenerationConversation(taskId: string, conversationId: string | null): boolean {
   const state = useChatStore.getState();
   const conversation =
@@ -172,20 +162,6 @@ function shouldAcceptAgentStep(
 
 function getAgentStepKey(step: Pick<SSEAgentStepEvent, 'node' | 'round'>): string {
   return `${step.node || 'content_agent'}:${step.round || 1}`;
-}
-
-function getAgentStepStreamContent(
-  taskId: string,
-  stepKey: string,
-  node: string,
-  incomingContent: string
-): string {
-  if (node !== 'comment_agent') {
-    return incomingContent;
-  }
-  const existingContent =
-    useChatStreamStore.getState().streams[taskId]?.agentSteps?.[stepKey]?.content || '';
-  return appendCommentAgentContent(existingContent, incomingContent);
 }
 
 /**
@@ -485,12 +461,10 @@ export function useChatSSE({
                   ? normalizeAIContent(agentStepData.content)
                   : '';
               useChatStreamStore.getState().setAgentStep(taskId, stepKey, {
-                content: getAgentStepStreamContent(
-                  taskId,
-                  stepKey,
-                  agentStepNode,
-                  normalizedContent
-                ),
+                content: normalizedContent,
+                ...(agentStepData.comment_agent
+                  ? { commentAgent: agentStepData.comment_agent }
+                  : {}),
                 isComplete: false,
               });
             }

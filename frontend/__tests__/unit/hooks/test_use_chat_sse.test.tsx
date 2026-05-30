@@ -464,7 +464,7 @@ describe('useChatSSE', () => {
     expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
   });
 
-  it('appends comment_agent AIMessage content for agent generate tasks', async () => {
+  it('keeps comment_agent incomplete snapshots transient and persists final snapshot', async () => {
     mockGetTaskStatus.mockResolvedValue({
       ...createRunningTaskStatus(),
       progress: {
@@ -502,12 +502,35 @@ describe('useChatSSE', () => {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
           task_kind: 'generate',
-          step_type: 'stream',
+          step_type: 'tool_snapshot',
           round: 1,
           node: 'comment_agent',
           is_complete: false,
-          content: '开始校验批注锚点',
+          content: '工具轮次 1：批注锚点校验快照',
           findings: [],
+          comment_agent: {
+            phase: 'validation_round',
+            rounds: [
+              {
+                round: 1,
+                label: '第 1 轮锚点校验',
+                passed: 0,
+                failed: 1,
+                skipped: 0,
+                highlights: [
+                  {
+                    index: 1,
+                    status: '需修复',
+                    reason: '当前锚点未在最终正文中精确匹配',
+                    original_reference_text: '★7.投标人须提供售后服务承诺',
+                    reference_text: '★7.投标人须提供售后服务承诺',
+                    candidate_fragments: ['7.投标人须提供售后服务承诺'],
+                  },
+                ],
+              },
+            ],
+            highlights: [],
+          },
         },
       });
       latestOptions?.onMessage?.({
@@ -517,12 +540,43 @@ describe('useChatSSE', () => {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
           task_kind: 'generate',
-          step_type: 'stream',
+          step_type: 'tool_snapshot',
           round: 1,
           node: 'comment_agent',
           is_complete: false,
-          content: '批注锚点校验完成',
+          content: '工具轮次 2：批注锚点校验快照',
           findings: [],
+          comment_agent: {
+            phase: 'validation_round',
+            rounds: [
+              {
+                round: 1,
+                label: '第 1 轮锚点校验',
+                passed: 0,
+                failed: 1,
+                skipped: 0,
+                highlights: [],
+              },
+              {
+                round: 2,
+                label: '第 2 轮修复复核',
+                passed: 1,
+                failed: 0,
+                skipped: 0,
+                highlights: [
+                  {
+                    index: 1,
+                    status: '已修复',
+                    reason: '锚点已通过校验',
+                    original_reference_text: '★7.投标人须提供售后服务承诺',
+                    reference_text: '7.投标人须提供售后服务承诺',
+                    candidate_fragments: [],
+                  },
+                ],
+              },
+            ],
+            highlights: [],
+          },
         },
       });
     });
@@ -532,11 +586,17 @@ describe('useChatSSE', () => {
       (message) => message.metadata?.agentStepNode === 'comment_agent'
     );
 
-    expect(commentAgentMessage?.content).toBe('开始校验批注锚点\n\n批注锚点校验完成');
+    expect(commentAgentMessage?.content).toBe('');
     expect(commentAgentMessage?.status).toBe('generating');
     expect(useChatStreamStore.getState().streams['task-1']?.agentSteps).toEqual({
       'comment_agent:1': {
-        content: '开始校验批注锚点\n\n批注锚点校验完成',
+        content: '工具轮次 2：批注锚点校验快照',
+        commentAgent: expect.objectContaining({
+          phase: 'validation_round',
+          rounds: expect.arrayContaining([
+            expect.objectContaining({ label: '第 2 轮修复复核' }),
+          ]),
+        }),
         isComplete: false,
       },
     });
@@ -549,12 +609,49 @@ describe('useChatSSE', () => {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
           task_kind: 'generate',
-          step_type: 'stream',
+          step_type: 'final',
           round: 1,
           node: 'comment_agent',
           is_complete: true,
-          content: null,
+          content: 'comment_agent 最终写入统计',
           findings: [],
+          comment_agent: {
+            phase: 'final',
+            rounds: [
+              {
+                round: 1,
+                label: '第 1 轮锚点校验',
+                passed: 0,
+                failed: 1,
+                skipped: 0,
+                highlights: [],
+              },
+              {
+                round: 2,
+                label: '第 2 轮修复复核',
+                passed: 1,
+                failed: 0,
+                skipped: 0,
+                highlights: [],
+              },
+            ],
+            highlights: [],
+            final_validation: {
+              round: 0,
+              label: '最终静默复校验',
+              passed: 1,
+              failed: 0,
+              skipped: 0,
+              highlights: [],
+            },
+            writeback: {
+              attempted: 1,
+              added: 1,
+              failed: 0,
+              skipped: 0,
+              issues: [],
+            },
+          },
         },
       });
     });
@@ -564,8 +661,10 @@ describe('useChatSSE', () => {
       (message) => message.metadata?.agentStepNode === 'comment_agent'
     );
 
-    expect(commentAgentMessage?.content).toBe('开始校验批注锚点\n\n批注锚点校验完成');
+    expect(commentAgentMessage?.content).toBe('comment_agent 最终写入统计');
     expect(commentAgentMessage?.status).toBe('completed');
+    expect(commentAgentMessage?.metadata?.commentAgent?.rounds).toHaveLength(2);
+    expect(commentAgentMessage?.metadata?.commentAgent?.writeback?.added).toBe(1);
   });
 
   it('shows comment_agent card for comment_supplement tasks and keeps one download card', async () => {
@@ -590,11 +689,11 @@ describe('useChatSSE', () => {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
           task_kind: 'comment_supplement',
-          step_type: 'stream',
+          step_type: 'tool_snapshot',
           round: 1,
           node: 'comment_agent',
           is_complete: false,
-          content: '正在修复批注锚点',
+          content: '工具轮次 1：批注锚点校验快照',
           findings: [],
         },
       });
@@ -605,11 +704,11 @@ describe('useChatSSE', () => {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
           task_kind: 'comment_supplement',
-          step_type: 'stream',
+          step_type: 'final',
           round: 1,
           node: 'comment_agent',
           is_complete: true,
-          content: null,
+          content: 'comment_agent 最终写入统计',
           findings: [],
         },
       });
@@ -638,7 +737,7 @@ describe('useChatSSE', () => {
     expect(agentMessages).toHaveLength(1);
     expect(agentMessages?.[0].metadata?.agentStepNode).toBe('comment_agent');
     expect(agentMessages?.[0].metadata?.taskKind).toBe('comment_supplement');
-    expect(agentMessages?.[0].content).toBe('正在修复批注锚点');
+    expect(agentMessages?.[0].content).toBe('comment_agent 最终写入统计');
     expect(agentMessages?.[0].status).toBe('completed');
     expect(group?.contentMessage).toBeUndefined();
     expect(group?.downloadMessage?.metadata?.taskKind).toBe('comment_supplement');

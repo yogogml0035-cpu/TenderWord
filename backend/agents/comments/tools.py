@@ -12,6 +12,7 @@ from backend.agents.comments.types import (
     VALIDATE_COMMENT_REFERENCES_TOOL,
     WRITE_VALIDATED_COMMENTS_TOOL,
     CommentCandidate,
+    CommentAgentToolSnapshot,
     CommentValidationIssue,
     CommentValidationResult,
 )
@@ -42,11 +43,10 @@ class WriteValidatedCommentsInput(BaseModel):
 class CommentAgentToolContext:
     initial_comments: list[dict[str, str]]
     polished_text: str
-    doc: Any | None = None
-    bound_start: int = 0
-    bound_end: int | None = None
     log_parts: list[str] = field(default_factory=list)
     validation_results: list[dict[str, Any]] = field(default_factory=list)
+    tool_snapshots: list[CommentAgentToolSnapshot] = field(default_factory=list)
+    final_proposed_comments: list[dict[str, str]] = field(default_factory=list)
     writeback_result: CommentWritebackResult | None = None
 
 def normalize_comment_candidates(
@@ -462,6 +462,24 @@ def write_validated_comment_candidates_to_word(
     return validation, result
 
 def create_comment_agent_tools(context: CommentAgentToolContext) -> list[StructuredTool]:
+    def _record_snapshot(
+        *,
+        proposed_comments: list[dict[str, Any]],
+        validation: CommentValidationResult,
+    ) -> CommentAgentToolSnapshot:
+        normalized_proposed = [
+            item.model_dump(mode="json")
+            for item in normalize_comment_candidates(proposed_comments)
+        ]
+        snapshot = CommentAgentToolSnapshot(
+            round=len(context.tool_snapshots) + 1,
+            proposed_comments=normalized_proposed,
+            validation=validation,
+        )
+        context.tool_snapshots.append(snapshot)
+        context.validation_results.append(validation.model_dump(mode="json"))
+        return snapshot
+
     def validate_comment_references(
         proposed_comments: list[dict[str, Any]],
     ) -> dict[str, Any]:
@@ -471,29 +489,29 @@ def create_comment_agent_tools(context: CommentAgentToolContext) -> list[Structu
             proposed_comments=proposed_comments,
             polished_text=context.polished_text,
         )
-        payload = validation.model_dump(mode="json")
-        context.validation_results.append(payload)
-        return payload
+        snapshot = _record_snapshot(
+            proposed_comments=proposed_comments,
+            validation=validation,
+        )
+        return snapshot.validation.model_dump(mode="json")
 
     def write_validated_comments_to_word(
         proposed_comments: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        """重新校验后，把通过门禁且目标范围无批注的候选写入 Word。"""
-        validation, writeback_result = write_validated_comment_candidates_to_word(
-            doc=context.doc,
+        """提交最终候选。这里只重新校验并记录候选，真正 Word 写入由 graph 节点线程执行。"""
+        validation = validate_comment_reference_candidates(
             initial_comments=context.initial_comments,
             proposed_comments=proposed_comments,
             polished_text=context.polished_text,
-            bound_start=context.bound_start,
-            bound_end=context.bound_end,
-            log_parts=context.log_parts,
         )
-        validation_payload = validation.model_dump(mode="json")
-        context.validation_results.append(validation_payload)
-        context.writeback_result = writeback_result
+        context.final_proposed_comments = [
+            item.model_dump(mode="json")
+            for item in normalize_comment_candidates(proposed_comments)
+        ]
         return {
-            "validation": validation_payload,
-            "writeback_result": writeback_result,
+            "validation": validation.model_dump(mode="json"),
+            "submitted": True,
+            "runtime_writeback": "deferred_to_graph_node_thread",
         }
 
     return [
@@ -510,7 +528,8 @@ def create_comment_agent_tools(context: CommentAgentToolContext) -> list[Structu
             write_validated_comments_to_word,
             name=WRITE_VALIDATED_COMMENTS_TOOL,
             description=(
-                "重新执行确定性校验，并仅在锚点范围内把通过校验且无已有批注的候选写入 Word。"
+                "提交最终批注候选。工具只重新执行确定性校验并记录候选；真正 Word 写入由 "
+                "comment_agent 运行时在 graph 节点线程完成。"
             ),
             args_schema=WriteValidatedCommentsInput,
         ),

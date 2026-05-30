@@ -470,6 +470,40 @@ export interface SSEAgentStepFinding {
   fix_hint: string;
 }
 
+export interface SSECommentAgentHighlight {
+  index: number;
+  status: string;
+  reason: string;
+  original_reference_text: string;
+  reference_text: string;
+  candidate_fragments: string[];
+}
+
+export interface SSECommentAgentRound {
+  round: number;
+  label: string;
+  passed: number;
+  failed: number;
+  skipped: number;
+  highlights: SSECommentAgentHighlight[];
+}
+
+export interface SSECommentAgentWriteback {
+  attempted: number;
+  added: number;
+  failed: number;
+  skipped: number;
+  issues: SSECommentAgentHighlight[];
+}
+
+export interface SSECommentAgentStep {
+  phase: 'validation_round' | 'final';
+  rounds: SSECommentAgentRound[];
+  highlights: SSECommentAgentHighlight[];
+  final_validation?: SSECommentAgentRound | null;
+  writeback?: SSECommentAgentWriteback | null;
+}
+
 export interface SSEAgentStepEvent {
   timestamp: string;
   task_id: string;
@@ -480,6 +514,7 @@ export interface SSEAgentStepEvent {
   is_complete: boolean;
   content?: string | null;
   findings: SSEAgentStepFinding[];
+  comment_agent?: SSECommentAgentStep | null;
 }
 
 export interface SSEStatusEvent {

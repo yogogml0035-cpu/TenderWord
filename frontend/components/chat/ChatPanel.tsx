@@ -242,6 +242,10 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           return {
             ...message,
             content: stepSnapshot.content,
+            metadata: {
+              ...(message.metadata || {}),
+              ...(stepSnapshot.commentAgent ? { commentAgent: stepSnapshot.commentAgent } : {}),
+            },
           };
         }
       }

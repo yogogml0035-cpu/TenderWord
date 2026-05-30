@@ -269,7 +269,7 @@ describe('chatStore task message grouping', () => {
     expect(secondAuditMessage?.metadata?.agentStepAuditRounds).toHaveLength(1);
   });
 
-  it('appends comment_agent AIMessage contents to one process card and preserves them on final', () => {
+  it('keeps comment_agent incomplete snapshots lightweight and persists final snapshot', () => {
     act(() => {
       useChatStore.getState().startTask('conv-1', 'task-1', {
         task_kind: 'comment_supplement',
@@ -277,38 +277,120 @@ describe('chatStore task message grouping', () => {
         current_node: 'comment_agent',
       });
       useChatStore.getState().upsertAgentStepMessage('task-1', {
-        timestamp: new Date().toISOString(),
-        task_id: 'task-1',
-        task_kind: 'comment_supplement',
-        step_type: 'stream',
-        round: 1,
-        node: 'comment_agent',
-        is_complete: false,
-        content: '开始校验批注锚点',
-        findings: [],
-      });
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'comment_supplement',
+          step_type: 'tool_snapshot',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: false,
+          content: '工具轮次 1：批注锚点校验快照',
+          findings: [],
+          comment_agent: {
+            phase: 'validation_round',
+            rounds: [
+              {
+                round: 1,
+                label: '第 1 轮锚点校验',
+                passed: 0,
+                failed: 1,
+                skipped: 0,
+                highlights: [],
+              },
+            ],
+            highlights: [],
+          },
+        });
       useChatStore.getState().upsertAgentStepMessage('task-1', {
-        timestamp: new Date().toISOString(),
-        task_id: 'task-1',
-        task_kind: 'comment_supplement',
-        step_type: 'stream',
-        round: 1,
-        node: 'comment_agent',
-        is_complete: false,
-        content: '批注锚点校验完成',
-        findings: [],
-      });
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'comment_supplement',
+          step_type: 'tool_snapshot',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: false,
+          content: '工具轮次 2：批注锚点校验快照',
+          findings: [],
+          comment_agent: {
+            phase: 'validation_round',
+            rounds: [
+              {
+                round: 1,
+                label: '第 1 轮锚点校验',
+                passed: 0,
+                failed: 1,
+                skipped: 0,
+                highlights: [],
+              },
+              {
+                round: 2,
+                label: '第 2 轮修复复核',
+                passed: 1,
+                failed: 0,
+                skipped: 0,
+                highlights: [
+                  {
+                    index: 1,
+                    status: '已修复',
+                    reason: '锚点已通过校验',
+                    original_reference_text: '★7.投标人须提供售后服务承诺',
+                    reference_text: '7.投标人须提供售后服务承诺',
+                    candidate_fragments: [],
+                  },
+                ],
+              },
+            ],
+            highlights: [],
+          },
+        });
       useChatStore.getState().upsertAgentStepMessage('task-1', {
-        timestamp: new Date().toISOString(),
-        task_id: 'task-1',
-        task_kind: 'comment_supplement',
-        step_type: 'stream',
-        round: 1,
-        node: 'comment_agent',
-        is_complete: true,
-        content: undefined,
-        findings: [],
-      });
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'comment_supplement',
+          step_type: 'stream',
+          round: 1,
+          node: 'comment_agent',
+          is_complete: true,
+          content: 'comment_agent 最终写入统计',
+          findings: [],
+          comment_agent: {
+            phase: 'final',
+            rounds: [
+              {
+                round: 1,
+                label: '第 1 轮锚点校验',
+                passed: 0,
+                failed: 1,
+                skipped: 0,
+                highlights: [],
+              },
+              {
+                round: 2,
+                label: '第 2 轮修复复核',
+                passed: 1,
+                failed: 0,
+                skipped: 0,
+                highlights: [],
+              },
+            ],
+            highlights: [],
+            final_validation: {
+              round: 0,
+              label: '最终静默复校验',
+              passed: 1,
+              failed: 0,
+              skipped: 0,
+              highlights: [],
+            },
+            writeback: {
+              attempted: 8,
+              added: 7,
+              failed: 0,
+              skipped: 1,
+              issues: [],
+            },
+          },
+        });
     });
 
     const conversation = useChatStore.getState().getCurrentConversation();
@@ -319,8 +401,10 @@ describe('chatStore task message grouping', () => {
     expect(agentMessages).toHaveLength(1);
     expect(agentMessages?.[0].metadata?.agentStepNode).toBe('comment_agent');
     expect(agentMessages?.[0].metadata?.taskKind).toBe('comment_supplement');
-    expect(agentMessages?.[0].content).toBe('开始校验批注锚点\n\n批注锚点校验完成');
+    expect(agentMessages?.[0].content).toBe('comment_agent 最终写入统计');
     expect(agentMessages?.[0].status).toBe('completed');
+    expect(agentMessages?.[0].metadata?.commentAgent?.rounds).toHaveLength(2);
+    expect(agentMessages?.[0].metadata?.commentAgent?.writeback?.added).toBe(7);
   });
 
   it('does not render empty verify findings as JSON until content or completion findings exist', () => {
@@ -645,6 +729,36 @@ describe('chatStore task message grouping', () => {
     expect(conversation?.messages.some((message) => message.content === '重复的普通内容')).toBe(
       false
     );
+  });
+
+  it('completeTask closes unfinished agent-step cards', () => {
+    act(() => {
+      useChatStore.getState().startTask('conv-1', 'task-1', {
+        task_kind: 'comment_supplement',
+        status: 'running',
+        current_node: 'comment_agent',
+      });
+      useChatStore.getState().ensureTaskLogMessage('task-1');
+      useChatStore.getState().upsertAgentStepMessage('task-1', {
+        timestamp: new Date().toISOString(),
+        task_id: 'task-1',
+        task_kind: 'comment_supplement',
+        step_type: 'tool_snapshot',
+        round: 1,
+        node: 'comment_agent',
+        is_complete: false,
+        content: '工具轮次 1：批注锚点校验快照',
+        findings: [],
+      });
+      useChatStore.getState().completeTask('task-1', 'D:/UploadFiles/output.docx', 'output.docx');
+    });
+
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessage = conversation?.messages.find(
+      (message) => message.metadata?.agentStepNode === 'comment_agent'
+    );
+
+    expect(agentMessage?.status).toBe('completed');
   });
 
   it('failTask keeps agent-step process cards and does not append task-content', () => {

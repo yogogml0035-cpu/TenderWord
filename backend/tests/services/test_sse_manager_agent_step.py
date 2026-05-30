@@ -83,6 +83,48 @@ async def test_event_stream_replays_agent_step_then_done_terminal() -> None:
     assert agent_payload["content"] == "修复后的正文"
 
 @pytest.mark.asyncio
+async def test_send_agent_step_replays_structured_comment_agent_payload() -> None:
+    manager = SSEManager(heartbeat_interval=1)
+    comment_agent = {
+        "phase": "final",
+        "rounds": [],
+        "highlights": [],
+        "writeback": {
+            "attempted": 8,
+            "added": 7,
+            "failed": 0,
+            "skipped": 1,
+            "issues": [
+                {
+                    "index": 8,
+                    "status": "已跳过",
+                    "reason": "目标位置已有批注，已跳过",
+                    "original_reference_text": "",
+                    "reference_text": "售后服务",
+                    "candidate_fragments": [],
+                }
+            ],
+        },
+    }
+
+    await manager.send_agent_step(
+        task_id="task-comment-1",
+        task_kind="comment_supplement",
+        step_type="final",
+        round=1,
+        node="comment_agent",
+        content="comment_agent 最终写入统计",
+        comment_agent=comment_agent,
+        is_complete=True,
+    )
+
+    missed_events = await manager.get_missed_events("task-comment-1", 0)
+
+    assert missed_events[0].event is SSEEventType.AGENT_STEP
+    assert missed_events[0].data["comment_agent"]["writeback"]["added"] == 7
+    assert missed_events[0].data["comment_agent"]["writeback"]["issues"][0]["reason"] == "目标位置已有批注，已跳过"
+
+@pytest.mark.asyncio
 async def test_send_done_buffers_comment_writeback_contract() -> None:
     manager = SSEManager(heartbeat_interval=1)
     comment_writeback = {

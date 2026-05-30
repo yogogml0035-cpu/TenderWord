@@ -174,12 +174,12 @@
 - 智能体过程卡最终态是会话历史消息，运行中正文快照是临时 stream。`agent_step` 会在 `chat-storage` 里保存为 `metadata.messageKind = "agent-step"` 的 AI 消息，刷新后随会话消息恢复；但 `is_complete=false` 的高频正文片段只存在 `chatStreamStore.streams[taskId].agentSteps`，由 `ChatPanel` 合并进当前渲染，不直接持久化到会话消息。
 - `agent-step` 消息不纳入旧 `taskMessageMap` 的 `task-log` / `task-content` / `task-download` 三卡分组；done 事件仍只负责生成下载入口卡。
 - 智能体过程卡按 `metadata.agentStepNode + metadata.agentStepRound` 聚合展示：`content_generate_agent`、`content_verify_agent`、`content_revise_agent` 分别展示对应 subagent 原始 streaming 内容；`content_agent` 只展示后端补发的终局验收卡。同一 `node` 不同轮次必须保留为多张卡，确保 `generate round-1 -> verify round-1 -> revise round-1 -> verify round-2 [] -> content_agent final` 这类因果顺序可见；只有相同 `node + round` 的 streaming 增量才 upsert 同一张卡。
-- `comment_agent` 过程卡复用 `agent_step` 机制，但事件语义是多条 `AIMessage.content` 顺序追加到同一张 `comment_agent` 卡；最终 `is_complete=true` 且 `content` 为空的事件只负责收尾，不能清空已追加内容。`comment_supplement` 任务允许显示 `comment_agent` 过程卡；generate 只有在 agent 模式或已有 agent-step 过程卡时才接收 `comment_agent`，workflow generate 不显示该卡。
-- 智能体过程卡状态必须单调收敛：同一 `node + round` 一旦进入 `completed` / `error` / `cancelled`，迟到的 `is_complete=false` stream 事件不得把卡片降回 `generating`；新的 agent-step 卡片到达时，应把同一任务下仍在运行的旧 agent-step 卡片收口为 `completed`，避免前端同时显示“下一步已完成”和“上一步生成中”。
+- `comment_agent` 过程卡复用 `agent_step` 机制，但主展示数据来自 `comment_agent` 结构字段；运行中 `is_complete=false` 的结构化快照只进入 `chatStreamStore` 临时流并覆盖展示，不写入持久化 conversation message；完成事件 `is_complete=true` 的结构化最终态才固化到 `chatStore` 的 `agent-step` 卡片。`content` 只作旧事件 fallback。`comment_supplement` 任务允许显示 `comment_agent` 过程卡；generate 只有在 agent 模式或已有 agent-step 过程卡时才接收 `comment_agent`，workflow generate 不显示该卡。
+- 智能体过程卡状态必须单调收敛：同一 `node + round` 一旦进入 `completed` / `error` / `cancelled`，迟到的 `is_complete=false` stream 事件不得把卡片降回 `generating`；新的 agent-step 卡片到达时，应把同一任务下仍在运行的旧 agent-step 卡片收口为 `completed`。任务 `done` / `error` / `cancelled` 终态也必须兜底收口同 task 下仍为 `generating` 的 agent-step 卡片，避免前端长期显示“生成中”。
 - 初次 generate 提交必须防同一会话重复创建任务：`FormPanel` 除依赖按钮禁用外，还要用同步提交锁和 `currentConversationIsBusy()` 阻挡同一轮双击。否则一次双击会创建多个后端任务、多个 SSE 流和多组日志 / agent-step 卡片，放大前端渲染和持久化成本。
 - 生成中的任务日志明细默认折叠；折叠态只显示日志条数和最新一条摘要，不挂载完整日志 DOM，也不预先拼接复制文本。点击展开才渲染最近日志窗口，点击复制时才临时拼接完整日志文本。单纯 CSS 隐藏日志卡片不能解决主线程卡顿，因为 React 渲染、自动滚动测量和复制文本构造仍会执行。
 - `content_verify_agent` 卡展示后端 SSE `content` 中的原始 JSON 文本；没有 `content` 时只在完成事件或存在真实 findings 时用 `findings` JSON 兜底。启动空事件不得把空 findings 渲染成 `[]`。
-- 智能体过程卡标题以 `metadata.agentStepNode` 和 `metadata.agentStepRound` 为准，显示如 `content_generate_agent round-1`、`content_verify_agent round-1`、`content_revise_agent round-1`；主 agent 终局事件显示 `content_agent final`，`comment_agent` 卡标题固定显示 `comment_agent`。不要再用“AI 初稿内容 / 智能体审核意见 / AI 修改内容”这类按 step_type 推导的标题。agent-step 卡出现后，前端不得再保留或补建普通 `task-content` 的“AI 生成内容”卡，避免与 `content_generate_agent` 正文重复。
+- 智能体过程卡标题以 `metadata.agentStepNode` 和 `metadata.agentStepRound` 为准，显示如 `content_generate_agent round-1`、`content_verify_agent round-1`、`content_revise_agent round-1`；主 agent 终局事件显示 `content_agent final`，`comment_agent` 卡标题固定显示“批注智能体”。不要再用“AI 初稿内容 / 智能体审核意见 / AI 修改内容”这类按 step_type 推导的标题。agent-step 卡出现后，前端不得再保留或补建普通 `task-content` 的“AI 生成内容”卡，避免与 `content_generate_agent` 正文重复。agent-step 文本 fallback 应使用适合中文段落的 `break-words` / `whitespace-pre-wrap` 样式，不使用 `font-mono + break-all` 导致中文逐字换行。
 - 空内容且仍在运行中的 agent-step 卡只显示紧凑“正在调用...”状态，不展示大块“等待生成...”占位。
 - 智能体 generate 任务失败、取消或本地中断时也必须沿用 agent-step 过程卡，不得因为运行时残留 `aiText` 而补建普通 `task-content` 卡；错误原因应进入 `task-log` 日志卡，保证用户能看到 `Request timed out.` 等失败信息。
 
@@ -210,7 +210,7 @@
 - 前端映射与注册：`frontend/__tests__/unit/utils/test_tender_type_mapper.test.ts`、`frontend/__tests__/unit/lib/test_form_data_converter.test.ts`、`frontend/__tests__/unit/components/chat/test_tender_form_registry.test.tsx`
 - 前端会话与表单：`frontend/__tests__/unit/stores/test_chat_store_conversation_scope.test.ts`、`frontend/__tests__/unit/components/forms/test_tender_form_shared.test.tsx`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
 - 前端任务消息恢复：`frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`
-- 前端 SSE 与智能体过程卡：`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/components/chat/test_task_content_message.test.tsx`、`frontend/__tests__/unit/lib/test_sse.test.ts`、`frontend/__tests__/unit/types/test_api_sse_agent_step.test.ts`
+- 前端 SSE 与智能体过程卡：`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`、`frontend/__tests__/unit/components/chat/test_task_content_message.test.tsx`、`frontend/__tests__/unit/lib/test_sse.test.ts`、`frontend/__tests__/unit/types/test_api_sse_agent_step.test.ts`
 - 前端生成提交与日志渲染性能：`frontend/__tests__/unit/components/chat/test_form_panel.test.tsx`、`frontend/__tests__/unit/components/chat/test_message_list.test.tsx`
 - 智能体用户可见闭环 E2E：`frontend/e2e/test_generation_mode_agent.spec.ts`
 - URL E2E：`frontend/e2e/test_url_conversation.spec.ts`

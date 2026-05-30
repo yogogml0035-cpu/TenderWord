@@ -180,6 +180,7 @@ class SSEManager:
         task_kind: str = "generate",
         content: Optional[str] = None,
         findings: Optional[List[dict[str, str]]] = None,
+        comment_agent: Optional[dict[str, Any]] = None,
         is_complete: bool = False,
     ) -> None:
         self._schedule(
@@ -191,6 +192,7 @@ class SSEManager:
                 node=node,
                 content=content,
                 findings=findings,
+                comment_agent=comment_agent,
                 is_complete=is_complete,
             )
         )
@@ -649,6 +651,7 @@ class SSEManager:
         task_kind: str = "generate",
         content: Optional[str] = None,
         findings: Optional[List[dict[str, str]]] = None,
+        comment_agent: Optional[dict[str, Any]] = None,
         is_complete: bool = False,
     ) -> int:
         """发送智能体步骤事件."""
@@ -660,6 +663,7 @@ class SSEManager:
             node=node,
             content=content,
             findings=findings or [],
+            comment_agent=comment_agent,
             is_complete=is_complete,
         ).model_dump(mode="json")
         return await self.broadcast(task_id, SSEEventType.AGENT_STEP, data)

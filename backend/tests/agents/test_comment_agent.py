@@ -11,7 +11,10 @@ from backend.agents.comments import (
     COMMENT_AGENT_NODE,
     VALIDATE_COMMENT_REFERENCES_TOOL,
     WRITE_VALIDATED_COMMENTS_TOOL,
+    create_comment_agent_tools,
     create_comment_agent_runner,
+    CommentAgentToolContext,
+    CommentAgentToolSnapshot,
     run_comment_agent,
     validate_comment_reference_candidates,
     write_validated_comment_candidates_to_word,
@@ -115,7 +118,7 @@ def test_create_comment_agent_runner_uses_named_agent_and_tool_limits(monkeypatc
     middleware = captured["middleware"]
     assert all(isinstance(item, ToolCallLimitMiddleware) for item in middleware)
     assert [(item.tool_name, item.run_limit) for item in middleware] == [
-        (VALIDATE_COMMENT_REFERENCES_TOOL, 3),
+        (VALIDATE_COMMENT_REFERENCES_TOOL, 2),
         (WRITE_VALIDATED_COMMENTS_TOOL, 1),
     ]
 
@@ -277,7 +280,42 @@ def test_write_tool_counts_existing_comment_as_skipped() -> None:
     assert writeback["issues"][0]["reason"] == "overlapping_comment_exists"
     assert doc.Comments.Count == 1
 
-def test_run_comment_agent_records_ai_messages_audit_and_filters_tool_messages(tmp_path) -> None:
+def test_write_validated_comments_tool_submits_candidates_without_touching_word_doc() -> None:
+    doc = _FakeDocument("投标人须提供原厂授权函，并承诺售后。")
+    context = CommentAgentToolContext(
+        initial_comments=[
+            {
+                "reference_text": "原厂授权",
+                "comment_text": "建议提示：不得要求原厂授权函。",
+            }
+        ],
+        polished_text=doc.text,
+    )
+    write_tool = next(
+        tool
+        for tool in create_comment_agent_tools(context)
+        if tool.name == WRITE_VALIDATED_COMMENTS_TOOL
+    )
+
+    payload = write_tool.invoke(
+        {
+            "proposed_comments": [
+                {
+                    "reference_text": "投标人须提供原厂授权函",
+                    "comment_text": "建议提示：不得要求原厂授权函。",
+                }
+            ]
+        }
+    )
+
+    assert payload["submitted"] is True
+    assert payload["runtime_writeback"] == "deferred_to_graph_node_thread"
+    assert context.final_proposed_comments[0]["reference_text"] == "投标人须提供原厂授权函"
+    assert len(context.tool_snapshots) == 0
+    assert context.writeback_result is None
+    assert doc.Comments.Count == 0
+
+def test_run_comment_agent_pushes_tool_snapshots_and_writes_word_after_runner(tmp_path) -> None:
     doc = _FakeDocument("投标人须提供原厂授权函，并承诺售后。")
     audit_path = tmp_path / "comment-agent-audit.json"
 
@@ -291,17 +329,26 @@ def test_run_comment_agent_records_ai_messages_audit_and_filters_tool_messages(t
                 }
             ]
             yield AIMessage(content="开始校验批注锚点")
-            validation, writeback = write_validated_comment_candidates_to_word(
-                doc=context.doc,
+            assert doc.Comments.Count == 0
+            context.final_proposed_comments = [
+                {
+                    "reference_text": proposed[0]["reference_text"],
+                    "comment_text": proposed[0]["comment_text"],
+                }
+            ]
+            validation = validate_comment_reference_candidates(
                 initial_comments=context.initial_comments,
                 proposed_comments=proposed,
                 polished_text=context.polished_text,
-                bound_start=context.bound_start,
-                bound_end=context.bound_end,
-                log_parts=context.log_parts,
             )
             context.validation_results.append(validation.model_dump(mode="json"))
-            context.writeback_result = writeback
+            context.tool_snapshots.append(
+                CommentAgentToolSnapshot(
+                    round=1,
+                    proposed_comments=context.final_proposed_comments,
+                    validation=validation,
+                )
+            )
             yield ToolMessage(content="工具内部输出不应展示", tool_call_id="tool-1")
             yield AIMessage(content="批注锚点校验完成")
 
@@ -324,14 +371,113 @@ def test_run_comment_agent_records_ai_messages_audit_and_filters_tool_messages(t
     )
 
     assert result.ai_messages == ["开始校验批注锚点", "批注锚点校验完成"]
-    assert [event.content for event in events if event.content] == result.ai_messages
+    assert not any(event.content in result.ai_messages for event in events)
+    assert events[0].step_type == "tool_snapshot"
+    assert events[0].comment_agent["phase"] == "validation_round"
+    assert events[0].comment_agent["rounds"][0]["label"] == "第 1 轮锚点校验"
+    assert "第 1 轮锚点校验" in str(events[0].content)
+    assert "投标人须提供原厂授权函" not in str(events[0].content)
+    assert events[0].comment_agent["rounds"][0]["passed"] == 1
+    assert events[0].comment_agent["rounds"][0]["highlights"] == []
     assert events[-1].node == COMMENT_AGENT_NODE
+    assert events[-1].step_type == "final"
     assert events[-1].is_complete is True
+    assert events[-1].comment_agent["phase"] == "final"
+    assert events[-1].comment_agent["final_validation"]["passed"] == 1
+    assert events[-1].comment_agent["writeback"]["added"] == 1
+    assert "comment_agent 最终写入统计" in str(events[-1].content)
     assert doc.Comments.Count == 1
 
     audit = json.loads(audit_path.read_text(encoding="utf-8"))
     assert audit["task_id"] == "task-1"
     assert audit["initial_comments"][0]["comment_text"] == "建议提示：不得要求原厂授权函。"
     assert audit["ai_messages"] == result.ai_messages
+    assert audit["tool_snapshots"][0]["validation"]["passed"][0]["reference_text"] == "投标人须提供原厂授权函"
+    assert audit["final_proposed_comments"][0]["reference_text"] == "投标人须提供原厂授权函"
     assert audit["final_passed"][0]["reference_text"] == "投标人须提供原厂授权函"
     assert audit["writeback_result"]["added"] == 1
+
+def test_run_comment_agent_shows_two_validation_rounds_and_silent_final_recheck(tmp_path) -> None:
+    doc = _FakeDocument("7.投标人须提供售后服务承诺。")
+    audit_path = tmp_path / "comment-agent-audit.json"
+
+    class FakeRunner:
+        def stream(self, _payload, config, **_kwargs):
+            context = config["configurable"]["comment_agent_tool_context"]
+            validation_1 = validate_comment_reference_candidates(
+                initial_comments=context.initial_comments,
+                proposed_comments=[
+                    {
+                        "reference_text": "★7.投标人须提供售后服务承诺",
+                        "comment_text": "建议提示：不得设置星号条款。",
+                    }
+                ],
+                polished_text=context.polished_text,
+            )
+            context.validation_results.append(validation_1.model_dump(mode="json"))
+            context.tool_snapshots.append(
+                CommentAgentToolSnapshot(
+                    round=1,
+                    proposed_comments=[
+                        {
+                            "reference_text": "★7.投标人须提供售后服务承诺",
+                            "comment_text": "建议提示：不得设置星号条款。",
+                        }
+                    ],
+                    validation=validation_1,
+                )
+            )
+            yield ToolMessage(content="round-1", tool_call_id="tool-1")
+
+            final_comments = [
+                {
+                    "reference_text": "7.投标人须提供售后服务承诺",
+                    "comment_text": "建议提示：不得设置星号条款。",
+                }
+            ]
+            validation_2 = validate_comment_reference_candidates(
+                initial_comments=context.initial_comments,
+                proposed_comments=final_comments,
+                polished_text=context.polished_text,
+            )
+            context.validation_results.append(validation_2.model_dump(mode="json"))
+            context.tool_snapshots.append(
+                CommentAgentToolSnapshot(
+                    round=2,
+                    proposed_comments=final_comments,
+                    validation=validation_2,
+                )
+            )
+            context.final_proposed_comments = final_comments
+            yield ToolMessage(content="round-2", tool_call_id="tool-2")
+
+    events = []
+    result = run_comment_agent(
+        initial_comments=[
+            {
+                "reference_text": "★7.投标人须提供售后服务承诺",
+                "comment_text": "建议提示：不得设置星号条款。",
+            }
+        ],
+        polished_text=doc.text,
+        doc=doc,
+        bound_start=0,
+        bound_end=len(doc.text),
+        task_id="task-5",
+        runner=FakeRunner(),
+        step_callback=events.append,
+        audit_log_path=audit_path,
+    )
+
+    visible_round_events = [event for event in events if event.step_type == "tool_snapshot"]
+    assert len(visible_round_events) == 2
+    assert visible_round_events[0].comment_agent["rounds"][-1]["label"] == "第 1 轮锚点校验"
+    assert visible_round_events[0].comment_agent["rounds"][-1]["failed"] == 1
+    assert visible_round_events[1].comment_agent["rounds"][-1]["label"] == "第 2 轮修复复核"
+    assert visible_round_events[1].comment_agent["rounds"][-1]["highlights"][0]["status"] == "已修复"
+    assert visible_round_events[1].comment_agent["rounds"][-1]["highlights"][0]["reference_text"] == "7.投标人须提供售后服务承诺"
+    assert events[-1].comment_agent["phase"] == "final"
+    assert len(events[-1].comment_agent["rounds"]) == 2
+    assert events[-1].comment_agent["final_validation"]["passed"] == 1
+    assert result.writeback_result["added"] == 1
+    assert doc.Comments.Count == 1

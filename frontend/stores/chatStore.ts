@@ -599,6 +599,17 @@ function formatAgentFindingsJson(findings: AgentStepFinding[]): string {
   return JSON.stringify(findings, null, 2);
 }
 
+function normalizeCommentAgentStep(value: unknown): SSEAgentStepEvent['comment_agent'] {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const payload = value as SSEAgentStepEvent['comment_agent'];
+  if (!payload || (payload.phase !== 'validation_round' && payload.phase !== 'final')) {
+    return undefined;
+  }
+  return payload;
+}
+
 function shouldShowVerifyFindingsJson(
   step: { content?: unknown; is_complete?: boolean },
   findings: AgentStepFinding[]
@@ -633,16 +644,6 @@ function isAgentProcessTaskKind(taskKind?: TaskKind): boolean {
   return taskKind === 'generate' || taskKind === 'comment_supplement';
 }
 
-function appendCommentAgentContent(current: string, next: string): string {
-  if (!next) {
-    return current;
-  }
-  if (!current) {
-    return next;
-  }
-  return `${current}\n\n${next}`;
-}
-
 function shouldUseAgentProcessCards(
   state: Pick<ChatStore, 'conversations' | 'conversationDrafts' | 'taskSummaries'>,
   taskId: string,
@@ -668,6 +669,26 @@ function shouldUseAgentProcessCards(
   return conversation
     ? state.conversationDrafts[conversation.id]?.generation_mode === 'agent'
     : false;
+}
+
+function completeGeneratingAgentStepMessages(
+  conversation: Conversation,
+  taskId: string,
+  terminalStatus: Extract<Message['status'], 'completed' | 'error' | 'cancelled'>
+): Conversation {
+  let changed = false;
+  const messages = conversation.messages.map((message) => {
+    if (
+      message.taskId === taskId &&
+      message.status === 'generating' &&
+      message.metadata?.messageKind === TASK_AGENT_STEP_KIND
+    ) {
+      changed = true;
+      return { ...message, status: terminalStatus };
+    }
+    return message;
+  });
+  return changed ? { ...conversation, messages } : conversation;
 }
 
 function getMessageById(messages: Message[], messageId?: string): Message | undefined {
@@ -1338,10 +1359,10 @@ export const useChatStore = create<ChatStore>()(
           const stepType = step.step_type || 'stream';
           const stepRound = step.round;
           const findings = normalizeAgentStepFindings(step.findings);
+          const commentAgent = normalizeCommentAgentStep(step.comment_agent);
           const taskKind = step.task_kind || get().taskSummaries[taskId]?.task_kind;
           const incomingStatus: Message['status'] = step.is_complete ? 'completed' : 'generating';
           const node = step.node || 'content_agent';
-          const isCommentAgentStep = node === 'comment_agent';
           const existing = findAgentStepMessage(conversation.messages, taskId, node, stepRound);
           if (existing && isTerminalMessageStatus(existing.status) && incomingStatus === 'generating') {
             return existing.id;
@@ -1387,19 +1408,15 @@ export const useChatStore = create<ChatStore>()(
             agentStepRound: stepRound,
             agentStepNode: node,
             agentStepFindings: findings,
+            ...(commentAgent ? { commentAgent } : {}),
             ...(auditRounds ? { agentStepAuditRounds: auditRounds } : {}),
           };
 
           const existingContent = typeof existing?.content === 'string' ? existing.content : '';
-          const persistedContent = isCommentAgentStep
-            ? appendCommentAgentContent(existingContent, content)
-            : step.is_complete
-              ? content
-              : '';
+          const persistedContent = step.is_complete ? content : existingContent;
 
           if (existing) {
             if (
-              !isCommentAgentStep &&
               !step.is_complete &&
               typeof step.content === 'string' &&
               step.content.length > 0
@@ -1550,9 +1567,13 @@ export const useChatStore = create<ChatStore>()(
 
             return {
               conversations: state.conversations.map((conversation) =>
-                conversation.currentTaskId === taskId
-                  ? { ...conversation, currentTaskId: undefined, updatedAt: Date.now() }
-                  : conversation
+                completeGeneratingAgentStepMessages(
+                  conversation.currentTaskId === taskId
+                    ? { ...conversation, currentTaskId: undefined, updatedAt: Date.now() }
+                    : conversation,
+                  taskId,
+                  'completed'
+                )
               ),
               activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
               taskMessageMap: nextTaskMessageMap,
@@ -1656,9 +1677,13 @@ export const useChatStore = create<ChatStore>()(
 
             return {
               conversations: state.conversations.map((conversation) =>
-                conversation.currentTaskId === taskId
-                  ? { ...conversation, currentTaskId: undefined, updatedAt: Date.now() }
-                  : conversation
+                completeGeneratingAgentStepMessages(
+                  conversation.currentTaskId === taskId
+                    ? { ...conversation, currentTaskId: undefined, updatedAt: Date.now() }
+                    : conversation,
+                  taskId,
+                  'error'
+                )
               ),
               activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
               taskMessageMap: nextTaskMessageMap,
@@ -1753,9 +1778,13 @@ export const useChatStore = create<ChatStore>()(
 
             return {
               conversations: state.conversations.map((conversation) =>
-                conversation.currentTaskId === taskId
-                  ? { ...conversation, currentTaskId: undefined, updatedAt: Date.now() }
-                  : conversation
+                completeGeneratingAgentStepMessages(
+                  conversation.currentTaskId === taskId
+                    ? { ...conversation, currentTaskId: undefined, updatedAt: Date.now() }
+                    : conversation,
+                  taskId,
+                  'cancelled'
+                )
               ),
               activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
               taskMessageMap: nextTaskMessageMap,

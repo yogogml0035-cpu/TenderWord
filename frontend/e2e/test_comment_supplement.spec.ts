@@ -281,25 +281,155 @@ test.describe('Comment supplement and comment_agent mocked flows', () => {
         timestamp: now,
         task_id: commentSupplementTaskId,
         task_kind: 'comment_supplement',
-        step_type: 'stream',
+        step_type: 'tool_snapshot',
         round: 1,
         node: 'comment_agent',
         is_complete: false,
-        content: '正在校验补充批注锚点。',
+        content:
+          '第 1 轮锚点校验\n#1 需修复: 原始锚点「★7.投标人须提供售后服务承诺」 -> 当前锚点「★7.投标人须提供售后服务承诺」',
         findings: [],
+        comment_agent: {
+          phase: 'validation_round',
+          rounds: [
+            {
+              round: 1,
+              label: '第 1 轮锚点校验',
+              passed: 6,
+              failed: 1,
+              skipped: 0,
+              highlights: [
+                {
+                  index: 7,
+                  status: '需修复',
+                  reason: '当前锚点未在最终正文中精确匹配',
+                  original_reference_text: '★7.投标人须提供售后服务承诺',
+                  reference_text: '★7.投标人须提供售后服务承诺',
+                  candidate_fragments: ['7.投标人须提供售后服务承诺'],
+                },
+              ],
+            },
+          ],
+          highlights: [],
+        },
       }),
       sseEvent('agent_step', '2', {
         timestamp: now,
         task_id: commentSupplementTaskId,
         task_kind: 'comment_supplement',
-        step_type: 'stream',
+        step_type: 'tool_snapshot',
+        round: 1,
+        node: 'comment_agent',
+        is_complete: false,
+        content: '第 2 轮修复复核\n#7 已修复: 当前锚点「7.投标人须提供售后服务承诺」',
+        findings: [],
+        comment_agent: {
+          phase: 'validation_round',
+          rounds: [
+            {
+              round: 1,
+              label: '第 1 轮锚点校验',
+              passed: 6,
+              failed: 1,
+              skipped: 0,
+              highlights: [],
+            },
+            {
+              round: 2,
+              label: '第 2 轮修复复核',
+              passed: 7,
+              failed: 0,
+              skipped: 0,
+              highlights: [
+                {
+                  index: 7,
+                  status: '已修复',
+                  reason: '锚点已通过校验',
+                  original_reference_text: '★7.投标人须提供售后服务承诺',
+                  reference_text: '7.投标人须提供售后服务承诺',
+                  candidate_fragments: [],
+                },
+              ],
+            },
+          ],
+          highlights: [],
+        },
+      }),
+      sseEvent('agent_step', '3', {
+        timestamp: now,
+        task_id: commentSupplementTaskId,
+        task_kind: 'comment_supplement',
+        step_type: 'final',
         round: 1,
         node: 'comment_agent',
         is_complete: true,
-        content: '已写入 2 条补充批注。',
+        content: 'comment_agent 最终写入统计\nWord 写入尝试 8 条，成功 7 条，失败 0 条，跳过 1 条。',
         findings: [],
+        comment_agent: {
+          phase: 'final',
+          rounds: [
+            {
+              round: 1,
+              label: '第 1 轮锚点校验',
+              passed: 6,
+              failed: 1,
+              skipped: 0,
+              highlights: [
+                {
+                  index: 7,
+                  status: '需修复',
+                  reason: '当前锚点未在最终正文中精确匹配',
+                  original_reference_text: '★7.投标人须提供售后服务承诺',
+                  reference_text: '★7.投标人须提供售后服务承诺',
+                  candidate_fragments: ['7.投标人须提供售后服务承诺'],
+                },
+              ],
+            },
+            {
+              round: 2,
+              label: '第 2 轮修复复核',
+              passed: 7,
+              failed: 0,
+              skipped: 0,
+              highlights: [
+                {
+                  index: 7,
+                  status: '已修复',
+                  reason: '锚点已通过校验',
+                  original_reference_text: '★7.投标人须提供售后服务承诺',
+                  reference_text: '7.投标人须提供售后服务承诺',
+                  candidate_fragments: [],
+                },
+              ],
+            },
+          ],
+          highlights: [],
+          final_validation: {
+            round: 0,
+            label: '最终静默复校验',
+            passed: 7,
+            failed: 0,
+            skipped: 0,
+            highlights: [],
+          },
+          writeback: {
+            attempted: 8,
+            added: 7,
+            failed: 0,
+            skipped: 1,
+            issues: [
+              {
+                index: 8,
+                status: '已跳过',
+                reason: '目标位置已有批注，已跳过',
+                original_reference_text: '',
+                reference_text: '售后服务承诺',
+                candidate_fragments: [],
+              },
+            ],
+          },
+        },
       }),
-      sseEvent('done', '3', {
+      sseEvent('done', '4', {
         timestamp: now,
         task_id: commentSupplementTaskId,
         task_kind: 'comment_supplement',
@@ -308,11 +438,11 @@ test.describe('Comment supplement and comment_agent mocked flows', () => {
         output_file: 'outputs/supplement-output.docx',
         file_name: 'supplement-output.docx',
         comment_writeback: {
-          summary: 'AI 批注写入: 生成 2 条，成功 2 条，失败 0 条',
-          generated: 2,
-          added: 2,
+          summary: 'AI 批注写入: 生成 8 条，成功 7 条，失败 0 条，跳过 1 条',
+          generated: 8,
+          added: 7,
           failed: 0,
-          skipped: 0,
+          skipped: 1,
           warning: false,
         },
       }),
@@ -355,9 +485,13 @@ test.describe('Comment supplement and comment_agent mocked flows', () => {
       source_file: 'outputs/generate-output.docx',
       model: 'deepseek',
     });
-    await expect(page.getByText('comment_agent', { exact: true })).toBeVisible();
-    await expect(page.getByText('正在校验补充批注锚点。')).toBeVisible();
-    await expect(page.getByText('已写入 2 条补充批注。')).toBeVisible();
+    await expect(page.getByText('批注智能体', { exact: true })).toBeVisible();
+    await expect(page.getByText('第 1 轮锚点校验')).toBeVisible();
+    await expect(page.getByText('第 2 轮修复复核')).toBeVisible();
+    await expect(page.getByText('当前锚点未在最终正文中精确匹配')).toBeVisible();
+    await expect(page.getByText('成功 7 条 / 跳过 1 条 / 失败 0 条')).toBeVisible();
+    await expect(page.getByText('1 条目标位置已有批注，已跳过')).toBeVisible();
+    await expect(page.getByText('工具轮次 3')).toHaveCount(0);
     await expect(page.getByText('supplement-output.docx')).toBeVisible();
     await expect(page.getByRole('button', { name: '下载文件' })).toHaveCount(2);
     await expect(page.getByRole('button', { name: '补充批注' })).toHaveCount(1);
@@ -392,23 +526,68 @@ test.describe('Comment supplement and comment_agent mocked flows', () => {
         timestamp: now,
         task_id: agentGenerateTaskId,
         task_kind: 'generate',
-        step_type: 'stream',
+        step_type: 'tool_snapshot',
         round: 1,
         node: 'comment_agent',
         is_complete: false,
-        content: '批注智能体正在修复锚点。',
+        content:
+          '第 1 轮锚点校验\n通过 1 条，失败 0 条，跳过 0 条。',
         findings: [],
+        comment_agent: {
+          phase: 'validation_round',
+          rounds: [
+            {
+              round: 1,
+              label: '第 1 轮锚点校验',
+              passed: 1,
+              failed: 0,
+              skipped: 0,
+              highlights: [],
+            },
+          ],
+          highlights: [],
+        },
       }),
       sseEvent('agent_step', '3', {
         timestamp: now,
         task_id: agentGenerateTaskId,
         task_kind: 'generate',
-        step_type: 'stream',
+        step_type: 'final',
         round: 1,
         node: 'comment_agent',
         is_complete: true,
-        content: '批注智能体完成写入检查。',
+        content:
+          'comment_agent 最终写入统计\nWord 写入尝试 1 条，成功 1 条，失败 0 条，跳过 0 条。',
         findings: [],
+        comment_agent: {
+          phase: 'final',
+          rounds: [
+            {
+              round: 1,
+              label: '第 1 轮锚点校验',
+              passed: 1,
+              failed: 0,
+              skipped: 0,
+              highlights: [],
+            },
+          ],
+          highlights: [],
+          final_validation: {
+            round: 0,
+            label: '最终静默复校验',
+            passed: 1,
+            failed: 0,
+            skipped: 0,
+            highlights: [],
+          },
+          writeback: {
+            attempted: 1,
+            added: 1,
+            failed: 0,
+            skipped: 0,
+            issues: [],
+          },
+        },
       }),
       sseEvent('done', '4', {
         timestamp: now,
@@ -435,9 +614,11 @@ test.describe('Comment supplement and comment_agent mocked flows', () => {
 
     await expect(page.getByText('content_generate_agent round-1', { exact: true })).toBeVisible();
     await expect(page.getByText('正文智能体已完成初稿。')).toBeVisible();
-    await expect(page.getByText('comment_agent', { exact: true })).toBeVisible();
-    await expect(page.getByText('批注智能体正在修复锚点。')).toBeVisible();
-    await expect(page.getByText('批注智能体完成写入检查。')).toBeVisible();
+    await expect(page.getByText('批注智能体', { exact: true })).toBeVisible();
+    await expect(page.getByText('第 1 轮锚点校验')).toBeVisible();
+    await expect(page.getByText('普通通过项已计入数量。')).toBeVisible();
+    await expect(page.getByText('成功 1 条 / 跳过 0 条 / 失败 0 条')).toBeVisible();
+    await expect(page.getByText('工具轮次 3')).toHaveCount(0);
     await expect(page.getByText('agent-comment-output.docx')).toBeVisible();
 
     ensureArtifactDirs();
@@ -490,7 +671,7 @@ test.describe('Comment supplement and comment_agent mocked flows', () => {
     await page.waitForLoadState('networkidle');
 
     await expect(page.getByText('workflow-output.docx')).toBeVisible();
-    await expect(page.getByText('comment_agent', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('批注智能体', { exact: true })).toHaveCount(0);
     await expect(page.getByText('workflow 不应展示这条批注智能体消息。')).toHaveCount(0);
 
     ensureArtifactDirs();
