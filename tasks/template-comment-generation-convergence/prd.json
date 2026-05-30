@@ -1,0 +1,207 @@
+{
+  "project": "TenderWord",
+  "branchName": "ralph/template-comment-generation-convergence",
+  "description": "将初次生成链路收敛为必填模板文件和技术参数文件，并统一 workflow、agent、comment_supplement 的批注生成 prompt 与回写链路。",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "前端表单只保留模板文件和技术参数文件",
+      "description": "作为生成任务用户，我想只看到模板文件和技术参数文件两个必填上传入口，以便不用理解送审稿和清洁稿概念。",
+      "acceptanceCriteria": [
+        "TenderFormShared 文件上传区只渲染“模板文件（必填）”和“技术参数文件（必填）”",
+        "未上传模板文件提交时显示“请上传模板文件”且不调用提交回调",
+        "未上传技术参数文件提交时显示“请上传至少一个技术参数文件”",
+        "会话 draft 的 files 结构只包含 template 和 tender_params",
+        "使用 Playwright 在 mock 后端数据下打开 /tender，并确认页面只显示两个必填上传控件",
+        "mock 的 /tender 上传校验流程中没有控制台错误",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-002",
+      "title": "前端生成 payload 收敛为 template",
+      "description": "作为开发者，我想让三类表单只发送 template 和 tender_params，以便后端不再兼容旧上传槽位。",
+      "acceptanceCriteria": [
+        "frontend/types/api.ts 中 FilesConfig 为 { template: string; tender_params: string[] }",
+        "FileType 支持 template，generate 路径不再使用 origin_tender 或 clean_draft",
+        "convertXjcgFormToApiRequest 输出的 file_paths 只包含 template 和 tender_params",
+        "convertGngkFormToApiRequest 输出的 file_paths 只包含 template 和 tender_params，且仍通过 resolveGngkFormType 分派 form_type",
+        "convertGjgkFormToApiRequest 输出的 file_paths 只包含 template 和 tender_params",
+        "frontend/__tests__/unit/lib/test_form_data_converter.test.ts 断言 payload 不含 origin_tender 和 clean_draft",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-003",
+      "title": "后端生成请求和初始 state 使用 template_path",
+      "description": "作为后端维护者，我想让 GenerateRequest 和初始 state 只接受模板文件路径，以便运行态字段和前端 payload 一致。",
+      "acceptanceCriteria": [
+        "GenerateRequest.file_paths 使用显式模型，要求 template 非空且 tender_params 至少包含一个路径",
+        "DocumentService._build_initial_state() 写入 template_path 和 tender_param_paths",
+        "DocumentService._build_initial_state() 不写入 origin_tender_path、clean_draft_path 或 source_origin_tender_path",
+        "缺少 template 的生成请求在进入 graph 前返回明确错误",
+        "backend/tests/services/test_document_service_initial_state.py 覆盖模板路径和多技术参数路径",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-004",
+      "title": "模板准备和参数提取只读取 template_path",
+      "description": "作为 Word 节点维护者，我想让模板复制和模板正文提取只使用 template_path，以便删除清洁稿和送审稿回退逻辑。",
+      "acceptanceCriteria": [
+        "prepare_template 只读取 state.template_path 并复制工作副本",
+        "prepare_template 缺少 template_path 时错误信息不提及清洁稿或送审稿",
+        "extract_tender_params 从 template_path 提取模板参考正文",
+        "extract_tender_params 从 tender_param_paths 提取并拼接技术参数正文",
+        "backend/tests/nodes/test_extract_tender_params_inline_style.py 覆盖 template_path 输入",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-005",
+      "title": "标准生成 graph 删除送审稿批注分支",
+      "description": "作为 graph 维护者，我想移除 get_comments 和 copy_comments 分支，以便 workflow 和 agent 的批注路径明确且统一。",
+      "acceptanceCriteria": [
+        "StandardTenderWorkflowGraph 不注册 get_comments、copy_comments 或 comments_ready 节点",
+        "workflow 模式节点顺序包含 generate_polished_text -> generate_comments -> update_word",
+        "agent 模式节点顺序包含 content_agent -> update_word -> comment_agent",
+        "agent 模式不进入 generate_comments",
+        "estimate_total_nodes 不再根据 origin_tender_path 改变节点数",
+        "backend/tests/graphs/test_generation_mode_branching.py 和各类型 generation_mode_agent 测试覆盖新拓扑",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-006",
+      "title": "generate_comments 只使用统一 comment_prompt",
+      "description": "作为批注生成维护者，我想让 generate_comments 只基于 polished_text 生成批注候选，以便删除送审稿计划输入。",
+      "acceptanceCriteria": [
+        "CommentPromptInput 不再包含 comment_plan_detail、strikethrough_plan、non_black_font_plan",
+        "comment_prompt.py 用户 prompt 不渲染旧计划字段",
+        "generate_comments 不读取旧计划字段",
+        "generate_comments 仍输出 polished_comments 和 generated_comment_count",
+        "backend/tests/nodes/test_generate_comments.py 覆盖空数组、合法 JSON 和无旧计划字段的 prompt 调用",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-007",
+      "title": "comment_agent 复用 comment_prompt 自主生成批注",
+      "description": "作为 agent 链路维护者，我想让 agent generate 和 comment_supplement 的无候选批注都由 comment_agent 使用同一 prompt 生成，以便三路批注规则一致。",
+      "acceptanceCriteria": [
+        "comment_agent 在 generation_mode=agent 的 generate 任务无 polished_comments 时允许自主生成批注",
+        "comment_agent 在 comment_supplement 任务无 polished_comments 时继续允许自主生成批注",
+        "comment_agent 自主生成批注时使用 render_comment_prompt 的 system_prompt 和 user_prompt",
+        "comment_no_reference_prompt.py 被删除，backend/prompts/__init__.py 不再导出 COMMENT_NO_REFERENCE 相关符号",
+        "rg \"comment_no_reference|CommentNoReference\" backend frontend 没有活跃引用",
+        "backend/tests/agents/test_comment_agent.py 和 backend/tests/nodes/test_comment_agent_writeback_node.py 覆盖两种无候选生成",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-008",
+      "title": "模板候选选择改为单文件回填",
+      "description": "作为表单用户，我想选择模板候选后只回填一个模板文件，以便模板候选和生成上传位一致。",
+      "acceptanceCriteria": [
+        "backend/models/template_candidates.py 的选择响应包含 selected_file 单文件字段",
+        "backend/api/template_candidates.py 选择候选时只下载和保存一次推荐模板文件",
+        "模板候选选择失败时整体失败，不返回 failed_slots 或 partial_success",
+        "frontend/types/api.ts 和 frontend/lib/api.ts 使用单文件响应类型",
+        "TemplateCandidateDialog 文案说明选择后回填模板文件",
+        "TenderFormShared 选择候选后只设置 template 文件",
+        "前端表单测试确认成功选择后页面只出现一个模板文件名",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-009",
+      "title": "清理旧契约并更新知识包",
+      "description": "作为长期维护者，我想清理旧字段、旧文案、旧测试和知识包，以便后续开发不会继续沿用历史分叉。",
+      "acceptanceCriteria": [
+        "活跃代码中不再引用 get_comments、copy_comments、comment_plan_detail、strikethrough_plan、non_black_font_plan、copy_comments_* 生成契约",
+        "asset/shared_runtime_word_skill_knowledge_pack.md 记录统一批注 prompt 和 workflow/agent/comment_supplement 批注链路",
+        "asset/tender_type_identity_session_knowledge_pack.md 记录生成输入只使用 template 和 tender_params",
+        "asset/template_candidate_pipeline_knowledge_pack.md 记录单文件模板候选回填和整体失败",
+        "asset/README.md 索引同步更新",
+        "rg \"送审稿|origin_tender|clean_draft|comment_plan_detail|strikethrough_plan|non_black_font_plan|copy_comments\" frontend backend asset 的结果只剩必要历史说明或已更新文案",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-010",
+      "title": "全链路回归验证",
+      "description": "作为交付负责人，我想验证生成、模板候选、agent 批注和补充批注链路，以便确认本次收敛没有破坏用户可见流程。",
+      "acceptanceCriteria": [
+        "cd backend; .\\.venv\\Scripts\\python.exe -m pytest tests -v passes",
+        "cd frontend; npm run lint passes",
+        "cd frontend; npm run type-check passes",
+        "cd frontend; npm run test passes",
+        "cd frontend; npm run test:e2e passes or documented Word COM/mock limitation is recorded",
+        "使用 Playwright mock 流程验证 agent generate 会渲染 content_agent 和 comment_agent 过程卡",
+        "使用 Playwright mock 流程验证 workflow generate 不会渲染 comment_agent 过程卡",
+        "Windows + Word COM smoke test creates a generate task with one template file and one technical parameter file, reaches completed status, and exposes a download action",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    }
+  ]
+}
