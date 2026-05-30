@@ -130,8 +130,6 @@ def test_standard_generate_graph_preserves_inline_style_fragments_until_update()
     class _InlineStylePropagationGraph(StandardTenderWorkflowGraph):
         STATE_CLS = TenderGraphStateBase
         NODE_PREPARE_TEMPLATE = _identity_node
-        NODE_GET_COMMENTS = _identity_node
-        NODE_COPY_COMMENTS = _identity_node
         NODE_EXTRACT_TENDER_PARAMS = _extract_node
         NODE_DELETE_TENDER_PARAM = _identity_node
         NODE_GET_REPLACEMENTS = _identity_node
@@ -142,7 +140,6 @@ def test_standard_generate_graph_preserves_inline_style_fragments_until_update()
 
     result = _InlineStylePropagationGraph().compile().invoke(
         {
-            "origin_tender_path": "",
             "prepared_doc_path": "fake.docx",
             "insertion_before_text": "前锚点",
             "insertion_after_text": "后锚点",

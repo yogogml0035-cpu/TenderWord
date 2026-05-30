@@ -22,6 +22,10 @@ def test_workflow_generation_mode_executes_generate_polished_text_not_content() 
         calls.append("content_agent")
         return {"polished_text": "agent text", "generate_polished_done": True}
 
+    def _comments_node(state, config=None):
+        calls.append("generate_comments")
+        return {"polished_comments": []}
+
     def _update_node(state, config=None):
         calls.append("update_word")
         return {"prepared_doc_path": "D:/UploadFiles/output.docx"}
@@ -29,21 +33,18 @@ def test_workflow_generation_mode_executes_generate_polished_text_not_content() 
     class _WorkflowGraph(StandardTenderWorkflowGraph):
         STATE_CLS = TenderGraphStateBase
         NODE_PREPARE_TEMPLATE = _identity_node
-        NODE_GET_COMMENTS = _identity_node
-        NODE_COPY_COMMENTS = _identity_node
         NODE_EXTRACT_TENDER_PARAMS = _extract_node
         NODE_DELETE_TENDER_PARAM = _identity_node
         NODE_GET_REPLACEMENTS = _identity_node
         NODE_REPLACE_CONTENT = _identity_node
         NODE_GENERATE_POLISHED_TEXT = _generate_node
         NODE_CONTENT_AGENT_GENERATE = _content_node
-        NODE_GENERATE_COMMENTS = _identity_node
+        NODE_GENERATE_COMMENTS = _comments_node
         NODE_UPDATE_WORD = _update_node
 
     result = _WorkflowGraph().compile().invoke(
         {
             "generation_mode": "workflow",
-            "origin_tender_path": "",
             "prepared_doc_path": "D:/UploadFiles/template.docx",
             "insertion_before_text": "before",
             "insertion_after_text": "after",
@@ -52,7 +53,10 @@ def test_workflow_generation_mode_executes_generate_polished_text_not_content() 
 
     assert "generate_polished_text" in calls
     assert "content_agent" not in calls
+    assert "generate_comments" in calls
     assert calls[-1] == "update_word"
+    assert calls.index("generate_polished_text") < calls.index("generate_comments")
+    assert calls.index("generate_comments") < calls.index("update_word")
     assert result["polished_text"] == "workflow text"
     assert result["generate_polished_done"] is True
     assert result["prepared_doc_path"] == "D:/UploadFiles/output.docx"

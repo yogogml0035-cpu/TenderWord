@@ -98,9 +98,11 @@ def _stub_gngk_fw_zc_nodes(
         update_seen["replace_content_done"] = state.get("replace_content_done")
         return {"prepared_doc_path": "D:/UploadFiles/gngk-fw-zc-output.docx"}
 
+    def _comment_agent(state, config=None):
+        calls.append("comment_agent")
+        return {"comment_writeback_result": {"generated": 0, "added": 0}}
+
     monkeypatch.setattr(GngkFwZcTenderGraph, "NODE_PREPARE_TEMPLATE", _prepare_template)
-    monkeypatch.setattr(GngkFwZcTenderGraph, "NODE_GET_COMMENTS", lambda state, config=None: {})
-    monkeypatch.setattr(GngkFwZcTenderGraph, "NODE_COPY_COMMENTS", lambda state, config=None: {})
     monkeypatch.setattr(
         GngkFwZcTenderGraph, "NODE_EXTRACT_TENDER_PARAMS", _extract_tender_params
     )
@@ -118,6 +120,7 @@ def _stub_gngk_fw_zc_nodes(
     )
     monkeypatch.setattr(GngkFwZcTenderGraph, "NODE_GENERATE_COMMENTS", _generate_comments)
     monkeypatch.setattr(GngkFwZcTenderGraph, "NODE_UPDATE_WORD", _gngk_fw_zc_update_word)
+    monkeypatch.setattr(GngkFwZcTenderGraph, "NODE_COMMENT_AGENT", _comment_agent)
 
 
 def test_gngk_fw_zc_agent_branch_produces_polished_text_for_service_update(
@@ -142,7 +145,6 @@ def test_gngk_fw_zc_agent_branch_produces_polished_text_for_service_update(
             {
                 "generation_mode": "agent",
                 "tender_type": "gngk_fw_zc",
-                "origin_tender_path": "",
                 "prepared_doc_path": "D:/UploadFiles/gngk-fw-zc-template.docx",
                 "project_content": "gngk fw zc project content",
                 "insertion_before_text": "before",
@@ -154,10 +156,11 @@ def test_gngk_fw_zc_agent_branch_produces_polished_text_for_service_update(
         set_generation_agent_runner(None)
 
     assert "generate_polished_text" not in calls
+    assert "generate_comments" not in calls
     assert "gngk_fw_zc_delete_tender_param" in calls
     assert "gngk_fw_zc_get_replacements" in calls
     assert "gngk_fw_zc_update_word" in calls
-    assert calls[-1] == "gngk_fw_zc_update_word"
+    assert calls[-2:] == ["gngk_fw_zc_update_word", "comment_agent"]
     assert result["polished_text"] == "gngk fw zc agent draft"
     assert result["generate_polished_done"] is True
     assert update_seen["polished_text"] == "gngk fw zc agent draft"
@@ -197,7 +200,6 @@ def test_gngk_fw_zc_workflow_branch_still_uses_old_generation_node(
         {
             "generation_mode": "workflow",
             "tender_type": "gngk_fw_zc",
-            "origin_tender_path": "",
             "prepared_doc_path": "D:/UploadFiles/gngk-fw-zc-template.docx",
             "project_content": "gngk fw zc project content",
             "insertion_before_text": "before",
@@ -206,10 +208,14 @@ def test_gngk_fw_zc_workflow_branch_still_uses_old_generation_node(
     )
 
     assert "generate_polished_text" in calls
+    assert "generate_comments" in calls
+    assert "comment_agent" not in calls
     assert "gngk_fw_zc_delete_tender_param" in calls
     assert "gngk_fw_zc_get_replacements" in calls
     assert "gngk_fw_zc_update_word" in calls
     assert calls[-1] == "gngk_fw_zc_update_word"
+    assert calls.index("generate_polished_text") < calls.index("generate_comments")
+    assert calls.index("generate_comments") < calls.index("gngk_fw_zc_update_word")
     assert result["polished_text"] == "workflow gngk fw zc text"
     assert result["generate_polished_done"] is True
     assert update_seen["polished_text"] == "workflow gngk fw zc text"

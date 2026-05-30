@@ -99,9 +99,11 @@ def _stub_gngk_fw_cz_nodes(
         update_seen["replace_content_done"] = state.get("replace_content_done")
         return {"prepared_doc_path": "D:/UploadFiles/gngk-fw-cz-output.docx"}
 
+    def _comment_agent(state, config=None):
+        calls.append("comment_agent")
+        return {"comment_writeback_result": {"generated": 0, "added": 0}}
+
     monkeypatch.setattr(GngkFwCzTenderGraph, "NODE_PREPARE_TEMPLATE", _prepare_template)
-    monkeypatch.setattr(GngkFwCzTenderGraph, "NODE_GET_COMMENTS", lambda state, config=None: {})
-    monkeypatch.setattr(GngkFwCzTenderGraph, "NODE_COPY_COMMENTS", lambda state, config=None: {})
     monkeypatch.setattr(
         GngkFwCzTenderGraph, "NODE_EXTRACT_TENDER_PARAMS", _extract_tender_params
     )
@@ -117,6 +119,7 @@ def _stub_gngk_fw_cz_nodes(
     )
     monkeypatch.setattr(GngkFwCzTenderGraph, "NODE_GENERATE_COMMENTS", _generate_comments)
     monkeypatch.setattr(GngkFwCzTenderGraph, "NODE_UPDATE_WORD", _common_update_word)
+    monkeypatch.setattr(GngkFwCzTenderGraph, "NODE_COMMENT_AGENT", _comment_agent)
 
 
 def test_gngk_fw_cz_agent_branch_smoke_preserves_inherited_chain(monkeypatch) -> None:
@@ -140,7 +143,6 @@ def test_gngk_fw_cz_agent_branch_smoke_preserves_inherited_chain(monkeypatch) ->
             {
                 "generation_mode": "agent",
                 "tender_type": "gngk_fw_cz",
-                "origin_tender_path": "",
                 "prepared_doc_path": "D:/UploadFiles/gngk-fw-cz-template.docx",
                 "project_content": "gngk fw cz project content",
                 "insertion_before_text": "before",
@@ -152,10 +154,11 @@ def test_gngk_fw_cz_agent_branch_smoke_preserves_inherited_chain(monkeypatch) ->
         set_generation_agent_runner(None)
 
     assert "generate_polished_text" not in calls
+    assert "generate_comments" not in calls
     assert "delete_tender_param" in calls
     assert "gngk_hw_zc_get_replacements" in calls
     assert "common_update_word" in calls
-    assert calls[-1] == "common_update_word"
+    assert calls[-2:] == ["common_update_word", "comment_agent"]
     assert result["polished_text"] == "gngk fw cz agent draft"
     assert result["generate_polished_done"] is True
     assert update_seen["polished_text"] == "gngk fw cz agent draft"

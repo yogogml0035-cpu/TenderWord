@@ -53,8 +53,6 @@ def _build_graph(calls: list[str]) -> StandardTenderWorkflowGraph:
     class _GenerationModeGraph(StandardTenderWorkflowGraph):
         STATE_CLS = TenderGraphStateBase
         NODE_PREPARE_TEMPLATE = _identity_node
-        NODE_GET_COMMENTS = _identity_node
-        NODE_COPY_COMMENTS = _identity_node
         NODE_EXTRACT_TENDER_PARAMS = _extract_node
         NODE_DELETE_TENDER_PARAM = _word_node
         NODE_GET_REPLACEMENTS = _word_node
@@ -73,7 +71,6 @@ def _run_graph(generation_mode: str) -> tuple[dict, list[str]]:
     result = _build_graph(calls).compile().invoke(
         {
             "generation_mode": generation_mode,
-            "origin_tender_path": "",
             "prepared_doc_path": "D:/UploadFiles/template.docx",
             "insertion_before_text": "before",
             "insertion_after_text": "after",
@@ -87,9 +84,12 @@ def test_workflow_branch_uses_generate_polished_text_and_skips_content() -> None
 
     assert "generate_polished_text" in calls
     assert "content_agent" not in calls
+    assert "generate_comments" in calls
     assert "comment_agent" not in calls
     assert "word_operation" in calls
     assert calls[-1] == "update_word"
+    assert calls.index("generate_polished_text") < calls.index("generate_comments")
+    assert calls.index("generate_comments") < calls.index("update_word")
     assert result["polished_text"] == "workflow text"
     assert result["generate_polished_done"] is True
 
@@ -99,13 +99,14 @@ def test_agent_branch_uses_content_and_skips_generate_polished_text() -> None:
 
     assert "content_agent" in calls
     assert "generate_polished_text" not in calls
+    assert "generate_comments" not in calls
     assert "word_operation" in calls
     assert calls[-2:] == ["update_word", "comment_agent"]
     assert result["polished_text"] == "agent text"
     assert result["generate_polished_done"] is True
 
 
-def test_generation_branches_continue_to_comments_when_origin_tender_exists() -> None:
+def test_agent_branch_skips_generate_comments_even_when_origin_tender_exists() -> None:
     calls: list[str] = []
     result = _build_graph(calls).compile().invoke(
         {
@@ -118,13 +119,30 @@ def test_generation_branches_continue_to_comments_when_origin_tender_exists() ->
     )
 
     assert "content_agent" in calls
-    assert "generate_comments" in calls
+    assert "generate_comments" not in calls
     assert calls[-2:] == ["update_word", "comment_agent"]
     assert result["polished_text"] == "agent text"
+
+
+def test_standard_graph_does_not_register_legacy_comment_copy_nodes() -> None:
+    graph_nodes = set(_build_graph([]).compile().get_graph().nodes)
+
+    assert "get_comments" not in graph_nodes
+    assert "copy_comments" not in graph_nodes
+    assert "comments_ready" not in graph_nodes
 
 
 def test_estimate_total_nodes_uses_selected_generation_branch() -> None:
     graph = _build_graph([])
 
-    assert graph.estimate_total_nodes({"generation_mode": "workflow"}) == 7
+    assert graph.estimate_total_nodes({"generation_mode": "workflow"}) == 8
     assert graph.estimate_total_nodes({"generation_mode": "agent"}) == 8
+    assert (
+        graph.estimate_total_nodes(
+            {
+                "generation_mode": "workflow",
+                "origin_tender_path": "D:/UploadFiles/review.docx",
+            }
+        )
+        == 8
+    )

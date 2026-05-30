@@ -3,13 +3,13 @@ from __future__ import annotations
 from backend.graphs.gjgk_tender_graph import GjgkTenderGraph
 
 
-def test_gjgk_estimate_total_nodes_includes_comment_branch_when_origin_tender_exists() -> None:
+def test_gjgk_estimate_total_nodes_ignores_origin_tender_path() -> None:
     graph = GjgkTenderGraph()
 
-    assert graph.estimate_total_nodes({"origin_tender_path": "D:/UploadFiles/review.docx"}) == 10
+    assert graph.estimate_total_nodes({"origin_tender_path": "D:/UploadFiles/review.docx"}) == 8
 
 
-def test_gjgk_estimate_total_nodes_skips_comment_branch_without_origin_tender() -> None:
+def test_gjgk_estimate_total_nodes_counts_workflow_comment_generation() -> None:
     graph = GjgkTenderGraph()
 
-    assert graph.estimate_total_nodes({}) == 7
+    assert graph.estimate_total_nodes({}) == 8

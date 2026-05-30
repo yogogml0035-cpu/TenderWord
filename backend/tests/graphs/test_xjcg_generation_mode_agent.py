@@ -85,9 +85,11 @@ def _stub_xjcg_nodes(monkeypatch, calls: list[str], update_seen: dict[str, objec
         update_seen["replace_content_done"] = state.get("replace_content_done")
         return {"prepared_doc_path": "D:/UploadFiles/xjcg-output.docx"}
 
+    def _comment_agent(state, config=None):
+        calls.append("comment_agent")
+        return {"comment_writeback_result": {"generated": 0, "added": 0}}
+
     monkeypatch.setattr(XjcgTenderGraph, "NODE_PREPARE_TEMPLATE", _prepare_template)
-    monkeypatch.setattr(XjcgTenderGraph, "NODE_GET_COMMENTS", lambda state, config=None: {})
-    monkeypatch.setattr(XjcgTenderGraph, "NODE_COPY_COMMENTS", lambda state, config=None: {})
     monkeypatch.setattr(
         XjcgTenderGraph, "NODE_EXTRACT_TENDER_PARAMS", _extract_tender_params
     )
@@ -101,6 +103,7 @@ def _stub_xjcg_nodes(monkeypatch, calls: list[str], update_seen: dict[str, objec
     )
     monkeypatch.setattr(XjcgTenderGraph, "NODE_GENERATE_COMMENTS", _generate_comments)
     monkeypatch.setattr(XjcgTenderGraph, "NODE_UPDATE_WORD", _update_word)
+    monkeypatch.setattr(XjcgTenderGraph, "NODE_COMMENT_AGENT", _comment_agent)
 
 
 def test_xjcg_agent_branch_produces_polished_text_for_common_update(
@@ -121,7 +124,6 @@ def test_xjcg_agent_branch_produces_polished_text_for_common_update(
             {
                 "generation_mode": "agent",
                 "tender_type": "xjcg",
-                "origin_tender_path": "",
                 "prepared_doc_path": "D:/UploadFiles/xjcg-template.docx",
                 "project_content": "xjcg project content",
                 "insertion_before_text": "before",
@@ -133,8 +135,9 @@ def test_xjcg_agent_branch_produces_polished_text_for_common_update(
         set_generation_agent_runner(None)
 
     assert "generate_polished_text" not in calls
+    assert "generate_comments" not in calls
     assert "update_word" in calls
-    assert calls[-1] == "update_word"
+    assert calls[-2:] == ["update_word", "comment_agent"]
     assert result["polished_text"] == "xjcg agent draft"
     assert result["generate_polished_done"] is True
     assert update_seen["polished_text"] == "xjcg agent draft"
@@ -162,7 +165,6 @@ def test_xjcg_workflow_branch_still_uses_old_generation_node(monkeypatch) -> Non
         {
             "generation_mode": "workflow",
             "tender_type": "xjcg",
-            "origin_tender_path": "",
             "prepared_doc_path": "D:/UploadFiles/xjcg-template.docx",
             "project_content": "xjcg project content",
             "insertion_before_text": "before",
@@ -171,8 +173,12 @@ def test_xjcg_workflow_branch_still_uses_old_generation_node(monkeypatch) -> Non
     )
 
     assert "generate_polished_text" in calls
+    assert "generate_comments" in calls
+    assert "comment_agent" not in calls
     assert "update_word" in calls
     assert calls[-1] == "update_word"
+    assert calls.index("generate_polished_text") < calls.index("generate_comments")
+    assert calls.index("generate_comments") < calls.index("update_word")
     assert result["polished_text"] == "workflow xjcg text"
     assert result["generate_polished_done"] is True
     assert update_seen["polished_text"] == "workflow xjcg text"

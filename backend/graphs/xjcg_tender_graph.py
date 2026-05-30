@@ -14,19 +14,16 @@
     START
       ↓
     prepare_template
-      ↓           ↓                  ↓
-    get_comments (若上传送审稿)  extract_tender_params  copy_comments (若上传送审稿)
-      ↓           ↓                  ↓
-      └───────────┴──────────────────┴───────────┐
-                              ↓         ↓
-                  word_operations_subgraph   generate_polished_text (LLM)
-                              ↓         ↓
-                              ↓    (若上传送审稿)
-                              ↓   generate_comments (LLM)
-                              ↓         ↓ (否则跳过)
-                              └─────────┴──→ update_word
-                                            ↓
-                                           END
+      ↓
+    extract_tender_params
+      ↓                     ↓
+    word_operations_subgraph   generate_polished_text / content_agent
+      ↓                     ↓
+      └──────────────→ generate_comments（workflow）/ comments_branch_done（agent）
+                            ↓
+                         update_word
+                            ↓
+                    comment_agent（agent）/ END（workflow）
 
 需求引用：
 - 需求 2.1: 作为开发者，我希望能够轻松创建新的 Graph
@@ -40,8 +37,8 @@
 
     # 准备初始状态
     initial_state = {
-        "origin_tender_path": "path/to/template.doc",
-        "tender_param_path": "path/to/params.docx",
+        "template_path": "path/to/template.doc",
+        "tender_param_paths": ["path/to/params.docx"],
         "project_name": "项目名称",
         # ... 其他字段
     }
@@ -67,8 +64,6 @@ from backend.nodes.common_word_nodes import (
     prepare_template,
     generate_polished_text,
     replace_content,
-    get_comments,
-    copy_comments,
     generate_comments,
     delete_tender_param,
     update_word,
@@ -99,8 +94,6 @@ class XjcgTenderGraph(StandardTenderWorkflowGraph):
     STATE_CLS = XjcgTenderGraphState
 
     NODE_PREPARE_TEMPLATE: Callable = prepare_template
-    NODE_GET_COMMENTS: Callable = get_comments
-    NODE_COPY_COMMENTS: Callable = copy_comments
     NODE_EXTRACT_TENDER_PARAMS: Callable = extract_tender_params
     NODE_DELETE_TENDER_PARAM: Callable = delete_tender_param
     NODE_GET_REPLACEMENTS: Callable = xjcg_get_replacements
