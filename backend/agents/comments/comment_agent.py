@@ -44,7 +44,7 @@ COMMENT_AGENT_SYSTEM_PROMPT = """
 """.strip()
 
 COMMENT_AGENT_GENERATION_SYSTEM_PROMPT = """
-你是批注智能体 comment_agent，负责先生成批注候选，再校验锚点并提交写回。
+你是批注生成智能体 comment_agent，负责先生成批注候选，再校验锚点并提交写回。
 
 硬性规则：
 1. 先基于 polished_text 和批注生成规则生成 proposed_comments，元素只能包含 reference_text 与 comment_text。

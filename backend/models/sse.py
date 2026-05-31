@@ -142,7 +142,7 @@ class AgentStepFindingData(BaseModel):
 
 
 class ContentAgentRoundData(BaseModel):
-    """正文智能体单阶段摘要。"""
+    """参数生成智能体单阶段摘要。"""
 
     round: int = Field(..., ge=1, description="轮次")
     phase: Literal["draft", "audit", "revision"] = Field(..., description="阶段")
@@ -155,7 +155,7 @@ class ContentAgentRoundData(BaseModel):
 
 
 class ContentAgentFinalData(BaseModel):
-    """正文智能体最终结果摘要。"""
+    """参数生成智能体最终结果摘要。"""
 
     summary: str = Field(default="", description="最终摘要")
     revision_rounds: int = Field(default=0, ge=0, description="修复轮次")
@@ -165,7 +165,7 @@ class ContentAgentFinalData(BaseModel):
 
 
 class ContentAgentStepData(BaseModel):
-    """正文智能体结构化过程数据。"""
+    """参数生成智能体结构化过程数据。"""
 
     phase: Literal["draft", "audit", "revision", "final"] = Field(..., description="过程阶段")
     summary: str = Field(default="", description="当前阶段摘要")
@@ -175,7 +175,7 @@ class ContentAgentStepData(BaseModel):
 
 
 class CommentAgentHighlightData(BaseModel):
-    """批注智能体用户可见重点项。"""
+    """批注生成智能体用户可见重点项。"""
 
     index: int = Field(..., ge=1, description="批注序号")
     status: str = Field(..., description="中文业务状态")
@@ -186,7 +186,7 @@ class CommentAgentHighlightData(BaseModel):
 
 
 class CommentAgentRoundData(BaseModel):
-    """批注智能体单轮校验摘要。"""
+    """批注生成智能体单轮校验摘要。"""
 
     round: int = Field(..., ge=0, description="校验轮次；0 表示最终静默复校验")
     label: str = Field(default="", description="轮次展示名")
@@ -197,7 +197,7 @@ class CommentAgentRoundData(BaseModel):
 
 
 class CommentAgentWritebackData(BaseModel):
-    """批注智能体 Word 写入摘要。"""
+    """批注生成智能体 Word 写入摘要。"""
 
     attempted: int = Field(default=0, ge=0, description="尝试写入数")
     added: int = Field(default=0, ge=0, description="成功写入数")
@@ -207,7 +207,7 @@ class CommentAgentWritebackData(BaseModel):
 
 
 class CommentAgentStepData(BaseModel):
-    """批注智能体结构化过程数据。"""
+    """批注生成智能体结构化过程数据。"""
 
     phase: Literal["validation_round", "final"] = Field(..., description="过程阶段")
     rounds: List[CommentAgentRoundData] = Field(default_factory=list, description="校验轮次")
@@ -234,11 +234,11 @@ class AgentStepEventData(BaseModel):
     )
     content_agent: Optional[ContentAgentStepData] = Field(
         default=None,
-        description="正文智能体结构化过程数据",
+        description="参数生成智能体结构化过程数据",
     )
     comment_agent: Optional[CommentAgentStepData] = Field(
         default=None,
-        description="批注智能体结构化过程数据",
+        description="批注生成智能体结构化过程数据",
     )
     timestamp: str = Field(
         default_factory=lambda: datetime.now().isoformat(), description="时间戳"

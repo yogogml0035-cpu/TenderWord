@@ -153,9 +153,9 @@
 - `/api/stream/{task_id}` 是任务 SSE 主入口，支持 `Last-Event-ID` 断线续传。
 - 用户态实时展示依赖 `log`、`llm`、`progress`、`done`、`error`。
 - `agent_step` 是智能体 generate 的用户态 SSE 显式例外，用于展示 `content_agent` 的结构化正文生成总览，以及 `comment_agent` 的结构化锚点校验、修复复核和最终写入统计，不替代 `done` / `error` 终态。
-- 后端 `AgentStepEventData` 字段包括 `task_id`、`task_kind`、`step_type`、`round`、`node`、`timestamp`、`is_complete`、可选 `content`、`findings`、`content_agent` 与 `comment_agent`。`round` 是 1-based；当前智能体子 agent 流使用 `step_type=stream`，主 agent 终局事件使用 `step_type=final`。`content_agent` 结构字段是正文智能体主展示数据，包含 `phase`、确定性 `summary`、阶段 `rounds`、当前问题 `highlights` 和 `final_result`；`content` 只作旧前端 fallback 或复制原文来源。`comment_agent` 过程事件使用 `step_type=tool_snapshot` / `final`，`comment_agent` 是批注智能体主展示数据，`content` 是完整快照 fallback 而非增量追加。
+- 后端 `AgentStepEventData` 字段包括 `task_id`、`task_kind`、`step_type`、`round`、`node`、`timestamp`、`is_complete`、可选 `content`、`findings`、`content_agent` 与 `comment_agent`。`round` 是 1-based；当前智能体子 agent 流使用 `step_type=stream`，主 agent 终局事件使用 `step_type=final`。`content_agent` 结构字段是参数生成智能体主展示数据，包含 `phase`、确定性 `summary`、阶段 `rounds`、当前问题 `highlights` 和 `final_result`；`content` 只作旧前端 fallback 或复制原文来源。`comment_agent` 过程事件使用 `step_type=tool_snapshot` / `final`，`comment_agent` 是批注生成智能体主展示数据，`content` 是完整快照 fallback 而非增量追加。
 - `DocumentService` 在 graph config 中注入 `agent_step_callback`，智能体生成链路统一经 `SSECallback.push_agent_step()` 进入本地缓冲与 `SSEManager.send_agent_step_threadsafe()`；子 agent 与 runner stream 不再各自直连 `sse_manager`，避免同一过程卡双通道重复推送。`SSEManager.send_agent_step()` 会进入缓冲，断线续传时可重放。
-- 前端合并 `agent_step` 时必须把终态视为单调状态：迟到的 `is_complete=false` 快照不得覆盖已完成卡片；旧版无 `content_agent` 结构的 generate 子 agent 事件继续按 `node + round` 文本 fallback 展示，带 `content_agent` 结构的事件必须统一聚合到一张“正文智能体”卡。
+- 前端合并 `agent_step` 时必须把终态视为单调状态：迟到的 `is_complete=false` 快照不得覆盖已完成卡片；旧版无 `content_agent` 结构的 generate 子 agent 事件继续按 `node + round` 文本 fallback 展示，带 `content_agent` 结构的事件必须统一聚合到一张“参数生成智能体”卡。
 - 高频 `agent_step` 运行中快照只进入 `frontend/stores/chatStreamStore.ts` 的临时 stream，不写入持久化 `chat-storage`；只有完成事件才把最终正文 / JSON 固化到 `chatStore.conversations`。否则每个 SSE 片段都会触发会话数组重写、React 消息列表重渲染和 `sessionStorage` JSON 序列化，长文本或重复任务会让浏览器主线程卡死。
 - 前端实时日志展示要优先降低主线程工作量，而不是只做视觉隐藏：生成中日志明细默认不挂载，复制文本点击时才构造；外层消息列表自动滚动只跟消息数量变化，不跟每个 SSE 内容片段变化。
 - `frontend/hooks/useChatSSE.ts` 负责接收 done metadata；下载卡片是否展示摘要属于 UI 决策，不能影响任务结果透传契约。

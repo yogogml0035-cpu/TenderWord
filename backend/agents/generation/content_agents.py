@@ -380,7 +380,7 @@ def _content_agent_round_label(phase: str, round_index: int) -> str:
         return "第 1 轮审核发现" if round_index == 1 else f"第 {round_index} 轮修复复核"
     if phase == "revision":
         return f"第 {round_index} 轮修复"
-    return "正文智能体"
+    return "参数生成智能体"
 
 
 def _content_agent_round_summary(
@@ -411,7 +411,7 @@ def _content_agent_round_summary(
             if fix_count
             else f"第 {round_index} 轮修复完成。"
         )
-    return "正文智能体处理中。"
+    return "参数生成智能体处理中。"
 
 
 def _content_agent_final_summary(

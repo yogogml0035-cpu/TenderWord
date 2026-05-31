@@ -70,7 +70,7 @@ describe('TaskContentMessage', () => {
       />
     );
 
-    expect(screen.getByText('正文智能体')).toBeInTheDocument();
+    expect(screen.getByText('参数生成智能体')).toBeInTheDocument();
     expect(screen.queryByText('content_agent final')).not.toBeInTheDocument();
     expect(screen.queryByText('content_agent round-2')).not.toBeInTheDocument();
   });
@@ -145,7 +145,7 @@ describe('TaskContentMessage', () => {
       />
     );
 
-    expect(screen.getByText('正文智能体')).toBeInTheDocument();
+    expect(screen.getByText('参数生成智能体')).toBeInTheDocument();
     expect(screen.getByText('初稿生成')).toBeInTheDocument();
     expect(screen.getByText('第 1 轮审核发现')).toBeInTheDocument();
     expect(screen.getByText('第 1 轮修复')).toBeInTheDocument();
@@ -173,7 +173,7 @@ describe('TaskContentMessage', () => {
       />
     );
 
-    expect(screen.getByText('批注智能体')).toBeInTheDocument();
+    expect(screen.getByText('批注生成智能体')).toBeInTheDocument();
     expect(screen.queryByText('comment_agent round-1')).not.toBeInTheDocument();
   });
 
@@ -257,7 +257,7 @@ describe('TaskContentMessage', () => {
       />
     );
 
-    expect(screen.getByText('批注智能体')).toBeInTheDocument();
+    expect(screen.getByText('批注生成智能体')).toBeInTheDocument();
     expect(screen.getByText('第 1 轮锚点校验')).toBeInTheDocument();
     expect(screen.getByText('第 2 轮修复复核')).toBeInTheDocument();
     expect(screen.getByText('需修复')).toBeInTheDocument();

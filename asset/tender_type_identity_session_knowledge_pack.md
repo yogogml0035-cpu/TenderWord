@@ -179,14 +179,14 @@
 - 删除当前会话时，优先回退到同类型最新会话；同类型为空再回退到全局剩余会话。
 - 智能体过程卡最终态是会话历史消息，运行中正文快照是临时 stream。`agent_step` 会在 `chat-storage` 里保存为 `metadata.messageKind = "agent-step"` 的 AI 消息，刷新后随会话消息恢复；但 `is_complete=false` 的高频正文片段只存在 `chatStreamStore.streams[taskId].agentSteps`，由 `ChatPanel` 合并进当前渲染，不直接持久化到会话消息。
 - `agent-step` 消息不纳入旧 `taskMessageMap` 的 `task-log` / `task-content` / `task-download` 三卡分组；done 事件仍只负责生成下载入口卡。
-- 正文智能体过程卡优先消费 `agent_step.content_agent` 结构字段，并按固定 `metadata.agentStepKey = "content_agent"` 聚合为一张“正文智能体”卡。后端结构字段按确定性规则提供 `phase`、阶段 `rounds`、问题数、修复数、`highlights` 和 `final_result`；前端主视图只展示阶段摘要和问题项，初稿正文、审核原始 JSON、修复正文和最终正文默认放在折叠详情里。
+- 参数生成智能体过程卡优先消费 `agent_step.content_agent` 结构字段，并按固定 `metadata.agentStepKey = "content_agent"` 聚合为一张“参数生成智能体”卡。后端结构字段按确定性规则提供 `phase`、阶段 `rounds`、问题数、修复数、`highlights` 和 `final_result`；前端主视图只展示阶段摘要和问题项，初稿正文、审核原始 JSON、修复正文和最终正文默认放在折叠详情里。
 - 旧版无 `content_agent` 结构字段的 generate 子 agent 事件继续按 `metadata.agentStepNode + metadata.agentStepRound` 文本 fallback 展示：`content_generate_agent`、`content_verify_agent`、`content_revise_agent` 各自保留对应原始 streaming 内容；只有相同 `node + round` 的 streaming 增量才 upsert 同一张旧卡。
 - `comment_agent` 过程卡复用 `agent_step` 机制，但主展示数据来自 `comment_agent` 结构字段；运行中 `is_complete=false` 的结构化快照只进入 `chatStreamStore` 临时流并覆盖展示，不写入持久化 conversation message；完成事件 `is_complete=true` 的结构化最终态才固化到 `chatStore` 的 `agent-step` 卡片。`content` 只作旧事件 fallback。`comment_supplement` 任务允许显示 `comment_agent` 过程卡；generate 只有在 agent 模式或已有 agent-step 过程卡时才接收 `comment_agent`，workflow generate 不显示该卡。
 - 智能体过程卡状态必须单调收敛：同一聚合 key 一旦进入 `completed` / `error` / `cancelled`，迟到的 `is_complete=false` stream 事件不得把卡片降回 `generating`；新的旧式 agent-step 卡片到达时，应把同一任务下仍在运行的其它旧式 agent-step 卡片收口为 `completed`。任务 `done` / `error` / `cancelled` 终态也必须兜底收口同 task 下仍为 `generating` 的 agent-step 卡片，避免前端长期显示“生成中”。
 - 初次 generate 提交必须防同一会话重复创建任务：`FormPanel` 除依赖按钮禁用外，还要用同步提交锁和 `currentConversationIsBusy()` 阻挡同一轮双击。否则一次双击会创建多个后端任务、多个 SSE 流和多组日志 / agent-step 卡片，放大前端渲染和持久化成本。
 - 生成中的任务日志明细默认折叠；折叠态只显示日志条数和最新一条摘要，不挂载完整日志 DOM，也不预先拼接复制文本。点击展开才渲染最近日志窗口，点击复制时才临时拼接完整日志文本。单纯 CSS 隐藏日志卡片不能解决主线程卡顿，因为 React 渲染、自动滚动测量和复制文本构造仍会执行。
 - 旧式 `content_verify_agent` 卡展示后端 SSE `content` 中的原始 JSON 文本；没有 `content` 时只在完成事件或存在真实 findings 时用 `findings` JSON 兜底。启动空事件不得把空 findings 渲染成 `[]`。
-- 智能体过程卡标题：带 `content_agent` 结构或 `node=content_agent` 的正文生成卡固定显示“正文智能体”；`comment_agent` 卡标题固定显示“批注智能体”；旧式子 agent 文本 fallback 继续按 `metadata.agentStepNode + metadata.agentStepRound` 显示。不要再用“AI 初稿内容 / 智能体审核意见 / AI 修改内容”这类按 step_type 推导的标题。agent-step 卡出现后，前端不得再保留或补建普通 `task-content` 的“AI 生成内容”卡，避免与正文智能体卡重复。agent-step 文本 fallback 应使用适合中文段落的 `break-words` / `whitespace-pre-wrap` 样式，不使用 `font-mono + break-all` 导致中文逐字换行。
+- 智能体过程卡标题：带 `content_agent` 结构或 `node=content_agent` 的正文生成卡固定显示“参数生成智能体”；`comment_agent` 卡标题固定显示“批注生成智能体”；旧式子 agent 文本 fallback 继续按 `metadata.agentStepNode + metadata.agentStepRound` 显示。不要再用“AI 初稿内容 / 智能体审核意见 / AI 修改内容”这类按 step_type 推导的标题。agent-step 卡出现后，前端不得再保留或补建普通 `task-content` 的“AI 生成内容”卡，避免与参数生成智能体卡重复。agent-step 文本 fallback 应使用适合中文段落的 `break-words` / `whitespace-pre-wrap` 样式，不使用 `font-mono + break-all` 导致中文逐字换行。
 - 空内容且仍在运行中的 agent-step 卡只显示紧凑“正在调用...”状态，不展示大块“等待生成...”占位。
 - 智能体 generate 任务失败、取消或本地中断时也必须沿用 agent-step 过程卡，不得因为运行时残留 `aiText` 而补建普通 `task-content` 卡；错误原因应进入 `task-log` 日志卡，保证用户能看到 `Request timed out.` 等失败信息。
 

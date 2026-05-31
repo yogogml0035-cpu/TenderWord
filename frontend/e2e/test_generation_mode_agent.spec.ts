@@ -387,7 +387,7 @@ test.describe('Generation mode agent flow', () => {
 
     await expect.poll(() => generatePayload?.generation_mode).toBe('agent');
 
-    await expect(page.getByText('正文智能体')).toHaveCount(1);
+    await expect(page.getByText('参数生成智能体')).toHaveCount(1);
     await expect(page.getByText('content_generate_agent')).toHaveCount(0);
     await expect(page.getByText('content_verify_agent round-1', { exact: true })).toHaveCount(0);
     await expect(page.getByText('content_revise_agent round-1', { exact: true })).toHaveCount(0);
