@@ -49,7 +49,7 @@ class GenerationAgentState(TypedDict, total=False):
     generation_style: str
     project_info: str
     tender_params: Any
-    origin_tender_params: Any
+    template_reference_text: Any
     model_provider: str
     draft_text: str
     draft_path: str

@@ -94,20 +94,8 @@ export interface TemplateCandidateSelectRequest {
 
 export type TemplateSelectedFile = UploadedFile;
 
-export interface TemplateSelectedFiles {
-  clean_draft?: TemplateSelectedFile | null;
-  origin_tender?: TemplateSelectedFile | null;
-}
-
-export interface TemplateSelectFailure {
-  slot: 'clean_draft' | 'origin_tender';
-  message: string;
-}
-
 export interface TemplateSelectResponse {
-  selected_files: TemplateSelectedFiles;
-  failed_slots: TemplateSelectFailure[];
-  partial_success: boolean;
+  selected_file: TemplateSelectedFile;
 }
 
 // ============================================
@@ -122,15 +110,14 @@ export interface UploadedFile {
   upload_time?: string;
 }
 
-export type FileType = 'clean_draft' | 'origin_tender' | 'params' | 'qualification';
+export type FileType = 'template' | 'edit_source' | 'params' | 'qualification';
 
 // ============================================
 // Generate Task Types
 // ============================================
 
 export interface FilesConfig {
-  origin_tender?: string;
-  clean_draft?: string;
+  template: string;
   tender_params: string[];
 }
 
@@ -141,6 +128,7 @@ export interface InsertionConfig {
 
 export type GenerationStyle = 'template' | 'param';
 export type GenerationMode = 'workflow' | 'agent';
+export type CommentGenerationMode = 'on' | 'off';
 export type StyleWritebackMode = 'full' | 'bold_only';
 
 export interface GenerateRequest {
@@ -156,6 +144,7 @@ export interface GenerateRequest {
   insertion_config?: InsertionConfig;
   generation_style?: GenerationStyle;
   generation_mode: GenerationMode;
+  comment_generation_mode: CommentGenerationMode;
   style_writeback_mode: StyleWritebackMode;
   conversation_id?: string;
   model: 'deepseek' | 'qwen' | 'doubao';

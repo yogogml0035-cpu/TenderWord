@@ -11,8 +11,8 @@ from backend.nodes.common_word_nodes.comment_writeback import (
     CommentWritebackResult,
     build_comment_writeback_summary_payload,
 )
-from backend.prompts.comment_no_reference_prompt import render_comment_no_reference_prompt
-from backend.prompts.types import CommentNoReferencePromptInput
+from backend.prompts.comment_prompt import render_comment_prompt
+from backend.prompts.types import CommentPromptInput
 from backend.states.base_state import TenderGraphStateBase
 from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
@@ -207,10 +207,15 @@ def comment_agent_writeback(
     """Run comment_agent after agent-mode body writeback without failing the task."""
     configurable = _get_configurable(config)
     task_kind = str(configurable.get("task_kind") or state.get("task_kind") or "generate")
+    generation_mode = str(
+        configurable.get("generation_mode") or state.get("generation_mode") or ""
+    )
     comments = list(state.get("polished_comments") or [])
     generated_count = _coerce_generated_count(state, comments)
     log_parts = ["comment_agent 开始处理批注"]
-    allow_comment_generation = task_kind == "comment_supplement" and not comments
+    allow_comment_generation = (
+        task_kind == "comment_supplement" or generation_mode == "agent"
+    ) and not comments
 
     if not comments and not allow_comment_generation:
         log_parts.append("没有可写入的 AI 批注，跳过 comment_agent")
@@ -295,8 +300,8 @@ def comment_agent_writeback(
 
         comment_generation_instruction = None
         if allow_comment_generation:
-            rendered_prompt = render_comment_no_reference_prompt(
-                CommentNoReferencePromptInput(
+            rendered_prompt = render_comment_prompt(
+                CommentPromptInput(
                     tender_type=tender_type,
                     polished_text=str(state.get("polished_text") or ""),
                 )
@@ -304,7 +309,7 @@ def comment_agent_writeback(
             comment_generation_instruction = (
                 rendered_prompt.system_prompt + "\n\n" + rendered_prompt.user_prompt
             )
-            log_parts.append("comment_agent 将直接生成补充批注候选")
+            log_parts.append("comment_agent 将使用统一批注 prompt 自主生成批注候选")
 
         result = run_comment_agent(
             initial_comments=comments,

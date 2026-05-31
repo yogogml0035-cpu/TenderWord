@@ -160,11 +160,10 @@ def resolve_rewrite_target(state: TaskSkillGraphState, config) -> TaskSkillGraph
         "rewrite_user_prompt": rewrite_user_prompt,
         "rewrite_target_index": selected_index,
         "rewrite_base_text": str(target_state.get("polished_text") or ""),
-        "origin_tender_path": str(rewrite_output_path),
+        "source_document_path": str(rewrite_output_path),
         "prepared_doc_path": str(rewrite_output_path),
         "rewrite_temp_output_path": str(rewrite_output_path),
         "source_prepared_doc_path": str(source_prepared_doc_path.resolve()),
-        "clean_draft_path": str(rewrite_output_path),
         "rewrite_mode": True,
     }
 

@@ -66,9 +66,6 @@ def test_build_task_result_payload_includes_comment_writeback_without_internal_p
                 "warning": True,
                 "issues": [{"reference_text": "锚点", "error": "未命中"}],
             },
-            "comment_plan_detail": [{"content": "内部批注依据"}],
-            "strikethrough_plan": [{"content": "内部删除线依据"}],
-            "non_black_font_plan": [{"content": "内部非黑字体依据"}],
         },
         initial_state={},
         elapsed_time=1.25,
@@ -83,12 +80,9 @@ def test_build_task_result_payload_includes_comment_writeback_without_internal_p
         "skipped": 0,
         "warning": True,
     }
-    assert "comment_plan_detail" not in payload
-    assert "strikethrough_plan" not in payload
-    assert "non_black_font_plan" not in payload
 
 
-def test_build_rewrite_state_snapshot_keeps_generate_comment_context_internal_only() -> None:
+def test_build_rewrite_state_snapshot_keeps_runtime_context() -> None:
     service = DocumentService.__new__(DocumentService)
 
     snapshot = service._build_rewrite_state_snapshot(
@@ -96,9 +90,7 @@ def test_build_rewrite_state_snapshot_keeps_generate_comment_context_internal_on
             "tender_type": "xjcg",
             "prepared_doc_path": "D:/UploadFiles/output.docx",
             "polished_text": "生成正文",
-            "comment_plan_detail": [{"content": "审查依据"}],
-            "strikethrough_plan": [{"content": "删除线依据"}],
-            "non_black_font_plan": [{"content": "非黑字体依据"}],
+            "tender_params": "技术参数正文",
         },
         initial_state={
             "generation_mode": "agent",
@@ -108,6 +100,6 @@ def test_build_rewrite_state_snapshot_keeps_generate_comment_context_internal_on
     )
 
     assert snapshot["generation_mode"] == "agent"
-    assert snapshot["comment_plan_detail"] == [{"content": "审查依据"}]
-    assert snapshot["strikethrough_plan"] == [{"content": "删除线依据"}]
-    assert snapshot["non_black_font_plan"] == [{"content": "非黑字体依据"}]
+    assert snapshot["prepared_doc_path"] == "D:/UploadFiles/output.docx"
+    assert snapshot["polished_text"] == "生成正文"
+    assert snapshot["tender_params"] == "技术参数正文"

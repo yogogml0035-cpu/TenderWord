@@ -21,7 +21,7 @@ def test_resolve_edit_target_enables_verbose_style_flags(tmp_path: Path) -> None
 
     result = edit_nodes.resolve_edit_target(
         {
-            "source_origin_tender_path": str(doc_path),
+            "source_document_path": str(doc_path),
         },
         config=None,
     )
@@ -109,7 +109,7 @@ def test_extract_edit_context_injects_inline_style_fragments(monkeypatch, tmp_pa
         config=None,
     )
 
-    assert result["origin_tender_params"] == "原始正文"
+    assert result["source_section_text"] == "原始正文"
     assert result["polished_comments"] == [
         {"reference_text": "原始正文", "comment_text": "保留批注"}
     ]

@@ -50,7 +50,6 @@ async def test_create_comment_supplement_task_validates_and_submits(monkeypatch,
             "polished_text": "投标人须提供原厂授权函。",
             "insertion_before_text": "第三章  采购需求",
             "insertion_after_text": "第四章  响应文件有关格式",
-            "comment_plan_detail": [{"content": "内部依据"}],
         }
     )
     submitted: dict[str, Any] = {}
@@ -92,7 +91,6 @@ async def test_create_comment_supplement_task_validates_and_submits(monkeypatch,
     assert submitted["initial_state"]["prepared_doc_path"] == str(source_file.resolve())
     assert submitted["initial_state"]["comment_supplement_source_file"] == str(source_file.resolve())
     assert submitted["initial_state"]["polished_text"] == "投标人须提供原厂授权函。"
-    assert submitted["initial_state"]["comment_plan_detail"] == [{"content": "内部依据"}]
 
 @pytest.mark.asyncio
 async def test_create_comment_supplement_task_rejects_missing_rewrite_state(monkeypatch, tmp_path: Path) -> None:

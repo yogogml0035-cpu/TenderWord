@@ -38,36 +38,6 @@ describe('current-page session persistence', () => {
     expect(window.localStorage.getItem('chat-storage')).toBeNull();
   });
 
-  it('does not persist internal comment plan arrays in chat message metadata', async () => {
-    let conversationId = '';
-    act(() => {
-      conversationId = useChatStore.getState().createConversation('SESSION-CHAT-PLAN', 'xjcg');
-      useChatStore.getState().addMessage(conversationId, {
-        type: 'ai',
-        content: '下载生成文件',
-        status: 'completed',
-        taskId: 'task-comment-plan-1',
-        metadata: {
-          messageKind: 'task-download',
-          outputFile: 'D:/UploadFiles/output.docx',
-          fileName: 'output.docx',
-          comment_plan_detail: [{ content: 'internal comment context' }],
-          strikethrough_plan: [{ content: 'internal strike context' }],
-          non_black_font_plan: [{ content: 'internal font context' }],
-        },
-      });
-    });
-
-    await waitFor(() => {
-      const stored = window.sessionStorage.getItem('chat-storage') || '';
-      expect(stored).toContain('SESSION-CHAT-PLAN');
-      expect(stored).not.toContain('comment_plan_detail');
-      expect(stored).not.toContain('strikethrough_plan');
-      expect(stored).not.toContain('non_black_font_plan');
-      expect(stored).not.toContain('internal comment context');
-    });
-  });
-
   it('persists current-page generation history in sessionStorage only', async () => {
     act(() => {
       useHistoryStore.getState().addToHistory({

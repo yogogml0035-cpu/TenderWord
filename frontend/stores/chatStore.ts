@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createJSONStorage, devtools, persist } from 'zustand/middleware';
 import type { TenderType, FundLx, TenderLx } from '@/types';
 import type {
+  CommentGenerationMode,
   GenerationMode,
   GenerationStyle,
   CommentWritebackSummary,
@@ -88,6 +89,7 @@ export interface ConversationFormDraft {
   fund_lx?: FundLx;
   model?: 'deepseek' | 'qwen' | 'doubao';
   generation_mode?: GenerationMode;
+  comment_generation_mode?: CommentGenerationMode;
   generation_style?: GenerationStyle;
   gngk_generation_styles?: {
     0?: GenerationStyle;
@@ -142,8 +144,7 @@ export interface ConversationFormDraft {
   pending_edit_prompt?: string;
   pending_edit_task_id?: string;
   files?: {
-    origin_tender?: ConversationDraftFile;
-    clean_draft?: ConversationDraftFile;
+    template?: ConversationDraftFile;
     tender_params: ConversationDraftFile[];
   };
 }
@@ -171,11 +172,6 @@ interface TaskScopeState {
 
 const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(['completed', 'failed', 'cancelled']);
 const TERMINAL_MESSAGE_STATUSES = new Set<Message['status']>(['completed', 'error', 'cancelled']);
-const REWRITE_STATE_DETAIL_METADATA_KEYS = [
-  'comment_plan_detail',
-  'strikethrough_plan',
-  'non_black_font_plan',
-] as const;
 
 function isTerminalTaskStatus(status?: TaskStatus): boolean {
   if (!status) {
@@ -189,42 +185,6 @@ function isTerminalMessageStatus(status?: Message['status']): boolean {
     return false;
   }
   return TERMINAL_MESSAGE_STATUSES.has(status);
-}
-
-function sanitizeMessageMetadataForPersistence(
-  metadata: Message['metadata'] | undefined
-): Message['metadata'] | undefined {
-  if (!metadata) {
-    return metadata;
-  }
-
-  let changed = false;
-  const nextMetadata = { ...metadata };
-  for (const key of REWRITE_STATE_DETAIL_METADATA_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(nextMetadata, key)) {
-      delete nextMetadata[key];
-      changed = true;
-    }
-  }
-
-  return changed ? nextMetadata : metadata;
-}
-
-function sanitizeConversationForPersistence(conversation: Conversation): Conversation {
-  let changed = false;
-  const messages = conversation.messages.map((message) => {
-    const metadata = sanitizeMessageMetadataForPersistence(message.metadata);
-    if (metadata === message.metadata) {
-      return message;
-    }
-    changed = true;
-    return {
-      ...message,
-      metadata,
-    };
-  });
-
-  return changed ? { ...conversation, messages } : conversation;
 }
 
 function normalizeDraftFile(file: ConversationDraftFile | undefined): ConversationDraftFile | undefined {
@@ -308,11 +268,8 @@ function mergeConversationDraft(
 
   if (nextDraft.files) {
     nextDraft.files = {
-      ...(nextDraft.files.origin_tender
-        ? { origin_tender: normalizeDraftFile(nextDraft.files.origin_tender) }
-        : {}),
-      ...(nextDraft.files.clean_draft
-        ? { clean_draft: normalizeDraftFile(nextDraft.files.clean_draft) }
+      ...(nextDraft.files.template
+        ? { template: normalizeDraftFile(nextDraft.files.template) }
         : {}),
       tender_params: (nextDraft.files.tender_params || [])
         .map((file) => normalizeDraftFile(file))
@@ -1038,6 +995,7 @@ export const useChatStore = create<ChatStore>()(
               ...state.conversationDrafts,
               [conversation.id]: {
                 generation_mode: 'workflow',
+                comment_generation_mode: 'on',
                 generation_style: 'template',
                 style_writeback_mode: 'full',
                 model: 'deepseek',
@@ -2417,7 +2375,7 @@ export const useChatStore = create<ChatStore>()(
         name: 'chat-storage',
         storage: createJSONStorage(() => sessionStorage),
         partialize: (state) => ({
-          conversations: state.conversations.map(sanitizeConversationForPersistence),
+          conversations: state.conversations,
           currentConversationId: state.currentConversationId,
           selectedTenderType: state.selectedTenderType,
           conversationDrafts: state.conversationDrafts,

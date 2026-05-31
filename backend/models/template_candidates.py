@@ -21,7 +21,7 @@ class TemplateCandidate(BaseModel):
     xbr: str = Field(default="", description="协办人")
     year: Optional[int] = Field(default=None, description="模板年份")
     fsg: Optional[str] = Field(default=None, description="发售稿链接")
-    shener: Optional[str] = Field(default=None, description="送审稿链接")
+    shener: Optional[str] = Field(default=None, description="推荐模板链接")
     selectable: bool = Field(default=False, description="是否允许直接选择")
     blocked_reason: Optional[str] = Field(default=None, description="不可选原因")
 
@@ -64,7 +64,7 @@ class TemplateCandidateSelectPayload(BaseModel):
     tendername: str = Field(..., min_length=1, description="模板项目名称")
     year: Optional[int] = Field(default=None, description="模板年份")
     fsg: Optional[str] = Field(default=None, description="发售稿链接")
-    shener: Optional[str] = Field(default=None, description="送审稿链接")
+    shener: Optional[str] = Field(default=None, description="推荐模板链接")
 
 
 class TemplateCandidateSelectRequest(BaseModel):
@@ -79,37 +79,13 @@ class TemplateSelectedFile(BaseModel):
     upload_time: str = Field(..., description="保存时间")
 
 
-class TemplateSelectedFiles(BaseModel):
-    clean_draft: Optional[TemplateSelectedFile] = Field(
-        default=None,
-        description="发售稿回填文件",
-    )
-    origin_tender: Optional[TemplateSelectedFile] = Field(
-        default=None,
-        description="送审稿回填文件",
-    )
-
-
-class TemplateSelectFailure(BaseModel):
-    slot: Literal["clean_draft", "origin_tender"] = Field(..., description="失败槽位")
-    message: str = Field(..., description="失败原因")
-
-
 class TemplateSelectData(BaseModel):
-    selected_files: TemplateSelectedFiles = Field(
-        default_factory=TemplateSelectedFiles,
-        description="成功回填的文件",
-    )
-    failed_slots: List[TemplateSelectFailure] = Field(
-        default_factory=list,
-        description="失败槽位信息",
-    )
-    partial_success: bool = Field(default=False, description="是否为部分成功")
+    selected_file: TemplateSelectedFile = Field(..., description="成功回填的模板文件")
 
 
 class TemplateSelectResponse(BaseModel):
     success: bool = Field(default=True, description="请求是否成功")
-    data: TemplateSelectData = Field(default_factory=TemplateSelectData, description="选择结果")
+    data: TemplateSelectData = Field(..., description="选择结果")
     message: str = Field(default="模板文件选择成功", description="响应消息")
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),

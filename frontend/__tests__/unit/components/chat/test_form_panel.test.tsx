@@ -35,11 +35,11 @@ const mockXjcgFormData = {
   tender_data: mockTenderData,
   model: 'deepseek' as const,
   files: {
-    clean_draft: {
-      id: 'clean-id',
-      file_path: 'D:/UploadFiles/clean.docx',
-      file_name: 'clean.docx',
-      original_name: 'clean.docx',
+    template: {
+      id: 'template-id',
+      file_path: 'D:/UploadFiles/template.docx',
+      file_name: 'template.docx',
+      original_name: 'template.docx',
       size: 1024,
       upload_time: '2024-01-01T00:00:00.000Z',
     },
@@ -233,7 +233,7 @@ describe('FormPanel', () => {
       form_type: 'xjcg_tender',
       tender_data: mockTenderData,
       file_paths: {
-        clean_draft: 'D:/UploadFiles/clean.docx',
+        template: 'D:/UploadFiles/template.docx',
         tender_params: ['D:/UploadFiles/params.docx'],
       },
       insertion_config: mockXjcgFormData.insertion_config,
@@ -243,7 +243,7 @@ describe('FormPanel', () => {
       form_type: 'gngk_hw_zc_tender',
       tender_data: mockTenderData,
       file_paths: {
-        clean_draft: 'D:/UploadFiles/clean.docx',
+        template: 'D:/UploadFiles/template.docx',
         tender_params: ['D:/UploadFiles/params.docx'],
       },
       insertion_config: mockGngkFormData.insertion_config,
@@ -253,7 +253,7 @@ describe('FormPanel', () => {
       form_type: 'gjgk_tender',
       tender_data: mockGjgkFormData.tender_data,
       file_paths: {
-        clean_draft: 'D:/UploadFiles/clean.docx',
+        template: 'D:/UploadFiles/template.docx',
         tender_params: ['D:/UploadFiles/params.docx'],
       },
       insertion_config: mockGjgkFormData.insertion_config,

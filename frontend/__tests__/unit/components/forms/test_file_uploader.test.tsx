@@ -46,16 +46,16 @@ describe('FileUploader', () => {
 
     render(
       <FileUploader
-        label="模板文件（可选）"
-        description="上传模板 Word 文件"
+        label="编辑文件（可选）"
+        description="上传待编辑 Word 文件"
         autoUpload={true}
         multiple={false}
-        fileType="clean_draft"
+        fileType="edit_source"
         onFilesChange={onFilesChange}
       />
     );
 
-    const card = screen.getByTestId('file-uploader-clean_draft-card');
+    const card = screen.getByTestId('file-uploader-edit_source-card');
     const input = card.querySelector('input[type="file"]');
     const file = createMockFile('template.docx');
 
@@ -64,9 +64,10 @@ describe('FileUploader', () => {
 
     await waitFor(() => expect(onFilesChange).toHaveBeenCalledWith(expect.any(Array)));
 
-    expect(within(card).getByText('模板文件（可选）')).toBeInTheDocument();
+    expect(mockUploadFile).toHaveBeenCalledWith(file, 'edit_source');
+    expect(within(card).getByText('编辑文件（可选）')).toBeInTheDocument();
     expect(within(card).getByText('单文件上传')).toBeInTheDocument();
-    expect(within(card).getByTestId('file-uploader-clean_draft-files')).toBeInTheDocument();
+    expect(within(card).getByTestId('file-uploader-edit_source-files')).toBeInTheDocument();
     expect(within(card).getByText('template.docx')).toBeInTheDocument();
   });
 

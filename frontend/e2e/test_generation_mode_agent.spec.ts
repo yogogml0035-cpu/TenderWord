@@ -4,7 +4,7 @@ import path from 'node:path';
 
 const taskId = 'task-agent-e2e';
 const conversationId = 'conv-agent-e2e';
-const artifactRoot = path.resolve(__dirname, '../../tasks/comment-supplement-comment-agent');
+const artifactRoot = path.resolve(__dirname, '../../tasks/template-comment-generation-convergence');
 const screenshotsDir = path.join(artifactRoot, 'screenshots');
 const logsDir = path.join(artifactRoot, 'logs');
 
@@ -94,11 +94,11 @@ async function seedConversation(page: Page) {
                 fund_source_lx: 0,
               },
               files: {
-                clean_draft: {
-                  id: 'clean-draft',
-                  file_path: 'uploads/clean-draft.docx',
-                  file_name: 'clean-draft.docx',
-                  original_name: 'clean-draft.docx',
+                template: {
+                  id: 'template',
+                  file_path: 'uploads/template.docx',
+                  file_name: 'template.docx',
+                  original_name: 'template.docx',
                   size: 128,
                   upload_time: '2026-05-27T14:30:00Z',
                 },
@@ -378,6 +378,7 @@ test.describe('Generation mode agent flow', () => {
 
     await expect(page.getByRole('heading', { name: '询价采购' })).toBeVisible();
     await page.getByRole('group', { name: '生成方式' }).getByRole('button', { name: '智能体' }).click();
+    await page.getByRole('group', { name: '生成批注' }).getByRole('button', { name: '关' }).click();
     await page.getByRole('button', { name: /开始生成/ }).evaluate((button) => {
       (button as HTMLButtonElement).click();
       (button as HTMLButtonElement).click();
@@ -386,8 +387,9 @@ test.describe('Generation mode agent flow', () => {
     releaseGenerateResponse();
 
     await expect.poll(() => generatePayload?.generation_mode).toBe('agent');
+    await expect.poll(() => generatePayload?.comment_generation_mode).toBe('off');
 
-    await expect(page.getByText('正文智能体')).toHaveCount(1);
+    await expect(page.getByText('参数生成智能体')).toHaveCount(1);
     await expect(page.getByText('content_generate_agent')).toHaveCount(0);
     await expect(page.getByText('content_verify_agent round-1', { exact: true })).toHaveCount(0);
     await expect(page.getByText('content_revise_agent round-1', { exact: true })).toHaveCount(0);

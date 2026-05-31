@@ -44,7 +44,7 @@ COMMENT_AGENT_SYSTEM_PROMPT = """
 """.strip()
 
 COMMENT_AGENT_GENERATION_SYSTEM_PROMPT = """
-你是批注智能体 comment_agent，负责先生成补充批注候选，再校验锚点并提交写回。
+你是批注生成智能体 comment_agent，负责先生成批注候选，再校验锚点并提交写回。
 
 硬性规则：
 1. 先基于 polished_text 和批注生成规则生成 proposed_comments，元素只能包含 reference_text 与 comment_text。
@@ -549,7 +549,7 @@ def _build_user_prompt(
             else ""
         )
         return (
-            "请直接接手补充批注任务：先生成补充批注候选 proposed_comments，"
+            "请直接接手批注生成任务：先生成批注候选 proposed_comments，"
             "再调用工具完成锚点校验、必要修复和最终候选提交。"
             "Word 写入由运行时完成，工具线程不会直接操作 Word。\n\n"
             f"{instruction_block}"

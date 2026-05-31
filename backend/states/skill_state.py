@@ -21,9 +21,10 @@ class TaskSkillGraphState(TenderGraphStateBase, total=False):
     rewrite_user_prompt: str
     edit_user_prompt: str
     rewrite_base_text: str
+    source_section_text: str
     rewrite_target_index: int
     rewrite_history_messages: List[RewriteHistoryMessage]
     source_prepared_doc_path: str
-    source_origin_tender_path: str
+    source_document_path: str
     rewrite_temp_output_path: str
     current_node_display_override: Optional[str]

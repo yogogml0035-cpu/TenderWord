@@ -15,13 +15,14 @@ describe('tenderFormRegistry', () => {
     ['gngk', 'gngk_fw_cz_tender'],
     ['gjgk', 'gjgk_tender'],
   ] as const)(
-    'preserves generation_mode, generation_style and style_writeback_mode for %s converter',
+    'preserves generation_mode, comment_generation_mode, generation_style and style_writeback_mode for %s converter',
     (tenderType, formType) => {
       const request = tenderFormConverterMap[tenderType]({
         tender_no: 'GJ-001',
         tender_lx: 1,
         fund_lx: 1,
         generation_mode: 'agent',
+        comment_generation_mode: 'off',
         generation_style: 'param',
         style_writeback_mode: 'bold_only',
         tender_data: {
@@ -53,6 +54,7 @@ describe('tenderFormRegistry', () => {
 
       expect(request.form_type).toBe(formType);
       expect(request.generation_mode).toBe('agent');
+      expect(request.comment_generation_mode).toBe('off');
       expect(request.generation_style).toBe('param');
       expect(request.style_writeback_mode).toBe('bold_only');
       expect(request.tender_data.tender_lx).toBe(1);

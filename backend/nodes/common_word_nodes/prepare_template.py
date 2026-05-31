@@ -6,7 +6,6 @@ import time
 import pathlib
 import sys
 
-# 添加项目根目录到 sys.path
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -14,7 +13,7 @@ if str(ROOT) not in sys.path:
 from backend.util.log_util.progress_log import progress_log
 
 from backend.states import TenderGraphStateBase
-from util.word_util import (
+from backend.util.word_util import (
     create_word_application,
     close_word_application,
 )
@@ -27,11 +26,11 @@ def prepare_template(state: TenderGraphStateBase, config) -> TenderGraphStateBas
     progress_log.debug(f"[Start] 当前类型：{tender_type}")
     progress_log.debug(f"[prepare_template] 开始执行...")
     
-    clean_draft_path = state.get("clean_draft_path")
-    origin_tender_path = state.get("origin_tender_path")
-    template_path = clean_draft_path or origin_tender_path
-    if not template_path or (isinstance(template_path, str) and template_path.strip() == ""):
-        raise ValueError("未提供可用的模板路径：需要 clean_draft_path（清洁稿）或 origin_tender_path")
+    template_path = state.get("template_path")
+    if not template_path or (
+        isinstance(template_path, str) and template_path.strip() == ""
+    ):
+        raise ValueError("未提供模板文件路径：需要 template_path")
     
     template_path = os.path.abspath(template_path)
 

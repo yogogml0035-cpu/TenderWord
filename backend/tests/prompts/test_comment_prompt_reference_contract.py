@@ -9,12 +9,13 @@ def test_render_comment_prompt_requires_precise_unique_reference_text() -> None:
         CommentPromptInput(
             tender_type="gjgk",
             polished_text="系统稳定性强，服务免费。",
-            comment_plan_detail=[],
-            strikethrough_plan=[],
-            non_black_font_plan=[],
         )
     )
 
+    assert set(CommentPromptInput.__dataclass_fields__) == {
+        "tender_type",
+        "polished_text",
+    }
     assert "Ctrl+F 精确搜索" in rendered.system_prompt
     assert "不得改写、概括、补字、删字、改标点" in rendered.system_prompt
     assert "不要单独使用“最优”“稳定性”“免费”“≥”" in rendered.system_prompt
@@ -24,3 +25,6 @@ def test_render_comment_prompt_requires_precise_unique_reference_text() -> None:
     assert "连续、逐字、可 Ctrl+F 精确搜索到" in rendered.user_prompt
     assert "短词风险必须扩展为同一句、同一分句或同一单元格内的连续原文" in rendered.user_prompt
     assert "无法找到可精确回填的唯一原文锚点，请输出空数组" in rendered.user_prompt
+    assert "批注计划详情" not in rendered.user_prompt
+    assert "删除线计划" not in rendered.user_prompt
+    assert "非黑色字体计划" not in rendered.user_prompt

@@ -8,11 +8,9 @@ from typing import Callable
 
 from backend.graphs.base_graph import StandardTenderWorkflowGraph
 from backend.nodes.common_word_nodes import (
-    copy_comments,
     delete_tender_param,
     generate_comments,
     generate_polished_text,
-    get_comments,
     prepare_template,
     replace_content,
     update_word,
@@ -28,8 +26,6 @@ class GngkHwZcTenderGraph(StandardTenderWorkflowGraph):
     STATE_CLS = GngkTenderGraphState
 
     NODE_PREPARE_TEMPLATE: Callable = prepare_template
-    NODE_GET_COMMENTS: Callable = get_comments
-    NODE_COPY_COMMENTS: Callable = copy_comments
     NODE_EXTRACT_TENDER_PARAMS: Callable = extract_tender_params
     NODE_DELETE_TENDER_PARAM: Callable = delete_tender_param
     NODE_GET_REPLACEMENTS: Callable = gngk_hw_zc_get_replacements

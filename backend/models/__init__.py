@@ -26,11 +26,13 @@ from .task import (
 
 # 生成请求/响应模型
 from .generate import (
+    CommentGenerationMode,
     CommentSupplementRequest,
     EditTaskRequest,
     FileRequirement,
     FormRequirementsResponse,
     FormType,
+    GenerateFilePaths,
     GenerationMode,
     GenerationStyle,
     GenerateRequest,
@@ -83,8 +85,6 @@ from .template_candidates import (
     TemplateCandidateSelectPayload,
     TemplateCandidateSelectRequest,
     TemplateSelectedFile,
-    TemplateSelectedFiles,
-    TemplateSelectFailure,
     TemplateSelectData,
     TemplateSelectResponse,
 )
@@ -100,8 +100,6 @@ __all__ = [
     "TemplateCandidateSelectPayload",
     "TemplateCandidateSelectRequest",
     "TemplateSelectedFile",
-    "TemplateSelectedFiles",
-    "TemplateSelectFailure",
     "TemplateSelectData",
     "TemplateSelectResponse",
     
@@ -123,10 +121,12 @@ __all__ = [
     # 生成相关
     "LLMModel",
     "FormType",
+    "CommentGenerationMode",
     "GenerationMode",
     "GenerationStyle",
     "CommentSupplementRequest",
     "EditTaskRequest",
+    "GenerateFilePaths",
     "GenerateRequest",
     "GenerateResponse",
     "GenerateResult",

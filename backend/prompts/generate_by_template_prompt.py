@@ -225,7 +225,7 @@ TEMPLATE_POLISH_USER_PROMPT = """
 {project_info}
 
 2. 【参考内容】（结构模具 - 格式以此为准）：
-{origin_tender_params}
+{template_reference_text}
 
 3. 【技术参数】（原材料 - 详细数据以此为准）：
 {tender_params}
@@ -255,7 +255,7 @@ def render_generate_by_template_prompt(data: GeneratePromptInput) -> RenderedPro
         user_prompt=user_prompt.format(
             project_info=format_prompt_value(data.project_info),
             tender_params=format_prompt_value(data.tender_params),
-            origin_tender_params=format_prompt_value(data.origin_tender_params),
+            template_reference_text=format_prompt_value(data.template_reference_text),
         ),
     )
 

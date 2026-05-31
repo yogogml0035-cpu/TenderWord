@@ -38,8 +38,6 @@ class TaskKind(Enum):
 class NodeName(Enum):
     """Graph 节点名称（按执行顺序）"""
     PREPARE_TEMPLATE = "prepare_template"
-    GET_COMMENTS = "get_comments"
-    COPY_COMMENTS = "copy_comments"
     EXTRACT_TENDER_PARAMS = "extract_tender_params"
     DELETE_TENDER_PARAM = "delete_tender_param"
     GET_REPLACEMENTS = "get_replacements"
@@ -62,12 +60,10 @@ class NodeName(Enum):
 
 # 节点显示名称映射
 NODE_DISPLAY_NAMES = {
-    NodeName.PREPARE_TEMPLATE: "复制原始模板文件",
-    NodeName.GET_COMMENTS: "提取送审稿批注",
-    NodeName.COPY_COMMENTS: "复制送审稿批注",
-    NodeName.EXTRACT_TENDER_PARAMS: "提取原始采购需求",
-    NodeName.DELETE_TENDER_PARAM: "删除原始采购需求",
-    NodeName.GET_REPLACEMENTS: "获取原始项目信息",
+    NodeName.PREPARE_TEMPLATE: "复制模板文件",
+    NodeName.EXTRACT_TENDER_PARAMS: "提取模板参考正文与技术参数",
+    NodeName.DELETE_TENDER_PARAM: "删除模板参考正文",
+    NodeName.GET_REPLACEMENTS: "获取替换字段",
     NodeName.REPLACE_CONTENT: "替换最新项目信息",
     NodeName.GENERATE_POLISHED_TEXT: "AI生成采购需求",
     NodeName.CONTENT_AGENT: "智能体生成采购需求",

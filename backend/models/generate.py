@@ -7,9 +7,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .tender import TenderData
 from .task import TaskKind, TaskProgress, TaskStatus
@@ -39,6 +39,13 @@ class GenerationMode(str, Enum):
     AGENT = "agent"
 
 
+class CommentGenerationMode(str, Enum):
+    """生成批注开关枚举，仅影响初次 generate 的批注生成分支。"""
+
+    ON = "on"
+    OFF = "off"
+
+
 class StyleWritebackMode(str, Enum):
     """样式回填模式枚举，仅影响初次 generate 的 Word 样式回填。"""
 
@@ -66,6 +73,47 @@ class InsertionConfig(BaseModel):
     after_text: Optional[str] = Field(default=None, description="插入位置后文本（锚点）")
 
 
+class GenerateFilePaths(BaseModel):
+    """初次生成文件路径配置。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    template: str = Field(..., min_length=1, description="模板文件路径")
+    tender_params: List[str] = Field(
+        ...,
+        min_length=1,
+        description="技术参数文件路径列表",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_required_paths(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            raise ValueError("file_paths 必须包含 template 和 tender_params")
+        if not str(value.get("template") or "").strip():
+            raise ValueError("请上传模板文件")
+        tender_params = value.get("tender_params")
+        if not isinstance(tender_params, list) or not tender_params:
+            raise ValueError("请上传至少一个技术参数文件")
+        return value
+
+    @field_validator("template")
+    @classmethod
+    def _normalize_template(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("请上传模板文件")
+        return normalized
+
+    @field_validator("tender_params")
+    @classmethod
+    def _normalize_tender_params(cls, value: List[str]) -> List[str]:
+        normalized = [str(path or "").strip() for path in value]
+        if not normalized or any(not path for path in normalized):
+            raise ValueError("请上传至少一个技术参数文件")
+        return normalized
+
+
 class GenerateRequest(BaseModel):
     """
     文档生成请求模型
@@ -75,7 +123,7 @@ class GenerateRequest(BaseModel):
         tender_data: 招标数据
         file_paths: 文件路径字典
             - template: 模板文件路径
-            - params: 技术参数文件路径列表
+            - tender_params: 技术参数文件路径列表
         model: 使用的 LLM 模型
     """
 
@@ -92,7 +140,7 @@ class GenerateRequest(BaseModel):
         ],
     )
     tender_data: TenderData = Field(..., description="招标数据")
-    file_paths: Dict[str, str | List[str]] = Field(..., description="文件路径字典")
+    file_paths: GenerateFilePaths = Field(..., description="文件路径字典")
     insertion_config: Optional[InsertionConfig] = Field(
         default=None, description="插入锚点配置（可选）"
     )
@@ -103,6 +151,10 @@ class GenerateRequest(BaseModel):
     generation_mode: GenerationMode = Field(
         default=GenerationMode.WORKFLOW,
         description="生成方式（仅初次 generate 生效）",
+    )
+    comment_generation_mode: CommentGenerationMode = Field(
+        default=CommentGenerationMode.ON,
+        description="生成批注开关（仅初次 generate 生效）",
     )
     style_writeback_mode: StyleWritebackMode = Field(
         default=StyleWritebackMode.FULL,
@@ -136,7 +188,7 @@ class GenerateRequest(BaseModel):
                 },
                 "file_paths": {
                     "template": "D:/UploadFiles/template.docx",
-                    "params": [
+                    "tender_params": [
                         "D:/UploadFiles/params1.docx",
                         "D:/UploadFiles/params2.docx",
                     ],
@@ -147,6 +199,7 @@ class GenerateRequest(BaseModel):
                 },
                 "generation_style": "template",
                 "generation_mode": "workflow",
+                "comment_generation_mode": "on",
                 "style_writeback_mode": "full",
                 "model": "deepseek",
             }

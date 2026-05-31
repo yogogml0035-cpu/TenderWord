@@ -950,7 +950,7 @@ describe('useChatSSE', () => {
           round: 1,
           node: 'comment_agent',
           is_complete: false,
-          content: 'workflow 不应展示的批注智能体内容',
+          content: 'workflow 不应展示的批注生成智能体内容',
           findings: [],
         },
       });

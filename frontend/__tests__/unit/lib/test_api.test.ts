@@ -97,9 +97,11 @@ const validGenerateRequest: GenerateRequest = {
     fund_source_lx: 1,
   },
   file_paths: {
+    template: '/uploads/template.docx',
     tender_params: ['/uploads/params.xlsx'],
   },
   generation_mode: 'workflow',
+  comment_generation_mode: 'on',
   style_writeback_mode: 'full',
   model: 'deepseek',
 };
@@ -463,17 +465,13 @@ describe('API Client', () => {
       const fetchSpy = mockFetchJson({
         success: true,
         data: {
-          selected_files: {
-            clean_draft: {
-              file_path: 'D:/UploadFiles/test.docx',
-              file_name: 'test.docx',
-              original_name: 'test.docx',
-              size: 100,
-              upload_time: new Date().toISOString(),
-            },
+          selected_file: {
+            file_path: 'D:/UploadFiles/test.docx',
+            file_name: 'test.docx',
+            original_name: 'test.docx',
+            size: 100,
+            upload_time: new Date().toISOString(),
           },
-          failed_slots: [],
-          partial_success: false,
         },
         message: 'OK',
         timestamp: new Date().toISOString(),
@@ -482,20 +480,21 @@ describe('API Client', () => {
 
       const result = await selectTemplateCandidate(validTemplateSelectRequest);
 
-      expect(result.selected_files.clean_draft?.file_name).toBe('test.docx');
+      expect(result.selected_file.file_name).toBe('test.docx');
       const [, init] = fetchSpy.mock.calls[0];
       expect(JSON.parse(String((init as RequestInit).body))).toEqual(validTemplateSelectRequest);
     });
 
     it('builds template candidate download URL with encoded params', () => {
+      const downloadName = '测试模板-模板';
       const url = getTemplateCandidateDownloadUrl(
         'http://10.11.1.224/dongsong/servlet/export.DownLoad?fileID=123',
-        '测试模板-发售稿'
+        downloadName
       );
 
       expect(url).toContain('/api/template-candidates/download?');
       expect(url).toContain('file_url=http%3A%2F%2F10.11.1.224%2Fdongsong%2Fservlet%2Fexport.DownLoad%3FfileID%3D123');
-      expect(url).toContain('download_name=%E6%B5%8B%E8%AF%95%E6%A8%A1%E6%9D%BF-%E5%8F%91%E5%94%AE%E7%A8%BF');
+      expect(url).toContain(`download_name=${encodeURIComponent(downloadName)}`);
     });
   });
 
@@ -734,7 +733,7 @@ describe('API Client', () => {
 
   describe('uploadFile', () => {
     it('should return uploaded file info on success', async () => {
-      globalThis.fetch = mockFetchJson({
+      const fetchSpy = mockFetchJson({
         success: true,
         data: {
           file_path: '/uploads/test.docx',
@@ -745,12 +744,17 @@ describe('API Client', () => {
         message: 'OK',
         timestamp: new Date().toISOString(),
       });
+      globalThis.fetch = fetchSpy;
 
       const file = new File(['test'], 'test.docx', {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
-      const result = await uploadFile(file, 'clean_draft');
+      const result = await uploadFile(file, 'edit_source');
       expect(result.file_path).toBe('/uploads/test.docx');
+
+      const [, init] = fetchSpy.mock.calls[0];
+      const body = (init as RequestInit).body as FormData;
+      expect(body.get('file_type')).toBe('edit_source');
     });
 
     it('should handle flat upload response without data wrapper', async () => {
@@ -767,7 +771,7 @@ describe('API Client', () => {
       const file = new File(['test'], 'flat-test.docx', {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
-      const result = await uploadFile(file, 'clean_draft');
+      const result = await uploadFile(file, 'edit_source');
       expect(result.file_path).toBe('/uploads/flat-test.docx');
     });
   });

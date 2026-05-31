@@ -440,7 +440,7 @@ def test_run_comment_agent_can_generate_candidates_in_generation_mode(tmp_path) 
                 tool.name: tool
                 for tool in create_comment_agent_tools(context)
             }
-            assert "请直接接手补充批注任务" in str(payload["messages"][0].content)
+            assert "请直接接手批注生成任务" in str(payload["messages"][0].content)
             proposed = [
                 {
                     "reference_text": "投标人须提供原厂授权函",

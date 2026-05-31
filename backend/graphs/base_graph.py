@@ -251,8 +251,6 @@ class CrossProcessFileLock:
 # ============================================================================
 TRACKED_PROGRESS_NODES = {
     "prepare_template",
-    "get_comments",
-    "copy_comments",
     "extract_tender_params",
     "resolve_edit_target",
     "resolve_rewrite_target",
@@ -485,8 +483,6 @@ class StandardTenderWorkflowGraph(BaseGraph):
     STATE_CLS: Type[TypedDict]
 
     NODE_PREPARE_TEMPLATE: Callable
-    NODE_GET_COMMENTS: Callable
-    NODE_COPY_COMMENTS: Callable
     NODE_EXTRACT_TENDER_PARAMS: Callable
     NODE_DELETE_TENDER_PARAM: Callable
     NODE_GET_REPLACEMENTS: Callable
@@ -511,20 +507,19 @@ class StandardTenderWorkflowGraph(BaseGraph):
         return ()
 
     def estimate_total_nodes(self, initial_state: dict) -> int:
-        origin_tender_path = initial_state.get("origin_tender_path")
-        has_origin_for_comments = bool(origin_tender_path and str(origin_tender_path).strip())
         generation_mode = str(initial_state.get("generation_mode") or "workflow").strip()
         generation_node = NODE_CONTENT_AGENT if generation_mode == "agent" else NODE_GENERATE_POLISHED_TEXT
+        comment_generation_enabled = self._is_comment_generation_enabled(initial_state)
         base_nodes = {
             "prepare_template",
             "extract_tender_params",
             generation_node,
             "update_word",
         }
-        if generation_mode == "agent":
+        if generation_mode == "agent" and comment_generation_enabled:
             base_nodes.add(NODE_COMMENT_AGENT)
-        if has_origin_for_comments:
-            base_nodes.update({"get_comments", "copy_comments", "generate_comments"})
+        elif comment_generation_enabled:
+            base_nodes.add("generate_comments")
         base_nodes.update(
             node_name
             for node_name, _node_func in self.get_word_operation_steps()
@@ -542,8 +537,6 @@ class StandardTenderWorkflowGraph(BaseGraph):
         builder = StateGraph(state_cls)
 
         node_prepare_template = getattr(type(self), "NODE_PREPARE_TEMPLATE")
-        node_get_comments = getattr(type(self), "NODE_GET_COMMENTS")
-        node_copy_comments = getattr(type(self), "NODE_COPY_COMMENTS")
         node_extract_tender_params = getattr(type(self), "NODE_EXTRACT_TENDER_PARAMS")
         node_generate_polished_text = getattr(type(self), "NODE_GENERATE_POLISHED_TEXT")
         node_content_agent_generate = getattr(type(self), "NODE_CONTENT_AGENT_GENERATE")
@@ -552,35 +545,21 @@ class StandardTenderWorkflowGraph(BaseGraph):
         node_comment_agent = getattr(type(self), "NODE_COMMENT_AGENT")
 
         def comments_branch_done(state, config):
-            return {
-                "suppress_ai_comment_writeback": state.get("generation_mode") == "agent",
+            comment_generation_enabled = self._is_comment_generation_enabled(state)
+            next_state = {
+                "suppress_ai_comment_writeback": (
+                    state.get("generation_mode") == "agent" or not comment_generation_enabled
+                ),
             }
+            if not comment_generation_enabled:
+                next_state.update({"polished_comments": [], "generated_comment_count": 0})
+            return next_state
 
         def generation_mode_gate(state, config):
             return {}
 
-        def comments_ready(state, config):
-            path = state.get("origin_tender_path")
-            has_origin = bool(path and str(path).strip())
-            if has_origin:
-                return {}
-            updates = {
-                "comment_plan_detail": [],
-                "strikethrough_plan": [],
-                "non_black_font_plan": [],
-                "copy_comments_log": "未上传送审稿，跳过批注提取与复制",
-                "copy_comments_added": 0,
-                "copy_comments_unmatched": [],
-            }
-            if "comment_plan" in getattr(state_cls, "__annotations__", {}):
-                updates["comment_plan"] = []
-            return updates
-
         builder.add_node("prepare_template", self.wrap_node("prepare_template", node_prepare_template))
-        builder.add_node("get_comments", self.wrap_node("get_comments", node_get_comments))
-        builder.add_node("copy_comments", self.wrap_node("copy_comments", node_copy_comments))
         builder.add_node("extract_tender_params", self.wrap_node("extract_tender_params", node_extract_tender_params))
-        builder.add_node("comments_ready", self.wrap_node("comments_ready", comments_ready))
         builder.add_node("word_operations_subgraph", self._build_word_operations_subgraph())
         builder.add_node("generation_mode_gate", self.wrap_node("generation_mode_gate", generation_mode_gate))
         builder.add_node(NODE_GENERATE_POLISHED_TEXT, self.wrap_node(NODE_GENERATE_POLISHED_TEXT, node_generate_polished_text))
@@ -595,24 +574,8 @@ class StandardTenderWorkflowGraph(BaseGraph):
 
         builder.add_edge(START, "prepare_template")
         builder.add_edge("prepare_template", "extract_tender_params")
-
-        def _has_origin_for_extract_comments(state) -> str:
-            path = state.get("origin_tender_path")
-            return "get_comments" if (path and str(path).strip()) else "comments_ready"
-
-        builder.add_conditional_edges(
-            "prepare_template",
-            _has_origin_for_extract_comments,
-            {
-                "get_comments": "get_comments",
-                "comments_ready": "comments_ready",
-            },
-        )
-        builder.add_edge("get_comments", "copy_comments")
-        builder.add_edge("copy_comments", "comments_ready")
-
-        builder.add_edge(["extract_tender_params", "comments_ready"], "word_operations_subgraph")
-        builder.add_edge(["extract_tender_params", "comments_ready"], "generation_mode_gate")
+        builder.add_edge("extract_tender_params", "word_operations_subgraph")
+        builder.add_edge("extract_tender_params", "generation_mode_gate")
         builder.add_conditional_edges(
             "generation_mode_gate",
             self._select_generation_node,
@@ -621,27 +584,15 @@ class StandardTenderWorkflowGraph(BaseGraph):
                 NODE_CONTENT_AGENT: NODE_CONTENT_AGENT,
             },
         )
-
-        def _has_origin_for_comments(state) -> str:
-            path = state.get("origin_tender_path")
-            return "generate_comments" if (path and str(path).strip()) else "comments_branch_done"
-
         builder.add_conditional_edges(
             NODE_GENERATE_POLISHED_TEXT,
-            _has_origin_for_comments,
+            self._select_after_workflow_generation_node,
             {
                 "generate_comments": "generate_comments",
                 "comments_branch_done": "comments_branch_done",
             },
         )
-        builder.add_conditional_edges(
-            NODE_CONTENT_AGENT,
-            _has_origin_for_comments,
-            {
-                "generate_comments": "generate_comments",
-                "comments_branch_done": "comments_branch_done",
-            },
-        )
+        builder.add_edge(NODE_CONTENT_AGENT, "comments_branch_done")
         builder.add_edge("generate_comments", "comments_branch_done")
         builder.add_edge(["word_operations_subgraph", "comments_branch_done"], "update_word")
         after_update_target = post_update_steps[0][0] if post_update_steps else END
@@ -666,9 +617,19 @@ class StandardTenderWorkflowGraph(BaseGraph):
     def _select_generation_node(state) -> str:
         return NODE_CONTENT_AGENT if state.get("generation_mode") == "agent" else NODE_GENERATE_POLISHED_TEXT
 
+    @classmethod
+    def _select_after_workflow_generation_node(cls, state) -> str:
+        return "generate_comments" if cls._is_comment_generation_enabled(state) else "comments_branch_done"
+
+    @classmethod
+    def _select_after_update_node(cls, state) -> str:
+        if state.get("generation_mode") == "agent" and cls._is_comment_generation_enabled(state):
+            return NODE_COMMENT_AGENT
+        return "after_update"
+
     @staticmethod
-    def _select_after_update_node(state) -> str:
-        return NODE_COMMENT_AGENT if state.get("generation_mode") == "agent" else "after_update"
+    def _is_comment_generation_enabled(state) -> bool:
+        return str(state.get("comment_generation_mode") or "on").strip().lower() != "off"
 
     def _build_word_operations_subgraph(self):
         state_cls = self.STATE_CLS

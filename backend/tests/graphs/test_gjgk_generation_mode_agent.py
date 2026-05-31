@@ -70,7 +70,7 @@ def _stub_gjgk_nodes(
         calls.append("extract_tender_params")
         return {
             "tender_params": "gjgk extracted params",
-            "origin_tender_params": "gjgk origin params",
+            "template_reference_text": "gjgk origin params",
         }
 
     def _gjgk_delete_tender_param(state, config=None):
@@ -103,9 +103,11 @@ def _stub_gjgk_nodes(
         update_seen["replace_content_done"] = state.get("replace_content_done")
         return {"prepared_doc_path": "D:/UploadFiles/gjgk-output.docx"}
 
+    def _comment_agent(state, config=None):
+        calls.append("comment_agent")
+        return {"comment_writeback_result": {"generated": 0, "added": 0}}
+
     monkeypatch.setattr(GjgkTenderGraph, "NODE_PREPARE_TEMPLATE", _prepare_template)
-    monkeypatch.setattr(GjgkTenderGraph, "NODE_GET_COMMENTS", lambda state, config=None: {})
-    monkeypatch.setattr(GjgkTenderGraph, "NODE_COPY_COMMENTS", lambda state, config=None: {})
     monkeypatch.setattr(
         GjgkTenderGraph, "NODE_EXTRACT_TENDER_PARAMS", _extract_tender_params
     )
@@ -121,6 +123,7 @@ def _stub_gjgk_nodes(
     )
     monkeypatch.setattr(GjgkTenderGraph, "NODE_GENERATE_COMMENTS", _generate_comments)
     monkeypatch.setattr(GjgkTenderGraph, "NODE_UPDATE_WORD", _gjgk_update_word)
+    monkeypatch.setattr(GjgkTenderGraph, "NODE_COMMENT_AGENT", _comment_agent)
 
 
 def test_gjgk_agent_branch_produces_polished_text_for_gjgk_update_and_post_hook(
@@ -148,7 +151,6 @@ def test_gjgk_agent_branch_produces_polished_text_for_gjgk_update_and_post_hook(
             {
                 "generation_mode": "agent",
                 "tender_type": "gjgk",
-                "origin_tender_path": "",
                 "prepared_doc_path": "D:/UploadFiles/gjgk-template.docx",
                 "project_content": "gjgk project content",
                 "insertion_before_text": "before",
@@ -160,11 +162,13 @@ def test_gjgk_agent_branch_produces_polished_text_for_gjgk_update_and_post_hook(
         set_generation_agent_runner(None)
 
     assert "generate_polished_text" not in calls
+    assert "generate_comments" not in calls
     assert "gjgk_delete_tender_param" in calls
     assert "gjgk_get_replacements" in calls
     assert "gjgk_update_word" in calls
+    assert "comment_agent" in calls
     assert "replace_content" in calls
-    assert calls[-2:] == ["gjgk_update_word", "replace_content"]
+    assert calls[-3:] == ["gjgk_update_word", "comment_agent", "replace_content"]
     assert result["polished_text"] == "gjgk agent draft"
     assert result["generate_polished_done"] is True
     assert result["replace_content_done"] is True
@@ -180,7 +184,8 @@ def test_gjgk_agent_branch_produces_polished_text_for_gjgk_update_and_post_hook(
     ]
     assert calls.index("gjgk_delete_tender_param") < calls.index("gjgk_update_word")
     assert calls.index("gjgk_get_replacements") < calls.index("gjgk_update_word")
-    assert calls.index("gjgk_update_word") < calls.index("replace_content")
+    assert calls.index("gjgk_update_word") < calls.index("comment_agent")
+    assert calls.index("comment_agent") < calls.index("replace_content")
     assert len(runner.payloads) == 1
     assert runner.configs[0]["configurable"]["generation_agent_context"]["tender_type"] == "gjgk"
 
@@ -212,7 +217,6 @@ def test_gjgk_workflow_branch_still_uses_old_generation_node_and_post_hook(
         {
             "generation_mode": "workflow",
             "tender_type": "gjgk",
-            "origin_tender_path": "",
             "prepared_doc_path": "D:/UploadFiles/gjgk-template.docx",
             "project_content": "gjgk project content",
             "insertion_before_text": "before",
@@ -221,6 +225,8 @@ def test_gjgk_workflow_branch_still_uses_old_generation_node_and_post_hook(
     )
 
     assert "generate_polished_text" in calls
+    assert "generate_comments" in calls
+    assert "comment_agent" not in calls
     assert "gjgk_delete_tender_param" in calls
     assert "gjgk_get_replacements" in calls
     assert "gjgk_update_word" in calls
@@ -239,6 +245,8 @@ def test_gjgk_workflow_branch_still_uses_old_generation_node_and_post_hook(
     assert post_update_seen["replacements"] == [
         ("international requirement", "gjgk replacement")
     ]
+    assert calls.index("generate_polished_text") < calls.index("generate_comments")
+    assert calls.index("generate_comments") < calls.index("gjgk_update_word")
     assert calls.index("gjgk_delete_tender_param") < calls.index("gjgk_update_word")
     assert calls.index("gjgk_get_replacements") < calls.index("gjgk_update_word")
     assert calls.index("gjgk_update_word") < calls.index("replace_content")

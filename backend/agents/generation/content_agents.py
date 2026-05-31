@@ -227,7 +227,7 @@ def _build_generation_payload(
         "tender_type": str(state.get("tender_type") or "xjcg"),
         "generation_style": str(state.get("generation_style") or "template"),
         "project_info": str(state.get("project_content") or ""),
-        "origin_tender_params": state.get("origin_tender_params"),
+        "template_reference_text": state.get("template_reference_text"),
         "tender_params": state.get("tender_params"),
         "model_provider": model_provider,
     }
@@ -271,11 +271,11 @@ def _log_generation_input_summary(
     payload: dict[str, Any],
 ) -> None:
     project_info_chars = _text_length(payload.get("project_info"))
-    origin_chars = _text_length(payload.get("origin_tender_params"))
+    origin_chars = _text_length(payload.get("template_reference_text"))
     tender_chars = _text_length(payload.get("tender_params"))
     message = (
         "[content_agent] 生成上下文摘要: task_id=%s, generation_style=%s, "
-        "project_info_chars=%d, origin_tender_params_chars=%d, tender_params_chars=%d"
+        "project_info_chars=%d, template_reference_text_chars=%d, tender_params_chars=%d"
     )
     args = (
         task_id,
@@ -380,7 +380,7 @@ def _content_agent_round_label(phase: str, round_index: int) -> str:
         return "第 1 轮审核发现" if round_index == 1 else f"第 {round_index} 轮修复复核"
     if phase == "revision":
         return f"第 {round_index} 轮修复"
-    return "正文智能体"
+    return "参数生成智能体"
 
 
 def _content_agent_round_summary(
@@ -411,7 +411,7 @@ def _content_agent_round_summary(
             if fix_count
             else f"第 {round_index} 轮修复完成。"
         )
-    return "正文智能体处理中。"
+    return "参数生成智能体处理中。"
 
 
 def _content_agent_final_summary(

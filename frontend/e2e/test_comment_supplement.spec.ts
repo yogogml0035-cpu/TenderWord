@@ -7,7 +7,7 @@ const generateDoneTaskId = 'task-generate-done-e2e';
 const commentSupplementTaskId = 'task-comment-supplement-e2e';
 const agentGenerateTaskId = 'task-agent-generate-comment-e2e';
 const workflowGenerateTaskId = 'task-workflow-generate-comment-e2e';
-const artifactRoot = path.resolve(__dirname, '../../tasks/comment-supplement-comment-agent');
+const artifactRoot = path.resolve(__dirname, '../../tasks/template-comment-generation-convergence');
 const screenshotsDir = path.join(artifactRoot, 'screenshots');
 const logsDir = path.join(artifactRoot, 'logs');
 
@@ -181,11 +181,11 @@ async function seedConversation(
                   fund_source_lx: 0,
                 },
                 files: {
-                  clean_draft: {
-                    id: 'clean-draft',
-                    file_path: 'uploads/clean-draft.docx',
-                    file_name: 'clean-draft.docx',
-                    original_name: 'clean-draft.docx',
+                  template: {
+                    id: 'template',
+                    file_path: 'uploads/template.docx',
+                    file_name: 'template.docx',
+                    original_name: 'template.docx',
                     size: 128,
                     upload_time: '2026-05-30T10:00:00Z',
                   },
@@ -485,7 +485,7 @@ test.describe('Comment supplement and comment_agent mocked flows', () => {
       source_file: 'outputs/generate-output.docx',
       model: 'deepseek',
     });
-    await expect(page.getByText('批注智能体', { exact: true })).toBeVisible();
+    await expect(page.getByText('批注生成智能体', { exact: true })).toBeVisible();
     await expect(page.getByText('第 1 轮锚点校验')).toBeVisible();
     await expect(page.getByText('第 2 轮修复复核')).toBeVisible();
     await expect(page.getByText('当前锚点未在最终正文中精确匹配')).toBeVisible();
@@ -519,7 +519,7 @@ test.describe('Comment supplement and comment_agent mocked flows', () => {
         round: 1,
         node: 'content_generate_agent',
         is_complete: true,
-        content: '正文智能体已完成初稿。',
+        content: '参数生成智能体已完成初稿。',
         findings: [],
       }),
       sseEvent('agent_step', '2', {
@@ -613,8 +613,8 @@ test.describe('Comment supplement and comment_agent mocked flows', () => {
     await page.waitForLoadState('networkidle');
 
     await expect(page.getByText('content_generate_agent round-1', { exact: true })).toBeVisible();
-    await expect(page.getByText('正文智能体已完成初稿。')).toBeVisible();
-    await expect(page.getByText('批注智能体', { exact: true })).toBeVisible();
+    await expect(page.getByText('参数生成智能体已完成初稿。')).toBeVisible();
+    await expect(page.getByText('批注生成智能体', { exact: true })).toBeVisible();
     await expect(page.getByText('第 1 轮锚点校验')).toBeVisible();
     await expect(page.getByText('普通通过项已计入数量。')).toBeVisible();
     await expect(page.getByText('成功 1 条 / 跳过 0 条 / 失败 0 条')).toBeVisible();
@@ -644,7 +644,7 @@ test.describe('Comment supplement and comment_agent mocked flows', () => {
         round: 1,
         node: 'comment_agent',
         is_complete: true,
-        content: 'workflow 不应展示这条批注智能体消息。',
+        content: 'workflow 不应展示这条批注生成智能体消息。',
         findings: [],
       }),
       sseEvent('done', '2', {
@@ -671,8 +671,8 @@ test.describe('Comment supplement and comment_agent mocked flows', () => {
     await page.waitForLoadState('networkidle');
 
     await expect(page.getByText('workflow-output.docx')).toBeVisible();
-    await expect(page.getByText('批注智能体', { exact: true })).toHaveCount(0);
-    await expect(page.getByText('workflow 不应展示这条批注智能体消息。')).toHaveCount(0);
+    await expect(page.getByText('批注生成智能体', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('workflow 不应展示这条批注生成智能体消息。')).toHaveCount(0);
 
     ensureArtifactDirs();
     await page.screenshot({

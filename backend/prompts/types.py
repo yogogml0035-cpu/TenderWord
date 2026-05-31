@@ -21,20 +21,11 @@ class GeneratePromptInput:
     generation_style: str = "template"
     project_info: str = ""
     tender_params: Any = ""
-    origin_tender_params: Any = ""
+    template_reference_text: Any = ""
 
 
 @dataclass(frozen=True)
 class CommentPromptInput:
-    tender_type: str = "xjcg"
-    polished_text: str = ""
-    comment_plan_detail: Any = None
-    strikethrough_plan: Any = None
-    non_black_font_plan: Any = None
-
-
-@dataclass(frozen=True)
-class CommentNoReferencePromptInput:
     tender_type: str = "xjcg"
     polished_text: str = ""
 

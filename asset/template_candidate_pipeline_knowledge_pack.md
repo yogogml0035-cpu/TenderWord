@@ -39,7 +39,7 @@
 
 - 候选列表返回 `candidates` 与 `ranking`。
 - `ranking` 元信息包含 `applied`、`mode`、`reason`、`message`。
-- 选择返回 `selected_files.clean_draft`、`selected_files.origin_tender`、`failed_slots`、`partial_success`。
+- 选择返回 `selected_file` 单文件结果；失败时整体返回 `TEMPLATE_SELECT_FAILED`，不返回部分成功或失败槽位。
 
 ## 候选归一化与可选规则
 
@@ -62,7 +62,7 @@
 - 外部文件下载必须经过后端代理，下载源主机受 `settings.TEMPLATE_CANDIDATE_ALLOWED_HOSTS` 白名单限制。
 - download 路由会校验 URL 协议与主机，代理拉取文件，尽量根据响应头和文件名修正 MIME，并返回 `Content-Disposition`。
 - select 路由当前只使用 `candidate.shener` 作为推荐模板源。
-- 当前同一份下载结果会分别落到两个上传槽位：`clean_draft` 与 `origin_tender`。
+- 当前同一份下载结果只落盘一次，并回填共享表单的 `template` 上传槽位。
 - 保存前统一经过 `upload_storage.py` 做文件名清洗、扩展名校验、大小校验和唯一路径生成。
 
 ## 前端弹窗与回填
@@ -74,14 +74,15 @@
 - 行 key 由候选核心字段拼接后追加 `rowIndex`，不是只用 `tendername + year`。
 - “推荐模板”列的下载链接统一走 `getTemplateCandidateDownloadUrl()`。
 - 点击“选择”时，前端只发送 `tendername`、`year`、`fsg`、`shener`；当前 `fsg` 固定传 `null`，后端不使用它回填。
-- 成功回填后，前端把后端返回的文件对象同步回 `cleanDraftFile`、`originFile` 和 conversation draft 对应 `files`。
+- 成功回填后，前端把后端返回的 `selected_file` 同步回 `templateFile` 和 conversation draft 的 `files.template`。
 - 不可选旧模板只弹 notice，不发起 `selectTemplateCandidate()`。
 
 ## 关联测试与验证入口
 
 - 前端 API：`frontend/__tests__/unit/lib/test_api.test.ts`
 - 前端表单弹窗链路：`frontend/__tests__/unit/components/forms/test_tender_form_shared.test.tsx`
-- 当前仓库没有独立的后端模板候选 API / 排序服务 / 下载落盘回归测试；若修改这条链路，应优先补到 `backend/tests/` 对应模块目录。
+- 后端选择 API：`backend/tests/api/test_template_candidates.py`
+- 当前仓库没有独立的后端模板候选列表 / 排序服务回归测试；若修改这条链路，应优先补到 `backend/tests/` 对应模块目录。
 
 ## 回归风险
 
@@ -89,3 +90,4 @@
 - 改下载代理时，不能绕过白名单校验，否则会把模板代理变成 SSRF 入口。
 - 改前端缓存键时，必须保留 `project_name` 维度，避免无项目名排序和有项目名 AI 排序互相污染。
 - 若后续恢复 `fsg` 参与回填，必须同时修改后端 select 逻辑、前端回填流程、API 类型和本知识包。
+- 选择接口是单文件、全成全败契约；不要重新引入 `selected_files`、`failed_slots` 或 `partial_success`。

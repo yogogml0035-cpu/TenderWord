@@ -12,7 +12,7 @@ def build_prompt_input(*, generation_style: str = "template") -> GeneratePromptI
         generation_style=generation_style,
         project_info="项目基础信息",
         tender_params="技术参数正文",
-        origin_tender_params="模板章节外壳",
+        template_reference_text="模板章节外壳",
     )
 
 
@@ -78,7 +78,7 @@ def test_generate_prompt_renders_none_inputs_as_empty_text() -> None:
         generation_style="template",
         project_info=None,
         tender_params=None,
-        origin_tender_params=None,
+        template_reference_text=None,
     )
 
     rendered = render_generate_prompt(data)

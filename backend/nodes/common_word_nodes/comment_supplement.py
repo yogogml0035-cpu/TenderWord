@@ -65,8 +65,7 @@ def prepare_comment_supplement(
             "comment_supplement_source_file": str(source_path.resolve()),
             "source_prepared_doc_path": str(source_path.resolve()),
             "comment_supplement_temp_output_path": str(output_path),
-            "origin_tender_path": str(output_path),
-            "clean_draft_path": str(output_path),
+            "source_document_path": str(output_path),
             "prepared_doc_path": str(output_path),
         }
     )

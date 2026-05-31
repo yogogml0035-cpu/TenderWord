@@ -59,7 +59,7 @@ LLM_SNAPSHOT_INTERVAL_SECONDS = 0.25
 REWRITE_STATE_KEYS = [
     "tender_type",
     "prepared_doc_path",
-    "source_origin_tender_path",
+    "source_document_path",
     "polished_text",
     "tender_params",
     "insertion_before_text",
@@ -82,12 +82,6 @@ REWRITE_STATE_KEYS = [
     "fund_source_lx",
     "tender_invitation",
     "delivery_location",
-]
-
-REWRITE_STATE_DETAIL_KEYS = [
-    "comment_plan_detail",
-    "strikethrough_plan",
-    "non_black_font_plan",
 ]
 
 REWRITE_DEFAULT_ANCHORS = {
@@ -818,9 +812,9 @@ class DocumentService:
             "rewrite_user_prompt": user_prompt,
             "rewrite_mode": True,
         }
-        if latest_rewrite_state is not None and "source_origin_tender_path" in latest_rewrite_state:
-            initial_state["source_origin_tender_path"] = str(
-                latest_rewrite_state.get("source_origin_tender_path") or ""
+        if latest_rewrite_state is not None and "source_document_path" in latest_rewrite_state:
+            initial_state["source_document_path"] = str(
+                latest_rewrite_state.get("source_document_path") or ""
             ).strip()
         return initial_state
 
@@ -873,7 +867,7 @@ class DocumentService:
             "tender_lx": int(request.tender_lx),
             "fund_source_lx": str(request.fund_source_lx),
             "edit_user_prompt": str(request.edit_prompt).strip(),
-            "source_origin_tender_path": str(request.file_path).strip(),
+            "source_document_path": str(request.file_path).strip(),
             "insertion_before_text": str(insertion_before_text),
             "insertion_after_text": str(insertion_after_text),
         }
@@ -907,8 +901,7 @@ class DocumentService:
                 "comment_supplement_source_file": source_file,
                 "source_prepared_doc_path": source_file,
                 "prepared_doc_path": source_file,
-                "origin_tender_path": source_file,
-                "clean_draft_path": source_file,
+                "source_document_path": source_file,
                 "polished_text": str(latest_rewrite_state.get("polished_text") or ""),
             }
         )
@@ -949,6 +942,9 @@ class DocumentService:
         generation_mode = getattr(request, "generation_mode", "workflow")
         if hasattr(generation_mode, "value"):
             generation_mode = generation_mode.value
+        comment_generation_mode = getattr(request, "comment_generation_mode", "on")
+        if hasattr(comment_generation_mode, "value"):
+            comment_generation_mode = comment_generation_mode.value
         style_writeback_mode = getattr(request, "style_writeback_mode", "full")
         if hasattr(style_writeback_mode, "value"):
             style_writeback_mode = style_writeback_mode.value
@@ -963,6 +959,7 @@ class DocumentService:
             "tender_type": tender_type,
             "generation_style": str(generation_style or "template"),
             "generation_mode": str(generation_mode or "workflow"),
+            "comment_generation_mode": str(comment_generation_mode or "on"),
             "style_writeback_mode": str(style_writeback_mode or "full"),
             # 项目信息
             "project_name": tender_data.project_name or "",
@@ -1008,33 +1005,8 @@ class DocumentService:
             )
 
         # 文件路径
-        # origin_tender_path: 送审稿（可选）
-        explicit_origin_tender = file_paths.get("origin_tender")
-        origin_tender = explicit_origin_tender or file_paths.get("template")
-        if origin_tender and isinstance(origin_tender, str):
-            state["origin_tender_path"] = origin_tender
-        state["source_origin_tender_path"] = (
-            explicit_origin_tender.strip()
-            if isinstance(explicit_origin_tender, str)
-            else ""
-        )
-
-        # clean_draft_path: 清洁稿（可选）
-        clean_draft = file_paths.get("clean_draft") or file_paths.get("clean_draft_path")
-        if clean_draft and isinstance(clean_draft, str):
-            state["clean_draft_path"] = clean_draft
-
-        # tender_param_paths: 技术参数文件（支持多文件）
-        params = file_paths.get("tender_params") or file_paths.get("params") or []
-        if isinstance(params, str):
-            params = [params]
-        state["tender_param_paths"] = params if isinstance(params, list) else []
-
-        # template: 模板文件（必需）
-        template = file_paths.get("template")
-        if template and isinstance(template, str):
-            # 保存模板路径，后续 prepare_template 节点会处理
-            state["template_path"] = template
+        state["template_path"] = file_paths.template
+        state["tender_param_paths"] = list(file_paths.tender_params)
 
         return state
 
@@ -1326,13 +1298,6 @@ class DocumentService:
             generation_mode = initial_state.get("generation_mode")
         if isinstance(generation_mode, str) and generation_mode.strip():
             snapshot["generation_mode"] = generation_mode.strip()
-
-        for key in REWRITE_STATE_DETAIL_KEYS:
-            value = result_state.get(key)
-            if value is None:
-                value = initial_state.get(key)
-            if isinstance(value, list):
-                snapshot[key] = copy.deepcopy(value)
 
         return snapshot
 

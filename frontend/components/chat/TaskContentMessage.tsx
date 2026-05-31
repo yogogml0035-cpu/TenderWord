@@ -90,10 +90,10 @@ function getContentTitle(message: Message) {
     const node = message.metadata.agentStepNode;
     if (typeof node === 'string' && node.trim()) {
       if (message.metadata.contentAgent || node.trim() === 'content_agent') {
-        return '正文智能体';
+        return '参数生成智能体';
       }
       if (node.trim() === 'comment_agent') {
-        return '批注智能体';
+        return '批注生成智能体';
       }
       if (message.metadata.agentStepType === 'final') {
         return `${node.trim()} final`;
@@ -257,7 +257,7 @@ function getContentAgentPhaseLabel(phase: SSEContentAgentStep['phase']): string 
     case 'final':
       return '最终完成';
     default:
-      return '正文智能体';
+      return '参数生成智能体';
   }
 }
 

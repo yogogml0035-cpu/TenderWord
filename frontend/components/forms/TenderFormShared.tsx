@@ -22,6 +22,7 @@ import {
   selectTemplateCandidate,
 } from '@/lib/api';
 import type {
+  CommentGenerationMode,
   GenerationMode,
   GenerationStyle,
   StyleWritebackMode,
@@ -51,13 +52,13 @@ export interface BaseTenderFormData {
   tender_lx: TenderLx;
   fund_lx: FundLx;
   generation_mode?: GenerationMode;
+  comment_generation_mode?: CommentGenerationMode;
   generation_style: GenerationStyle;
   style_writeback_mode: StyleWritebackMode;
   tender_data: TenderData;
   model: ModelType;
   files: {
-    origin_tender?: UploadedFile;
-    clean_draft?: UploadedFile;
+    template?: UploadedFile;
     tender_params: UploadedFile[];
   };
   insertion_config: TenderInsertionConfig;
@@ -79,13 +80,9 @@ export interface TenderFormSharedProps<TFormData extends BaseTenderFormData = Ba
 }
 
 const sharedUploadCopy = {
-  cleanDraftUpload: {
-    label: '模板文件（可选）',
-    description: '上传则优先使用，若未上传则使用送审稿文件作为模板',
-  },
-  originUpload: {
-    label: '送审稿文件（可选）',
-    description: '若上传则最终文件将生成批注',
+  templateUpload: {
+    label: '模板文件（必填）',
+    description: '上传模板 Word 文件，作为生成正文的格式与内容参考',
   },
 } as const;
 
@@ -98,6 +95,7 @@ const segmentedToggleButtonClassName =
 const advancedSettingsGridClassName =
   'grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))]';
 const defaultGenerationMode: GenerationMode = 'workflow';
+const defaultCommentGenerationMode: CommentGenerationMode = 'on';
 const defaultStyleWritebackMode: StyleWritebackMode = 'full';
 const gngkSharedContentBeforeText = '第三章 招标内容及要求';
 const gngkLegacyFormatAfterText = '第四章 投标文件有关格式';
@@ -667,11 +665,8 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       initialDraft?.tender_data || initialTenderData
     )
   );
-  const [originFile, setOriginFile] = useState<UploadedFile | null>(
-    (initialDraft?.files?.origin_tender as UploadedFile | undefined) || null
-  );
-  const [cleanDraftFile, setCleanDraftFile] = useState<UploadedFile | null>(
-    (initialDraft?.files?.clean_draft as UploadedFile | undefined) || null
+  const [templateFile, setTemplateFile] = useState<UploadedFile | null>(
+    (initialDraft?.files?.template as UploadedFile | undefined) || null
   );
   const [paramFiles, setParamFiles] = useState<UploadedFile[]>(
     (initialDraft?.files?.tender_params as UploadedFile[] | undefined) || []
@@ -712,6 +707,10 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const [localGenerationMode, setLocalGenerationMode] = useState<GenerationMode>(
     initialDraft?.generation_mode || defaultGenerationMode
   );
+  const [localCommentGenerationMode, setLocalCommentGenerationMode] =
+    useState<CommentGenerationMode>(
+      initialDraft?.comment_generation_mode || defaultCommentGenerationMode
+    );
   const [localStyleWritebackMode, setLocalStyleWritebackMode] = useState<StyleWritebackMode>(
     initialDraft?.style_writeback_mode || defaultStyleWritebackMode
   );
@@ -772,6 +771,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const generationMode: GenerationMode = onDraftChange
     ? initialDraft?.generation_mode || defaultGenerationMode
     : localGenerationMode;
+  const commentGenerationMode: CommentGenerationMode = onDraftChange
+    ? initialDraft?.comment_generation_mode || defaultCommentGenerationMode
+    : localCommentGenerationMode;
   const styleWritebackMode: StyleWritebackMode = onDraftChange
     ? initialDraft?.style_writeback_mode || defaultStyleWritebackMode
     : localStyleWritebackMode;
@@ -881,6 +883,16 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     });
   }, [initialDraft?.generation_mode, onDraftChange]);
 
+  useEffect(() => {
+    if (!onDraftChange || initialDraft?.comment_generation_mode) {
+      return;
+    }
+
+    onDraftChange({
+      comment_generation_mode: defaultCommentGenerationMode,
+    });
+  }, [initialDraft?.comment_generation_mode, onDraftChange]);
+
   const applyTenderDraftUpdates = useCallback(
     (updates: TenderDraftUpdates) => {
       if (Object.prototype.hasOwnProperty.call(updates, 'tender_no')) {
@@ -901,21 +913,15 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   );
 
   const syncDraftFiles = useCallback(
-    (
-      nextOriginFile: UploadedFile | null,
-      nextCleanDraftFile: UploadedFile | null,
-      nextParamFiles: UploadedFile[]
-    ) => {
+    (nextTemplateFile: UploadedFile | null, nextParamFiles: UploadedFile[]) => {
       if (!onDraftChange) {
         return;
       }
 
-      const nextOriginTender = toDraftFile(nextOriginFile);
-      const nextCleanDraft = toDraftFile(nextCleanDraftFile);
+      const nextTemplate = toDraftFile(nextTemplateFile);
       onDraftChange({
         files: {
-          ...(nextOriginTender ? { origin_tender: nextOriginTender } : {}),
-          ...(nextCleanDraft ? { clean_draft: nextCleanDraft } : {}),
+          template: nextTemplate || undefined,
           tender_params: nextParamFiles
             .map((file) => toDraftFile(file))
             .filter((file): file is ConversationDraftFile => !!file),
@@ -1159,6 +1165,20 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     [generationMode, onDraftChange]
   );
 
+  const handleCommentGenerationModeChange = useCallback(
+    (nextCommentGenerationMode: CommentGenerationMode) => {
+      if (commentGenerationMode === nextCommentGenerationMode) {
+        return;
+      }
+
+      setLocalCommentGenerationMode(nextCommentGenerationMode);
+      onDraftChange?.({
+        comment_generation_mode: nextCommentGenerationMode,
+      });
+    },
+    [commentGenerationMode, onDraftChange]
+  );
+
   const handleStyleWritebackModeChange = useCallback(
     (nextStyleWritebackMode: StyleWritebackMode) => {
       if (styleWritebackMode === nextStyleWritebackMode) {
@@ -1207,10 +1227,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     [fundLx, initialDraft, insertionConfig, onDraftChange, tenderLx, tenderType]
   );
 
-  const originUploaderFiles = useMemo(() => (originFile ? [originFile] : []), [originFile]);
-  const cleanDraftUploaderFiles = useMemo(
-    () => (cleanDraftFile ? [cleanDraftFile] : []),
-    [cleanDraftFile]
+  const templateUploaderFiles = useMemo(
+    () => (templateFile ? [templateFile] : []),
+    [templateFile]
   );
   const tenderInfoItems = useMemo(
     () => toTenderInfoItems(tenderType, tenderData, tenderTypeInfo),
@@ -1481,21 +1500,10 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
           },
         });
 
-        const nextCleanDraftFile = response.selected_files.clean_draft
-          ? toSelectedUploadedFile(response.selected_files.clean_draft)
-          : cleanDraftFile;
-        const nextOriginFile = response.selected_files.origin_tender
-          ? toSelectedUploadedFile(response.selected_files.origin_tender)
-          : originFile;
+        const nextTemplateFile = toSelectedUploadedFile(response.selected_file);
 
-        if (response.selected_files.clean_draft) {
-          setCleanDraftFile(nextCleanDraftFile);
-        }
-        if (response.selected_files.origin_tender) {
-          setOriginFile(nextOriginFile);
-        }
-
-        syncDraftFiles(nextOriginFile, nextCleanDraftFile, paramFiles);
+        setTemplateFile(nextTemplateFile);
+        syncDraftFiles(nextTemplateFile, paramFiles);
         setTemplateDialogOpen(false);
         setTemplateDialogError(null);
         setTemplateDialogNotice(null);
@@ -1514,7 +1522,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         setSelectingTemplateRowKey(null);
       }
     },
-    [cleanDraftFile, originFile, paramFiles, syncDraftFiles]
+    [paramFiles, syncDraftFiles]
   );
 
   const uploadSectionAction = (
@@ -1544,8 +1552,8 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         return;
       }
 
-      if (!originFile && !cleanDraftFile) {
-        setError('清洁稿和送审稿至少要上传一个文件');
+      if (!templateFile) {
+        setError('请上传模板文件');
         return;
       }
 
@@ -1572,6 +1580,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         tender_lx: tenderLx,
         fund_lx: fundLx,
         generation_mode: generationMode,
+        comment_generation_mode: commentGenerationMode,
         generation_style: generationStyle,
         style_writeback_mode: styleWritebackMode,
         tender_data: {
@@ -1581,8 +1590,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         },
         model: selectedModel,
         files: {
-          origin_tender: originFile || undefined,
-          clean_draft: cleanDraftFile || undefined,
+          template: templateFile || undefined,
           tender_params: paramFiles,
         },
         insertion_config: insertionConfig,
@@ -1597,10 +1605,10 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       tenderData,
       selectedModel,
       generationMode,
+      commentGenerationMode,
       generationStyle,
       styleWritebackMode,
-      originFile,
-      cleanDraftFile,
+      templateFile,
       paramFiles,
       insertionConfig,
       onSubmit,
@@ -1722,34 +1730,18 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         <FormSection title="文件上传" index={2} headerAction={uploadSectionAction}>
           <div className="space-y-5">
             <FileUploader
-              label={sharedUploadCopy.cleanDraftUpload.label}
-              description={sharedUploadCopy.cleanDraftUpload.description}
+              label={sharedUploadCopy.templateUpload.label}
+              description={sharedUploadCopy.templateUpload.description}
               accept=".doc,.docx"
               multiple={false}
               autoUpload={true}
               disabled={isSubmitting}
-              fileType="clean_draft"
-              initialFiles={cleanDraftUploaderFiles}
+              fileType="template"
+              initialFiles={templateUploaderFiles}
               onFilesChange={(files) => {
-                const nextCleanDraftFile = files[0] || null;
-                setCleanDraftFile(nextCleanDraftFile);
-                syncDraftFiles(originFile, nextCleanDraftFile, paramFiles);
-              }}
-            />
-
-            <FileUploader
-              label={sharedUploadCopy.originUpload.label}
-              description={sharedUploadCopy.originUpload.description}
-              accept=".doc,.docx"
-              multiple={false}
-              autoUpload={true}
-              disabled={isSubmitting}
-              fileType="origin_tender"
-              initialFiles={originUploaderFiles}
-              onFilesChange={(files) => {
-                const nextOriginFile = files[0] || null;
-                setOriginFile(nextOriginFile);
-                syncDraftFiles(nextOriginFile, cleanDraftFile, paramFiles);
+                const nextTemplateFile = files[0] || null;
+                setTemplateFile(nextTemplateFile);
+                syncDraftFiles(nextTemplateFile, paramFiles);
               }}
             />
 
@@ -1765,7 +1757,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
               initialFiles={paramFiles}
               onFilesChange={(files) => {
                 setParamFiles(files);
-                syncDraftFiles(originFile, cleanDraftFile, files);
+                syncDraftFiles(templateFile, files);
               }}
             />
           </div>
@@ -1866,6 +1858,39 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
             </div>
 
             <div className={advancedSettingsGridClassName}>
+              <div className="space-y-1.5">
+                <p className="block text-sm font-semibold text-[var(--foreground)]">生成批注</p>
+                <div role="group" aria-label="生成批注" className={segmentedControlClassName}>
+                  <button
+                    type="button"
+                    onClick={() => handleCommentGenerationModeChange('on')}
+                    disabled={isSubmitting}
+                    className={cn(
+                      segmentedToggleButtonClassName,
+                      commentGenerationMode === 'on'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-transparent text-slate-700 hover:bg-white/80'
+                    )}
+                  >
+                    开
+                  </button>
+                  <span aria-hidden className="h-6 w-px bg-slate-200" />
+                  <button
+                    type="button"
+                    onClick={() => handleCommentGenerationModeChange('off')}
+                    disabled={isSubmitting}
+                    className={cn(
+                      segmentedToggleButtonClassName,
+                      commentGenerationMode === 'off'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-transparent text-slate-700 hover:bg-white/80'
+                    )}
+                  >
+                    关
+                  </button>
+                </div>
+              </div>
+
               <div className="space-y-1.5">
                 <p className="block text-sm font-semibold text-[var(--foreground)]">样式修订</p>
                 <div role="group" aria-label="样式修订" className={segmentedControlClassName}>

@@ -5,3 +5,225 @@ Started: 2026-05-31 02:50
 Source: prd.json
 
 ## Codebase Patterns
+- `TenderFormShared` is the shared source of truth for upload labels, draft sync, and submit validation; wrapper forms should only supply tender-type defaults.
+- `chatStore.mergeConversationDraft()` is the normalization point for `ConversationFormDraft.files`; keep only populated upload slots and let the form own draft writes.
+- Playwright validation can seed `chat-storage` directly and mock `/api/conversations/*/heartbeat` to reach `/tender` without backend or Word COM.
+- Real generate smoke polling must keep POSTing `/api/tasks/{task_id}/heartbeat`; otherwise the backend cancels long-running tasks with `heartbeat_timeout`.
+- Generate payloads now use `file_paths.template` + `file_paths.tender_params` only; edit uploads use `FileType` `edit_source` rather than generate upload slots.
+- Backend generate requests now validate `file_paths` through `GenerateFilePaths`; `DocumentService._build_initial_state()` maps only `template_path` and `tender_param_paths` for generate tasks.
+- Generate Word nodes now consume `state.template_path` directly: `prepare_template` copies it to `prepared_doc_path`, and `extract_tender_params` extracts template reference text from it while joining `tender_param_paths`.
+- Standard generate graphs now split comments by `generation_mode`: workflow always runs `generate_comments` before `update_word`; agent skips `generate_comments` and runs `comment_agent` after `update_word`, while total-node estimates ignore `origin_tender_path`.
+- Prompt builders should expose the smallest contract needed by the current node; `generate_comments` now forwards only `tender_type` and `polished_text`, and legacy plan fields should be treated as inert state if they still appear in fixtures.
+- `comment_agent` autonomous generation reuses `render_comment_prompt()` for both agent generate and comment_supplement; do not reintroduce separate `comment_no_reference` prompt modules or exports.
+- Template candidate selection is single-file and all-or-nothing: backend returns `selected_file`, frontend fills only `files.template`, and failures surface as `TEMPLATE_SELECT_FAILED` without `partial_success`.
+- 旧生成/批注契约清理要同时做 active-path `rg` 回归搜索；嵌套运行时 `prompts_log` 应被 `.gitignore` 排除，避免历史日志污染字段搜索结果。
+
+## 2026-05-31 07:37 - US-010
+- 完成全链路回归验证：前端 `npm run lint`、`npm run type-check`、`npm run test -- --runInBand`、`npm run test:e2e` 通过；后端 `python -m pytest tests -v` 通过；并完成一次真实 Windows + Word COM 生成冒烟，任务到达 `completed` 且下载端点可用
+- 更改的文件：
+  - `frontend/e2e/test_generation_mode_agent.spec.ts`
+  - `frontend/e2e/test_comment_supplement.spec.ts`
+  - `tasks/template-comment-generation-convergence/prd.json`
+  - `tasks/template-comment-generation-convergence/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns：真实 generate 冒烟不能只轮询任务状态，必须在轮询期间持续 POST `task heartbeat`，否则长任务会被服务端以 `heartbeat_timeout` 取消
+  - 遇到的陷阱：xjcg 的真实 Word COM 写回对受保护字段很敏感，冒烟输入必须包含模板要求的关键商务字段，否则会在 `update_word` 阶段 fail-fast
+  - 有用的上下文：现有 mock E2E 已覆盖 `content_agent` / `comment_agent` 过程卡和下载卡 UI；这轮 real smoke 主要用来验证 backend 任务完成与下载端点
+---
+
+## 2026-05-31 03:23 - US-001
+- 将共享表单的上传区收敛为“模板文件（必填）”和“技术参数文件（必填）”，并把 draft files 结构改为 `template` + `tender_params`
+- 更改的文件：
+  - `frontend/components/forms/TenderFormShared.tsx`
+  - `frontend/stores/chatStore.ts`
+  - `frontend/types/api.ts`
+  - `frontend/e2e/test_tender_form_upload_slots.spec.ts`
+  - `frontend/__tests__/unit/components/forms/test_tender_form_shared.test.tsx`
+  - `frontend/__tests__/unit/components/forms/test_xjcg_tender_form.test.tsx`
+  - `frontend/__tests__/unit/components/forms/test_gngk_tender_form.test.tsx`
+  - `frontend/__tests__/unit/components/chat/test_form_panel.test.tsx`
+  - `frontend/e2e/test_generation_mode_agent.spec.ts`
+  - `frontend/e2e/test_comment_supplement.spec.ts`
+- **未来迭代的学习：**
+  - 发现的 patterns：共享表单是上传文案、draft 同步和必填校验的单一入口，类型 wrapper 不应再各自持有上传槽位语义
+  - 遇到的陷阱：会话 draft 的旧文件槽位会拖住 wrapper 测试和 e2e seed，改动后要同步清掉所有 seeded `chat-storage` 里的旧字段
+  - 有用的上下文：`/tender` 的无后端浏览器验收可以通过 sessionStorage seed + heartbeat mock 完成，不需要启动真实任务链
+---
+
+## 2026-05-31 03:51 - US-002
+- 将前端生成请求 payload 收敛为 `file_paths.template` 与 `file_paths.tender_params`；三类转换器继续保留 `gngk` 的 `resolveGngkFormType` 分派
+- 更改的文件：
+  - `frontend/types/api.ts`
+  - `frontend/lib/formDataConverter.ts`
+  - `frontend/components/forms/TenderFormShared.tsx`
+  - `frontend/components/chat/ChatPanel.tsx`
+  - `frontend/__tests__/unit/lib/test_form_data_converter.test.ts`
+  - `frontend/__tests__/unit/lib/test_api.test.ts`
+  - `frontend/__tests__/unit/components/forms/test_file_uploader.test.tsx`
+  - `frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
+  - `frontend/__tests__/unit/components/chat/test_form_panel.test.tsx`
+- 验证：`npm run lint`、`npm run type-check`、相关 Jest 6 个测试文件均通过
+- **未来迭代的学习：**
+  - 发现的 patterns：生成转换器只从 `formData.files.template` 和 `formData.files.tender_params` 取路径，旧 `origin_tender` / `clean_draft` 不再属于 generate payload
+  - 遇到的陷阱：`FileType` 移除旧生成槽位后，`ChatPanel` 的编辑文件上传也要同步切到独立 `edit_source`，否则类型检查会重新暴露旧契约
+  - 有用的上下文：`frontend/__tests__/unit/lib/test_form_data_converter.test.ts` 是三类表单 payload 断言入口；`frontend/__tests__/unit/lib/test_api.test.ts` 里有 typed `GenerateRequest` 夹具，`FilesConfig` 改动会先在这里暴露
+---
+
+## 2026-05-31 04:12 - US-003
+- 将后端 `GenerateRequest.file_paths` 收敛为显式 `GenerateFilePaths` 模型，要求 `template` 非空且 `tender_params` 至少包含一个路径，并拒绝旧上传槽位
+- 将 `DocumentService._build_initial_state()` 的 generate 初始 state 改为只写入 `template_path` 和 `tender_param_paths`
+- 更改的文件：
+  - `backend/models/generate.py`
+  - `backend/models/__init__.py`
+  - `backend/states/base_state.py`
+  - `backend/services/document_service.py`
+  - `backend/tests/services/test_document_service_initial_state.py`
+  - `backend/tests/models/test_generate_request_generation_style.py`
+  - `tasks/template-comment-generation-convergence/prd.json`
+  - `tasks/template-comment-generation-convergence/progress.txt`
+- 验证：`cd backend; .\.venv\Scripts\python.exe -m pytest tests\services\test_document_service_initial_state.py tests\models\test_generate_request_generation_style.py -v` 通过；`cd backend; .\.venv\Scripts\python.exe -m pytest tests -v` 通过（390 passed）
+- **未来迭代的学习：**
+  - 发现的 patterns：生成入口的路径校验应放在 `backend/models/generate.py` 的请求模型层，service 只消费已规范化字段
+  - 遇到的陷阱：`GenerateRequest.file_paths` 从 dict 改成 Pydantic 子模型后，`DocumentService` 不能再使用 `.get()` 读取文件槽位
+  - 有用的上下文：`backend/tests/services/test_document_service_initial_state.py` 是 generate 初始 state 字段契约的主要回归入口
+---
+
+## 2026-05-31 04:43 - US-004
+- 将 `prepare_template` 改为只读取 `state.template_path`，缺失模板路径时 fail-fast 且错误信息不再提及旧上传槽位
+- 将 `extract_tender_params` 改为从 `state.template_path` 提取模板参考正文，并继续从 `tender_param_paths` 逐个提取技术参数后用空行拼接
+- 更改的文件：
+  - `backend/nodes/common_word_nodes/prepare_template.py`
+  - `backend/nodes/common_word_nodes/extract_tender_params.py`
+  - `backend/tests/nodes/test_prepare_template.py`
+  - `backend/tests/nodes/test_extract_tender_params_inline_style.py`
+  - `tasks/template-comment-generation-convergence/prd.json`
+  - `tasks/template-comment-generation-convergence/progress.txt`
+- 验证：`cd backend; .\.venv\Scripts\python.exe -m pytest tests\nodes\test_prepare_template.py tests\nodes\test_extract_tender_params_inline_style.py -v` 通过；`cd backend; .\.venv\Scripts\python.exe -m pytest tests -v` 通过（394 passed）
+- **未来迭代的学习：**
+  - 发现的 patterns：`template_path` 是 generate 节点的模板文件真源，节点层不再对旧文件槽位做 fallback
+  - 遇到的陷阱：`extract_tender_params` 仍保留 `origin_tender_params` 作为下游正文字段名，不要在本轮误改下游契约
+  - 有用的上下文：Word COM 相关节点测试可以通过 monkeypatch `create_word_application`、`open_document_with_retry` 和 `extract_text_from_word_file` 覆盖路径选择与多文件拼接
+---
+
+## 2026-05-31 05:08 - US-005
+- 移除了 `StandardTenderWorkflowGraph` 中旧的 `get_comments`、`copy_comments`、`comments_ready` 标准生成分支；workflow 固定执行 `generate_polished_text -> generate_comments -> update_word`，agent 固定执行 `content_agent -> update_word -> comment_agent`
+- 将标准生成 graph 的节点数估算改为只随 `generation_mode`、Word 子图步骤和类型 post-update 步骤变化，不再读取 `origin_tender_path`
+- 更改的文件：
+  - `backend/graphs/base_graph.py`
+  - `backend/graphs/xjcg_tender_graph.py`
+  - `backend/graphs/gjgk_tender_graph.py`
+  - `backend/graphs/gngk_hw_zc_tender_graph.py`
+  - `backend/tests/graphs/test_generation_mode_branching.py`
+  - `backend/tests/graphs/test_generation_mode_workflow.py`
+  - `backend/tests/graphs/test_gjgk_tender_graph.py`
+  - `backend/tests/graphs/test_gngk_tender_graph.py`
+  - `backend/tests/graphs/test_xjcg_generation_mode_agent.py`
+  - `backend/tests/graphs/test_gngk_hw_zc_generation_mode_agent.py`
+  - `backend/tests/graphs/test_gngk_hw_cz_generation_mode_agent.py`
+  - `backend/tests/graphs/test_gngk_fw_zc_generation_mode_agent.py`
+  - `backend/tests/graphs/test_gngk_fw_cz_generation_mode_agent.py`
+  - `backend/tests/graphs/test_gjgk_generation_mode_agent.py`
+  - `tasks/template-comment-generation-convergence/prd.json`
+  - `tasks/template-comment-generation-convergence/progress.txt`
+- 验证：`cd backend; .\.venv\Scripts\python.exe -m pytest tests\graphs\test_generation_mode_branching.py tests\graphs\test_generation_mode_workflow.py tests\graphs\test_gjgk_tender_graph.py tests\graphs\test_gngk_tender_graph.py tests\graphs\test_xjcg_generation_mode_agent.py tests\graphs\test_gngk_hw_zc_generation_mode_agent.py tests\graphs\test_gngk_hw_cz_generation_mode_agent.py tests\graphs\test_gngk_fw_zc_generation_mode_agent.py tests\graphs\test_gngk_fw_cz_generation_mode_agent.py tests\graphs\test_gjgk_generation_mode_agent.py -v` 通过；`cd backend; .\.venv\Scripts\python.exe -m pytest tests -v` 通过（395 passed）；改动文件 `py_compile` 通过
+- **未来迭代的学习：**
+  - 发现的 patterns：`StandardTenderWorkflowGraph` 是所有标准生成类型的批注拓扑真源，类型 graph 只需要绑定差异化 Word 节点和生成节点
+  - 遇到的陷阱：`gjgk` 有 post-update `replace_content`，agent 模式顺序是 `update_word -> comment_agent -> replace_content`，测试不要只断言 `update_word -> replace_content`
+  - 有用的上下文：`compile().get_graph().nodes` 可直接断言标准 graph 是否注册了旧节点；各类型 `test_*_generation_mode_agent.py` 是跨类型拓扑回归入口
+---
+
+## 2026-05-31 05:28 - US-006
+- 将 `comment_prompt.py` 和 `generate_comments` 收敛为只基于 `polished_text` 生成批注候选，`CommentPromptInput` 只保留 `tender_type` / `polished_text`
+- 删除了 prompt 渲染中对 `comment_plan_detail`、`strikethrough_plan`、`non_black_font_plan` 的读取，`generate_comments` 也不再从 state 取这些旧字段
+- 更改的文件：
+  - `backend/prompts/types.py`
+  - `backend/prompts/comment_prompt.py`
+  - `backend/nodes/common_word_nodes/generate_comments.py`
+  - `backend/tests/nodes/test_generate_comments.py`
+  - `backend/tests/prompts/test_comment_prompt_reference_contract.py`
+  - `tasks/template-comment-generation-convergence/prd.json`
+  - `tasks/template-comment-generation-convergence/progress.txt`
+- 验证：`cd backend; .\.venv\Scripts\python.exe -m pytest tests\nodes\test_generate_comments.py tests\prompts\test_comment_prompt_reference_contract.py -v` 通过；`cd backend; .\.venv\Scripts\python.exe -m pytest tests -v` 通过（396 passed）
+- **未来迭代的学习：**
+  - 发现的 patterns：prompt 输入模型最好只暴露当前节点真正需要的字段，旧 state 字段即使还存在于 fixture 中，也应通过哨兵值测试其不会进入 prompt
+  - 遇到的陷阱：`generate_comments` 的 prompt 合约变化会被 `stream_llm_completion` 的 kwargs 捕获测试直接暴露，改动 prompt 前要先更新相关断言
+  - 有用的上下文：`backend/tests/prompts/test_comment_prompt_reference_contract.py` 现在同时验证 dataclass 字段集合和 user prompt 文案，适合做 prompt contract 回归入口
+---
+
+## 2026-05-31 05:45 - US-007
+- 将 `comment_agent` 无候选自主生成切到统一 `render_comment_prompt()`；`generation_mode=agent` 的 generate 任务和 `comment_supplement` 都允许无 `polished_comments` 时先生成批注候选再校验写回
+- 删除独立 `comment_no_reference_prompt.py`、相关 prompt 类型 / 导出和旧 prompt 测试，并更新共享运行时知识包
+- 更改的文件：
+  - `backend/nodes/common_word_nodes/comment_agent.py`
+  - `backend/agents/comments/comment_agent.py`
+  - `backend/prompts/__init__.py`
+  - `backend/prompts/types.py`
+  - `backend/prompts/comment_no_reference_prompt.py`
+  - `backend/tests/agents/test_comment_agent.py`
+  - `backend/tests/nodes/test_comment_agent_writeback_node.py`
+  - `backend/tests/prompts/test_comment_no_reference_prompt.py`
+  - `asset/shared_runtime_word_skill_knowledge_pack.md`
+  - `asset/README.md`
+  - `tasks/template-comment-generation-convergence/prd.json`
+  - `tasks/template-comment-generation-convergence/progress.txt`
+- 验证：`backend\.venv\Scripts\python.exe -m py_compile ...` 通过；`cd backend; .\.venv\Scripts\python.exe -m pytest tests\nodes\test_comment_agent_writeback_node.py tests\agents\test_comment_agent.py -v` 通过；`cd backend; .\.venv\Scripts\python.exe -m pytest tests -v` 通过（392 passed）；`rg "comment_no_reference|CommentNoReference|COMMENT_NO_REFERENCE" backend frontend` 无结果；`git diff --check` 通过
+- **未来迭代的学习：**
+  - 发现的 patterns：自主生成批注的 Prompt Layer 真源现在只有 `backend/prompts/comment_prompt.py`，节点层只负责判断是否允许生成并把 system/user prompt 透传给 `run_comment_agent`
+  - 遇到的陷阱：`comment_agent` 空候选不再一律跳过，只有非 `generation_mode=agent` 的 generate 才保持 skip；测试要区分 workflow 空候选、agent generate 空候选和 comment_supplement 空候选
+  - 有用的上下文：`backend/tests/nodes/test_comment_agent_writeback_node.py` 是节点是否允许自主生成和 prompt 透传的回归入口，`backend/tests/agents/test_comment_agent.py` 覆盖 runner 级生成模式工具闭环
+---
+
+## 2026-05-31 06:12 - US-008
+- 将模板候选选择响应从双槽位 `selected_files` 收敛为单文件 `selected_file`，后端只下载并保存一次推荐模板文件
+- 将选择失败改为整体失败，统一返回 `TEMPLATE_SELECT_FAILED`，不再返回 `failed_slots` 或 `partial_success`
+- 将模板候选弹窗文案和下载展示名改为模板文件语义，选择成功后只回填共享表单的 `template` 上传位
+- 更改的文件：
+  - `backend/models/template_candidates.py`
+  - `backend/models/__init__.py`
+  - `backend/api/template_candidates.py`
+  - `backend/tests/api/test_template_candidates.py`
+  - `frontend/types/api.ts`
+  - `frontend/components/forms/TemplateCandidateDialog.tsx`
+  - `frontend/components/forms/TenderFormShared.tsx`
+  - `frontend/__tests__/unit/lib/test_api.test.ts`
+  - `frontend/__tests__/unit/components/forms/test_tender_form_shared.test.tsx`
+  - `asset/template_candidate_pipeline_knowledge_pack.md`
+  - `asset/README.md`
+  - `tasks/template-comment-generation-convergence/prd.json`
+  - `tasks/template-comment-generation-convergence/progress.txt`
+- 验证：`cd backend; .\.venv\Scripts\python.exe -m pytest tests -v` 通过（396 passed）；`cd frontend; npm run lint`、`npm run type-check`、`npm run test -- --runInBand` 均通过；Playwright MCP mock 浏览器验证通过，截图写入 `tasks/template-comment-generation-convergence/screenshots/us-008-template-selection.png`
+- **未来迭代的学习：**
+  - 发现的 patterns：模板候选选择是单文件全成全败契约，后端响应只暴露 `selected_file`，前端只同步 `templateFile` 和 draft `files.template`
+  - 遇到的陷阱：不要在前端为失败槽位保留 partial success 分支；下载、保存和缺少推荐链接都应该整体失败并显示 `TEMPLATE_SELECT_FAILED` 消息
+  - 有用的上下文：`backend/tests/api/test_template_candidates.py` 是选择 API 成功/失败契约入口，`frontend/__tests__/unit/components/forms/test_tender_form_shared.test.tsx` 覆盖弹窗文案和单文件回填
+---
+
+## 2026-05-31 06:58 - US-009
+- 清理旧送审稿生成/批注契约：删除标准生成旧批注提取/复制节点，将生成参考正文统一命名为 `template_reference_text`，将 rewrite/edit/comment_supplement 源文档路径统一到 `source_document_path`
+- 更新共享批注、生成 agent、rewrite/edit、任务结果快照、前端持久化和相关测试，使活跃代码不再依赖旧计划字段或旧上传槽位
+- 更新知识包和索引，记录统一批注 prompt、template+tender_params 输入契约，并排除嵌套 `prompts_log` 运行时日志
+- 更改的文件：
+  - `.gitignore`
+  - `asset/README.md`
+  - `asset/shared_runtime_word_skill_knowledge_pack.md`
+  - `asset/tender_type_identity_session_knowledge_pack.md`
+  - `backend/agents/generation/*`
+  - `backend/graphs/base_graph.py`
+  - `backend/models/template_candidates.py`
+  - `backend/nodes/common_word_nodes/*`
+  - `backend/nodes/skills_nodes/*`
+  - `backend/prompts/*`
+  - `backend/services/document_service.py`
+  - `backend/skills/rewrite/scripts/runtime.py`
+  - `backend/states/*`
+  - `backend/task/task_queue_manager.py`
+  - `backend/tests/**/*`
+  - `frontend/stores/chatStore.ts`
+  - `frontend/__tests__/unit/**/*`
+  - `frontend/e2e/test_tender_form_upload_slots.spec.ts`
+- 验证：`rg -n "送审稿|origin_tender|clean_draft|comment_plan_detail|strikethrough_plan|non_black_font_plan|copy_comments" frontend backend asset` 无结果；`git diff --check` 通过；`cd backend; .\.venv\Scripts\python.exe -m pytest tests -v` 通过（396 passed）；`cd frontend; npm run lint`、`npm run type-check`、`npm run test -- --runInBand` 均通过（376 passed）
+- **未来迭代的学习：**
+  - 发现的 patterns：生成模板参考正文的运行态字段是 `template_reference_text`，rewrite/edit/comment_supplement 的源文件路径字段是 `source_document_path`
+  - 遇到的陷阱：删除旧字段后，不要保留前端 metadata sanitize 这种“无活源”的兼容过滤，否则会让后续维护者误以为旧字段仍可能产生
+  - 有用的上下文：rewrite/edit 仍需要抽取已有批注/样式时，应复用 `backend/nodes/common_word_nodes/comment_extraction.py`，不要重新引入标准生成的旧批注复制节点
+---

@@ -19,8 +19,6 @@ from backend.models.template_candidates import (
     TemplateCandidateSelectRequest,
     TemplateSelectData,
     TemplateSelectedFile,
-    TemplateSelectedFiles,
-    TemplateSelectFailure,
     TemplateSelectResponse,
 )
 from backend.services.template_candidate_ranking_service import (
@@ -198,7 +196,7 @@ async def download_template_candidate(
         502: {"model": ErrorResponse, "description": "模板文件选择失败"},
     },
     summary="选择模板并保存到上传区",
-    description="根据所选推荐模板下载送审稿并落入上传目录，同时回填到发售稿和送审稿上传槽位。",
+    description="根据所选推荐模板下载模板文件并落入上传目录，返回单文件回填结果。",
 )
 async def select_template_candidate(
     request: TemplateCandidateSelectRequest,
@@ -218,82 +216,55 @@ async def select_template_candidate(
             message=INVALID_TEMPLATE_YEAR_MESSAGE,
         )
 
-    selected_files = TemplateSelectedFiles()
-    failures: list[TemplateSelectFailure] = []
-
     recommended_template_url = candidate.shener
     if not recommended_template_url:
-        failures.extend(
-            [
-                TemplateSelectFailure(slot="clean_draft", message="推荐模板链接不存在"),
-                TemplateSelectFailure(slot="origin_tender", message="推荐模板链接不存在"),
-            ]
-        )
-    else:
-        try:
-            upstream_response = fetch_template_file(recommended_template_url)
-            remote_filename = infer_remote_filename(
-                upstream_response,
-                recommended_template_url,
-                f"{candidate.tendername}-送审稿",
-            )
-            save_name = build_template_download_name(candidate.tendername, "送审稿", remote_filename)
-            template_content = upstream_response.content
-            template_content_type = upstream_response.headers.get(
-                "Content-Type",
-                "application/octet-stream",
-            )
-        except ValueError as exc:
-            failures.extend(
-                [
-                    TemplateSelectFailure(slot="clean_draft", message=str(exc)),
-                    TemplateSelectFailure(slot="origin_tender", message=str(exc)),
-                ]
-            )
-        except requests.exceptions.RequestException as exc:
-            failures.extend(
-                [
-                    TemplateSelectFailure(slot="clean_draft", message=str(exc)),
-                    TemplateSelectFailure(slot="origin_tender", message=str(exc)),
-                ]
-            )
-        else:
-            for slot in ("clean_draft", "origin_tender"):
-                try:
-                    file_info = persist_file_bytes(
-                        original_name=save_name,
-                        content=template_content,
-                        content_type=template_content_type,
-                    )
-                except HTTPException as exc:
-                    detail = exc.detail if isinstance(exc.detail, dict) else {}
-                    failure_message = detail.get("message") or "模板文件保存失败"
-                    failure_details = detail.get("details")
-                    if failure_details:
-                        failure_message = f"{failure_message}: {failure_details}"
-                    failures.append(TemplateSelectFailure(slot=slot, message=failure_message))
-                    continue
-
-                if slot == "clean_draft":
-                    selected_files.clean_draft = _build_selected_file(file_info)
-                else:
-                    selected_files.origin_tender = _build_selected_file(file_info)
-
-    if selected_files.clean_draft is None and selected_files.origin_tender is None:
         raise _build_error_response(
             status_code=status.HTTP_502_BAD_GATEWAY,
             code="TEMPLATE_SELECT_FAILED",
             message="模板文件选择失败",
-            details=[failure.model_dump() for failure in failures],
+            details="推荐模板链接不存在",
         )
 
-    partial_success = bool(failures)
+    try:
+        upstream_response = fetch_template_file(recommended_template_url)
+        remote_filename = infer_remote_filename(
+            upstream_response,
+            recommended_template_url,
+            f"{candidate.tendername}-模板",
+        )
+        save_name = build_template_download_name(candidate.tendername, "模板", remote_filename)
+        file_info = persist_file_bytes(
+            original_name=save_name,
+            content=upstream_response.content,
+            content_type=upstream_response.headers.get(
+                "Content-Type",
+                "application/octet-stream",
+            ),
+        )
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        failure_message = detail.get("message") or "模板文件保存失败"
+        failure_details = detail.get("details")
+        if failure_details:
+            failure_message = f"{failure_message}: {failure_details}"
+        raise _build_error_response(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            code="TEMPLATE_SELECT_FAILED",
+            message="模板文件选择失败",
+            details=failure_message,
+        ) from exc
+    except (ValueError, requests.exceptions.RequestException) as exc:
+        raise _build_error_response(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            code="TEMPLATE_SELECT_FAILED",
+            message="模板文件选择失败",
+            details=str(exc),
+        )
+
     return TemplateSelectResponse(
         success=True,
         data=TemplateSelectData(
-            selected_files=selected_files,
-            failed_slots=failures,
-            partial_success=partial_success,
+            selected_file=_build_selected_file(file_info),
         ),
-        message="模板部分回填成功" if partial_success else "模板回填成功",
+        message="模板回填成功",
     )

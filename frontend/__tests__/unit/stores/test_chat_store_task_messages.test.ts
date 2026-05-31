@@ -269,7 +269,7 @@ describe('chatStore task message grouping', () => {
     expect(secondAuditMessage?.metadata?.agentStepAuditRounds).toHaveLength(1);
   });
 
-  it('aggregates structured content_agent snapshots into one正文智能体 card', () => {
+  it('aggregates structured content_agent snapshots into one 参数生成智能体 card', () => {
     act(() => {
       useChatStore.getState().startTask('conv-1', 'task-1', {
         task_kind: 'generate',
