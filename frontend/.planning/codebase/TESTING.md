@@ -35,7 +35,7 @@ frontend/e2e/
 
 ## 关键覆盖入口
 
-- 页面：`frontend/__tests__/unit/app/test_chat_page.test.tsx`。
+- 页面：`frontend/__tests__/unit/app/test_home_page.test.tsx`、`frontend/__tests__/unit/app/test_chat_page.test.tsx`。
 - 聊天组件：`frontend/__tests__/unit/components/chat/`。
 - 表单组件：`frontend/__tests__/unit/components/forms/`。
 - API client：`frontend/__tests__/unit/lib/test_api.test.ts`、`test_api_base_url.test.ts`。
@@ -103,7 +103,7 @@ git diff --check
 - SSE/任务：`test_use_chat_sse.test.tsx`、`test_sse.test.ts`、`test_api_sse_agent_step.test.ts`、task store 测试、`test_use_task_heartbeat.test.tsx`。
 - 模板候选：表单与 API client 测试，必要时补弹窗交互测试。
 - UI/页面：相关组件测试，真实浏览器契约补 Playwright。
-- 智能体生成方式：`test_tender_form_shared.test.tsx`、`test_form_data_converter.test.ts`、`test_chat_panel.test.tsx`、`test_generation_mode_agent.spec.ts`。
+- 智能体生成方式与批注开关：`test_tender_form_shared.test.tsx`、`test_form_data_converter.test.ts`、`test_chat_panel.test.tsx`、`test_generation_mode_agent.spec.ts`。
 - 补充批注：API client、下载卡动作、`comment_agent` 过程卡、任务下载卡和 mock E2E。
 
 ## 覆盖缺口

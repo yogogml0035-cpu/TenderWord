@@ -1,6 +1,6 @@
 # 前端编码约定事实地图
 
-**分析日期：** 2026-05-30
+**分析日期：** 2026-05-31
 
 **范围：** `frontend/` 源码、类型、测试和 UI 状态约定。
 
@@ -35,6 +35,7 @@
 - `TenderFormShared` 初始化优先级固定为 `draft > URL > default`。
 - 深链 URL 参数要先写入 draft，再让表单初始化读取。
 - `generation_mode` 是会话级 generate 草稿字段，默认 `workflow`，不按 `gngk` 子类型分桶。
+- `comment_generation_mode` 是会话级 generate 草稿字段，默认 `on`，只影响初次生成批注分支。
 - canonical URL 构造和重写统一走 `buildCanonicalSearchParams()`、`syncBrowserUrlToConversation()` 和 store helper。
 - `gngk` 会话身份按 `tenderType + tenderno + tender_lx + fund_lx` 匹配。
 
@@ -44,6 +45,7 @@
 - 后端 form type union 在 `frontend/types/api.ts`。
 - `frontend/lib/gngkFormType.ts` 是 `gngk` 后端 form type 分派真源。
 - `frontend/lib/formDataConverter.ts` 负责生成任务转换，并调用 `resolveGngkFormType()`；缺省 `generation_mode` 要归一为 `workflow`。
+- 生成任务只提交模板文件和技术参数文件：`files.template`、`files.tender_params` 转为 `file_paths.template`、`file_paths.tender_params`；edit 上传使用独立 `edit_source`。
 - `frontend/components/chat/ChatPanel.tsx` 负责 edit 任务构造，并调用 `resolveGngkFormType()`。
 - 修改 `gngk` 的 `tender_lx + fund_lx + ifzgcg` 分派时，只改共享 helper，并补生成与 edit 测试。
 - 默认锚点在 `frontend/components/forms/tenderFormConfig.ts`；后端最终锚点配置在 `backend/config/tender_config.py`。
@@ -79,4 +81,4 @@
 
 ---
 
-*前端编码约定分析：2026-05-23*
+*前端编码约定分析：2026-05-31*

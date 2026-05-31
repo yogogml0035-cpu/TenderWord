@@ -47,7 +47,7 @@ frontend/
 
 ### 路由与工作台
 
-- `frontend/app/page.tsx`：首页入口。
+- `frontend/app/page.tsx`：根路径重定向到 `/tender`。
 - `frontend/app/tender/page.tsx`：工作台、URL 接入、会话启动、招标详情预取、会话心跳。
 - `frontend/components/chat/TenderTypeSidebar.tsx`：类型分组、会话选择/创建/重命名/删除。
 - `frontend/components/chat/FormPanel.tsx`：表单挂载、生成任务创建、任务状态 overlay、SSE hook 绑定。
@@ -56,7 +56,7 @@ frontend/
 
 ### 表单
 
-- `frontend/components/forms/TenderFormShared.tsx`：共享表单主体。
+- `frontend/components/forms/TenderFormShared.tsx`：共享表单主体、模板/技术参数上传、生成方式和批注生成开关。
 - `frontend/components/forms/XjcgTenderForm.tsx`、`GngkTenderForm.tsx`、`GjgkTenderForm.tsx`：类型 wrapper。
 - `frontend/components/forms/tenderFormConfig.ts`：默认锚点和表单配置。
 - `frontend/components/forms/TemplateCandidateDialog.tsx`：模板候选弹窗。

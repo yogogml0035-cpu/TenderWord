@@ -1,6 +1,6 @@
 # 前端技术栈事实地图
 
-**分析日期：** 2026-05-30
+**分析日期：** 2026-05-31
 
 **范围：** `frontend/` 及前端启动/测试相关根脚本。
 
@@ -50,7 +50,7 @@ npm run test:e2e       # Playwright
 ## 配置
 
 - Next 配置：`frontend/next.config.ts`。
-- TypeScript 配置：`frontend/tsconfig.json`，包含 `@/*` alias。
+- TypeScript 配置：`frontend/tsconfig.json`，包含 `@/*` alias；稳定类型检查走 `frontend/tsconfig.typecheck.json`，避开 Next dev 生成缓存。
 - Jest 配置：`frontend/jest.config.ts`。
 - Playwright 配置：`frontend/playwright.config.ts`，baseURL 为 `http://localhost:8502`。
 - 环境示例：`frontend/.env.local.example`。
@@ -58,7 +58,7 @@ npm run test:e2e       # Playwright
 
 ## 前端入口
 
-- 页面入口：`frontend/app/page.tsx`、`frontend/app/tender/page.tsx`。
+- 页面入口：`frontend/app/page.tsx` 直接重定向到 `/tender`，`frontend/app/tender/page.tsx` 承载工作台。
 - API 入口：`frontend/lib/api.ts`。
 - SSE 入口：`frontend/lib/sse.ts`、`frontend/hooks/useChatSSE.ts`。
 - 表单转换：`frontend/lib/formDataConverter.ts`；`gngk` form type 分派：`frontend/lib/gngkFormType.ts`。
@@ -74,4 +74,4 @@ npm run test:e2e       # Playwright
 
 ---
 
-*前端技术栈分析：2026-05-23*
+*前端技术栈分析：2026-05-31*

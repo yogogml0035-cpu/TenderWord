@@ -43,9 +43,9 @@ Next.js App Router
 
 ### 生成任务
 
-1. `TenderFormShared` 收集招标数据、上传文件、模板候选结果、插入锚点、生成风格、生成方式和样式回填模式。
+1. `TenderFormShared` 收集招标数据、模板文件、技术参数文件、模板候选结果、插入锚点、生成风格、生成方式、批注生成开关和样式回填模式。
 2. `FormPanel` 通过 `tenderFormRegistry` 获取表单组件和转换器。
-3. `frontend/lib/formDataConverter.ts` 把前端类型转换为后端 `GenerateRequest`，并把缺省 `generation_mode` 归一为 `workflow`。
+3. `frontend/lib/formDataConverter.ts` 把前端类型转换为后端 `GenerateRequest`，只发送 `file_paths.template` 与 `file_paths.tender_params`，并把缺省 `generation_mode` / `comment_generation_mode` 分别归一为 `workflow` / `on`。
 4. `gngk` 由 `frontend/lib/gngkFormType.ts` 根据 `tender_lx + fund_lx + ifzgcg` 分派到四套后端 form type；工程类当前复用服务链路。
 5. `frontend/lib/api.ts` 调用 `createGenerateTask()`。
 6. `chatStore.startTask()` 创建任务消息组和 task summary。

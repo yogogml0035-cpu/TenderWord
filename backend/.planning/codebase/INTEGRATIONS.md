@@ -36,6 +36,12 @@
 - Graph 边界：`CommentSupplementGraph` 只处理当前文档副本的补充批注，不重新生成正文；成功后更新会话 latest `rewrite_state.prepared_doc_path`。
 - 前端触发来自初次生成下载卡，rewrite/edit/comment_supplement 下载卡不应再次显示补充批注动作。
 
+### 初次生成文件与批注开关
+
+- 生成请求的文件输入只接受模板文件和技术参数文件。
+- `DocumentService` 将文件输入装配为 `template_path` 与 `tender_param_paths`，`prepare_template` 复制模板，`extract_tender_params` 从模板提取参考正文并拼接技术参数文本。
+- `comment_generation_mode=off` 只跳过初次生成批注逻辑；正文生成、Word 写回、样式回填、任务结果和下载链路不应受影响。
+
 ### 招标详情接口
 
 - 后端入口：`GET /api/tender/{tender_no}`。

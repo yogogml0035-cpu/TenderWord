@@ -27,8 +27,10 @@
 | 运行时 | `backend/task/task_queue_manager.py`, `backend/graphs/base_graph.py` |
 
 同步要求：
+- `GenerateRequest.file_paths` 当前只接受 `template` 与 `tender_params`；生成节点只消费 `template_path` 与 `tender_param_paths`，不要重新引入旧文件槽位。
 - `GenerateRequest.form_type` 变化必须同步 `frontend/types/api.ts`、`frontend/lib/formDataConverter.ts` 和 `backend/models/generate.py`；`gngk` 分派变化还必须同步 `frontend/lib/gngkFormType.ts`。
 - `generation_mode` 是 generate-only 字段，默认 `workflow`；`agent` 只影响初次生成节点选择，不进入 rewrite / edit 请求模型、skill state 或 prompt surface。
+- `comment_generation_mode` 是 generate-only 字段，默认 `on`；`off` 时 workflow 与 agent 生成都跳过 AI 批注生成，不进入 rewrite / edit 链路。
 - `gngk` 的后端分派依赖 `tender_lx + fund_lx + ifzgcg`，共享真源是 `frontend/lib/gngkFormType.ts`；generate 由 `formDataConverter.ts` 调用该 helper，edit 由 `ChatPanel.tsx` 调用该 helper，不能绕开 helper 单独改调用点。
 
 ### 任务状态、取消与心跳

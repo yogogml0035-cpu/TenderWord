@@ -49,6 +49,8 @@
 
 - 浏览器不直接访问本地文件系统。
 - 文件上传通过 `FormData` 发往后端 upload API。
+- 初次生成只使用模板文件和技术参数文件；模板候选选择成功后只回填模板文件槽位。
+- edit 上传使用独立 `edit_source` 文件类型，不复用初次生成上传槽位。
 - 下载通过后端 download API 或模板候选代理下载 URL。
 - 模板候选外部文件 URL 不应在前端直接请求。
 - 初次生成下载卡可以触发补充批注任务；该任务必须通过项目内 `POST /api/comment-supplement` 创建，不能直接在前端修改文档。
@@ -88,6 +90,7 @@
 ## 集成风险
 
 - API shape 变化必须同步 `frontend/types/api.ts`、`frontend/lib/api.ts`、后端模型和测试。
+- `generation_mode` 和 `comment_generation_mode` 都是初次生成字段，不能透传到 rewrite/edit。
 - SSE 事件变化必须同步事件类型、底层 named event 注册、解析、store 映射和测试。
 - gngk form type 分派必须集中在 `frontend/lib/gngkFormType.ts`，`formDataConverter.ts` 与 `ChatPanel.tsx` 只能调用共享 helper。
 - URL 参数变化必须同步 `tenderTypeMapper.ts`、store、页面启动和 E2E。

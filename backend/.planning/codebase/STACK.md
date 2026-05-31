@@ -1,6 +1,6 @@
 # 后端技术栈事实地图
 
-**分析日期：** 2026-05-30
+**分析日期：** 2026-05-31
 
 **范围：** `backend/`、后端依赖、后端启动/验证相关根脚本。
 
@@ -30,6 +30,7 @@
 | Pydantic Settings | `.env` 配置加载 | `backend/config/settings.py` |
 | LangGraph | 生成、rewrite/edit、用户路由工作流 | `backend/graphs/` |
 | DeepAgents | `generation_mode=agent` 的内容生成主/子智能体运行时 | `backend/agents/generation/` |
+| LangChain agents | `comment_agent` 批注校验/写回工具运行时 | `backend/agents/comments/` |
 | pywin32 | Word COM 自动化 | `backend/util/word_util/` |
 | OpenAI-compatible SDK | DeepSeek、Doubao/ARK、Qwen/DashScope 流式调用 | `backend/util/common_util/llm_stream_utils.py` |
 | pytest / pytest-asyncio | 后端单测与 async 测试 | `backend/tests/` |
@@ -99,4 +100,4 @@ TMPDIR=/tmp TMP=/tmp TEMP=/tmp .venv-linux/bin/python -m pytest tests -v
 
 ---
 
-*后端技术栈分析：2026-05-23*
+*后端技术栈分析：2026-05-31*

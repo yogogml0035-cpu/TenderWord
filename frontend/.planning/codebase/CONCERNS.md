@@ -21,6 +21,11 @@
 - 风险：直接改 URL 参数或反转初始化优先级会导致深链、草稿和会话身份错位。
 - 安全修改：保持 `draft > URL > default`，深链参数先写 draft，canonical URL 只走 mapper/store helper。
 
+**初次生成字段容易泄漏到 rewrite/edit：**
+- 文件：`frontend/components/forms/TenderFormShared.tsx`、`frontend/lib/formDataConverter.ts`、`frontend/components/chat/ChatPanel.tsx`
+- 风险：`generation_mode` 或 `comment_generation_mode` 若被带入 rewrite/edit，会让修改链路误用初次生成分支。
+- 安全修改：生成转换器负责兜底默认值；ChatPanel 构造 rewrite/edit payload 时不得透传这些字段。
+
 ## 已知脆弱区
 
 **running task 恢复依赖后端状态确认：**

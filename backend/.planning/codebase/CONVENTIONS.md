@@ -1,6 +1,6 @@
 # 后端编码约定事实地图
 
-**分析日期：** 2026-05-30
+**分析日期：** 2026-05-31
 
 **范围：** `backend/` 源码和测试约定。
 
@@ -78,6 +78,8 @@
 - SSE 事件类型变化必须同步后端模型、发送方、前端 union 类型、解析和测试。
 - `generation_style` 是 generate-only 字段，不进入 rewrite/edit 请求模型、skill state 或 prompt surface。
 - `generation_mode` 是 generate-only 字段，不进入 rewrite/edit 请求模型、skill state 或 prompt surface。
+- `comment_generation_mode` 是 generate-only 字段，不进入 rewrite/edit 请求模型、skill state 或 prompt surface；`off` 只跳过初次生成批注分支。
+- 生成文件输入只接受 `template` 与 `tender_params`，service 装配为 `template_path` 与 `tender_param_paths` 后再交给节点。
 - `agent_step` 是智能体生成的用户态过程事件，不替代 `done` / `error` 终态；新增或调整时必须同步后端模型、SSE manager、前端 named event、类型和 store 测试。
 
 ## 测试约定
@@ -90,4 +92,4 @@
 
 ---
 
-*后端编码约定分析：2026-05-23*
+*后端编码约定分析：2026-05-31*

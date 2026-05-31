@@ -20,9 +20,9 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 ### 生成任务
 
 1. 用户进入 `/tender`，`frontend/app/tender/page.tsx` 解析 URL 参数并恢复或创建会话。
-2. `frontend/components/forms/TenderFormShared.tsx` 收集招标数据、文件、模板候选、插入锚点和 `generation_mode`。
+2. `frontend/components/forms/TenderFormShared.tsx` 收集招标数据、模板文件、技术参数文件、模板候选、插入锚点、`generation_mode` 和 `comment_generation_mode`。
 3. `frontend/components/chat/FormPanel.tsx` 通过 `tenderFormRegistry` 选择转换器。
-4. `frontend/lib/formDataConverter.ts` 把前端 `TenderType` 转换为后端 `GenerateRequest`；其中 `gngk` 后端 `form_type` 由共享 helper `frontend/lib/gngkFormType.ts` 根据 `tender_lx + fund_lx + ifzgcg` 解析。
+4. `frontend/lib/formDataConverter.ts` 把前端 `TenderType` 转换为后端 `GenerateRequest`，并只提交 `file_paths.template` 与 `file_paths.tender_params`；其中 `gngk` 后端 `form_type` 由共享 helper `frontend/lib/gngkFormType.ts` 根据 `tender_lx + fund_lx + ifzgcg` 解析。
 5. `frontend/lib/api.ts` 调用 `POST /api/generate`。
 6. `backend/api/generate.py` 校验请求并交给 `backend/services/document_service.py`。
 7. `DocumentService` 选择 `GRAPH_REGISTRY`，构造初始 state，并提交到 `backend/task/task_queue_manager.py`。
@@ -165,6 +165,8 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 
 - API 形状变化是否同步后端模型、前端类型、API client 和测试。
 - `gngk` 的 `tender_lx + fund_lx + ifzgcg` 分派是否集中在 `frontend/lib/gngkFormType.ts`，且 `formDataConverter.ts` 与 `ChatPanel.tsx` 是否都调用该 helper。
+- 生成文件契约是否仍是 `template + tender_params`，后端初始 state 是否只装配 `template_path + tender_param_paths`。
+- `comment_generation_mode` 是否只影响初次生成批注分支，且没有进入 rewrite/edit 请求模型或 skill state。
 - 新增或修改 SSE 事件是否同步后端事件模型、前端事件 union、`frontend/lib/sse.ts` named event、`useChatSSE` 和测试。
 - 新增或修改任务类型是否同步 `TaskKind`、任务状态、SSE `done` payload、下载卡和会话结果语义。
 - Word COM 相关改动是否仍然经过任务队列、graph 锁、取消检查和进度包装。

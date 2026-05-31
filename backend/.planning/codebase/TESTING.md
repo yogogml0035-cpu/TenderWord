@@ -38,6 +38,7 @@ backend/tests/
 - 类型配置：`backend/tests/config/test_tender_config_protected_fields.py`。
 - graph 路由：`backend/tests/graphs/test_gngk_tender_graph.py`、`backend/tests/graphs/test_gjgk_tender_graph.py`。
 - generation mode：`backend/tests/graphs/test_generation_mode_branching.py`、`test_generation_mode_workflow.py` 和各类型 `test_*_generation_mode_agent.py`。
+- comment generation mode：通过 graph 分支、服务初始 state 和 comment_agent 节点测试锁定 `on/off` 批注分支。
 - 内容智能体：`backend/tests/agents/test_generation_content_agent.py`、`backend/tests/nodes/test_content_agent_generate.py`。
 - Word helper：`backend/tests/helper/test_content_ops.py`、`test_delete_ops.py`、`test_paragraph_boundary_ops.py`、`test_inline_style_ops.py`。
 - 节点：`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`、`test_gngk_fw_zc_update_word.py`、`test_common_update_word_split.py`、`test_comment_writeback.py`。

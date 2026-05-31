@@ -8,7 +8,7 @@
 
 ```text
 backend/
-├── agents/              # DeepAgents 内容生成智能体
+├── agents/              # DeepAgents 内容生成与批注智能体
 ├── api/                  # FastAPI routers
 ├── config/               # settings 与招标类型配置
 ├── core/                 # SSE 等核心运行基础设施
@@ -34,6 +34,7 @@ backend/
 | --- | --- |
 | `backend/api/` | `/api` router：生成、edit、补充批注、任务、SSE、用户流式、会话心跳、上传、下载、招标详情、模板候选。 |
 | `backend/agents/generation/` | 初次生成 `generation_mode=agent` 的 DeepAgents 主/子智能体、JSON 协议、模型工厂和工作区管理。 |
+| `backend/agents/comments/` | `comment_agent` 批注校验、写回工具、结构化类型和工作区管理。 |
 | `backend/models/` | `GenerateRequest`、`EditTaskRequest`、任务状态、SSE 事件、上传与模板候选模型。 |
 | `backend/services/` | `DocumentService`、任务状态展示、会话快照、用户路由、模板候选 AI 重排。 |
 | `backend/task/` | `TaskQueueManager`、任务实体、进度、取消、心跳。 |
@@ -98,6 +99,13 @@ backend/
 - `backend/agents/generation/json_utils.py`、`types.py`：智能体输入输出协议解析与结构校验。
 - `backend/agents/generation/workspace.py`：FilesystemBackend 工作区和文件交接契约。
 - `backend/agents/generation/agent_step_events.py`：智能体步骤事件归一化。
+
+### 批注智能体
+
+- `backend/agents/comments/comment_agent.py`：`comment_agent` 运行时与工具调用门禁。
+- `backend/agents/comments/tools.py`：批注引用校验与 Word 边界内写回工具。
+- `backend/agents/comments/types.py`：批注候选、校验结果与写回统计类型。
+- `backend/agents/comments/workspace.py`：批注智能体审计工作区。
 
 ### Word helper 与工具层
 

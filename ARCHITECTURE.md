@@ -26,10 +26,10 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 
 `frontend/` 是 Next.js 16 + React 19 工作台。它负责：
 
-- `/` 与 `/tender` 页面入口。
+- `/` 根路径重定向与 `/tender` 工作台入口。
 - 招标类型侧栏、表单面板、聊天和任务面板。
 - 会话、草稿、历史、任务摘要与 SSE resume 元数据的 `sessionStorage` 持久化。
-- 初次生成 `generation_mode` 草稿、生成方式控件和智能体 `agent-step` 过程卡展示。
+- 初次生成 `generation_mode`、`comment_generation_mode` 草稿，高级设置控件和智能体 `agent-step` 过程卡展示。
 - 初次生成下载卡上的补充批注动作和 `comment_agent` 过程卡展示。
 - 前端 `TenderType`、URL canonical 化、`gngk` 子类型身份匹配。
 - 通过 `frontend/lib/api.ts` 调用后端 JSON、上传、下载、NDJSON 和 SSE helper。
@@ -84,7 +84,7 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 
 ```text
 frontend/app/
-  路由边界与工作台组合
+  根路径重定向、工作台路由边界与页面组合
 frontend/components/chat/
   工作台面板、聊天、任务消息、侧栏
 frontend/components/forms/
@@ -146,7 +146,7 @@ backend/prompts/ 与 backend/skills/
 
 ### 生成
 
-`POST /api/generate` 由前端表单提交，后端创建任务并通过 tender graph 执行文档生成。`generation_mode=workflow` 走旧 `generate_polished_text`，`generation_mode=agent` 走 `content_agent`，两者最终都产出 `polished_text` 并进入批注、写回和下载主干。任务进度通过 SSE 回到前端，智能体过程通过 `agent_step` 展示，完成后前端展示下载入口。
+`POST /api/generate` 由前端表单提交，生成文件契约是 `file_paths.template` 加 `file_paths.tender_params`。后端创建任务并通过 tender graph 执行文档生成：`generation_mode=workflow` 走旧 `generate_polished_text`，`generation_mode=agent` 走 `content_agent`；`comment_generation_mode` 决定是否生成或补写 AI 批注。任务进度通过 SSE 回到前端，智能体过程通过 `agent_step` 展示，完成后前端展示下载入口。
 
 关键入口：
 - `frontend/components/chat/FormPanel.tsx`

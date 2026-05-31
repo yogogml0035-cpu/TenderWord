@@ -44,10 +44,10 @@ FastAPI /api
 
 1. `POST /api/generate` 在 `backend/api/generate.py` 校验 `GenerateRequest`。
 2. `DocumentService.create_task()` 根据 `form_type` 从 `GRAPH_REGISTRY` 选择 graph，并构造初始 state。
-3. 初始 state 写入 `tender_type`、文件路径、招标数据、默认锚点、`generation_style`、`generation_mode`、`style_writeback_mode` 和会话信息。
+3. 初始 state 写入 `tender_type`、`template_path`、`tender_param_paths`、招标数据、默认锚点、`generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 和会话信息。
 4. `TaskQueueManager` 创建任务并进入队列。
 5. 后台线程执行 graph；`BaseGraph.invoke_with_timing_async()` 等待公平队列、获取跨进程锁、注册运行上下文并执行 LangGraph。
-6. `StandardTenderWorkflowGraph` 按共享拓扑执行模板准备、抽参、Word 子图、生成、批注、写回等节点；`generation_mode=workflow` 进入 `generate_polished_text`，`generation_mode=agent` 进入公共 `content_agent` 节点。
+6. `StandardTenderWorkflowGraph` 按共享拓扑执行模板准备、抽参、Word 子图、生成、批注、写回等节点；`generation_mode=workflow` 进入 `generate_polished_text`，`generation_mode=agent` 进入公共 `content_agent` 节点，`comment_generation_mode=off` 跳过 AI 批注分支。
 7. 类型 graph 只绑定差异节点：`xjcg`、`gngk_hw_zc`、`gngk_hw_cz`、`gngk_fw_zc`、`gngk_fw_cz`、`gjgk` 分别由 `backend/graphs/*_tender_graph.py` 注册。
 8. 成功后 `DocumentService` 构造任务结果、更新会话快照并发送 SSE `done`；失败时发送 SSE `error` 并标记任务失败。
 
@@ -92,6 +92,7 @@ FastAPI /api
 
 - `GenerateRequest` / `EditTaskRequest`：生成和显式 edit 的 API 输入契约，位于 `backend/models/generate.py`。
 - `GenerationMode`：初次生成方式契约，`workflow` 是默认旧路径，`agent` 只影响初次 generate 的生成节点选择。
+- `CommentGenerationMode`：初次生成批注开关，`on` 是默认路径，`off` 只影响 generate 的 AI 批注分支。
 - `FormType` -> `GRAPH_REGISTRY`：`xjcg_tender`、四个 `gngk_*_tender` 和 `gjgk_tender` 到 graph class 的延迟注册，位于 `backend/services/document_service.py`。
 - `TenderGraphStateBase`：生成与 task skill 写回共享 state 底座，位于 `backend/states/base_state.py`。
 - `StandardTenderWorkflowGraph`：标准 tender 生成拓扑，类型 graph 通过 class attribute 绑定差异节点。
