@@ -39,6 +39,13 @@ class GenerationMode(str, Enum):
     AGENT = "agent"
 
 
+class CommentGenerationMode(str, Enum):
+    """生成批注开关枚举，仅影响初次 generate 的批注生成分支。"""
+
+    ON = "on"
+    OFF = "off"
+
+
 class StyleWritebackMode(str, Enum):
     """样式回填模式枚举，仅影响初次 generate 的 Word 样式回填。"""
 
@@ -145,6 +152,10 @@ class GenerateRequest(BaseModel):
         default=GenerationMode.WORKFLOW,
         description="生成方式（仅初次 generate 生效）",
     )
+    comment_generation_mode: CommentGenerationMode = Field(
+        default=CommentGenerationMode.ON,
+        description="生成批注开关（仅初次 generate 生效）",
+    )
     style_writeback_mode: StyleWritebackMode = Field(
         default=StyleWritebackMode.FULL,
         description="样式回填模式（仅初次 generate 生效）",
@@ -188,6 +199,7 @@ class GenerateRequest(BaseModel):
                 },
                 "generation_style": "template",
                 "generation_mode": "workflow",
+                "comment_generation_mode": "on",
                 "style_writeback_mode": "full",
                 "model": "deepseek",
             }

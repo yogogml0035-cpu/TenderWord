@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from backend.config.tender_config import get_default_anchor_texts
 from backend.models.generate import (
+    CommentGenerationMode,
     EditTaskRequest,
     FormType,
     GenerateRequest,
@@ -29,6 +30,7 @@ def build_request(
     tender_lx: int = 0,
     fund_source_lx: int = 1,
     generation_mode: GenerationMode = GenerationMode.WORKFLOW,
+    comment_generation_mode: CommentGenerationMode = CommentGenerationMode.ON,
     generation_style: GenerationStyle = GenerationStyle.TEMPLATE,
     style_writeback_mode: StyleWritebackMode = StyleWritebackMode.FULL,
     investment: str = "140",
@@ -61,6 +63,7 @@ def build_request(
         ),
         file_paths=file_paths,
         generation_mode=generation_mode,
+        comment_generation_mode=comment_generation_mode,
         generation_style=generation_style,
         style_writeback_mode=style_writeback_mode,
         model=LLMModel.DEEPSEEK,
@@ -116,6 +119,18 @@ def test_build_initial_state_carries_generation_mode() -> None:
     state = service._build_initial_state(request, task_id="task-3a")
 
     assert state["generation_mode"] == "agent"
+
+
+def test_build_initial_state_carries_comment_generation_mode() -> None:
+    service = object.__new__(DocumentService)
+    request = build_request(
+        template="D:/UploadFiles/template.docx",
+        comment_generation_mode=CommentGenerationMode.OFF,
+    )
+
+    state = service._build_initial_state(request, task_id="task-3c")
+
+    assert state["comment_generation_mode"] == "off"
 
 
 def test_build_initial_state_carries_style_writeback_mode() -> None:

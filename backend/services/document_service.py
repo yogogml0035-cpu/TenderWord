@@ -942,6 +942,9 @@ class DocumentService:
         generation_mode = getattr(request, "generation_mode", "workflow")
         if hasattr(generation_mode, "value"):
             generation_mode = generation_mode.value
+        comment_generation_mode = getattr(request, "comment_generation_mode", "on")
+        if hasattr(comment_generation_mode, "value"):
+            comment_generation_mode = comment_generation_mode.value
         style_writeback_mode = getattr(request, "style_writeback_mode", "full")
         if hasattr(style_writeback_mode, "value"):
             style_writeback_mode = style_writeback_mode.value
@@ -956,6 +959,7 @@ class DocumentService:
             "tender_type": tender_type,
             "generation_style": str(generation_style or "template"),
             "generation_mode": str(generation_mode or "workflow"),
+            "comment_generation_mode": str(comment_generation_mode or "on"),
             "style_writeback_mode": str(style_writeback_mode or "full"),
             # 项目信息
             "project_name": tender_data.project_name or "",

@@ -49,6 +49,7 @@ describe('formDataConverter', () => {
         tender_lx: 1,
         fund_lx: 0,
         generation_mode: 'agent',
+        comment_generation_mode: 'off',
         generation_style: 'param',
         style_writeback_mode: 'bold_only',
         tender_data: baseTenderData,
@@ -65,6 +66,7 @@ describe('formDataConverter', () => {
         tender_lx: 2,
         fund_lx: 1,
         generation_mode: 'agent',
+        comment_generation_mode: 'off',
         generation_style: 'param',
         style_writeback_mode: 'bold_only',
         tender_data: baseTenderData,
@@ -81,6 +83,7 @@ describe('formDataConverter', () => {
         tender_lx: 1,
         fund_lx: 1,
         generation_mode: 'agent',
+        comment_generation_mode: 'off',
         generation_style: 'param',
         style_writeback_mode: 'bold_only',
         tender_data: baseTenderData,
@@ -96,6 +99,7 @@ describe('formDataConverter', () => {
     (_tenderType, buildRequest) => {
       const request = buildRequest();
       expect(request.generation_mode).toBe('agent');
+      expect(request.comment_generation_mode).toBe('off');
       expect(request.generation_style).toBe('param');
       expect(request.style_writeback_mode).toBe('bold_only');
       expect(request.file_paths).toEqual({
@@ -156,6 +160,7 @@ describe('formDataConverter', () => {
     'defaults generation_mode to workflow for %s converters',
     (_tenderType, buildRequest) => {
       expect(buildRequest().generation_mode).toBe('workflow');
+      expect(buildRequest().comment_generation_mode).toBe('on');
     }
   );
 

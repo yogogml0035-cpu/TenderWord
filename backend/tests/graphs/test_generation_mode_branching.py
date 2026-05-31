@@ -31,7 +31,7 @@ def _build_graph(calls: list[str]) -> StandardTenderWorkflowGraph:
 
     def _update_node(state, config=None):
         calls.append("update_word")
-        if state.get("generation_mode") == "agent":
+        if state.get("generation_mode") == "agent" or state.get("comment_generation_mode") == "off":
             assert state.get("suppress_ai_comment_writeback") is True
         else:
             assert state.get("suppress_ai_comment_writeback") is False
@@ -66,11 +66,14 @@ def _build_graph(calls: list[str]) -> StandardTenderWorkflowGraph:
     return _GenerationModeGraph()
 
 
-def _run_graph(generation_mode: str) -> tuple[dict, list[str]]:
+def _run_graph(
+    generation_mode: str, *, comment_generation_mode: str = "on"
+) -> tuple[dict, list[str]]:
     calls: list[str] = []
     result = _build_graph(calls).compile().invoke(
         {
             "generation_mode": generation_mode,
+            "comment_generation_mode": comment_generation_mode,
             "prepared_doc_path": "D:/UploadFiles/template.docx",
             "insertion_before_text": "before",
             "insertion_after_text": "after",
@@ -104,6 +107,34 @@ def test_agent_branch_uses_content_and_skips_generate_polished_text() -> None:
     assert calls[-2:] == ["update_word", "comment_agent"]
     assert result["polished_text"] == "agent text"
     assert result["generate_polished_done"] is True
+
+
+def test_workflow_branch_skips_generate_comments_when_comment_generation_is_off() -> None:
+    result, calls = _run_graph("workflow", comment_generation_mode="off")
+
+    assert "generate_polished_text" in calls
+    assert "content_agent" not in calls
+    assert "generate_comments" not in calls
+    assert "comment_agent" not in calls
+    assert "word_operation" in calls
+    assert calls[-1] == "update_word"
+    assert result["polished_text"] == "workflow text"
+    assert result["polished_comments"] == []
+    assert result["generated_comment_count"] == 0
+
+
+def test_agent_branch_skips_comment_agent_when_comment_generation_is_off() -> None:
+    result, calls = _run_graph("agent", comment_generation_mode="off")
+
+    assert "content_agent" in calls
+    assert "generate_polished_text" not in calls
+    assert "generate_comments" not in calls
+    assert "comment_agent" not in calls
+    assert "word_operation" in calls
+    assert calls[-1] == "update_word"
+    assert result["polished_text"] == "agent text"
+    assert result["polished_comments"] == []
+    assert result["generated_comment_count"] == 0
 
 
 def test_agent_branch_uses_comment_agent_regardless_of_source_document_path() -> None:
@@ -142,6 +173,18 @@ def test_estimate_total_nodes_uses_selected_generation_branch() -> None:
 
     assert graph.estimate_total_nodes({"generation_mode": "workflow"}) == 8
     assert graph.estimate_total_nodes({"generation_mode": "agent"}) == 8
+    assert (
+        graph.estimate_total_nodes(
+            {"generation_mode": "workflow", "comment_generation_mode": "off"}
+        )
+        == 7
+    )
+    assert (
+        graph.estimate_total_nodes(
+            {"generation_mode": "agent", "comment_generation_mode": "off"}
+        )
+        == 7
+    )
     assert (
         graph.estimate_total_nodes(
             {

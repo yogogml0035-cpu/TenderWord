@@ -101,6 +101,7 @@ const validGenerateRequest: GenerateRequest = {
     tender_params: ['/uploads/params.xlsx'],
   },
   generation_mode: 'workflow',
+  comment_generation_mode: 'on',
   style_writeback_mode: 'full',
   model: 'deepseek',
 };

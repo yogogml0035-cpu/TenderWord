@@ -22,6 +22,7 @@ import {
   selectTemplateCandidate,
 } from '@/lib/api';
 import type {
+  CommentGenerationMode,
   GenerationMode,
   GenerationStyle,
   StyleWritebackMode,
@@ -51,6 +52,7 @@ export interface BaseTenderFormData {
   tender_lx: TenderLx;
   fund_lx: FundLx;
   generation_mode?: GenerationMode;
+  comment_generation_mode?: CommentGenerationMode;
   generation_style: GenerationStyle;
   style_writeback_mode: StyleWritebackMode;
   tender_data: TenderData;
@@ -93,6 +95,7 @@ const segmentedToggleButtonClassName =
 const advancedSettingsGridClassName =
   'grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))]';
 const defaultGenerationMode: GenerationMode = 'workflow';
+const defaultCommentGenerationMode: CommentGenerationMode = 'on';
 const defaultStyleWritebackMode: StyleWritebackMode = 'full';
 const gngkSharedContentBeforeText = '第三章 招标内容及要求';
 const gngkLegacyFormatAfterText = '第四章 投标文件有关格式';
@@ -704,6 +707,10 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const [localGenerationMode, setLocalGenerationMode] = useState<GenerationMode>(
     initialDraft?.generation_mode || defaultGenerationMode
   );
+  const [localCommentGenerationMode, setLocalCommentGenerationMode] =
+    useState<CommentGenerationMode>(
+      initialDraft?.comment_generation_mode || defaultCommentGenerationMode
+    );
   const [localStyleWritebackMode, setLocalStyleWritebackMode] = useState<StyleWritebackMode>(
     initialDraft?.style_writeback_mode || defaultStyleWritebackMode
   );
@@ -764,6 +771,9 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
   const generationMode: GenerationMode = onDraftChange
     ? initialDraft?.generation_mode || defaultGenerationMode
     : localGenerationMode;
+  const commentGenerationMode: CommentGenerationMode = onDraftChange
+    ? initialDraft?.comment_generation_mode || defaultCommentGenerationMode
+    : localCommentGenerationMode;
   const styleWritebackMode: StyleWritebackMode = onDraftChange
     ? initialDraft?.style_writeback_mode || defaultStyleWritebackMode
     : localStyleWritebackMode;
@@ -872,6 +882,16 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       generation_mode: defaultGenerationMode,
     });
   }, [initialDraft?.generation_mode, onDraftChange]);
+
+  useEffect(() => {
+    if (!onDraftChange || initialDraft?.comment_generation_mode) {
+      return;
+    }
+
+    onDraftChange({
+      comment_generation_mode: defaultCommentGenerationMode,
+    });
+  }, [initialDraft?.comment_generation_mode, onDraftChange]);
 
   const applyTenderDraftUpdates = useCallback(
     (updates: TenderDraftUpdates) => {
@@ -1143,6 +1163,20 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       });
     },
     [generationMode, onDraftChange]
+  );
+
+  const handleCommentGenerationModeChange = useCallback(
+    (nextCommentGenerationMode: CommentGenerationMode) => {
+      if (commentGenerationMode === nextCommentGenerationMode) {
+        return;
+      }
+
+      setLocalCommentGenerationMode(nextCommentGenerationMode);
+      onDraftChange?.({
+        comment_generation_mode: nextCommentGenerationMode,
+      });
+    },
+    [commentGenerationMode, onDraftChange]
   );
 
   const handleStyleWritebackModeChange = useCallback(
@@ -1546,6 +1580,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
         tender_lx: tenderLx,
         fund_lx: fundLx,
         generation_mode: generationMode,
+        comment_generation_mode: commentGenerationMode,
         generation_style: generationStyle,
         style_writeback_mode: styleWritebackMode,
         tender_data: {
@@ -1570,6 +1605,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
       tenderData,
       selectedModel,
       generationMode,
+      commentGenerationMode,
       generationStyle,
       styleWritebackMode,
       templateFile,
@@ -1822,6 +1858,39 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
             </div>
 
             <div className={advancedSettingsGridClassName}>
+              <div className="space-y-1.5">
+                <p className="block text-sm font-semibold text-[var(--foreground)]">生成批注</p>
+                <div role="group" aria-label="生成批注" className={segmentedControlClassName}>
+                  <button
+                    type="button"
+                    onClick={() => handleCommentGenerationModeChange('on')}
+                    disabled={isSubmitting}
+                    className={cn(
+                      segmentedToggleButtonClassName,
+                      commentGenerationMode === 'on'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-transparent text-slate-700 hover:bg-white/80'
+                    )}
+                  >
+                    开
+                  </button>
+                  <span aria-hidden className="h-6 w-px bg-slate-200" />
+                  <button
+                    type="button"
+                    onClick={() => handleCommentGenerationModeChange('off')}
+                    disabled={isSubmitting}
+                    className={cn(
+                      segmentedToggleButtonClassName,
+                      commentGenerationMode === 'off'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-transparent text-slate-700 hover:bg-white/80'
+                    )}
+                  >
+                    关
+                  </button>
+                </div>
+              </div>
+
               <div className="space-y-1.5">
                 <p className="block text-sm font-semibold text-[var(--foreground)]">样式修订</p>
                 <div role="group" aria-label="样式修订" className={segmentedControlClassName}>

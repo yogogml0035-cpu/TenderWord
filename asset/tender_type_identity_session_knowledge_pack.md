@@ -167,8 +167,10 @@
 - 财政货物默认锚点为 `第四章  招标需求` -> `第五章  评标方法与程序`；若“获取信息”成功且接口返回类型为“货物 + 财政 + ifzgcg = 2”，当次回填按货物自筹默认锚点 `第三章 招标内容及要求` -> `第四章 投标文件有关格式` 显示，且 generate / edit 走 `gngk_hw_zc_tender` graph。用户后续切出再切回“货物 + 财政”时，不再继续受 `ifzgcg` 影响，恢复财政货物默认锚点，除非该组合已被用户手动编辑锁定。
 - `generation_style` 是 generate 表单态：货物、工程、服务默认都为 `template`；后端只在 generate runtime 使用该字段。
 - `generation_mode` 是全局 generate 表单态，不参与 tender identity，也不按 `gngk` 的 `tender_lx` / `fund_lx` 分桶。新会话和旧草稿缺省值都是 `workflow`，用户在高级设置切换到 `agent` 后写入当前 `ConversationFormDraft.generation_mode`。
+- `comment_generation_mode` 是全局 generate 表单态，不参与 tender identity，也不按 `gngk` 的 `tender_lx` / `fund_lx` 分桶。新会话和旧草稿缺省值都是 `on`；高级设置“生成批注”切换到“关”后写入当前 `ConversationFormDraft.comment_generation_mode=off`，提交 generate 时进入 `formDataConverter`。
 - `TenderFormShared` 的“生成方式”控件位于高级设置，选项为“工作流”和“智能体”；提交 generate 时 `BaseTenderFormData.generation_mode` 进入 `formDataConverter`，未显式选择时 converter 也要兜底为 `workflow`。
-- rewrite / edit 请求 payload 不包含 `generation_mode`。如果聊天草稿中保留 `generation_mode: "agent"`，`ChatPanel` 创建 rewrite / edit 任务时也不能透传它。
+- `TenderFormShared` 的“生成批注”控件位于高级设置，选项为“开”和“关”；提交 generate 时 `BaseTenderFormData.comment_generation_mode` 进入 `formDataConverter`，未显式选择时 converter 兜底为 `on`。
+- rewrite / edit 请求 payload 不包含 `generation_mode` 或 `comment_generation_mode`。如果聊天草稿中保留 `generation_mode: "agent"` 或 `comment_generation_mode: "off"`，`ChatPanel` 创建 rewrite / edit 任务时也不能透传它。
 
 ## 当前页面会话生命周期
 

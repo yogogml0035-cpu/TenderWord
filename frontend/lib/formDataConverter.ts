@@ -10,7 +10,12 @@ import type { XjcgTenderFormData } from '@/components/forms/XjcgTenderForm';
 import type { GngkTenderFormData } from '@/components/forms/GngkTenderForm';
 import type { GjgkTenderFormData } from '@/components/forms/GjgkTenderForm';
 import type { UploadedFile } from '@/components/forms/FileUploader';
-import type { GenerateRequest, FilesConfig, GenerationMode } from '@/types/api';
+import type {
+  CommentGenerationMode,
+  GenerateRequest,
+  FilesConfig,
+  GenerationMode,
+} from '@/types/api';
 import { resolveGngkFormType } from '@/lib/gngkFormType';
 
 // ============================================
@@ -67,6 +72,12 @@ function resolveGenerationMode(generationMode: GenerationMode | undefined): Gene
   return generationMode || 'workflow';
 }
 
+function resolveCommentGenerationMode(
+  commentGenerationMode: CommentGenerationMode | undefined
+): CommentGenerationMode {
+  return commentGenerationMode || 'on';
+}
+
 // ============================================
 // XJCG Converter
 // ============================================
@@ -120,6 +131,7 @@ export function convertXjcgFormToApiRequest(formData: XjcgTenderFormData): Gener
     insertion_config: formData.insertion_config,
     generation_style: formData.generation_style,
     generation_mode: resolveGenerationMode(formData.generation_mode),
+    comment_generation_mode: resolveCommentGenerationMode(formData.comment_generation_mode),
     style_writeback_mode: formData.style_writeback_mode,
     model: formData.model,
   };
@@ -201,6 +213,7 @@ export function convertGngkFormToApiRequest(
     insertion_config: formData.insertion_config,
     generation_style: formData.generation_style,
     generation_mode: resolveGenerationMode(formData.generation_mode),
+    comment_generation_mode: resolveCommentGenerationMode(formData.comment_generation_mode),
     style_writeback_mode: formData.style_writeback_mode,
     model: formData.model,
   };
@@ -228,6 +241,7 @@ export function convertGjgkFormToApiRequest(
     insertion_config: formData.insertion_config,
     generation_style: formData.generation_style,
     generation_mode: resolveGenerationMode(formData.generation_mode),
+    comment_generation_mode: resolveCommentGenerationMode(formData.comment_generation_mode),
     style_writeback_mode: formData.style_writeback_mode,
     model: formData.model,
   };

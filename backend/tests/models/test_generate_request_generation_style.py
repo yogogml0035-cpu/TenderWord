@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from backend.models.generate import (
+    CommentGenerationMode,
     GenerateRequest,
     GenerationMode,
     GenerationStyle,
@@ -59,6 +60,18 @@ def test_generate_request_accepts_agent_generation_mode() -> None:
     request = GenerateRequest(**{**build_payload(), "generation_mode": "agent"})
 
     assert request.generation_mode == GenerationMode.AGENT
+
+
+def test_generate_request_defaults_comment_generation_mode_to_on() -> None:
+    request = GenerateRequest(**build_payload())
+
+    assert request.comment_generation_mode == CommentGenerationMode.ON
+
+
+def test_generate_request_accepts_off_comment_generation_mode() -> None:
+    request = GenerateRequest(**{**build_payload(), "comment_generation_mode": "off"})
+
+    assert request.comment_generation_mode == CommentGenerationMode.OFF
 
 
 def test_generate_request_defaults_style_writeback_mode_to_full() -> None:

@@ -49,6 +49,7 @@ class TenderGraphStateBase(BaseState, total=False):
     comment_supplement_completed: bool
     generation_style: str
     generation_mode: str
+    comment_generation_mode: str
     style_writeback_mode: str
 
     template_reference_text: str

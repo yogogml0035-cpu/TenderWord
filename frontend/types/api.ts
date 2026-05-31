@@ -128,6 +128,7 @@ export interface InsertionConfig {
 
 export type GenerationStyle = 'template' | 'param';
 export type GenerationMode = 'workflow' | 'agent';
+export type CommentGenerationMode = 'on' | 'off';
 export type StyleWritebackMode = 'full' | 'bold_only';
 
 export interface GenerateRequest {
@@ -143,6 +144,7 @@ export interface GenerateRequest {
   insertion_config?: InsertionConfig;
   generation_style?: GenerationStyle;
   generation_mode: GenerationMode;
+  comment_generation_mode: CommentGenerationMode;
   style_writeback_mode: StyleWritebackMode;
   conversation_id?: string;
   model: 'deepseek' | 'qwen' | 'doubao';

@@ -531,17 +531,52 @@ describe('TenderFormShared', () => {
     const firstRender = renderSharedForm();
 
     expect(screen.getByText('样式修订')).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: '样式修订' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '开' })).toHaveClass('bg-blue-600');
-    expect(screen.getByRole('button', { name: '关' })).not.toHaveClass('bg-blue-600');
+    const firstStyleGroup = screen.getByRole('group', { name: '样式修订' });
+    expect(firstStyleGroup).toBeInTheDocument();
+    expect(within(firstStyleGroup).getByRole('button', { name: '开' })).toHaveClass('bg-blue-600');
+    expect(within(firstStyleGroup).getByRole('button', { name: '关' })).not.toHaveClass(
+      'bg-blue-600'
+    );
 
     firstRender.unmount();
     renderSharedForm({
       initialDraft: { style_writeback_mode: 'bold_only' },
     });
 
-    expect(screen.getByRole('button', { name: '关' })).toHaveClass('bg-blue-600');
-    expect(screen.getByRole('button', { name: '开' })).not.toHaveClass('bg-blue-600');
+    const restoredStyleGroup = screen.getByRole('group', { name: '样式修订' });
+    expect(within(restoredStyleGroup).getByRole('button', { name: '关' })).toHaveClass(
+      'bg-blue-600'
+    );
+    expect(within(restoredStyleGroup).getByRole('button', { name: '开' })).not.toHaveClass(
+      'bg-blue-600'
+    );
+  });
+
+  it('renders comment generation mode inside advanced settings with on default and restores off draft', () => {
+    const firstRender = renderSharedForm();
+
+    expect(screen.getByText('生成批注')).toBeInTheDocument();
+    const firstCommentGroup = screen.getByRole('group', { name: '生成批注' });
+    expect(firstCommentGroup).toBeInTheDocument();
+    expect(within(firstCommentGroup).getByRole('button', { name: '开' })).toHaveClass(
+      'bg-blue-600'
+    );
+    expect(within(firstCommentGroup).getByRole('button', { name: '关' })).not.toHaveClass(
+      'bg-blue-600'
+    );
+
+    firstRender.unmount();
+    renderSharedForm({
+      initialDraft: { comment_generation_mode: 'off' },
+    });
+
+    const restoredCommentGroup = screen.getByRole('group', { name: '生成批注' });
+    expect(within(restoredCommentGroup).getByRole('button', { name: '关' })).toHaveClass(
+      'bg-blue-600'
+    );
+    expect(within(restoredCommentGroup).getByRole('button', { name: '开' })).not.toHaveClass(
+      'bg-blue-600'
+    );
   });
 
   it('groups advanced settings into two responsive rows', () => {
@@ -562,6 +597,9 @@ describe('TenderFormShared', () => {
     const styleWritebackField = screen
       .getByRole('group', { name: '样式修订' })
       .closest('div.space-y-1\\.5');
+    const commentGenerationField = screen
+      .getByRole('group', { name: '生成批注' })
+      .closest('div.space-y-1\\.5');
 
     const anchorRow = beforeTextField?.parentElement;
     const generationOptionRow = generationModeField?.parentElement;
@@ -577,6 +615,7 @@ describe('TenderFormShared', () => {
 
     expect(writebackRow).not.toBeNull();
     expect(writebackRow).toHaveClass('grid', 'gap-4', '[grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))]');
+    expect(commentGenerationField?.parentElement).toBe(writebackRow);
   });
 
   it.each([
@@ -781,6 +820,7 @@ describe('TenderFormShared', () => {
       tender_no: 'TEST-001',
       tender_lx: 0,
       generation_mode: 'workflow',
+      comment_generation_mode: 'on',
       generation_style: 'template',
       style_writeback_mode: 'full',
       tender_data: {
@@ -1004,14 +1044,17 @@ describe('TenderFormShared', () => {
       expect(screen.getByTestId('draft-state')).toHaveTextContent('"style_writeback_mode":"full"')
     );
 
-    await user.click(screen.getByRole('button', { name: '关' }));
+    const styleWritebackGroup = screen.getByRole('group', { name: '样式修订' });
+    await user.click(within(styleWritebackGroup).getByRole('button', { name: '关' }));
 
     await waitFor(() =>
       expect(screen.getByTestId('draft-state')).toHaveTextContent(
         '"style_writeback_mode":"bold_only"'
       )
     );
-    expect(screen.getByRole('button', { name: '关' })).toHaveClass('bg-blue-600');
+    expect(within(styleWritebackGroup).getByRole('button', { name: '关' })).toHaveClass(
+      'bg-blue-600'
+    );
 
     await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
     await user.click(screen.getByLabelText('模拟获取招标信息'));
@@ -1023,6 +1066,58 @@ describe('TenderFormShared', () => {
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
         style_writeback_mode: 'bold_only',
+      })
+    );
+  });
+
+  it('persists comment generation mode through draft updates and submit payload', async () => {
+    const user = userEvent.setup();
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+
+    function StatefulDraftHarness() {
+      const [draft, setDraft] = React.useState<ConversationFormDraft>({});
+
+      return (
+        <>
+          <TenderFormShared
+            tenderType="xjcg"
+            onSubmit={onSubmit}
+            initialDraft={draft}
+            onDraftChange={(updates) => {
+              setDraft((previous) => mergeDraftState(previous, updates));
+            }}
+          />
+          <pre data-testid="draft-state">{JSON.stringify(draft)}</pre>
+        </>
+      );
+    }
+
+    render(<StatefulDraftHarness />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('draft-state')).toHaveTextContent('"comment_generation_mode":"on"')
+    );
+
+    const commentGenerationGroup = screen.getByRole('group', { name: '生成批注' });
+    await user.click(within(commentGenerationGroup).getByRole('button', { name: '关' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('draft-state')).toHaveTextContent('"comment_generation_mode":"off"')
+    );
+    expect(within(commentGenerationGroup).getByRole('button', { name: '关' })).toHaveClass(
+      'bg-blue-600'
+    );
+
+    await user.type(screen.getByLabelText('招标编号输入框'), 'TEST-001');
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+    await user.click(screen.getByLabelText('上传模板文件（必填）'));
+    await user.click(screen.getByLabelText('上传技术参数文件（必填）'));
+    await user.click(screen.getByRole('button', { name: '开始生成' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        comment_generation_mode: 'off',
       })
     );
   });

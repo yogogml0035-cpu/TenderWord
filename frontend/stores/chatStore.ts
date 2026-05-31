@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createJSONStorage, devtools, persist } from 'zustand/middleware';
 import type { TenderType, FundLx, TenderLx } from '@/types';
 import type {
+  CommentGenerationMode,
   GenerationMode,
   GenerationStyle,
   CommentWritebackSummary,
@@ -88,6 +89,7 @@ export interface ConversationFormDraft {
   fund_lx?: FundLx;
   model?: 'deepseek' | 'qwen' | 'doubao';
   generation_mode?: GenerationMode;
+  comment_generation_mode?: CommentGenerationMode;
   generation_style?: GenerationStyle;
   gngk_generation_styles?: {
     0?: GenerationStyle;
@@ -993,6 +995,7 @@ export const useChatStore = create<ChatStore>()(
               ...state.conversationDrafts,
               [conversation.id]: {
                 generation_mode: 'workflow',
+                comment_generation_mode: 'on',
                 generation_style: 'template',
                 style_writeback_mode: 'full',
                 model: 'deepseek',

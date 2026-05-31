@@ -422,6 +422,7 @@ describe('ChatPanel', () => {
           chat_input: '请把交付日期改成合同签订后 30 天内',
           input_mode: 'edit',
           generation_mode: 'agent',
+          comment_generation_mode: 'off',
           edit_file: {
             id: 'file-1',
             file_path: 'D:/UploadFiles/edit.docx',
@@ -508,6 +509,7 @@ describe('ChatPanel', () => {
       }),
     });
     expect(editPayload).not.toHaveProperty('generation_mode');
+    expect(editPayload).not.toHaveProperty('comment_generation_mode');
   });
 
   it('routes gngk goods fiscal edit with ifzgcg=2 to the self-funded goods graph', async () => {
@@ -804,6 +806,7 @@ describe('ChatPanel', () => {
         'conv-1': {
           chat_input: '请帮我修改这一段内容',
           generation_mode: 'agent',
+          comment_generation_mode: 'off',
         },
       },
     }));
@@ -850,6 +853,9 @@ describe('ChatPanel', () => {
       messages: [{ role: 'user', content: '请帮我修改这一段内容' }],
     });
     expect(mockStreamUserMessage.mock.calls[0]?.[0]).not.toHaveProperty('generation_mode');
+    expect(mockStreamUserMessage.mock.calls[0]?.[0]).not.toHaveProperty(
+      'comment_generation_mode'
+    );
   });
 
   it('keeps ordinary chat on the streaming path without creating a task', async () => {
