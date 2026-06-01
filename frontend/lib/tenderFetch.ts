@@ -6,6 +6,7 @@ export type TenderFetchStatus = 'idle' | 'loading' | 'success' | 'error';
 export interface TenderFetchState {
   status: TenderFetchStatus;
   error?: string;
+  warning?: string;
 }
 
 export interface TenderDraftUpdates {
@@ -24,9 +25,14 @@ export interface SyncTenderDataDraftOptions {
 
 export function createTenderFetchState(
   status: TenderFetchStatus,
-  error?: string
+  error?: string,
+  warning?: string
 ): TenderFetchState {
-  return error ? { status, error } : { status };
+  return {
+    status,
+    ...(error ? { error } : {}),
+    ...(warning ? { warning } : {}),
+  };
 }
 
 export function resolveTenderFetchState(
@@ -81,7 +87,7 @@ export async function syncTenderDataDraft({
       tender_no: normalizedTenderNo,
       tender_data: data,
       tender_type_info: result.type,
-      tender_fetch: createTenderFetchState('success'),
+      tender_fetch: createTenderFetchState('success', undefined, result.warning?.message),
     });
     onSuccess?.(data);
     return data;

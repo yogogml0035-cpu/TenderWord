@@ -21,7 +21,9 @@ class TenderType(BaseModel):
         ..., description="标的类型（0=货物, 1=工程, 2=服务）", ge=0, le=2
     )
     purchase_method: int = Field(
-        ..., description="页面类型路由（0=国际公开, 2=国内公开, 5=询价采购）", ge=0, le=5
+        ...,
+        description="采购方式编码；当前可路由类型为 0=国际公开, 2=国内公开, 5=询价采购",
+        ge=0,
     )
     fund_lx: int = Field(
         ...,

@@ -1653,6 +1653,70 @@ describe('TenderFormShared', () => {
     expect(screen.getByText('标的类型').parentElement).toHaveTextContent('工程');
   });
 
+  it('keeps current workflow when fetched purchase method is unsupported', async () => {
+    const user = userEvent.setup();
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+    setUrlParams({ tenderType: 'gngk', tenderLx: 0, fundLx: 1 });
+    mockUploadFactoryByType.template = () => [buildUploadedFile('template')];
+    mockUploadFactoryByType.params = () => [buildUploadedFile('params')];
+    mockSyncTenderDataDraft.mockImplementationOnce(
+      async ({
+        tenderNo,
+        updateDraft,
+      }: {
+        tenderNo: string;
+        updateDraft: (updates: Partial<ConversationFormDraft>) => void;
+      }) => {
+        updateDraft({
+          tender_fetch: { status: 'loading' },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        updateDraft({
+          tender_no: tenderNo,
+          tender_data: mockTenderData,
+          tender_type_info: buildTenderTypeInfo({
+            tender_lx: 2,
+            purchase_method: 9,
+            fund_lx: 0,
+          }),
+          tender_fetch: { status: 'success', warning: '当前采购方式暂不支持' },
+        });
+        return mockTenderData;
+      }
+    );
+    renderSharedForm({ tenderType: 'gngk', onSubmit });
+
+    const goodsButton = screen.getByRole('button', { name: '货物' });
+    const serviceButton = screen.getByRole('button', { name: '服务' });
+    const fiscalButton = screen.getByRole('button', { name: '财政' });
+    const selfFundedButton = screen.getByRole('button', { name: '自筹' });
+    const afterInput = screen.getByPlaceholderText('插入位置后的章节标题');
+
+    await user.type(screen.getByLabelText('招标编号输入框'), '0811-DSITC261472');
+    await user.click(screen.getByLabelText('模拟获取招标信息'));
+
+    await waitFor(() => expect(screen.getByText('测试项目')).toBeInTheDocument());
+    expect(goodsButton).toHaveClass('bg-blue-600');
+    expect(serviceButton).not.toHaveClass('bg-blue-600');
+    expect(fiscalButton).toHaveClass('bg-blue-600');
+    expect(selfFundedButton).not.toHaveClass('bg-blue-600');
+    expect(afterInput).toHaveValue('第五章  评标方法与程序');
+
+    await user.click(screen.getByRole('button', { name: '上传模板文件（必填）' }));
+    await user.click(screen.getByRole('button', { name: '上传技术参数文件（必填）' }));
+    await user.click(screen.getByRole('button', { name: '开始生成' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      tender_lx: 0,
+      fund_lx: 1,
+      tender_data: {
+        tender_lx: 0,
+        fund_source_lx: 1,
+      },
+    });
+  });
+
   it('applies fetched gngk type info once and lets later switches use mode defaults', async () => {
     const user = userEvent.setup();
     setUrlParams({ tenderType: 'gngk', tenderLx: 0, fundLx: 1 });

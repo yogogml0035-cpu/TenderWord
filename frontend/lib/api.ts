@@ -462,6 +462,21 @@ function parseTenderTypeInfo(payload: unknown): TenderTypeInfo | null {
   };
 }
 
+function parseTenderLookupWarning(payload: unknown): TenderLookupResponse['warning'] {
+  if (!isRecord(payload) || typeof payload.message !== 'string') {
+    return null;
+  }
+
+  const warning: TenderLookupResponse['warning'] = {
+    code: typeof payload.code === 'string' ? payload.code : 'TENDER_LOOKUP_WARNING',
+    message: payload.message,
+  };
+  if (isRecord(payload.details)) {
+    warning.details = payload.details;
+  }
+  return warning;
+}
+
 function isGjgkTenderTypeInfo(tenderTypeInfo: TenderTypeInfo | null): boolean {
   return Boolean(
     tenderTypeInfo &&
@@ -529,6 +544,7 @@ export async function fetchTenderDataWithType(tenderNo: string): Promise<TenderL
   return {
     data: normalizedTenderData,
     type: tenderTypeInfo,
+    warning: parseTenderLookupWarning(payload.warning),
   };
 }
 

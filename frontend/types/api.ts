@@ -42,9 +42,16 @@ export interface TenderTypeInfo {
   fund_lx: 0 | 1;
 }
 
+export interface TenderLookupWarning {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
 export interface TenderLookupResponse {
   data: TenderData;
   type: TenderTypeInfo | null;
+  warning?: TenderLookupWarning | null;
 }
 
 // ============================================

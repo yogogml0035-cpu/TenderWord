@@ -16,6 +16,7 @@ from backend.util.common_util import fetch_tender_data
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tender", tags=["Tender"])
+SUPPORTED_PURCHASE_METHODS = {0, 2, 5}
 
 
 # ========================================
@@ -27,6 +28,7 @@ class TenderResponse(BaseModel):
     success: bool = Field(..., description="请求是否成功")
     data: Optional[TenderData] = Field(None, description="招标数据")
     type: Optional[TenderType] = Field(None, description="招标类型信息")
+    warning: Optional[Dict[str, Any]] = Field(None, description="非阻断提示信息")
     message: str = Field(..., description="响应消息")
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
@@ -111,6 +113,7 @@ async def get_tender_data(
 
         # 构建 TenderType 模型（可能为 None）
         tender_type = None
+        warning = None
         if tender_type_dict:
             normalized_fund_lx = tender_type_dict.get("fund_lx")
             if normalized_fund_lx in (0, 1):
@@ -119,6 +122,14 @@ async def get_tender_data(
                     purchase_method=tender_type_dict.get("purchase_method", 5),
                     fund_lx=normalized_fund_lx,
                 )
+                if tender_type.purchase_method not in SUPPORTED_PURCHASE_METHODS:
+                    warning = {
+                        "code": "TENDER_UNSUPPORTED_PURCHASE_METHOD",
+                        "message": "当前采购方式暂不支持",
+                        "details": {
+                            "purchase_method": tender_type.purchase_method,
+                        },
+                    }
 
         logger.info(f"招标数据获取成功: tender_no={tender_no}")
 
@@ -126,6 +137,7 @@ async def get_tender_data(
             success=True,
             data=tender_data,
             type=tender_type,
+            warning=warning,
             message="数据获取成功",
         )
 

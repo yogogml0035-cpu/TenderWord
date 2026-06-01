@@ -28,6 +28,7 @@
 - `GET /api/tender/{tender_no}` 会把外部招标详情接口数据装配成 `backend.models.tender.TenderData`；外部接口字段类型可能波动，例如 `investment` 可能返回数字而不是字符串。
 - `TenderData` 是前端表单和后续 generate/rewrite/edit 快照的文本契约边界；预算、项目编号、联系人、日期、平台等文本字段必须在模型边界转成字符串，不能把可显示数字误判成“招标数据格式错误”。
 - 排查“输入招标编号显示格式错误”时，先看后端响应体里的 Pydantic 字段错误；若外部数据已返回且只是字段类型不匹配，应修归一化契约，而不是收紧招标编号格式。
+- 未支持的外部采购方式不能阻断信息展示：`TenderType.purchase_method` 保留外部原值，当前只把 `0/2/5` 视为可路由类型；其它值通过 `/api/tender` 的 `warning` 透传给前端黄色提示，并由用户当前页面/按钮状态决定后续生成 graph。
 
 ### Generate / Rewrite / Edit
 

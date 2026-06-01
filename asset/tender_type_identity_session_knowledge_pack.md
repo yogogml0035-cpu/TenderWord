@@ -60,6 +60,7 @@
   - `tender_lx` 决定货物 / 工程 / 服务按钮，并在信息卡显示为“标的类型”
   - `fund_lx` 决定自筹 / 财政按钮
   - `purchase_method` 决定是否把当前会话 / 表单切到 `xjcg`、`gngk` 或 `gjgk`
+- 若外部接口返回的 `purchase_method` 不在 `0/2/5` 中，`/api/tender` 仍返回 `data` 与原始 `type`，同时返回 `warning.code = TENDER_UNSUPPORTED_PURCHASE_METHOD`；前端显示黄色“当前采购方式暂不支持”，不把未知采购方式映射到现有页面类型，也不自动回写货物/工程/服务或资金按钮，后续生成仍按用户当前页面和按钮状态走现有 graph。
 - 这次回写只在“获取信息”成功完成的当次校正里生效一次；校正完成后，货物 / 工程 / 服务与自筹 / 财政按钮仍然允许用户继续手动切换，只有再次点击“获取信息”才会重新按接口结果校验。
 - `/api/tender` 现在还会透传 `data.ifdzpt2` 与 `data.ifzgcg` 给前端；两者都不参与大类判型。`ifdzpt2` 只参与“获取信息”成功当次的 `gngk` 锚点修正；`ifzgcg` 同时参与货物财政的锚点修正与 `form_type` / graph 分派。
 

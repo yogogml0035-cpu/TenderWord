@@ -361,6 +361,34 @@ describe('API Client', () => {
       });
     });
 
+    it('returns warning when upstream purchase method is unsupported', async () => {
+      globalThis.fetch = mockFetchJson({
+        success: true,
+        data: { project_name: 'Unsupported Project' },
+        type: {
+          tender_lx: 0,
+          purchase_method: 9,
+          fund_lx: 0,
+        },
+        warning: {
+          code: 'TENDER_UNSUPPORTED_PURCHASE_METHOD',
+          message: '当前采购方式暂不支持',
+          details: { purchase_method: 9 },
+        },
+        message: 'OK',
+        timestamp: new Date().toISOString(),
+      });
+
+      const result = await fetchTenderDataWithType('0811-DSITC261472');
+      expect(result.data.project_name).toBe('Unsupported Project');
+      expect(result.type).toEqual({
+        tender_lx: 0,
+        purchase_method: 9,
+        fund_lx: 0,
+      });
+      expect(result.warning?.message).toBe('当前采购方式暂不支持');
+    });
+
     it('drops invalid tender type info when fund_lx is outside 0|1', async () => {
       globalThis.fetch = mockFetchJson({
         success: true,

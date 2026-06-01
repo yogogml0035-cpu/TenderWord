@@ -61,3 +61,35 @@ async def test_get_tender_data_coerces_numeric_investment(monkeypatch):
     assert response.data.investment == "30.0"
     assert response.type is not None
     assert response.type.purchase_method == 2
+
+
+@pytest.mark.asyncio
+async def test_get_tender_data_returns_warning_for_unsupported_purchase_method(monkeypatch):
+    monkeypatch.setattr(
+        tender_api,
+        "fetch_tender_data",
+        lambda tender_no: {
+            "data": {
+                "project_name": "医疗设备采购",
+                "project_number": "261472",
+                "project_content": "设备一批",
+                "buyer_name": "上海市某单位",
+                "investment": 30.0,
+            },
+            "type": {
+                "tender_lx": 0,
+                "purchase_method": 9,
+                "fund_lx": 0,
+            },
+        },
+    )
+
+    response = await tender_api.get_tender_data("0811-DSITC261472")
+
+    assert response.data is not None
+    assert response.data.project_name == "医疗设备采购"
+    assert response.data.investment == "30.0"
+    assert response.type is not None
+    assert response.type.purchase_method == 9
+    assert response.warning is not None
+    assert response.warning["message"] == "当前采购方式暂不支持"

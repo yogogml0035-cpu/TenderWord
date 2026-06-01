@@ -41,4 +41,20 @@ describe('TenderNoInput', () => {
     expect(screen.getByText('自动获取失败')).toBeInTheDocument();
     expect(screen.getByRole('button')).toBeDisabled();
   });
+
+  it('renders warning state without success icon', () => {
+    render(
+      <TenderNoInput
+        value="0811-DSITC261472"
+        onChange={jest.fn()}
+        onFetch={jest.fn()}
+        isSuccess
+        warning="当前采购方式暂不支持"
+      />
+    );
+
+    expect(screen.getByTestId('tender-no-warning-icon')).toBeInTheDocument();
+    expect(screen.queryByTestId('tender-no-success-icon')).not.toBeInTheDocument();
+    expect(screen.getByText('当前采购方式暂不支持')).toBeInTheDocument();
+  });
 });

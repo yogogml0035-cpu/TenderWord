@@ -1260,6 +1260,10 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     shouldApplyFetchedTypeRef.current = false;
 
     const nextTenderType = resolveFetchedTenderType(tenderTypeInfo);
+    if (!nextTenderType) {
+      return;
+    }
+
     const nextTenderLx = tenderTypeInfo.tender_lx;
     const nextFundLx = tenderTypeInfo.fund_lx;
     const draftUpdates: Partial<ConversationFormDraft> = {};
@@ -1317,7 +1321,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
     }
 
     const nextTenderType = resolveFetchedTenderType(tenderTypeInfo);
-    if (nextTenderType && nextTenderType !== tenderType) {
+    if (!nextTenderType || nextTenderType !== tenderType) {
       return;
     }
 
@@ -1723,6 +1727,7 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
             isLoading={tenderFetchState.status === 'loading'}
             isSuccess={tenderFetchState.status === 'success'}
             error={tenderFetchState.status === 'error' ? tenderFetchState.error || null : null}
+            warning={tenderFetchState.status === 'success' ? tenderFetchState.warning || null : null}
           />
           {tenderData && <InfoCard items={tenderInfoItems} columns={2} />}
         </FormSection>

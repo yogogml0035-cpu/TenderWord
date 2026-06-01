@@ -21,6 +21,7 @@ export interface TenderNoInputProps {
   isLoading?: boolean;
   isSuccess?: boolean;
   error?: string | null;
+  warning?: string | null;
 }
 
 export function TenderNoInput({
@@ -35,6 +36,7 @@ export function TenderNoInput({
   isLoading = false,
   isSuccess = false,
   error = null,
+  warning = null,
 }: TenderNoInputProps) {
   const handleFetchData = useCallback(async () => {
     if (!value.trim() || !onFetch) {
@@ -74,10 +76,11 @@ export function TenderNoInput({
             className={cn(
               'input-field h-11 w-full rounded-xl px-3.5 pr-10 text-sm',
               error && 'border-[var(--error)] focus:ring-[var(--error)]',
-              isSuccess && 'border-[var(--success)] focus:ring-[var(--success)]'
+              !error && warning && 'border-amber-400 focus:ring-amber-400',
+              isSuccess && !warning && 'border-[var(--success)] focus:ring-[var(--success)]'
             )}
           />
-          {isSuccess && !error && !isLoading && (
+          {isSuccess && !error && !warning && !isLoading && (
             <CheckCircle
               data-testid="tender-no-success-icon"
               className="absolute top-1/2 right-3 h-4.5 w-4.5 -translate-y-1/2 text-[var(--success)]"
@@ -87,6 +90,12 @@ export function TenderNoInput({
             <AlertCircle
               data-testid="tender-no-error-icon"
               className="absolute top-1/2 right-3 h-4.5 w-4.5 -translate-y-1/2 text-[var(--error)]"
+            />
+          )}
+          {warning && !error && !isLoading && (
+            <AlertCircle
+              data-testid="tender-no-warning-icon"
+              className="absolute top-1/2 right-3 h-4.5 w-4.5 -translate-y-1/2 text-amber-500"
             />
           )}
         </div>
@@ -113,6 +122,12 @@ export function TenderNoInput({
         <p className="flex items-center gap-1 text-xs text-[var(--error)]">
           <AlertCircle className="h-3.5 w-3.5" />
           {error}
+        </p>
+      )}
+      {warning && !error && (
+        <p className="flex items-center gap-1 text-xs text-amber-600">
+          <AlertCircle className="h-3.5 w-3.5" />
+          {warning}
         </p>
       )}
 
