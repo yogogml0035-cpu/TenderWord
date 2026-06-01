@@ -1,0 +1,272 @@
+{
+  "project": "TenderWord",
+  "branchName": "ralph/agent-run-skill-chat-refactor",
+  "description": "将 TenderWord 右侧聊天入口重构为任务上下文助手，使用 create_deep_agent 加载 rewrite/edit skills，通过工具创建现有 Word COM 队列任务，并删除旧 /api/user/stream 与旧 workflow skill 入口。",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "建立 agent run 流式协议与 fake 后端闭环",
+      "description": "作为开发者，我想先用 fake runtime 打通 /api/agent/runs/stream，以便在不依赖真实 LLM 和 Word COM 的情况下验证新协议。",
+      "acceptanceCriteria": [
+        "POST /api/agent/runs/stream 接收 conversation_id、message、model、selected_skills 和受控 context_snapshot",
+        "fake runtime 可以按顺序输出 run_started、thinking_stage、tool_call、task_accepted、done 或 needs_input 事件",
+        "fake task_accepted 返回的 task_id 和 task_kind 可被前端映射到现有任务卡",
+        "后端测试覆盖成功创建任务、缺条件追问和运行异常 error 终态",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-002",
+      "title": "前端 API client 支持 agent run stream",
+      "description": "作为开发者，我想让前端通过统一 API client 消费 agent run stream，以便替换旧 streamUserMessage 的请求和解析逻辑。",
+      "acceptanceCriteria": [
+        "frontend/lib/api.ts 暴露 streamAgentRun，并把 NDJSON 事件解析为类型化 AgentRunEvent",
+        "frontend/types/api.ts 定义 AgentRunStreamRequest、AgentRunEvent、AgentThinkingStage 和 task_accepted payload",
+        "streamAgentRun 对 done、needs_input、task_accepted 和 error 都能调用 onEvent 回调",
+        "API 单元测试覆盖正常事件序列、无效 JSON 行和后端错误响应",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-003",
+      "title": "ChatPanel 接入新 agent run 事件",
+      "description": "作为用户，我想右侧输入框发送消息后看到 agent run 回复或任务卡，以便使用新的任务上下文助手入口。",
+      "acceptanceCriteria": [
+        "ChatPanel 发送普通右侧消息时调用 streamAgentRun 而不是 streamUserMessage",
+        "收到 task_accepted 后，现有任务日志/内容消息被创建并显示生成态",
+        "收到 needs_input 后，聊天区显示助手追问且不创建任务卡",
+        "收到 error 后，聊天区显示明确错误消息且 loading 状态结束",
+        "使用 Playwright 打开 /tender，发送 fake rewrite 消息，确认请求到达 /api/agent/runs/stream、页面出现任务卡、无控制台错误",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-004",
+      "title": "实现 / skill picker 与 $skill 前缀解析",
+      "description": "作为用户，我想通过 / 或 $rewrite/$edit 明确选择能力，以便 agent 优先按我的显式选择执行。",
+      "acceptanceCriteria": [
+        "ChatInput 输入 / 时展示 rewrite 和 edit 两个 skill 选项",
+        "选择 rewrite 或 edit 后，selected_skills 单独保存，输入框正文不保留 /rewrite 或 /edit 前缀",
+        "输入 $rewrite 指令 或 $edit 指令 时自动解析为对应 selected_skills，并移除正文前缀",
+        "模型选择、发送、取消和上传文件修改按钮仍保持可用",
+        "使用 Playwright 打开 /tender，输入 / 并选择 rewrite，确认选中态可见且发送 payload 包含 selected_skills=[\"rewrite\"]",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-005",
+      "title": "用户消息显示 capability chip 并恢复复制文本",
+      "description": "作为用户，我想在自己发送的消息上看到已选择的 skill，并在复制时保留可回放的 $skill 前缀。",
+      "acceptanceCriteria": [
+        "用户消息气泡显示 rewrite 或 edit capability chip",
+        "用户消息正文不显示 $rewrite、$edit、/rewrite、/edit 或 [$rewrite] 前缀",
+        "复制带 rewrite chip 的用户消息时，剪贴板文本为 $rewrite 加原始指令正文",
+        "未选择 skill 的普通用户消息不显示 capability chip，复制文本保持原正文",
+        "使用 Playwright 发送 $rewrite 改写第三包，确认气泡显示 rewrite chip、正文只显示改写第三包、复制文本包含 $rewrite 改写第三包",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-006",
+      "title": "展示结构化 agent 思考过程卡",
+      "description": "作为用户，我想看到 agent run 的阶段化进度，以便理解系统正在检查上下文、调用工具还是等待补充信息。",
+      "acceptanceCriteria": [
+        "前端可展示 理解需求、执行任务、调用工具、异常与重试、汇总结论 阶段",
+        "thinking_stage 事件可以增量更新阶段状态、摘要、工具名和 guard 结果",
+        "思考过程卡不展示原始 reasoning_content、完整工具参数或隐藏模型推理",
+        "task_accepted 后思考过程卡进入完成状态，并由现有任务卡继续展示 Word COM 任务进度",
+        "使用 Playwright 触发 fake agent run，确认思考过程卡出现、阶段更新、最终完成且无控制台错误",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-007",
+      "title": "创建 DeepAgents 工厂与隔离 backend",
+      "description": "作为开发者，我想使用 create_deep_agent 构建任务上下文助手，并隔离 agent 可访问的文件系统。",
+      "acceptanceCriteria": [
+        "后端新增 task_context_assistant factory，调用 create_deep_agent 并传入 tools、skills、backend 和指令",
+        "backend 使用 FilesystemBackend(virtual_mode=True)，并通过 CompositeBackend 或等价结构隔离 scratch、skills 和运行工作区",
+        "skills 来源只暴露 backend/skills/rewrite 和 backend/skills/edit 的受控路径",
+        "agent factory 测试验证不能读取 .env、项目根任意文件、backend/logs 全局目录或私有绝对路径",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-008",
+      "title": "改写 rewrite skill guide 并实现 rewrite tool",
+      "description": "作为用户，我想在已有生成文档上下文时让助手直接创建 rewrite 任务，以便继续修改已生成内容。",
+      "acceptanceCriteria": [
+        "backend/skills/rewrite/SKILL.md 不再包含 executor_kind、workflow_entry、dispatch_key 或 route_literal 等旧 workflow 字段",
+        "rewrite skill guide 明确说明适用场景、前置条件、缺失信息追问和 create_rewrite_task_tool 调用方式",
+        "create_rewrite_task_tool 复用 DocumentService.create_rewrite_task，且不直接操作 Word COM",
+        "有 rewrite history 时，显式 /rewrite 或 $rewrite 创建 rewrite task 并返回 task_accepted",
+        "无 rewrite history 时，guard 返回 needs_input 且不创建 task",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-009",
+      "title": "写入 agent run JSONL 日志并提供受控上下文工具",
+      "description": "作为开发者，我想记录 agent run 的关键事件并让 agent 只读当前会话摘要，以便排障和安全查阅上下文。",
+      "acceptanceCriteria": [
+        "每次 agent run 写入 backend/logs 下以 agent-run 或 task 前缀命名的 JSONL 日志",
+        "日志包含 run_id、conversation_id、selected_skills、阶段摘要、工具名、guard 结果和 task_id",
+        "日志 scrubber 移除访问凭证、认证头、密码字段、.env、私有绝对路径、完整客户原文和堆栈明细",
+        "agent 只能通过受控工具读取当前 conversation_id 的 agent run 摘要和当前 task 公共摘要",
+        "后端重启不从这些日志恢复 UI 会话状态",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-010",
+      "title": "改写 edit skill guide 并实现 edit tool",
+      "description": "作为用户，我想通过 /edit 或上传文件修改入口创建 edit 任务，以便修改指定 Word 文件的锚点区正文。",
+      "acceptanceCriteria": [
+        "backend/skills/edit/SKILL.md 不再包含 executor_kind、workflow_entry、dispatch_key 或 route_literal 等旧 workflow 字段",
+        "edit skill guide 明确说明上传 Word 文件、锚点配置、form type 和 draft 字段等前置条件",
+        "create_edit_task_tool 复用 DocumentService.create_edit_task，且不直接操作 Word COM",
+        "缺上传文件、缺锚点或缺必要 form type/draft 字段时返回 needs_input 且不创建 task",
+        "有上传 Word 文件和必要上下文时，显式 /edit 或 $edit 创建 edit task 并返回 task_accepted",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-011",
+      "title": "把上传文件修改入口映射到 edit agent run",
+      "description": "作为用户，我想继续使用现有上传文件修改按钮，同时让它进入新的 edit skill 语义。",
+      "acceptanceCriteria": [
+        "现有上传文件修改按钮保留在 ChatInput 中且视觉风格不变",
+        "上传成功后的文件上下文进入 agent run context_snapshot，而不是由 ChatPanel 直接调用 createEditTask",
+        "未上传文件时选择 /edit 会在聊天区显示请先上传 Word 文件的追问",
+        "上传文件后发送 /edit 修改指令会触发 fake task_accepted 并显示现有任务卡",
+        "使用 Playwright 打开 /tender，验证 /edit 缺文件追问和上传后 fake 创建任务两个路径均无控制台错误",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-012",
+      "title": "删除前端旧 user stream 依赖",
+      "description": "作为开发者，我想移除前端对旧 /api/user/stream 的依赖，以便右侧输入只有一个可维护入口。",
+      "acceptanceCriteria": [
+        "frontend/lib/api.ts 不再导出 streamUserMessage",
+        "frontend/types/api.ts 不再保留旧 UserStreamRequest 和旧 UserStreamEvent 运行时使用类型",
+        "ChatPanel 不再包含旧 route=reply/rewrite 的 user stream 分支",
+        "仓库前端运行时代码中 rg -n \"/api/user/stream|streamUserMessage\" frontend 无结果或仅剩历史文档说明",
+        "前端测试覆盖普通回复、needs_input、task_accepted 和 error",
+        "npm run lint passes",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-013",
+      "title": "删除后端旧 user routing 与旧 workflow skill 入口",
+      "description": "作为开发者，我想删除新路径不再使用的旧代码，以便避免两套判路和两套 skill 定义长期并存。",
+      "acceptanceCriteria": [
+        "backend/main.py 不再注册 backend.api.user 路由，POST /api/user/stream 不存在",
+        "删除 backend/api/user.py、backend/graphs/user_graph.py、backend/states/user_state.py、backend/services/user_routing_service.py 及仅服务旧 user stream 的 routing prompt",
+        "删除 backend/skills/loader.py、backend/skills/registry.py、backend/skills/types.py、backend/skills/rewrite/scripts/workflow.py 和 backend/skills/edit/scripts/workflow.py",
+        "后端 import 中 rg -n \"UserGraph|user_routing_service|workflow_entry|scripts.workflow\" backend 无运行时引用",
+        "保留仍被 DocumentService task 执行需要的节点，直到新工具路径测试证明可替代后才删除",
+        "python -m pytest backend/tests -v passes",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-014",
+      "title": "完成 rewrite 到 edit 的集成回归验证与文档更新",
+      "description": "作为项目维护者，我想验证新 agent run 入口和现有任务系统端到端协作，并更新系统文档。",
+      "acceptanceCriteria": [
+        "使用 fake runtime 验证 /rewrite 创建 task accepted 后，现有任务卡进入生成态",
+        "使用 fake runtime 验证 /edit 缺文件时显示追问，上传文件后创建 task accepted",
+        "现有任务 SSE、下载卡、取消按钮和生成任务展示无回归",
+        "ARCHITECTURE.md、INTERFACES.md、coding_maps/SYSTEM_MAP.md 和必要 asset 知识包记录新的 agent run/task 边界",
+        "git diff --check passes",
+        "文档和日志样例敏感凭证扫描无命中",
+        "npm run lint passes",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    }
+  ]
+}

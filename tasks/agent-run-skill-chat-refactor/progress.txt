@@ -1,0 +1,7 @@
+# Ralph Progress
+
+Requirement: tasks/agent-run-skill-chat-refactor
+Started: 2026-06-01 18:25
+Source: prd.json
+
+## Codebase Patterns
