@@ -6,11 +6,11 @@
 
 ## 系统目的与仓库形态
 
-TenderWord 是前后端分离的招标文档生成、修改、补充批注和模板复用系统。完整运行依赖 Windows + Word COM：前端负责会话、表单、任务进度和文件交互，后端负责 API、任务队列、LangGraph 工作流、LLM 调用、模板候选代理和 Word 文件生成。
+TenderWord 是前后端分离的招标文档生成、修改、补充批注和模板复用系统。完整运行依赖 Windows + Word COM：前端负责会话、表单、任务进度和文件交互，后端负责 API、任务队列、LangGraph 工作流、LLM/智能体调用、模板候选代理和 Word 文件生成。
 
 | 子项目 | 职责 | 事实文档 |
 | --- | --- | --- |
-| `backend/` | FastAPI API、任务队列、SSE、LangGraph、补充批注图、Prompt Layer、DeepAgents content_agent、Word COM、模板候选代理、上传与下载。 | `backend/.planning/codebase/` |
+| `backend/` | FastAPI API、任务队列、SSE、LangGraph、补充批注图、Prompt Layer、DeepAgents content_agent、LangChain comment_agent、Word COM、模板候选代理、上传与下载。 | `backend/.planning/codebase/` |
 | `frontend/` | Next.js 工作台、招标类型表单、会话与 URL 身份、任务 SSE / agent-step 展示、补充批注动作、模板候选弹窗、上传下载交互。 | `frontend/.planning/codebase/` |
 
 长期业务规则和跨主题回归风险沉淀在 `asset/`，当前索引是 `asset/README.md`。首次安装和启动入口保留在 `README.md`。
@@ -27,7 +27,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 6. `backend/api/generate.py` 校验请求并交给 `backend/services/document_service.py`。
 7. `DocumentService` 选择 `GRAPH_REGISTRY`，构造初始 state，并提交到 `backend/task/task_queue_manager.py`。
 8. `backend/graphs/base_graph.py` 执行共享 LangGraph 工作流，类型 graph 绑定具体 node；`generation_mode=workflow` 走 `generate_polished_text`，`generation_mode=agent` 走公共 `content_agent`。
-9. Word 业务逻辑通过 `backend/helper/word_helper/` 和 `backend/util/word_util/` 执行，LLM prompt 通过 `backend/prompts/` 渲染；智能体生成运行时在 `backend/agents/generation/`。
+9. Word 业务逻辑通过 `backend/helper/word_helper/` 和 `backend/util/word_util/` 执行，LLM prompt 通过 `backend/prompts/` 渲染；正文智能体运行时在 `backend/agents/generation/`，批注智能体运行时在 `backend/agents/comments/`。
 10. 后端写入任务结果并推送 `agent_step` / `done` / `error` SSE，前端通过 `frontend/hooks/useChatSSE.ts` 更新任务消息、智能体过程卡和下载入口。
 
 ### 任务状态、SSE 与下载
@@ -50,7 +50,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - 初次生成下载卡在前端触发补充批注，入口从 `TaskDownloadMessage` 经 `MessageList` 回到 `ChatPanel`。
 - `frontend/lib/api.ts` 调用 `POST /api/comment-supplement` 创建 `comment_supplement` 任务。
 - 后端 `DocumentService` 校验当前会话 latest `rewrite_state`、`polished_text` 和 source file 后，提交 `CommentSupplementGraph`。
-- `CommentSupplementGraph` 复制当前文档副本，调用 `comment_agent` 生成/校验/写回补充批注，完成后更新会话 latest `rewrite_state.prepared_doc_path` 并通过同一 SSE / 下载链路返回结果。
+- `CommentSupplementGraph` 复制当前文档副本，调用 `backend/agents/comments/` 的 `comment_agent` 生成/校验/写回补充批注，完成后更新会话 latest `rewrite_state.prepared_doc_path` 并通过同一 SSE / 下载链路返回结果。
 - rewrite、edit 和 comment_supplement 下载卡不应再次显示补充批注动作。
 
 ### 模板候选
@@ -70,7 +70,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 | 会话和 URL | `frontend/stores/chatStore.ts`, `frontend/utils/tenderTypeMapper.ts` | `backend/api/conversations.py`, `backend/services/conversation_service.py` | 地址栏、会话身份、任务恢复和后端心跳需保持一致。 |
 | 任务与 SSE | `frontend/hooks/useChatSSE.ts`, `frontend/lib/sse.ts`, `frontend/stores/*` | `backend/api/stream.py`, `backend/core/sse_manager.py`, `backend/task/task_queue_manager.py` | 新增 SSE 事件必须同步后端模型、前端 named event、类型、解析和测试。 |
 | Word 运行时 | 无前端直接入口 | `backend/graphs/`, `backend/nodes/`, `backend/helper/word_helper/`, `backend/util/word_util/` | 前端不得触碰 COM；后端新增 graph/node/tool 不得绕过队列、锁、取消检查和进度包装。 |
-| Prompt / LLM / 内容智能体 | 无前端直接入口 | `backend/prompts/`, `backend/agents/generation/`, `backend/util/common_util/llm_stream_utils.py` | prompt 渲染、智能体协议、超时、解析和结构校验要集中维护。 |
+| Prompt / LLM / 智能体 | 无前端直接入口 | `backend/prompts/`, `backend/agents/generation/`, `backend/agents/comments/`, `backend/util/common_util/llm_stream_utils.py` | prompt 渲染、智能体协议、超时、解析和结构校验要集中维护。 |
 | 模板候选 | `frontend/components/forms/TemplateCandidateDialog.tsx`, `frontend/lib/api.ts` | `backend/api/template_candidates.py` | 前端不得直接调用外部候选接口或外部文件 URL。 |
 
 ## 状态、存储与运行时
@@ -97,8 +97,8 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 
 - 任务与队列：`backend/task/task_queue_manager.py`、`backend/services/document_service.py`
 - SSE：`backend/core/sse_manager.py`、`backend/api/stream.py`
-- 补充批注：`backend/api/comment_supplement.py`、`backend/graphs/comment_supplement_graph.py`、`backend/nodes/common_word_nodes/comment_supplement.py`
-- Prompt / skill / 内容智能体：`backend/prompts/`、`backend/skills/`、`backend/agents/generation/`
+- 补充批注：`backend/api/comment_supplement.py`、`backend/graphs/comment_supplement_graph.py`、`backend/nodes/common_word_nodes/comment_supplement.py`、`backend/agents/comments/`
+- Prompt / skill / 智能体：`backend/prompts/`、`backend/skills/`、`backend/agents/generation/`、`backend/agents/comments/`
 - Word 业务：`asset/shared_runtime_word_skill_knowledge_pack.md`
 
 ### 前端表单、会话、URL 或任务展示修改
@@ -170,7 +170,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - 新增或修改 SSE 事件是否同步后端事件模型、前端事件 union、`frontend/lib/sse.ts` named event、`useChatSSE` 和测试。
 - 新增或修改任务类型是否同步 `TaskKind`、任务状态、SSE `done` payload、下载卡和会话结果语义。
 - Word COM 相关改动是否仍然经过任务队列、graph 锁、取消检查和进度包装。
-- Prompt、LLM 流式或 content_agent 改动是否复用 `LLM_STREAM_TIMEOUT_SECONDS`，并保留 Prompt Layer 与智能体协议边界。
+- Prompt、LLM 流式、`content_agent` 或 `comment_agent` 改动是否复用 `LLM_STREAM_TIMEOUT_SECONDS`，并保留 Prompt Layer 与智能体协议边界。
 - `content_verify_agent` 是否只输出真实需修复 findings，并把“无问题 / 无需修改”的无效审核项折叠为 `[]`。
 - 模板候选改动是否仍由后端代理外部列表、文件下载和白名单校验。
 - 前端 running task 恢复是否先查任务状态，避免直接连接已不存在的 SSE。

@@ -110,7 +110,7 @@
 | 后端路由 | `backend/api/comment_supplement.py` 中的 `POST /api/comment-supplement` |
 | 后端 service | `DocumentService.create_comment_supplement_task()` |
 | Graph | `backend/graphs/comment_supplement_graph.py` |
-| 共享节点 | `backend/nodes/common_word_nodes/comment_supplement.py`, `backend/nodes/common_word_nodes/comment_agent.py` |
+| 共享节点 / 运行时 | `backend/nodes/common_word_nodes/comment_supplement.py`, `backend/nodes/common_word_nodes/comment_agent.py`, `backend/agents/comments/` |
 
 同步要求：
 - 补充批注只从初次生成下载卡触发；rewrite、edit 和 comment_supplement 下载卡不应再显示补充批注动作。
@@ -208,7 +208,7 @@
 
 ### LLM 服务商
 
-后端通过 OpenAI-compatible streaming client 调用 DeepSeek、Doubao / Volcengine ARK 和 Qwen / DashScope。调用封装集中在 `backend/util/common_util/llm_stream_utils.py` 和相关服务。初次生成的 `generation_mode=agent` 通过 `backend/agents/generation/` 调用 DeepAgents content agent，模型配置仍复用后端 settings。
+后端通过 OpenAI-compatible streaming client 调用 DeepSeek、Doubao / Volcengine ARK 和 Qwen / DashScope。调用封装集中在 `backend/util/common_util/llm_stream_utils.py` 和相关服务。初次生成的 `generation_mode=agent` 通过 `backend/agents/generation/` 调用 DeepAgents content agent；批注增强和补充批注通过 `backend/agents/comments/` 调用 `comment_agent`，模型配置仍复用后端 settings。
 
 关键设置位于 `backend/config/settings.py`，包括 provider key、base URL、model、`LLM_STREAM_TIMEOUT_SECONDS` 和模板候选重排 provider。
 

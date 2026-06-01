@@ -13,7 +13,7 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
   -> FastAPI /api
   -> 任务队列 + SSE
   -> LangGraph tender / skill / comment_supplement workflow
-  -> Prompt Layer + LLM provider / DeepAgents content_agent
+  -> Prompt Layer + LLM provider / DeepAgents content_agent / LangChain comment_agent
   -> Word COM 文档操作
   -> 生成文件 / 任务结果 / 下载
 ```
@@ -51,6 +51,7 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 - `TaskQueueManager` 串行化文档任务、跟踪进度、取消、心跳和清理。
 - `SSEManager` 事件缓冲、客户端管理和重连重放。
 - 标准 tender graph、rewrite/edit skill graph、user routing graph 和 `generation_mode=agent` 的 content agent 分支。
+- agent generate 与补充批注共用的 `comment_agent` 批注生成、锚点校验、写回统计和过程事件。
 - Word COM 生命周期、共享 Word helper、类型特化节点和 Prompt Layer。
 - 外部 LLM provider、招标详情接口和模板候选接口的后端代理。
 - `content_verify_agent` 的审核契约只保留真实需修复的问题；无问题或无需修改的审核项会在后端折叠为 `[]`，避免把空 findings 传播到 workspace audit 或前端过程卡。
@@ -123,6 +124,8 @@ backend/graphs/
   LangGraph tender、skill、user 工作流
 backend/agents/generation/
   初次生成 content_agent 主/子智能体与工作区
+backend/agents/comments/
+  comment_agent 批注候选生成、锚点校验、工具门禁与审计工作区
 backend/states/
   Typed graph state 契约
 backend/nodes/
@@ -184,7 +187,7 @@ Edit 是显式 task 入口，只走 `POST /api/edit`。它复用任务队列、S
 
 ### 补充批注
 
-补充批注是独立 task 入口，只走 `POST /api/comment-supplement`。前端从初次生成下载卡触发，后端校验 latest `rewrite_state` 和当前下载文件后，执行 `CommentSupplementGraph`：复制当前文档副本、通过 `comment_agent` 生成/校验/写回批注，再更新会话 latest `rewrite_state.prepared_doc_path` 和新的下载结果。
+补充批注是独立 task 入口，只走 `POST /api/comment-supplement`。前端从初次生成下载卡触发，后端校验 latest `rewrite_state` 和当前下载文件后，执行 `CommentSupplementGraph`：复制当前文档副本、通过 `backend/agents/comments/` 的 `comment_agent` 生成/校验/写回批注，再更新会话 latest `rewrite_state.prepared_doc_path` 和新的下载结果。
 
 关键入口：
 - `frontend/components/chat/TaskDownloadMessage.tsx`
@@ -193,6 +196,8 @@ Edit 是显式 task 入口，只走 `POST /api/edit`。它复用任务队列、S
 - `backend/api/comment_supplement.py`
 - `backend/services/document_service.py`
 - `backend/graphs/comment_supplement_graph.py`
+- `backend/nodes/common_word_nodes/comment_agent.py`
+- `backend/agents/comments/`
 
 ### 模板候选
 

@@ -13,7 +13,7 @@ FastAPI /api
   -> service 编排
   -> 任务队列 + SSE
   -> LangGraph 生成 / rewrite / edit / 补充批注 / 用户路由
-  -> Prompt Layer + LLM provider / DeepAgents content_agent
+  -> Prompt Layer + LLM provider / DeepAgents content_agent / LangChain comment_agent
   -> Word helper + Word COM utility
   -> 上传目录中的产物与下载接口
 ```
@@ -35,6 +35,7 @@ FastAPI /api
 | Word 业务 helper | 受保护字段、正文边界、插入、cleanup、样式回填、范围工具 | `backend/helper/word_helper/` |
 | 技术 utility | Word COM 生命周期、上传存储、HTTP、LLM 流式、日志 | `backend/util/` |
 | 内容智能体 | 初次生成 `generation_mode=agent` 的 DeepAgents 主/子智能体、工作区和步骤事件 | `backend/agents/generation/` |
+| 批注智能体 | `comment_agent` 批注候选生成、锚点校验、工具门禁、审计工作区和写回统计 | `backend/agents/comments/` |
 | Prompt / Skill | prompt 渲染、prompt-bound 解析、rewrite/edit task skill 声明 | `backend/prompts/`, `backend/skills/` |
 | 配置 | 环境配置、招标类型锚点、字号、content mode、profile、family | `backend/config/settings.py`, `backend/config/tender_config.py` |
 
@@ -58,7 +59,7 @@ FastAPI /api
 - 任务状态、取消和心跳由 `backend/api/tasks.py` 与 `backend/services/task_service.py` 暴露。
 - SSE 主入口是 `GET /api/stream/{task_id}`，事件缓存与 `Last-Event-ID` 重放在 `backend/core/sse_manager.py`。
 - `progress_log` 通过 `sse_log_handler` 转成用户可见进度日志；排障细节应留在 `execution_log`。
-- 智能体生成过程通过 `agent_step` SSE 展示 `content_agent`、`content_generate_agent`、`content_verify_agent`、`content_revise_agent` 的流式过程；终态仍必须走 `done` / `error`。
+- 智能体过程通过 `agent_step` SSE 展示 `content_agent` / 子 agent 与 `comment_agent` 的结构化过程；终态仍必须走 `done` / `error`。
 
 ### 智能体生成分支
 
@@ -68,6 +69,13 @@ FastAPI /api
 - `content_verify_agent` 只应把需要修复的问题写成 findings；解析层会把“无问题 / 实质一致 / 无需修改”这类无效审核项折叠为 `[]`，避免它们进入 workspace audit、过程卡 highlights 或下一轮修订。
 - `agent_step` 事件由 graph config 注入的 callback 进入 `SSEManager`，不由子 agent 直接连接 SSE manager。
 
+### 批注智能体分支
+
+- `backend/nodes/common_word_nodes/comment_agent.py` 是 graph 中的公共批注增强节点，负责准备锚点上下文、调用运行时并收敛 `comment_writeback` 摘要。
+- `backend/agents/comments/comment_agent.py` 是 `comment_agent` 运行时真源，通过 LangChain agent 和工具门禁执行批注候选生成、引用校验和写回前复核。
+- `backend/agents/comments/tools.py` 提供批注引用校验和边界内写回工具；真正 Word 写入仍由当前 graph 节点线程完成，不由工具绕过 Word COM 边界。
+- `backend/agents/comments/workspace.py` 写入批注智能体审计日志，日志只记录排障所需结构化信息，不进入用户态进度。
+
 ### 普通聊天、rewrite、edit 与补充批注
 
 - 普通聊天和 rewrite 判路走 `POST /api/user/stream`，返回 NDJSON。
@@ -75,7 +83,7 @@ FastAPI /api
 - rewrite/edit 是 task skill runtime，声明在 `backend/skills/rewrite/` 与 `backend/skills/edit/`，执行图由 `backend/graphs/skill_graph.py` 构造。
 - edit 是显式入口，只走 `POST /api/edit`，不并回 user stream 的模型判路链路。
 - 补充批注是独立任务入口，只走 `POST /api/comment-supplement`；`DocumentService.create_comment_supplement_task()` 校验 latest `rewrite_state` 和当前下载文件后，提交 `CommentSupplementGraph`。
-- `CommentSupplementGraph` 的节点顺序是 `prepare_comment_supplement -> comment_agent -> finalize_comment_supplement`，成功后会把新的 `prepared_doc_path` 写回会话 latest `rewrite_state`，后续 rewrite/edit 应继续基于该副本。
+- `CommentSupplementGraph` 的节点顺序是 `prepare_comment_supplement -> comment_agent -> finalize_comment_supplement`，`comment_agent` 运行时来自 `backend/agents/comments/`；成功后会把新的 `prepared_doc_path` 写回会话 latest `rewrite_state`，后续 rewrite/edit 应继续基于该副本。
 
 ### 模板候选
 
@@ -99,6 +107,7 @@ FastAPI /api
 - `StandardTenderWorkflowGraph`：标准 tender 生成拓扑，类型 graph 通过 class attribute 绑定差异节点。
 - `CommentSupplementGraph`：补充批注任务图，复用任务队列、SSE、`comment_agent` 和会话 rewrite_state 更新机制。
 - `content_agent`：标准生成 graph 的智能体生成节点，不能在各类型 graph 里复制分流逻辑。
+- `comment_agent`：批注生成/校验/写回增强运行时，可服务 agent generate 和独立补充批注任务，但不能替代任务终态。
 - `TaskQueueManager`：长任务队列、串行化、心跳和进度真源。
 - `SSEManager`：任务事件缓存、跨线程发送和重连重放。
 - `TaskSkillWorkflow`：rewrite/edit skill 从 `SKILL.md` 与 `scripts/workflow.py` 声明可执行节点序列。
@@ -112,7 +121,7 @@ FastAPI /api
 - Word 业务逻辑优先下沉到 `backend/helper/word_helper/`；`backend/util/word_util/` 只放 COM 生命周期和底层工具。
 - 后端跨包导入统一使用 `backend.*`；旧的短 import 只能作为历史兼容，不应复制。
 - 任务、SSE 和会话快照是进程内存态；上传和生成文件是本地文件态。
-- Prompt、LLM 超时、DeepAgents content_agent、rewrite/edit skill 契约应集中维护，不在 service/node 里散落大段 prompt。
+- Prompt、LLM 超时、DeepAgents content_agent、LangChain comment_agent、rewrite/edit skill 契约应集中维护，不在 service/node 里散落大段 prompt。
 
 ## 反模式
 
@@ -135,6 +144,7 @@ FastAPI /api
 
 - 日志分层：`progress_log` 面向用户进度，`execution_log` 面向排障，`prompt_log` 面向 prompt 记录，`skill_audit_log` 面向 task skill 审计。
 - `content_agent` 工作区保留完整输入和生成中间产物；运行期日志只记录长度、节点和摘要，不记录完整客户正文。
+- `comment_agent` 审计日志只沉淀候选、校验、跳过和写回统计，不向用户态 SSE 暴露工具原始 JSON、token 或排障栈。
 - 文件安全：上传文件名清洗、下载路径限制、模板候选下载白名单都在后端执行。
 - 测试入口：后端测试按 API、graph、node、helper、service、prompt、config 等目录归档在 `backend/tests/`。
 
