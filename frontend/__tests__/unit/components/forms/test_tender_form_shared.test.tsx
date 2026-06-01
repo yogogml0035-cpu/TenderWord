@@ -555,8 +555,8 @@ describe('TenderFormShared', () => {
   it('renders comment generation mode inside advanced settings with on default and restores off draft', () => {
     const firstRender = renderSharedForm();
 
-    expect(screen.getByText('生成批注')).toBeInTheDocument();
-    const firstCommentGroup = screen.getByRole('group', { name: '生成批注' });
+    expect(screen.getByText('批注生成')).toBeInTheDocument();
+    const firstCommentGroup = screen.getByRole('group', { name: '批注生成' });
     expect(firstCommentGroup).toBeInTheDocument();
     expect(within(firstCommentGroup).getByRole('button', { name: '开' })).toHaveClass(
       'bg-blue-600'
@@ -570,7 +570,7 @@ describe('TenderFormShared', () => {
       initialDraft: { comment_generation_mode: 'off' },
     });
 
-    const restoredCommentGroup = screen.getByRole('group', { name: '生成批注' });
+    const restoredCommentGroup = screen.getByRole('group', { name: '批注生成' });
     expect(within(restoredCommentGroup).getByRole('button', { name: '关' })).toHaveClass(
       'bg-blue-600'
     );
@@ -598,7 +598,7 @@ describe('TenderFormShared', () => {
       .getByRole('group', { name: '样式修订' })
       .closest('div.space-y-1\\.5');
     const commentGenerationField = screen
-      .getByRole('group', { name: '生成批注' })
+      .getByRole('group', { name: '批注生成' })
       .closest('div.space-y-1\\.5');
 
     const anchorRow = beforeTextField?.parentElement;
@@ -1098,7 +1098,7 @@ describe('TenderFormShared', () => {
       expect(screen.getByTestId('draft-state')).toHaveTextContent('"comment_generation_mode":"on"')
     );
 
-    const commentGenerationGroup = screen.getByRole('group', { name: '生成批注' });
+    const commentGenerationGroup = screen.getByRole('group', { name: '批注生成' });
     await user.click(within(commentGenerationGroup).getByRole('button', { name: '关' }));
 
     await waitFor(() =>

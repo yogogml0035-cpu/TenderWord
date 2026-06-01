@@ -13,6 +13,7 @@ from backend.agents.generation.agent_step_events import (
 from backend.agents.generation.json_utils import (
     build_audit_findings_fallback,
     coerce_audit_findings,
+    filter_noop_audit_findings,
     is_contract_placeholder_text,
     parse_audit_findings,
 )
@@ -49,6 +50,7 @@ VERIFY_SYSTEM_PROMPT = """
 5. evidence 必须指出【待审核正文】中的具体问题、缺漏或多余内容，并引用可定位的正文片段或缺失的技术参数片段。
 6. fix_hint 必须给出最小必要修复方式，要求保持其它内容不变。
 7. 只输出需要修复的问题；不需要修改、实质一致、仅格式差异或“不视为问题”的内容必须省略，不能作为 finding 输出。
+8. 禁止输出 evidence 写“两者一致/无问题”且 fix_hint 写“无需修改”的对象；这种情况等价于 []。
 
 审核真源：
 1. 【技术参数（原材料，事实真源）】是实质参数、★/▲符号、包件数量和业务要求的事实真源。
@@ -76,6 +78,10 @@ Few-shots：
 [{"evidence":"技术参数明显包含包件一和包件二，但待审核正文只覆盖包件一，缺少包件二 `离心机` 的采购需求内容。","fix_hint":"补充包件二及其对应技术参数内容，保持包件一内容不变。"}]
 
 输入要点：项目基础信息为“项目名称及数量：细胞电转仪 壹套”，参考内容旧设备名为“细胞自动计数仪”，技术参数为细胞电转仪参数，待审核正文使用“细胞电转仪”且参数完整。
+输出：
+[]
+
+输入要点：技术参数第 3.1 条和待审核正文第 3.1 条的 ★ 符号、尺寸要求、接口数量和文字内容完全一致。
 输出：
 []
 """.strip()
@@ -216,7 +222,9 @@ def _render_verify_user_prompt(
         "- 技术参数明显是多个包件/标段/采购包/独立设备组时，正文是否只生成了其中一个。\n"
         "- 正文是否用参考内容旧事实替换了技术参数或项目基础信息中的新事实。\n"
         "- 不要因为正文编号、章节外壳、表格形态与技术参数原文不同而报错。\n\n"
-        "只返回需要修复的问题；不需要修改的问题不要出现在 JSON 数组里。\n\n"
+        "只返回需要修复的问题；不需要修改的问题不要出现在 JSON 数组里。"
+        "如果比对结论是“实质一致、无问题、无需修改”，必须输出 []，"
+        "不要把一致性说明写成 evidence。\n\n"
         f"【项目基础信息】\n{project_info or ''}\n\n"
         f"【参考内容（只作模板，不作事实真源）】\n{template_reference_text or ''}\n\n"
         f"【技术参数（原材料，事实真源）】\n{tender_params or ''}\n\n"
@@ -229,7 +237,7 @@ def _parse_or_repair_audit_findings(
     model_provider: str,
 ) -> list[AuditFinding]:
     try:
-        return parse_audit_findings(raw_content)
+        return filter_noop_audit_findings(parse_audit_findings(raw_content))
     except GenerationAgentProtocolError as first_error:
         last_error: BaseException = first_error
 

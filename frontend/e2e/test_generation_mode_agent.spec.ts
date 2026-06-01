@@ -378,7 +378,7 @@ test.describe('Generation mode agent flow', () => {
 
     await expect(page.getByRole('heading', { name: '询价采购' })).toBeVisible();
     await page.getByRole('group', { name: '生成方式' }).getByRole('button', { name: '智能体' }).click();
-    await page.getByRole('group', { name: '生成批注' }).getByRole('button', { name: '关' }).click();
+    await page.getByRole('group', { name: '批注生成' }).getByRole('button', { name: '关' }).click();
     await page.getByRole('button', { name: /开始生成/ }).evaluate((button) => {
       (button as HTMLButtonElement).click();
       (button as HTMLButtonElement).click();

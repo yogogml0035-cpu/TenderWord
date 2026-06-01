@@ -378,6 +378,7 @@ def test_content_verify_agent_reads_current_text_from_config(monkeypatch) -> Non
     assert "【参考内容（只作模板，不作事实真源）】\nconfig origin params" in user_prompt
     assert "【技术参数（原材料，事实真源）】\nconfig tender params" in user_prompt
     assert "【待审核正文】\nconfig draft text" in user_prompt
+    assert "如果比对结论是“实质一致、无问题、无需修改”，必须输出 []" in user_prompt
     assert "参考内容】只作章节/编号/表格/语气模板" in user_prompt
     assert "★、▲ 指标" in user_prompt
     assert "多个包件/标段/采购包/独立设备组" in user_prompt
@@ -385,6 +386,32 @@ def test_content_verify_agent_reads_current_text_from_config(monkeypatch) -> Non
     assert "Few-shots" in system_prompt
     assert "禁止输出“第 1 轮审核”" in system_prompt
     assert "不要用技术参数中的设备标题覆盖项目基础信息" in system_prompt
+    assert "禁止输出 evidence 写“两者一致/无问题”且 fix_hint 写“无需修改”" in system_prompt
+
+
+def test_content_verify_agent_drops_noop_findings(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fake_stream_llm_completion(**kwargs):
+        calls.append(kwargs)
+        return (
+            '[{"evidence":"技术参数第3.1条与待审核正文第3.1条完全一致，无问题。",'
+            '"fix_hint":"无需修改。"}]'
+        )
+
+    monkeypatch.setattr(
+        verify_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    result = verify_agent_graph_module.create_verify_agent_graph().invoke(
+        {"current_text": "采购需求正文", "model_provider": "deepseek"}
+    )
+
+    assert len(calls) == 1
+    assert result["structured_response"] == []
+    assert json.loads(result["messages"][-1].content) == []
 
 
 def test_content_verify_agent_flags_placeholder_current_text_without_llm(monkeypatch) -> None:

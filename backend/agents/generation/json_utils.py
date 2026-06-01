@@ -25,6 +25,56 @@ CONTRACT_PLACEHOLDER_PATTERN = re.compile(
     r"(?:采购需求|需求)?\s*(?:正文|内容|draft_text|polished_text)\s*[>＞]$",
     re.IGNORECASE,
 )
+AUDIT_NOOP_TRANSLATION = str.maketrans(
+    "",
+    "",
+    " \t\r\n，。！？、；：,.!?;:\"'“”‘’（）()[]【】<>《》·",
+)
+AUDIT_NOOP_EVIDENCE_MARKERS = (
+    "无问题",
+    "没有问题",
+    "未发现问题",
+    "不存在问题",
+    "没有差异",
+    "不存在差异",
+    "无需修改",
+    "无需修订",
+    "无需调整",
+    "无需处理",
+    "保持不变",
+    "保持原文不变",
+    "保持内容不变",
+    "不作修改",
+    "无需变更",
+    "不需要修改",
+    "不需修改",
+)
+AUDIT_NOOP_FIX_HINT_MARKERS = (
+    "无需修改",
+    "无须修改",
+    "不需修改",
+    "不需要修改",
+    "无需修订",
+    "无须修订",
+    "不需修订",
+    "不需要修订",
+    "无需调整",
+    "无须调整",
+    "不需调整",
+    "不需要调整",
+    "无需处理",
+    "无须处理",
+    "不需处理",
+    "不需要处理",
+    "保持不变",
+    "保持原文不变",
+    "保持内容不变",
+    "不作修改",
+    "无需变更",
+    "无须变更",
+    "不需变更",
+    "不需要变更",
+)
 
 
 def is_contract_placeholder_text(value: Any) -> bool:
@@ -32,6 +82,28 @@ def is_contract_placeholder_text(value: Any) -> bool:
     if not text or "\n" in text:
         return False
     return bool(CONTRACT_PLACEHOLDER_PATTERN.fullmatch(text))
+
+
+def _normalize_audit_noop_text(value: Any) -> str:
+    return str(value or "").strip().translate(AUDIT_NOOP_TRANSLATION)
+
+
+def _is_noop_audit_finding(finding: AuditFinding) -> bool:
+    evidence = _normalize_audit_noop_text(finding.evidence)
+    fix_hint = _normalize_audit_noop_text(finding.fix_hint)
+    if not evidence or not fix_hint:
+        return False
+    return any(marker in evidence for marker in AUDIT_NOOP_EVIDENCE_MARKERS) and any(
+        marker in fix_hint for marker in AUDIT_NOOP_FIX_HINT_MARKERS
+    )
+
+
+def filter_noop_audit_findings(findings: list[AuditFinding]) -> list[AuditFinding]:
+    return [
+        finding
+        for finding in findings
+        if not _is_noop_audit_finding(finding)
+    ]
 
 
 def _strip_code_fence_wrappers(text: str) -> str:
@@ -321,10 +393,12 @@ def coerce_audit_findings(
     fallback_on_error: bool = False,
 ) -> list[AuditFinding]:
     try:
-        return parse_audit_findings(raw_content)
+        return filter_noop_audit_findings(parse_audit_findings(raw_content))
     except GenerationAgentProtocolError as first_error:
         try:
-            return _normalize_audit_findings_value(_load_relaxed_audit_value(raw_content))
+            return filter_noop_audit_findings(
+                _normalize_audit_findings_value(_load_relaxed_audit_value(raw_content))
+            )
         except GenerationAgentProtocolError as exc:
             if fallback_on_error:
                 return build_audit_findings_fallback(exc)
@@ -348,6 +422,7 @@ def parse_content_agent_final_output(raw_content: str) -> ContentAgentFinalOutpu
 __all__ = [
     "build_audit_findings_fallback",
     "coerce_audit_findings",
+    "filter_noop_audit_findings",
     "is_contract_placeholder_text",
     "parse_audit_findings",
     "parse_content_agent_final_output",

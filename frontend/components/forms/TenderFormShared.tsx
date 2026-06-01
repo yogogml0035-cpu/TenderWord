@@ -1859,8 +1859,8 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
 
             <div className={advancedSettingsGridClassName}>
               <div className="space-y-1.5">
-                <p className="block text-sm font-semibold text-[var(--foreground)]">生成批注</p>
-                <div role="group" aria-label="生成批注" className={segmentedControlClassName}>
+                <p className="block text-sm font-semibold text-[var(--foreground)]">批注生成</p>
+                <div role="group" aria-label="批注生成" className={segmentedControlClassName}>
                   <button
                     type="button"
                     onClick={() => handleCommentGenerationModeChange('on')}
