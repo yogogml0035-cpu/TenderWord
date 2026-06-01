@@ -1,6 +1,6 @@
 # 后端风险事实地图
 
-**分析日期：** 2026-05-31
+**分析日期：** 2026-06-01
 
 **范围：** `backend/` 当前技术债、脆弱点、安全边界和测试缺口。
 
@@ -59,6 +59,11 @@
 - 风险：只改提示语示例也可能破坏字面量断言。
 - 安全修改：prompt 文案变化同步复核 prompt 测试。
 
+**content_verify_agent 的无效审核项不能外溢：**
+- 文件：`backend/agents/generation/verify_agent_graph.py`、`backend/agents/generation/json_utils.py`
+- 风险：模型把“无问题 / 无需修改”写成 finding 时，如果不折叠为 `[]`，会误触发修订轮次、污染过程卡 highlights，并让用户误以为存在真实问题。
+- 安全修改：审核提示词和解析层都要保留无效审核项过滤；修改审核 JSON 解析或 repair 逻辑时同步覆盖 `backend/tests/agents/test_generation_content_agent.py`。
+
 **generation mode 不得影响 rewrite/edit：**
 - 文件：`backend/models/generate.py`、`backend/services/document_service.py`、`backend/states/base_state.py`
 - 风险：把 `generation_mode` 混入 rewrite/edit 会让显式修改链路误触初次生成智能体分支。
@@ -103,4 +108,4 @@
 
 ---
 
-*后端风险审计：2026-05-31*
+*后端风险审计：2026-06-01*

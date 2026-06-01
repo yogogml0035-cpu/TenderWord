@@ -1,6 +1,6 @@
 # 后端测试事实地图
 
-**分析日期：** 2026-05-31
+**分析日期：** 2026-06-01
 
 **范围：** `backend/tests/` 与后端验证命令。
 
@@ -45,6 +45,7 @@ backend/tests/
 - prompt：`backend/tests/prompts/test_generate_prompt_routing.py`、`test_comment_prompt_reference_contract.py`。
 - service：`backend/tests/services/test_document_service_initial_state.py`、`test_document_service_task_result.py`、`test_user_routing_service.py`。
 - agent_step SSE：`backend/tests/models/test_sse_agent_step.py`、`backend/tests/services/test_sse_manager_agent_step.py`、`backend/tests/services/test_document_service_agent_step.py`。
+- content_verify_agent 无效审核项过滤：`backend/tests/agents/test_generation_content_agent.py` 覆盖“实质一致 / 无问题 / 无需修改” finding 折叠为 `[]`。
 - 补充批注任务：`backend/tests/api/test_comment_supplement_api.py`、`backend/tests/graphs/test_comment_supplement_graph.py`、`backend/tests/services/test_document_service_comment_supplement.py`、`backend/tests/nodes/test_comment_agent_writeback_node.py`。
 
 ## Mock 与 fixture 模式
@@ -110,4 +111,4 @@ git diff --check
 
 ---
 
-*后端测试分析：2026-05-31*
+*后端测试分析：2026-06-01*

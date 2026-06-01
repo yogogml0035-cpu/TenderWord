@@ -1,6 +1,6 @@
 # TenderWord 系统地图
 
-**生成日期：** 2026-05-31
+**生成日期：** 2026-06-01
 
 本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它不替代代码真源、不替代根级 `AGENTS.md` 的执行红线，也不替代 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 的子系统事实文档。
 
@@ -171,6 +171,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - 新增或修改任务类型是否同步 `TaskKind`、任务状态、SSE `done` payload、下载卡和会话结果语义。
 - Word COM 相关改动是否仍然经过任务队列、graph 锁、取消检查和进度包装。
 - Prompt、LLM 流式或 content_agent 改动是否复用 `LLM_STREAM_TIMEOUT_SECONDS`，并保留 Prompt Layer 与智能体协议边界。
+- `content_verify_agent` 是否只输出真实需修复 findings，并把“无问题 / 无需修改”的无效审核项折叠为 `[]`。
 - 模板候选改动是否仍由后端代理外部列表、文件下载和白名单校验。
 - 前端 running task 恢复是否先查任务状态，避免直接连接已不存在的 SSE。
 - 文档引用的路径、命令、端口和目录是否仍真实存在。

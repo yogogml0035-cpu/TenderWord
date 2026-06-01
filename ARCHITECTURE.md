@@ -1,6 +1,6 @@
 # TenderWord 架构地图
 
-**生成日期：** 2026-05-31
+**生成日期：** 2026-06-01
 
 本文件是根级系统架构地图，描述 TenderWord 的系统边界、子系统职责和推荐理解路径。实现细节仍以代码为准；子系统内部事实以 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 为准。
 
@@ -53,6 +53,7 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 - 标准 tender graph、rewrite/edit skill graph、user routing graph 和 `generation_mode=agent` 的 content agent 分支。
 - Word COM 生命周期、共享 Word helper、类型特化节点和 Prompt Layer。
 - 外部 LLM provider、招标详情接口和模板候选接口的后端代理。
+- `content_verify_agent` 的审核契约只保留真实需修复的问题；无问题或无需修改的审核项会在后端折叠为 `[]`，避免把空 findings 传播到 workspace audit 或前端过程卡。
 
 事实入口：
 - `backend/.planning/codebase/ARCHITECTURE.md`

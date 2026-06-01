@@ -1,7 +1,7 @@
-<!-- refreshed: 2026-05-31 -->
+<!-- refreshed: 2026-06-01 -->
 # 后端架构事实地图
 
-**分析日期：** 2026-05-31
+**分析日期：** 2026-06-01
 
 **范围：** 仅覆盖 `backend/`，并在启动、验证和 Windows/WSL 运行边界上参考根级 `AGENTS.md`、`README.md` 与 `scripts/`。
 
@@ -65,6 +65,7 @@ FastAPI /api
 - `backend/nodes/common_word_nodes/content_agent_generate.py` 是标准 graph 中的公共智能体节点，只把 DeepAgents 结果收敛为 `polished_text` 与 `generate_polished_done=True`。
 - `backend/agents/generation/content_agents.py` 是 DeepAgents 主运行时真源，主 `content_agent` 通过 task 工具调度 generate / verify / revise 子 agent，最多 3 轮审核修订。
 - `backend/agents/generation/workspace.py` 管理单次生成工作区，默认写入 `backend/prompts_log/content_agent_workspace/`，用于审计输入、草稿、审核、修订和最终正文。
+- `content_verify_agent` 只应把需要修复的问题写成 findings；解析层会把“无问题 / 实质一致 / 无需修改”这类无效审核项折叠为 `[]`，避免它们进入 workspace audit、过程卡 highlights 或下一轮修订。
 - `agent_step` 事件由 graph config 注入的 callback 进入 `SSEManager`，不由子 agent 直接连接 SSE manager。
 
 ### 普通聊天、rewrite、edit 与补充批注
@@ -139,4 +140,4 @@ FastAPI /api
 
 ---
 
-*后端架构分析：2026-05-31*
+*后端架构分析：2026-06-01*

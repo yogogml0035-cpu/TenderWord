@@ -1,6 +1,6 @@
 # 后端编码约定事实地图
 
-**分析日期：** 2026-05-31
+**分析日期：** 2026-06-01
 
 **范围：** `backend/` 源码和测试约定。
 
@@ -70,6 +70,7 @@
 - 修改 prompt 示例文案时要复核 `backend/tests/prompts/` 中的字面量断言。
 - `content_agent`、`content_generate_agent`、`content_verify_agent`、`content_revise_agent` 等节点名和 JSON 字段是机器契约，提示词说明可以中文化，但这些标识符不能翻译或改名。
 - `content_generate_agent` 复用生成 prompt builder；修改 generate prompt 时要同时评估 workflow 与 agent 两条初次生成链路。
+- `content_verify_agent` 的审核输出必须只保留真实需修复问题；表达一致、无问题或无需修改的 finding 要在解析层折叠为 `[]`，不得驱动修订轮次或用户可见 highlights。
 
 ## API 与模型约定
 
@@ -92,4 +93,4 @@
 
 ---
 
-*后端编码约定分析：2026-05-31*
+*后端编码约定分析：2026-06-01*
