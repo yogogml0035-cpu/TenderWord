@@ -11,6 +11,7 @@ Source: prd.json
 - fake agent run 产出的占位 `task_accepted` 只能复用任务卡 UI，不能继续挂在 `activeTaskIds/currentTaskId/taskSummaries` 上，否则 `heartbeat/getTaskStatus` 会把占位任务误判成后端重启。
 - 显式 agent skill 选择应该放在 `conversationDraft.selected_skills`，发送时写入 `streamAgentRun.selected_skills`，并在消息发出后立即清空，避免把一次性 capability 泄漏到下一条消息。
 - 即使当前 draft 已进入 `edit` 模式，只要用户显式选中了 `/edit` 或 `$edit`，`ChatPanel` 也应优先走 agent run，而不是回退到旧的直连 `createEditTask` 路径。
+- 用户消息里的 capability 展示和复制回放应基于 `metadata.chatKind` 派生；正文始终显示去前缀后的内容，复制时再恢复 `$skill` 前缀。
 
 ## 2026-06-02 09:48 - US-001
 - 实现了 `/api/agent/runs/stream` fake runtime，支持 `run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`done`、`needs_input` 和 `error` 终态。
@@ -93,4 +94,26 @@ Source: prd.json
     - 当前 WSL 里后台起 Next dev 需要用长会话或 `tee` 持有进程；简单的 shell 后台 `&` 很容易随父 shell 退出，导致 Playwright 等不到 8502。
   - 有用的上下文（例如，"评估面板在 component X 中"）
     - `frontend/e2e/test_agent_run_chat_panel.spec.ts` 已经有一套 seed `sessionStorage` + route stub 的 fake agent run harness，后续 capability chip、thinking card 和 edit flow 可以继续复用。
+---
+
+## 2026-06-02 12:43 - US-005
+- 实现了用户消息 capability chip：当 `chatKind` 为 `rewrite` 或 `edit` 时，消息气泡显示对应 chip，正文统一去掉 `$rewrite`、`/rewrite`、`[$rewrite]` 等回放前缀。
+- 调整了用户消息复制逻辑，复制文本改为基于 `metadata.chatKind` 恢复 `$skill + 正文` 的可回放格式；普通消息继续复制原正文。
+- 补充了 `MessageList` 单测与 Playwright 验证，覆盖 chip 显示、前缀清洗、复制回放文本和真实页面发送 `$rewrite 改写第三包` 的闭环，并保存截图与日志证据。
+- 更改的文件
+  - `frontend/components/chat/MessageList.tsx`
+  - `frontend/__tests__/unit/components/chat/test_message_list.test.tsx`
+  - `frontend/e2e/test_agent_run_chat_panel.spec.ts`
+  - `tasks/agent-run-skill-chat-refactor/prd.json`
+  - `tasks/agent-run-skill-chat-refactor/progress.txt`
+  - `tasks/agent-run-skill-chat-refactor/screenshots/us-005-capability-chip.png`
+  - `tasks/agent-run-skill-chat-refactor/logs/us-005-dev-server.log`
+  - `tasks/agent-run-skill-chat-refactor/logs/us-005-playwright.log`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - capability chip 这类一次性聊天能力标记，最好只把规范化后的正文存进消息内容，回放所需前缀通过元数据恢复，避免 UI 和复制逻辑分叉。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - `MessageList` 的用户消息复制回调用了 `metadata.chatKind` 后，要把派生值提到 `useCallback` 外部，否则 React Compiler 的 `preserve-manual-memoization` 会直接让 `eslint` 失败。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - 真实页面里的复制按钮默认隐藏在 `user-message-frame` hover/focus 态下；Playwright 验证前需要先 `hover()` 才能稳定点击。
 ---

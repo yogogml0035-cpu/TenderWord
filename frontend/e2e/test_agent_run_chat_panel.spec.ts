@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const conversationId = 'conv-agent-run-chat-panel';
 const stableInstanceId = 'agent-run-chat-panel-instance';
+const us005ScreenshotPath = '../tasks/agent-run-skill-chat-refactor/screenshots/us-005-capability-chip.png';
 
 function toNdjsonLines(events: Array<Record<string, unknown>>): string {
   return `${events.map((event) => JSON.stringify(event)).join('\n')}\n`;
@@ -70,6 +71,24 @@ async function stubConversationHeartbeat(page: Page) {
           rewrite_available: true,
         },
       }),
+    });
+  });
+}
+
+async function stubClipboard(page: Page) {
+  await page.addInitScript(() => {
+    const clipboardState = { text: '' };
+    Object.defineProperty(window, '__testClipboard', {
+      configurable: true,
+      value: clipboardState,
+    });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          clipboardState.text = text;
+        },
+      },
     });
   });
 }
@@ -362,6 +381,81 @@ test.describe('Agent run chat panel', () => {
       },
     });
     expect(taskRequests).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test('shows rewrite capability chips and restores the replay prefix when copying user messages', async ({
+    page,
+  }) => {
+    const consoleErrors: string[] = [];
+    let agentRunPayload: Record<string, unknown> | null = null;
+
+    page.on('console', (message) => {
+      if (message.type() === 'error') {
+        consoleErrors.push(message.text());
+      }
+    });
+    page.on('pageerror', (error) => {
+      consoleErrors.push(error.message);
+    });
+
+    await seedConversation(page);
+    await stubConversationHeartbeat(page);
+    await stubClipboard(page);
+
+    await page.route('**/api/agent/runs/stream', async (route) => {
+      agentRunPayload = (await route.request().postDataJSON()) as Record<string, unknown>;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/x-ndjson',
+        body: toNdjsonLines([
+          {
+            event: 'done',
+            data: {
+              run_id: 'run-user-capability-chip',
+              message: 'rewrite 任务需求已收到。',
+              selected_skill: 'rewrite',
+            },
+          },
+        ]),
+      });
+    });
+
+    await page.goto('/tender');
+    await expect(page.getByRole('heading', { name: 'US003-001' })).toBeVisible();
+
+    const textarea = page.getByPlaceholder('输入文字并发送即可对话...');
+    await textarea.fill('$rewrite 改写第三包');
+    await page.getByTestId('chat-send-button').click();
+
+    await expect(page.getByTestId('user-message-capability-chip-rewrite')).toBeVisible();
+    await expect(page.getByTestId('user-message-text')).toHaveText('改写第三包');
+    await expect(page.getByText('rewrite 任务需求已收到。')).toBeVisible();
+
+    await page.getByTestId('user-message-frame').hover();
+    await page.getByRole('button', { name: '复制用户消息' }).click();
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as Window & {
+                __testClipboard?: { text: string };
+              }
+            ).__testClipboard?.text || ''
+        )
+      )
+      .toBe('$rewrite 改写第三包');
+
+    await page.screenshot({ path: us005ScreenshotPath });
+
+    expect(agentRunPayload).toMatchObject({
+      conversation_id: conversationId,
+      message: '改写第三包',
+      model: 'deepseek',
+      selected_skills: ['rewrite'],
+    });
     expect(consoleErrors).toEqual([]);
   });
 });

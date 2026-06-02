@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MessageList } from '@/components/chat/MessageList';
-import type { Message } from '@/types/chat';
+import type { ChatMessageKind, Message } from '@/types/chat';
 
 function createTaskMessages(): Message[] {
   return [
@@ -107,7 +107,12 @@ function createStyleWritebackTaskMessages(): Message[] {
   return messages;
 }
 
-function createUserMessage(content = '你好'): Message[] {
+function createUserMessage(
+  content = '你好',
+  options?: {
+    chatKind?: ChatMessageKind;
+  }
+): Message[] {
   return [
     {
       id: 'msg-user',
@@ -116,6 +121,11 @@ function createUserMessage(content = '你好'): Message[] {
       content,
       timestamp: 1,
       status: 'sent',
+      metadata: options?.chatKind
+        ? {
+            chatKind: options.chatKind,
+          }
+        : undefined,
     },
   ];
 }
@@ -333,6 +343,7 @@ describe('MessageList', () => {
     );
     expect(screen.getByTestId('user-message-actions')).toHaveClass('opacity-0', 'pointer-events-none');
     expect(screen.getByTestId('user-message-time')).toHaveClass('opacity-100');
+    expect(screen.queryByTestId('user-message-capability-chip-rewrite')).not.toBeInTheDocument();
   });
 
   it('copies the user message from the inline copy button', async () => {
@@ -343,6 +354,27 @@ describe('MessageList', () => {
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith('请复制这段内容');
+    });
+  });
+
+  it('renders a rewrite capability chip and strips replay prefixes from the user bubble', () => {
+    render(
+      <MessageList messages={createUserMessage('[$rewrite] 改写第三包', { chatKind: 'rewrite' })} />
+    );
+
+    expect(screen.getByTestId('user-message-capability-chip-rewrite')).toHaveTextContent('rewrite');
+    expect(screen.getByTestId('user-message-text')).toHaveTextContent('改写第三包');
+    expect(screen.getByTestId('user-message-text')).not.toHaveTextContent('[$rewrite]');
+  });
+
+  it('copies rewrite user messages with the replayable $skill prefix restored', async () => {
+    render(<MessageList messages={createUserMessage('改写第三包', { chatKind: 'rewrite' })} />);
+
+    fireEvent.mouseEnter(screen.getByTestId('user-message-frame'));
+    fireEvent.click(screen.getByRole('button', { name: '复制用户消息' }));
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('$rewrite 改写第三包');
     });
   });
 
