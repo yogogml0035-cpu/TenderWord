@@ -4,6 +4,7 @@ const conversationId = 'conv-agent-run-chat-panel';
 const stableInstanceId = 'agent-run-chat-panel-instance';
 const us005ScreenshotPath = '../tasks/agent-run-skill-chat-refactor/screenshots/us-005-capability-chip.png';
 const us006ScreenshotPath = '../tasks/agent-run-skill-chat-refactor/screenshots/us-006-thinking-card.png';
+const us010ScreenshotPath = '../tasks/agent-run-skill-chat-refactor/screenshots/us-010-edit-context.png';
 
 function toNdjsonLines(events: Array<Record<string, unknown>>): string {
   return `${events.map((event) => JSON.stringify(event)).join('\n')}\n`;
@@ -12,11 +13,12 @@ function toNdjsonLines(events: Array<Record<string, unknown>>): string {
 async function seedConversation(
   page: Page,
   options?: {
+    draft?: Record<string, unknown>;
     messages?: Array<Record<string, unknown>>;
   }
 ) {
   await page.addInitScript(
-    ({ conversationId: seededConversationId, messages }) => {
+    ({ conversationId: seededConversationId, draft, messages }) => {
       window.sessionStorage.setItem(
         'chat-storage',
         JSON.stringify({
@@ -43,6 +45,7 @@ async function seedConversation(
                 fund_lx: 0,
                 model: 'deepseek',
                 tender_fetch: { status: 'success' },
+                ...(draft || {}),
               },
             },
           },
@@ -52,6 +55,7 @@ async function seedConversation(
     },
     {
       conversationId,
+      draft: options?.draft || {},
       messages: options?.messages || [],
     }
   );
@@ -134,7 +138,7 @@ test.describe('Agent run chat panel', () => {
     await page.goto('/tender');
     await expect(page.getByRole('heading', { name: 'US003-001' })).toBeVisible();
 
-    const textarea = page.getByPlaceholder('输入文字并发送即可对话...');
+    const textarea = page.getByPlaceholder('输入修改要求，系统将只修改当前锚点区正文...');
     await textarea.fill('/');
     await expect(page.getByTestId('chat-skill-picker')).toBeVisible();
 
@@ -267,7 +271,7 @@ test.describe('Agent run chat panel', () => {
     await page.getByPlaceholder('输入文字并发送即可对话...').fill('请帮我改写第三包');
     await page.getByTestId('chat-send-button').click();
 
-    await expect(page.getByText('修改进度')).toBeVisible();
+    await expect(page.getByText('进度日志')).toBeVisible();
     await expect(page.getByText('AI 修改内容')).toBeVisible();
     await expect(page.getByText('请帮我改写第三包')).toBeVisible();
 
@@ -430,7 +434,7 @@ test.describe('Agent run chat panel', () => {
     await expect(page.getByTestId('agent-thinking-stage-summary')).toContainText(
       '已创建 rewrite 任务，后续进度由任务卡继续展示。'
     );
-    await expect(page.getByText('修改进度')).toBeVisible();
+    await expect(page.getByText('进度日志')).toBeVisible();
     await expect(page.getByText('AI 修改内容')).toBeVisible();
 
     await expect
@@ -536,6 +540,220 @@ test.describe('Agent run chat panel', () => {
       },
     });
     expect(taskRequests).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test('sends controlled edit_context for explicit edit skill and renders the accepted task card', async ({
+    page,
+  }) => {
+    const consoleErrors: string[] = [];
+    const taskRequests: string[] = [];
+    let agentRunPayload: Record<string, unknown> | null = null;
+
+    page.on('console', (message) => {
+      if (message.type() === 'error') {
+        consoleErrors.push(message.text());
+      }
+    });
+    page.on('pageerror', (error) => {
+      consoleErrors.push(error.message);
+    });
+
+    await seedConversation(page, {
+      draft: {
+        input_mode: 'edit',
+        edit_file: {
+          id: 'edit-seeded-file',
+          file_path: 'D:/UploadFiles/edit-source.docx',
+          file_name: 'edit-source.docx',
+          original_name: 'edit-source.docx',
+          size: 256,
+          upload_time: '2026-06-02T16:20:00.000Z',
+        },
+        insertion_config: {
+          before_text: '第三章 采购需求',
+          after_text: '第四章 响应文件有关格式',
+        },
+        tender_data: {
+          project_name: 'US010-EDIT',
+          project_number: 'US010-EDIT-001',
+          project_content: '原始内容',
+          bzj_rule: '',
+          buyer_name: '示例单位',
+          project_zbr_xbr: '',
+          zbr_xbr_tel: '',
+          zbr_pinyin: '',
+          shell_start_date: '',
+          shell_end_date: '',
+          submit_date: '',
+          platform: '',
+          service_fee: '',
+          tender_lx: 0,
+          fund_source_lx: 0,
+        },
+      },
+    });
+    await stubConversationHeartbeat(page);
+
+    await page.route('**/api/tasks/**', async (route) => {
+      taskRequests.push(route.request().url());
+      await route.fulfill({
+        status: 418,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: false,
+          error: {
+            code: 'UNEXPECTED_FAKE_TASK_REQUEST',
+            message: 'fake task should not be polled',
+          },
+        }),
+      });
+    });
+
+    await page.route('**/api/agent/runs/stream', async (route) => {
+      agentRunPayload = (await route.request().postDataJSON()) as Record<string, unknown>;
+      const contextSnapshot = agentRunPayload?.context_snapshot as
+        | Record<string, unknown>
+        | undefined;
+      const editContext = contextSnapshot?.edit_context as Record<string, unknown> | undefined;
+      const insertionConfig = editContext?.insertion_config as Record<string, unknown> | undefined;
+      const hasFullEditContext =
+        editContext?.form_type === 'xjcg_tender' &&
+        editContext?.tender_lx === 0 &&
+        editContext?.fund_source_lx === 0 &&
+        insertionConfig?.before_text === '第三章 采购需求' &&
+        insertionConfig?.after_text === '第四章 响应文件有关格式';
+
+      if (!hasFullEditContext) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/x-ndjson',
+          body: toNdjsonLines([
+            {
+              event: 'needs_input',
+              data: {
+                run_id: 'run-edit-needs-context',
+                message: '请先补全当前页面的 edit 上下文。',
+                selected_skill: 'edit',
+                missing_requirements: ['edit_context'],
+              },
+            },
+          ]),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/x-ndjson',
+        body: toNdjsonLines([
+          {
+            event: 'run_started',
+            data: {
+              run_id: 'run-edit-context-success',
+              conversation_id: conversationId,
+              model: 'deepseek',
+              runtime: 'fake',
+              selected_skills: ['edit'],
+            },
+          },
+          {
+            event: 'thinking_stage',
+            data: {
+              run_id: 'run-edit-context-success',
+              stage: 'guard',
+              label: '检查上下文',
+              status: 'completed',
+              summary: '检测到当前会话已有上传文件和完整 edit 上下文。',
+              selected_skill: 'edit',
+              guard_result: 'passed',
+            },
+          },
+          {
+            event: 'tool_call',
+            data: {
+              run_id: 'run-edit-context-success',
+              tool_name: 'create_edit_task_tool',
+              status: 'completed',
+              summary: 'fake runtime 已调用 create_edit_task_tool。',
+              task_kind: 'edit',
+            },
+          },
+          {
+            event: 'task_accepted',
+            data: {
+              run_id: 'run-edit-context-success',
+              task_id: 'fake-edit-task-e2e',
+              task_kind: 'edit',
+              status: 'queued',
+              queue_position: 0,
+              waiting_count: 0,
+            },
+          },
+          {
+            event: 'done',
+            data: {
+              run_id: 'run-edit-context-success',
+              message: '已为你创建 edit 任务。',
+              task_id: 'fake-edit-task-e2e',
+              selected_skill: 'edit',
+            },
+          },
+        ]),
+      });
+    });
+
+    await page.goto('/tender');
+    await expect(page.getByRole('heading', { name: 'US003-001' })).toBeVisible();
+
+    const textarea = page.getByPlaceholder('输入修改要求，系统将只修改当前锚点区正文...');
+    await textarea.fill('/');
+    await expect(page.getByTestId('chat-skill-picker')).toBeVisible();
+    await page.getByTestId('chat-skill-option-edit').click();
+    await expect(page.getByTestId('chat-selected-skill-edit')).toBeVisible();
+
+    await textarea.fill('请把交付日期改成合同签订后 30 天内');
+    await page.getByTestId('chat-send-button').click();
+
+    await expect(page.getByTestId('user-message-capability-chip-edit')).toBeVisible();
+    await expect(page.getByText('进度日志')).toBeVisible();
+    await expect(page.getByText('AI 修改内容')).toBeVisible();
+
+    await expect
+      .poll(() => taskRequests.length, {
+        timeout: 1000,
+      })
+      .toBe(0);
+
+    await page.screenshot({ path: us010ScreenshotPath });
+
+    expect(agentRunPayload).toMatchObject({
+      conversation_id: conversationId,
+      message: '请把交付日期改成合同签订后 30 天内',
+      model: 'deepseek',
+      selected_skills: ['edit'],
+      context_snapshot: {
+        rewrite_available: false,
+        uploaded_files: [
+          {
+            file_path: 'D:/UploadFiles/edit-source.docx',
+            file_name: 'edit-source.docx',
+          },
+        ],
+        edit_context: {
+          form_type: 'xjcg_tender',
+          insertion_config: {
+            before_text: '第三章 采购需求',
+            after_text: '第四章 响应文件有关格式',
+          },
+          tender_lx: 0,
+          fund_source_lx: 0,
+          tender_data_snapshot: {
+            project_name: 'US010-EDIT',
+          },
+        },
+      },
+    });
     expect(consoleErrors).toEqual([]);
   });
 

@@ -16,7 +16,12 @@ import {
   streamAgentRun,
   uploadFile,
 } from '@/lib/api';
-import type { AgentRunEvent, AgentSkill, EditTaskRequest } from '@/types/api';
+import type {
+  AgentRunContextSnapshot,
+  AgentRunEvent,
+  AgentSkill,
+  EditTaskRequest,
+} from '@/types/api';
 import type { AgentThinkingCardState, ChatMessageKind, Message } from '@/types/chat';
 import type { ModelType } from '@/components/forms/ModelSelector';
 import type { ConversationDraftFile, ConversationFormDraft } from '@/stores/chatStore';
@@ -54,20 +59,6 @@ function hasRewriteContext(messages: Message[]): boolean {
   return false;
 }
 
-function buildAgentRunContextSnapshot(messages: Message[], draft: ConversationFormDraft | null) {
-  return {
-    rewrite_available: hasRewriteContext(messages),
-    uploaded_files: draft?.edit_file
-      ? [
-          {
-            file_path: draft.edit_file.file_path,
-            file_name: draft.edit_file.original_name || draft.edit_file.file_name,
-          },
-        ]
-      : [],
-  };
-}
-
 function getConversationMessagesById(conversationId: string): Message[] {
   const state = useChatStore.getState();
   return state.conversations.find((item) => item.id === conversationId)?.messages || [];
@@ -90,6 +81,67 @@ function getSelectedSkillChatKind(skills: AgentSkill[]): ChatMessageKind {
     return selectedSkill;
   }
   return 'normal';
+}
+
+function buildAgentRunEditContext(
+  tenderType: 'xjcg' | 'gngk' | 'gjgk',
+  draft: ConversationFormDraft | null,
+  selectedSkills: AgentSkill[]
+): AgentRunContextSnapshot['edit_context'] {
+  const shouldIncludeEditContext =
+    selectedSkills.includes('edit') || draft?.input_mode === 'edit' || !!draft?.edit_file;
+  if (!shouldIncludeEditContext) {
+    return undefined;
+  }
+
+  const editContext: NonNullable<AgentRunContextSnapshot['edit_context']> = {};
+  const formType = resolveEditFormType(tenderType, draft);
+  if (formType) {
+    editContext.form_type = formType;
+  }
+
+  if (draft?.insertion_config) {
+    editContext.insertion_config = {
+      before_text: draft.insertion_config.before_text,
+      after_text: draft.insertion_config.after_text,
+    };
+  }
+
+  if (draft?.tender_lx === 0 || draft?.tender_lx === 1 || draft?.tender_lx === 2) {
+    editContext.tender_lx = draft.tender_lx;
+  }
+
+  if (draft?.fund_lx === 0 || draft?.fund_lx === 1) {
+    editContext.fund_source_lx = draft.fund_lx;
+  }
+
+  if (draft?.tender_data) {
+    editContext.tender_data_snapshot = draft.tender_data;
+  }
+
+  return editContext;
+}
+
+function buildAgentRunContextSnapshot(
+  messages: Message[],
+  tenderType: 'xjcg' | 'gngk' | 'gjgk',
+  draft: ConversationFormDraft | null,
+  selectedSkills: AgentSkill[]
+): AgentRunContextSnapshot {
+  const editContext = buildAgentRunEditContext(tenderType, draft, selectedSkills);
+
+  return {
+    rewrite_available: hasRewriteContext(messages),
+    uploaded_files: draft?.edit_file
+      ? [
+          {
+            file_path: draft.edit_file.file_path,
+            file_name: draft.edit_file.original_name || draft.edit_file.file_name,
+          },
+        ]
+      : [],
+    ...(editContext ? { edit_context: editContext } : {}),
+  };
 }
 
 function toConversationDraftFile(uploadedFile: {
@@ -442,7 +494,12 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         options.selectedSkillsOverride ?? draftForRequest?.selected_skills
       );
       const selectedSkillChatKind = getSelectedSkillChatKind(selectedSkillsForRequest);
-      const contextSnapshot = buildAgentRunContextSnapshot(existingMessages, draftForRequest);
+      const contextSnapshot = buildAgentRunContextSnapshot(
+        existingMessages,
+        conversation.tenderType,
+        draftForRequest,
+        selectedSkillsForRequest
+      );
       const baseAiMetadata = {
         chatKind: selectedSkillChatKind,
         chatPrompt: prompt,

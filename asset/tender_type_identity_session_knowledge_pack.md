@@ -200,7 +200,7 @@
 
 - `chat_input` 在普通聊天发送或显式 edit 任务创建后立即清空。
 - `/` 只负责打开 capability picker；`$rewrite` / `$edit` 以及手动输入 `/rewrite` / `/edit` 都必须在 `ChatInput` 当场解析成 `selected_skills + chat_input`，不能把命令前缀留在持久化草稿或用户消息正文里。
-- 显式 capability 选择优先于旧聊天分支：当 `selected_skills=["edit"]` 且当前 draft 已有 `input_mode=edit` / `edit_file` 时，`ChatPanel` 仍应走 `/api/agent/runs/stream`，把上传文件上下文放进 `context_snapshot.uploaded_files`；只有没有显式 capability 时，旧的直连 `createEditTask()` 才继续服务“上传文件修改”入口。
+- 显式 capability 选择优先于旧聊天分支：当 `selected_skills=["edit"]` 且当前 draft 已有 `input_mode=edit` / `edit_file` 时，`ChatPanel` 仍应走 `/api/agent/runs/stream`，并把上传文件、`form_type`、锚点、`tender_lx/fund_source_lx` 与可选 `tender_data_snapshot` 一并投影到 `context_snapshot.uploaded_files + context_snapshot.edit_context`；只有没有显式 capability 时，旧的直连 `createEditTask()` 才继续服务“上传文件修改”入口。
 - `pending_rewrite_prompt` / `pending_edit_prompt` 只用于排队阶段取消或失败后的恢复回填，不是正常发送后的延迟清空机制。
 - rewrite 只有在 `/api/user/stream` 返回 `task_accepted` 后写入 pending rewrite 字段。
 - edit 在 `createEditTask()` 成功后写入 pending edit 字段；成功完成时把最新输出文件回写到 `edit_file`。

@@ -361,9 +361,18 @@ export interface AgentRunUploadedFile {
   file_name?: string | null;
 }
 
+export interface AgentRunEditContextSnapshot {
+  form_type?: EditTaskRequest['form_type'];
+  insertion_config?: InsertionConfig;
+  tender_lx?: EditTaskRequest['tender_lx'];
+  fund_source_lx?: EditTaskRequest['fund_source_lx'];
+  tender_data_snapshot?: TenderData;
+}
+
 export interface AgentRunContextSnapshot {
   rewrite_available: boolean;
   uploaded_files: AgentRunUploadedFile[];
+  edit_context?: AgentRunEditContextSnapshot;
 }
 
 export interface AgentRunStreamRequest {

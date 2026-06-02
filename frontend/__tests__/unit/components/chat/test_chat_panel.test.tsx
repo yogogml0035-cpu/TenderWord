@@ -496,6 +496,29 @@ describe('ChatPanel', () => {
             size: 128,
             upload_time: new Date().toISOString(),
           },
+          tender_lx: 0,
+          fund_lx: 1,
+          insertion_config: {
+            before_text: '第三章 采购需求',
+            after_text: '第四章 响应文件有关格式',
+          },
+          tender_data: {
+            project_name: '示例项目',
+            project_number: 'ZBGG-2026-001',
+            project_content: '原始内容',
+            bzj_rule: '',
+            buyer_name: '示例单位',
+            project_zbr_xbr: '',
+            zbr_xbr_tel: '',
+            zbr_pinyin: '',
+            shell_start_date: '',
+            shell_end_date: '',
+            submit_date: '',
+            platform: '',
+            service_fee: '',
+            tender_lx: 0,
+            fund_source_lx: 1,
+          },
         },
       },
     }));
@@ -523,6 +546,19 @@ describe('ChatPanel', () => {
             file_name: 'edit.docx',
           },
         ],
+        edit_context: {
+          form_type: 'xjcg_tender',
+          insertion_config: {
+            before_text: '第三章 采购需求',
+            after_text: '第四章 响应文件有关格式',
+          },
+          tender_lx: 0,
+          fund_source_lx: 1,
+          tender_data_snapshot: expect.objectContaining({
+            project_name: '示例项目',
+            fund_source_lx: 1,
+          }),
+        },
       },
     });
   });

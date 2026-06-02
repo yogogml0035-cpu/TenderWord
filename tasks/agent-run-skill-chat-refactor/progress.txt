@@ -19,6 +19,7 @@ Source: prd.json
 - 当某个 skill 已迁移到 DeepAgents guide、不再携带旧 workflow frontmatter 时，验证指令文本的测试应直接读取 `SKILL.md`，不要再经过 legacy `backend.skills.loader`。
 - 旧 task skill runtime 仍依赖 `SkillGraph` 时，可以让 loader 在检测到 `scripts/workflow.py` 后按约定补出 task binding 和 `scripts.workflow:get_workflow`，这样 `SKILL.md` 可以只保留 DeepAgents guide 所需的最小 frontmatter。
 - agent run 要复用 edit 这类显式任务创建能力时，受控上下文应拆成 `uploaded_files` + `edit_context`：前者只负责文件路径，后者承载 `form_type`、锚点和必要 draft 字段，方便 guard 精确区分“缺文件”和“缺页面上下文”。
+- `ChatInput` 进入 `input_mode=edit` 且存在 `edit_file` 后会切换成 edit placeholder；Playwright 断言 textarea 时不要硬编码普通聊天 placeholder，优先按当前模式文案或稳定 testid 定位。
 - 当同一个 `SKILL.md` 既要给 DeepAgents 当 guide，又要继续被旧 `SkillGraph` 当正文改写指令读取时，文档里必须显式拆分“agent run 创建任务规则”和“后台 task 正文改写规则”，否则前台 guide 很容易覆盖掉后台正文契约。
 
 ## 2026-06-02 15:30 - US-009
@@ -275,4 +276,27 @@ Source: prd.json
     - 只移除 `edit/SKILL.md` 的 legacy frontmatter 还不够；如果不保留后台 task 的正文改写指令段，`edit_text` 节点会直接读到 DeepAgents guide，导致实际 edit 任务提示词漂移。
   - 有用的上下文（例如，"评估面板在 component X 中"）
     - `AgentRunContextSnapshot.edit_context` 是当前 edit agent run 的唯一受控表单上下文入口，后续前端把上传文件修改入口映射到 agent run 时，应优先从这里对齐 payload，而不是重新拼一套后端私有字段。
+---
+
+## 2026-06-02 16:44 - US-010
+- 修复了显式 `/edit` / `$edit` 的 agent run payload，`ChatPanel` 现在会从当前会话 draft 受控投影 `form_type`、`insertion_config`、`tender_lx/fund_source_lx` 和可选 `tender_data_snapshot` 到 `context_snapshot.edit_context`，不再只发送 `uploaded_files`。
+- 扩展前端 `AgentRunContextSnapshot` 类型并补充单测、Playwright 回归：用例会在缺少 `edit_context` 时返回 `needs_input`，完整上下文时返回 `task_accepted`，从而直接拦住这次回归。
+- 更新类型身份与会话知识包，明确显式 edit capability 必须携带 `context_snapshot.uploaded_files + context_snapshot.edit_context` 的受控上下文契约。
+- 更改的文件
+  - `asset/tender_type_identity_session_knowledge_pack.md`
+  - `frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
+  - `frontend/components/chat/ChatPanel.tsx`
+  - `frontend/e2e/test_agent_run_chat_panel.spec.ts`
+  - `frontend/types/api.ts`
+  - `tasks/agent-run-skill-chat-refactor/logs/us-010-playwright.log`
+  - `tasks/agent-run-skill-chat-refactor/prd.json`
+  - `tasks/agent-run-skill-chat-refactor/progress.txt`
+  - `tasks/agent-run-skill-chat-refactor/screenshots/us-010-edit-context.png`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - 显式 edit capability 走 agent run 时，前端请求必须同时带 `uploaded_files` 和 `edit_context`；这样后端 guard 才能精确区分缺文件、缺锚点和缺表单字段。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - `ChatInput` 一旦进入 edit 模式会切换 placeholder，Playwright 不能继续用普通聊天文案去定位 textarea。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - 当前 edit fake `task_accepted` 路径在消息区展示的是 `进度日志 + AI 修改内容` 卡片组合，断言不要复用 rewrite 场景里的 `修改进度` 文案。
 ---
