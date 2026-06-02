@@ -7,6 +7,7 @@ import pytest
 from backend.agents.task_context_assistant import (
     AgentRunAuditLogger,
     TaskContextAssistantToolContext,
+    create_edit_task_tool,
     create_read_current_conversation_summary_tool,
     create_read_current_task_public_summary_tool,
     create_rewrite_task_tool,
@@ -60,6 +61,80 @@ async def test_create_rewrite_task_tool_reuses_document_service() -> None:
     }
     assert result["task_id"] == "rewrite-task-42"
     assert result["task_kind"] == "rewrite"
+
+@pytest.mark.asyncio
+async def test_create_edit_task_tool_reuses_document_service() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeDocumentService:
+        async def create_edit_task(self, request) -> GenerateResponse:
+            captured.update(request.model_dump(mode="json"))
+            return GenerateResponse(
+                success=True,
+                task_id="edit-task-42",
+                message="queued",
+                task_kind=TaskKind.EDIT,
+                status=TaskStatus.QUEUED,
+                queue_position=1,
+                waiting_count=0,
+            )
+
+    tool = create_edit_task_tool(
+        TaskContextAssistantToolContext(document_service=FakeDocumentService())
+    )
+
+    result = await tool.ainvoke(
+        {
+            "conversation_id": "conv-42",
+            "form_type": "xjcg_tender",
+            "model": "deepseek",
+            "edit_prompt": "把第三章采购需求补充完整",
+            "file_path": "D:/UploadFiles/edit.docx",
+            "insertion_config": {
+                "before_text": "第三章 采购需求",
+                "after_text": "第四章 响应文件有关格式",
+            },
+            "tender_lx": 0,
+            "fund_source_lx": 1,
+            "tender_data_snapshot": {
+                "project_name": "测试项目",
+                "project_number": "XJ-001",
+                "project_content": "采购内容",
+                "buyer_name": "采购人",
+                "bzj_rule": "规则",
+                "project_zbr_xbr": "张三",
+                "zbr_xbr_tel": "13800000000",
+                "zbr_pinyin": "zhangsan",
+                "shell_start_date": "2026-06-01",
+                "shell_end_date": "2026-06-08",
+                "submit_date": "2026-06-09",
+                "platform": "平台",
+                "service_fee": "1000",
+                "tender_lx": 0,
+                "fund_source_lx": 1,
+            },
+        }
+    )
+
+    assert tool.name == "create_edit_task_tool"
+    assert captured["conversation_id"] == "conv-42"
+    assert captured["form_type"] == "xjcg_tender"
+    assert captured["model"] == "deepseek"
+    assert captured["edit_prompt"] == "把第三章采购需求补充完整"
+    assert captured["file_path"] == "D:/UploadFiles/edit.docx"
+    assert captured["insertion_config"] == {
+        "before_text": "第三章 采购需求",
+        "after_text": "第四章 响应文件有关格式",
+    }
+    assert captured["tender_lx"] == 0
+    assert captured["fund_source_lx"] == 1
+    assert isinstance(captured["tender_data_snapshot"], dict)
+    assert captured["tender_data_snapshot"]["project_name"] == "测试项目"
+    assert captured["tender_data_snapshot"]["project_number"] == "XJ-001"
+    assert captured["tender_data_snapshot"]["tender_lx"] == 0
+    assert captured["tender_data_snapshot"]["fund_source_lx"] == 1
+    assert result["task_id"] == "edit-task-42"
+    assert result["task_kind"] == "edit"
 
 
 @pytest.mark.asyncio

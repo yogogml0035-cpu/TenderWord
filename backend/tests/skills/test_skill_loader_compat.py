@@ -20,3 +20,21 @@ def test_rewrite_skill_graph_compiles_without_legacy_frontmatter() -> None:
     compiled_graph = graph.compile()
 
     assert compiled_graph is not None
+
+def test_edit_skill_loader_infers_task_runtime_defaults() -> None:
+    definitions = {definition.name: definition for definition in load_skill_definitions()}
+
+    edit = definitions["edit"]
+
+    assert edit.executor_binding is not None
+    assert edit.executor_binding.executor_kind == "task"
+    assert edit.executor_binding.dispatch_key == "edit"
+    assert edit.executor_binding.route_literal == "edit"
+    assert edit.workflow_entry == "scripts.workflow:get_workflow"
+
+def test_edit_skill_graph_compiles_without_legacy_frontmatter() -> None:
+    graph = SkillGraph.for_skill("edit")()
+
+    compiled_graph = graph.compile()
+
+    assert compiled_graph is not None

@@ -38,9 +38,11 @@ from .generate import (
     GenerateRequest,
     GenerateResponse,
     GenerateResult,
+    InsertionConfig,
     LLMModel,
 )
 from .agent_run import (
+    AgentRunEditContextSnapshot,
     AgentNeedsInputEventData,
     AgentRunContextSnapshot,
     AgentRunDoneEventData,
@@ -134,6 +136,7 @@ __all__ = [
     # 生成相关
     "LLMModel",
     "FormType",
+    "InsertionConfig",
     "CommentGenerationMode",
     "GenerationMode",
     "GenerationStyle",
@@ -147,6 +150,7 @@ __all__ = [
     "FormRequirementsResponse",
     "AgentSkill",
     "AgentRunUploadedFile",
+    "AgentRunEditContextSnapshot",
     "AgentRunContextSnapshot",
     "AgentRunStreamRequest",
     "AgentRunStartedEventData",

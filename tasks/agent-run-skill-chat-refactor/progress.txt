@@ -18,6 +18,8 @@ Source: prd.json
 - task-context assistant 的 tool 如果要复用 `DocumentService`，优先在 executor factory 内部延迟导入 `get_document_service()`；模块顶层直接 import 容易触发 `document_service -> backend.agents` 的循环依赖。
 - 当某个 skill 已迁移到 DeepAgents guide、不再携带旧 workflow frontmatter 时，验证指令文本的测试应直接读取 `SKILL.md`，不要再经过 legacy `backend.skills.loader`。
 - 旧 task skill runtime 仍依赖 `SkillGraph` 时，可以让 loader 在检测到 `scripts/workflow.py` 后按约定补出 task binding 和 `scripts.workflow:get_workflow`，这样 `SKILL.md` 可以只保留 DeepAgents guide 所需的最小 frontmatter。
+- agent run 要复用 edit 这类显式任务创建能力时，受控上下文应拆成 `uploaded_files` + `edit_context`：前者只负责文件路径，后者承载 `form_type`、锚点和必要 draft 字段，方便 guard 精确区分“缺文件”和“缺页面上下文”。
+- 当同一个 `SKILL.md` 既要给 DeepAgents 当 guide，又要继续被旧 `SkillGraph` 当正文改写指令读取时，文档里必须显式拆分“agent run 创建任务规则”和“后台 task 正文改写规则”，否则前台 guide 很容易覆盖掉后台正文契约。
 
 ## 2026-06-02 15:30 - US-009
 - 实现了 `backend/agents/task_context_assistant/logging.py`，为每次 agent run 写入 `backend/logs/agent-run-<run_id>.jsonl`，并对白名单字段统一做敏感信息 scrub。
@@ -244,4 +246,33 @@ Source: prd.json
     - 只修 `SkillGraph` 还不够，`generate_polished_text()` 这类节点也会通过 `get_skill_registry().get_definition()` 读取 skill instruction；loader 必须先能解析 guide-only 的 `SKILL.md`，否则任务会在真正进入节点前失败。
   - 有用的上下文（例如，"评估面板在 component X 中"）
     - 这条兼容层的最小验收是 `SkillGraph.for_skill(\"rewrite\")().compile()` 能通过，因为真实 rewrite 任务从队列线程启动后就是在这里首次触发 workflow 加载。
+---
+
+## 2026-06-02 16:03 - US-010
+- 实现了 `create_edit_task_tool` 和 `make_create_edit_task_executor`，让 task-context assistant 受控复用 `DocumentService.create_edit_task` 创建真实 edit 队列任务，不再在 agent run edit 分支里伪造 `task_id`。
+- 扩展了 `AgentRunContextSnapshot.edit_context`，把 `form_type`、锚点配置、`tender_lx/fund_source_lx` 和可选 `tender_data_snapshot` 纳入受控 edit 上下文；`AgentRunService` 现在会对缺上传文件、缺锚点、缺表单类型和缺 draft 字段分别返回 `needs_input`。
+- 将 `backend/skills/edit/SKILL.md` 改成 DeepAgents guide，并保留后台 edit task 的正文改写规则段，避免旧 `SkillGraph` 运行时失去“全文复制后局部修改”的输出约束；同时补充 loader / SkillGraph / agent run / tool 回归测试和共享运行时知识包。
+- 更改的文件
+  - `asset/shared_runtime_word_skill_knowledge_pack.md`
+  - `backend/agents/__init__.py`
+  - `backend/agents/task_context_assistant/__init__.py`
+  - `backend/agents/task_context_assistant/tools.py`
+  - `backend/models/__init__.py`
+  - `backend/models/agent_run.py`
+  - `backend/services/agent_run_service.py`
+  - `backend/skills/edit/SKILL.md`
+  - `backend/tests/agents/test_task_context_assistant_tools.py`
+  - `backend/tests/services/test_agent_run_service.py`
+  - `backend/tests/skills/test_skill_loader_compat.py`
+  - `backend/tests/skills/test_task_skill_instructions.py`
+  - `tasks/agent-run-skill-chat-refactor/prd.json`
+  - `tasks/agent-run-skill-chat-refactor/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - agent run 的 tool 层如果要复用已有显式请求模型，优先把 executor 设计成“接收结构化 kwargs -> 内部组装请求模型 -> 调用 DocumentService”，这样 `StructuredTool` 和 runtime service 可以共用同一套参数映射。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - edit 创建链路里的 `form_type` 与 `insertion_config` 在 Python 侧会以 `Enum` / Pydantic model 形态流动；测试如果直接按原始字符串或字典断言，很容易把正常实现误判成失败。
+    - 只移除 `edit/SKILL.md` 的 legacy frontmatter 还不够；如果不保留后台 task 的正文改写指令段，`edit_text` 节点会直接读到 DeepAgents guide，导致实际 edit 任务提示词漂移。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - `AgentRunContextSnapshot.edit_context` 是当前 edit agent run 的唯一受控表单上下文入口，后续前端把上传文件修改入口映射到 agent run 时，应优先从这里对齐 payload，而不是重新拼一套后端私有字段。
 ---

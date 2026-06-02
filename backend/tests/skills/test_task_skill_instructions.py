@@ -19,6 +19,10 @@ def test_rewrite_and_edit_instructions_preserve_full_output_scope() -> None:
 
     edit_instruction = _load_instruction("edit")
 
+    assert "create_edit_task_tool" in edit_instruction
+    assert "请先上传要修改的 Word 文件" in edit_instruction
+    assert "form_type" in edit_instruction
+    assert "insertion_config.before_text" in edit_instruction
     assert "输出范围默认必须等于" in edit_instruction
     assert "不能理解为只输出该范围" in edit_instruction
     assert "不得省略、裁剪或用省略号代替未修改内容" in edit_instruction
@@ -27,6 +31,15 @@ def test_rewrite_and_edit_instructions_preserve_full_output_scope() -> None:
 
 def test_rewrite_skill_guide_does_not_restore_legacy_workflow_frontmatter() -> None:
     skill_file = Path(__file__).resolve().parents[2] / "skills" / "rewrite" / "SKILL.md"
+    content = skill_file.read_text(encoding="utf-8")
+
+    assert "executor_kind:" not in content
+    assert "dispatch_key:" not in content
+    assert "route_literal:" not in content
+    assert "workflow_entry:" not in content
+
+def test_edit_skill_guide_does_not_restore_legacy_workflow_frontmatter() -> None:
+    skill_file = Path(__file__).resolve().parents[2] / "skills" / "edit" / "SKILL.md"
     content = skill_file.read_text(encoding="utf-8")
 
     assert "executor_kind:" not in content
