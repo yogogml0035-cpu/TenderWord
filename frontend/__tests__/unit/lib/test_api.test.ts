@@ -14,7 +14,6 @@ import {
   sendTaskHeartbeat,
   streamAgentRun,
   streamNdjson,
-  streamUserMessage,
   uploadFile,
 } from '@/lib/api';
 import type {
@@ -24,7 +23,6 @@ import type {
   EditTaskRequest,
   GenerateRequest,
   TemplateCandidateSelectRequest,
-  UserStreamEvent,
 } from '@/types/api';
 
 type FetchMock = jest.MockedFunction<typeof fetch>;
@@ -715,66 +713,8 @@ describe('API Client', () => {
     });
   });
 
-  describe('streamUserMessage', () => {
-    it('parses reply-route events and ignores unknown events', async () => {
-      globalThis.fetch = mockFetchStream([
-        JSON.stringify({ event: 'route', data: { route: 'reply' } }) + '\n',
-        JSON.stringify({ event: 'mystery', data: { ignored: true } }) + '\n',
-        JSON.stringify({ event: 'done', data: { content: '你好' } }) + '\n',
-      ]);
-
-      const events: UserStreamEvent[] = [];
-
-      await streamUserMessage(
-        {
-          conversation_id: 'conv-1',
-          model: 'deepseek',
-          messages: [{ role: 'user', content: '你好' }],
-        },
-        {
-          onEvent: (event) => {
-            events.push(event);
-          },
-        }
-      );
-
-      expect(events).toEqual([
-        { event: 'route', data: { route: 'reply' } },
-        { event: 'done', data: { content: '你好' } },
-      ]);
-    });
-
-    it('converts HTTP error payloads into ApiError', async () => {
-      globalThis.fetch = mockFetchStream([], {
-        ok: false,
-        status: 400,
-        json: {
-          detail: {
-            success: false,
-            error: {
-              code: 'REQ_MISSING_FIELD',
-              message: 'messages 不能为空',
-            },
-          },
-        },
-      });
-
-      await expect(
-        streamUserMessage({
-          conversation_id: 'conv-1',
-          model: 'deepseek',
-          messages: [{ role: 'user', content: '你好' }],
-        })
-      ).rejects.toMatchObject({
-        name: 'ApiError',
-        code: 'REQ_MISSING_FIELD',
-        status: 400,
-      });
-    });
-  });
-
   describe('streamAgentRun', () => {
-    it('parses typed agent run events and ignores unknown events', async () => {
+    it('parses ordinary assistant replies and ignores unknown events', async () => {
       globalThis.fetch = mockFetchStream([
         JSON.stringify({
           event: 'run_started',
@@ -787,38 +727,13 @@ describe('API Client', () => {
           },
         }) + '\n',
         JSON.stringify({
-          event: 'thinking_stage',
-          data: {
-            run_id: 'run-1',
-            stage: 'guard',
-            label: '检查前置条件',
-            status: 'completed',
-            summary: '已确认存在可改写上下文',
-            selected_skill: 'rewrite',
-            guard_result: 'passed',
-          },
-        }) + '\n',
-        JSON.stringify({ event: 'mystery', data: { ignored: true } }) + '\n',
-        JSON.stringify({
-          event: 'task_accepted',
-          data: {
-            run_id: 'run-1',
-            task_id: 'task-1',
-            task_kind: 'rewrite',
-            status: 'queued',
-            queue_position: 0,
-            waiting_count: 0,
-          },
-        }) + '\n',
-        JSON.stringify({
           event: 'done',
           data: {
             run_id: 'run-1',
-            message: '已创建改写任务',
-            task_id: 'task-1',
-            selected_skill: 'rewrite',
+            message: '你好，我可以继续帮你完善任务上下文。',
           },
         }) + '\n',
+        JSON.stringify({ event: 'mystery', data: { ignored: true } }) + '\n',
       ]);
 
       const events: AgentRunEvent[] = [];
@@ -841,17 +756,101 @@ describe('API Client', () => {
           },
         },
         {
-          event: 'thinking_stage',
+          event: 'done',
           data: {
             run_id: 'run-1',
-            stage: 'guard',
-            label: '检查前置条件',
-            status: 'completed',
-            summary: '已确认存在可改写上下文',
-            selected_skill: 'rewrite',
-            guard_result: 'passed',
+            message: '你好，我可以继续帮你完善任务上下文。',
           },
         },
+      ]);
+    });
+
+    it('parses needs_input follow-up events', async () => {
+      globalThis.fetch = mockFetchStream([
+        JSON.stringify({
+          event: 'run_started',
+          data: {
+            run_id: 'run-need-input',
+            conversation_id: 'conv-1',
+            model: 'deepseek',
+            runtime: 'fake',
+            selected_skills: ['edit'],
+          },
+        }) + '\n',
+        JSON.stringify({
+          event: 'needs_input',
+          data: {
+            run_id: 'run-need-input',
+            message: '请先上传要修改的 Word 文件。',
+            selected_skill: 'edit',
+            missing_requirements: ['uploaded_file'],
+          },
+        }) + '\n',
+      ]);
+
+      const events: AgentRunEvent[] = [];
+
+      await streamAgentRun(validAgentRunStreamRequest, {
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+
+      expect(events).toEqual([
+        {
+          event: 'run_started',
+          data: {
+            run_id: 'run-need-input',
+            conversation_id: 'conv-1',
+            model: 'deepseek',
+            runtime: 'fake',
+            selected_skills: ['edit'],
+          },
+        },
+        {
+          event: 'needs_input',
+          data: {
+            run_id: 'run-need-input',
+            message: '请先上传要修改的 Word 文件。',
+            selected_skill: 'edit',
+            missing_requirements: ['uploaded_file'],
+          },
+        },
+      ]);
+    });
+
+    it('parses task_accepted and error terminal events', async () => {
+      globalThis.fetch = mockFetchStream([
+        JSON.stringify({
+          event: 'task_accepted',
+          data: {
+            run_id: 'run-1',
+            task_id: 'task-1',
+            task_kind: 'rewrite',
+            status: 'queued',
+            queue_position: 0,
+            waiting_count: 0,
+          },
+        }) + '\n',
+        JSON.stringify({
+          event: 'error',
+          data: {
+            run_id: 'run-1',
+            code: 'AGENT_RUN_FAILED',
+            message: 'agent run 执行失败，请稍后重试',
+          },
+        }) + '\n',
+      ]);
+
+      const events: AgentRunEvent[] = [];
+
+      await streamAgentRun(validAgentRunStreamRequest, {
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+
+      expect(events).toEqual([
         {
           event: 'task_accepted',
           data: {
@@ -864,12 +863,11 @@ describe('API Client', () => {
           },
         },
         {
-          event: 'done',
+          event: 'error',
           data: {
             run_id: 'run-1',
-            message: '已创建改写任务',
-            task_id: 'task-1',
-            selected_skill: 'rewrite',
+            code: 'AGENT_RUN_FAILED',
+            message: 'agent run 执行失败，请稍后重试',
           },
         },
       ]);

@@ -483,66 +483,6 @@ export type AgentRunEvent =
   | AgentRunDoneEvent
   | AgentRunErrorEvent;
 
-export interface UserStreamMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-export interface UserStreamRequest {
-  conversation_id: string;
-  model: 'deepseek' | 'qwen' | 'doubao';
-  messages: UserStreamMessage[];
-}
-
-export interface UserStreamChunkEvent {
-  event: 'chunk';
-  data: {
-    content: string;
-  };
-}
-
-export interface UserStreamDoneEvent {
-  event: 'done';
-  data: {
-    content: string;
-  };
-}
-
-export interface UserStreamErrorEvent {
-  event: 'error';
-  data: {
-    code?: string;
-    message: string;
-  };
-}
-
-export type UserStreamRoute = 'reply' | 'rewrite';
-
-export interface UserStreamRouteEvent {
-  event: 'route';
-  data: {
-    route: UserStreamRoute;
-  };
-}
-
-export interface UserStreamTaskAcceptedEvent {
-  event: 'task_accepted';
-  data: {
-    task_id: string;
-    task_kind: TaskKind;
-    status?: TaskStatus;
-    queue_position?: number;
-    waiting_count?: number;
-  };
-}
-
-export type UserStreamEvent =
-  | UserStreamRouteEvent
-  | UserStreamTaskAcceptedEvent
-  | UserStreamChunkEvent
-  | UserStreamDoneEvent
-  | UserStreamErrorEvent;
-
 export interface ConversationHeartbeatData {
   conversation_id: string;
   alive: boolean;

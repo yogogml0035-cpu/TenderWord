@@ -31,8 +31,6 @@ import type {
   FileType,
   TaskKind,
   TaskStatus,
-  UserStreamEvent,
-  UserStreamRequest,
 } from '@/types/api';
 import type { Conversation } from '@/types/chat';
 import { resolveApiBaseUrl } from '@/lib/apiBaseUrl';
@@ -421,75 +419,6 @@ function parseAgentRunEvent(payload: unknown): AgentRunEvent | null {
   }
 }
 
-function parseUserStreamEvent(payload: unknown): UserStreamEvent | null {
-  if (
-    !isRecord(payload) ||
-    typeof payload.event !== 'string' ||
-    !('data' in payload) ||
-    !isRecord(payload.data)
-  ) {
-    return null;
-  }
-
-  switch (payload.event) {
-    case 'route': {
-      const route = payload.data.route;
-      if (route !== 'reply' && route !== 'rewrite') {
-        return null;
-      }
-      return {
-        event: 'route',
-        data: { route },
-      };
-    }
-    case 'task_accepted': {
-      const taskKind = parseTaskKind(payload.data.task_kind);
-      const taskId = payload.data.task_id;
-      if (!taskKind) {
-        return null;
-      }
-      if (typeof taskId !== 'string' || !taskId) {
-        return null;
-      }
-
-      const taskStatus = parseTaskStatus(payload.data.status) ?? undefined;
-
-      return {
-        event: 'task_accepted',
-        data: {
-          task_id: taskId,
-          task_kind: taskKind,
-          status: taskStatus,
-          queue_position:
-            typeof payload.data.queue_position === 'number'
-              ? payload.data.queue_position
-              : undefined,
-          waiting_count:
-            typeof payload.data.waiting_count === 'number' ? payload.data.waiting_count : undefined,
-        },
-      };
-    }
-    case 'chunk':
-    case 'done':
-      return {
-        event: payload.event,
-        data: {
-          content: typeof payload.data.content === 'string' ? payload.data.content : '',
-        },
-      };
-    case 'error':
-      return {
-        event: 'error',
-        data: {
-          code: typeof payload.data.code === 'string' ? payload.data.code : undefined,
-          message: typeof payload.data.message === 'string' ? payload.data.message : '',
-        },
-      };
-    default:
-      return null;
-  }
-}
-
 /**
  * Generic API request function with error handling
  */
@@ -670,28 +599,6 @@ export async function streamAgentRun(
     protocolErrorMessage: '任务助手流协议错误',
     protocolErrorCode: 'AGENT_RUN_STREAM_PROTOCOL_ERROR',
     noBodyMessage: '任务助手流不可用',
-  });
-}
-
-export async function streamUserMessage(
-  payload: UserStreamRequest,
-  options: {
-    signal?: AbortSignal;
-    onEvent?: (event: UserStreamEvent) => void | Promise<void>;
-  } = {}
-): Promise<void> {
-  return streamNdjson<UserStreamEvent>({
-    endpoint: '/api/user/stream',
-    method: 'POST',
-    body: payload,
-    signal: options.signal,
-    onEvent: options.onEvent,
-    parseEvent: parseUserStreamEvent,
-    defaultErrorMessage: '聊天请求失败',
-    defaultErrorCode: 'CHAT_STREAM_ERROR',
-    protocolErrorMessage: '聊天流协议错误',
-    protocolErrorCode: 'CHAT_STREAM_PROTOCOL_ERROR',
-    noBodyMessage: '聊天流不可用',
   });
 }
 
