@@ -7,6 +7,9 @@
  */
 
 import type {
+  AgentRunEvent,
+  AgentRunStreamRequest,
+  AgentSkill,
   TenderData,
   TenderLookupResponse,
   TenderTypeInfo,
@@ -172,8 +175,259 @@ function createStreamRequestConfig(
   } satisfies RequestInit;
 }
 
+function parseTaskKind(value: unknown): TaskKind | null {
+  return value === 'generate' ||
+    value === 'rewrite' ||
+    value === 'edit' ||
+    value === 'comment_supplement'
+    ? value
+    : null;
+}
+
+function parseTaskStatus(value: unknown): TaskStatus | null {
+  return value === 'queued' ||
+    value === 'running' ||
+    value === 'completed' ||
+    value === 'failed' ||
+    value === 'cancelled'
+    ? value
+    : null;
+}
+
+function parseAgentSkill(value: unknown): AgentSkill | null {
+  return value === 'rewrite' || value === 'edit' ? value : null;
+}
+
+function parseAgentSkillList(value: unknown): AgentSkill[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const parsedSkills: AgentSkill[] = [];
+  for (const item of value) {
+    const parsedSkill = parseAgentSkill(item);
+    if (!parsedSkill) {
+      return null;
+    }
+    parsedSkills.push(parsedSkill);
+  }
+
+  return parsedSkills;
+}
+
+function parseStringList(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : null;
+}
+
+function parseAgentRunEvent(payload: unknown): AgentRunEvent | null {
+  if (
+    !isRecord(payload) ||
+    typeof payload.event !== 'string' ||
+    !('data' in payload) ||
+    !isRecord(payload.data)
+  ) {
+    return null;
+  }
+
+  switch (payload.event) {
+    case 'run_started': {
+      const selectedSkills = parseAgentSkillList(payload.data.selected_skills);
+      if (
+        typeof payload.data.run_id !== 'string' ||
+        typeof payload.data.conversation_id !== 'string' ||
+        (payload.data.model !== 'deepseek' &&
+          payload.data.model !== 'qwen' &&
+          payload.data.model !== 'doubao') ||
+        payload.data.runtime !== 'fake' ||
+        !selectedSkills
+      ) {
+        return null;
+      }
+
+      return {
+        event: 'run_started',
+        data: {
+          run_id: payload.data.run_id,
+          conversation_id: payload.data.conversation_id,
+          model: payload.data.model,
+          runtime: payload.data.runtime,
+          selected_skills: selectedSkills,
+        },
+      };
+    }
+    case 'thinking_stage': {
+      const selectedSkill =
+        payload.data.selected_skill === undefined
+          ? undefined
+          : parseAgentSkill(payload.data.selected_skill);
+      const guardResult =
+        payload.data.guard_result === undefined ||
+        payload.data.guard_result === 'passed' ||
+        payload.data.guard_result === 'needs_input'
+          ? payload.data.guard_result
+          : null;
+      if (
+        typeof payload.data.run_id !== 'string' ||
+        (payload.data.stage !== 'understand' &&
+          payload.data.stage !== 'guard' &&
+          payload.data.stage !== 'tool' &&
+          payload.data.stage !== 'summary') ||
+        typeof payload.data.label !== 'string' ||
+        (payload.data.status !== 'in_progress' && payload.data.status !== 'completed') ||
+        typeof payload.data.summary !== 'string' ||
+        (payload.data.selected_skill !== undefined && !selectedSkill) ||
+        guardResult === null ||
+        (payload.data.tool_name !== undefined && typeof payload.data.tool_name !== 'string')
+      ) {
+        return null;
+      }
+
+      return {
+        event: 'thinking_stage',
+        data: {
+          run_id: payload.data.run_id,
+          stage: payload.data.stage,
+          label: payload.data.label,
+          status: payload.data.status,
+          summary: payload.data.summary,
+          selected_skill: selectedSkill ?? undefined,
+          guard_result: guardResult,
+          tool_name: payload.data.tool_name,
+        },
+      };
+    }
+    case 'tool_call': {
+      const taskKind = parseTaskKind(payload.data.task_kind);
+      if (
+        typeof payload.data.run_id !== 'string' ||
+        typeof payload.data.tool_name !== 'string' ||
+        payload.data.status !== 'completed' ||
+        typeof payload.data.summary !== 'string' ||
+        !taskKind
+      ) {
+        return null;
+      }
+
+      return {
+        event: 'tool_call',
+        data: {
+          run_id: payload.data.run_id,
+          tool_name: payload.data.tool_name,
+          status: payload.data.status,
+          summary: payload.data.summary,
+          task_kind: taskKind,
+        },
+      };
+    }
+    case 'task_accepted': {
+      const taskKind = parseTaskKind(payload.data.task_kind);
+      const status =
+        payload.data.status === undefined ? undefined : parseTaskStatus(payload.data.status);
+      if (
+        typeof payload.data.run_id !== 'string' ||
+        typeof payload.data.task_id !== 'string' ||
+        !taskKind ||
+        status === null ||
+        (payload.data.queue_position !== undefined &&
+          typeof payload.data.queue_position !== 'number') ||
+        (payload.data.waiting_count !== undefined && typeof payload.data.waiting_count !== 'number')
+      ) {
+        return null;
+      }
+
+      return {
+        event: 'task_accepted',
+        data: {
+          run_id: payload.data.run_id,
+          task_id: payload.data.task_id,
+          task_kind: taskKind,
+          status,
+          queue_position:
+            typeof payload.data.queue_position === 'number'
+              ? payload.data.queue_position
+              : undefined,
+          waiting_count:
+            typeof payload.data.waiting_count === 'number' ? payload.data.waiting_count : undefined,
+        },
+      };
+    }
+    case 'needs_input': {
+      const selectedSkill =
+        payload.data.selected_skill === undefined
+          ? undefined
+          : parseAgentSkill(payload.data.selected_skill);
+      const missingRequirements = parseStringList(payload.data.missing_requirements);
+      if (
+        typeof payload.data.run_id !== 'string' ||
+        typeof payload.data.message !== 'string' ||
+        (payload.data.selected_skill !== undefined && !selectedSkill) ||
+        !missingRequirements
+      ) {
+        return null;
+      }
+
+      return {
+        event: 'needs_input',
+        data: {
+          run_id: payload.data.run_id,
+          message: payload.data.message,
+          selected_skill: selectedSkill ?? undefined,
+          missing_requirements: missingRequirements,
+        },
+      };
+    }
+    case 'done': {
+      const selectedSkill =
+        payload.data.selected_skill === undefined
+          ? undefined
+          : parseAgentSkill(payload.data.selected_skill);
+      if (
+        typeof payload.data.run_id !== 'string' ||
+        typeof payload.data.message !== 'string' ||
+        (payload.data.task_id !== undefined && typeof payload.data.task_id !== 'string') ||
+        (payload.data.selected_skill !== undefined && !selectedSkill)
+      ) {
+        return null;
+      }
+
+      return {
+        event: 'done',
+        data: {
+          run_id: payload.data.run_id,
+          message: payload.data.message,
+          task_id: payload.data.task_id,
+          selected_skill: selectedSkill ?? undefined,
+        },
+      };
+    }
+    case 'error':
+      if (
+        typeof payload.data.run_id !== 'string' ||
+        typeof payload.data.code !== 'string' ||
+        typeof payload.data.message !== 'string'
+      ) {
+        return null;
+      }
+      return {
+        event: 'error',
+        data: {
+          run_id: payload.data.run_id,
+          code: payload.data.code,
+          message: payload.data.message,
+        },
+      };
+    default:
+      return null;
+  }
+}
+
 function parseUserStreamEvent(payload: unknown): UserStreamEvent | null {
-  if (!isRecord(payload) || typeof payload.event !== 'string' || !('data' in payload) || !isRecord(payload.data)) {
+  if (
+    !isRecord(payload) ||
+    typeof payload.event !== 'string' ||
+    !('data' in payload) ||
+    !isRecord(payload.data)
+  ) {
     return null;
   }
 
@@ -189,38 +443,27 @@ function parseUserStreamEvent(payload: unknown): UserStreamEvent | null {
       };
     }
     case 'task_accepted': {
-      const taskKind = payload.data.task_kind;
+      const taskKind = parseTaskKind(payload.data.task_kind);
       const taskId = payload.data.task_id;
-      if (
-        taskKind !== 'generate' &&
-        taskKind !== 'rewrite' &&
-        taskKind !== 'edit' &&
-        taskKind !== 'comment_supplement'
-      ) {
+      if (!taskKind) {
         return null;
       }
       if (typeof taskId !== 'string' || !taskId) {
         return null;
       }
 
-      const status = payload.data.status;
-      const taskStatus =
-        status === 'queued' ||
-        status === 'running' ||
-        status === 'completed' ||
-        status === 'failed' ||
-        status === 'cancelled'
-          ? status
-          : undefined;
+      const taskStatus = parseTaskStatus(payload.data.status) ?? undefined;
 
       return {
         event: 'task_accepted',
         data: {
           task_id: taskId,
-          task_kind: taskKind as TaskKind,
-          status: taskStatus as TaskStatus | undefined,
+          task_kind: taskKind,
+          status: taskStatus,
           queue_position:
-            typeof payload.data.queue_position === 'number' ? payload.data.queue_position : undefined,
+            typeof payload.data.queue_position === 'number'
+              ? payload.data.queue_position
+              : undefined,
           waiting_count:
             typeof payload.data.waiting_count === 'number' ? payload.data.waiting_count : undefined,
         },
@@ -406,6 +649,28 @@ export async function streamNdjson<TEvent>({
   if (buffer.trim()) {
     await dispatchLine(buffer);
   }
+}
+
+export async function streamAgentRun(
+  payload: AgentRunStreamRequest,
+  options: {
+    signal?: AbortSignal;
+    onEvent?: (event: AgentRunEvent) => void | Promise<void>;
+  } = {}
+): Promise<void> {
+  return streamNdjson<AgentRunEvent>({
+    endpoint: '/api/agent/runs/stream',
+    method: 'POST',
+    body: payload,
+    signal: options.signal,
+    onEvent: options.onEvent,
+    parseEvent: parseAgentRunEvent,
+    defaultErrorMessage: '任务助手请求失败',
+    defaultErrorCode: 'AGENT_RUN_STREAM_ERROR',
+    protocolErrorMessage: '任务助手流协议错误',
+    protocolErrorCode: 'AGENT_RUN_STREAM_PROTOCOL_ERROR',
+    noBodyMessage: '任务助手流不可用',
+  });
 }
 
 export async function streamUserMessage(

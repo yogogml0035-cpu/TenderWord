@@ -350,6 +350,130 @@ export interface CreateTaskData {
 
 export type CreateTaskResponse = ApiResponse<CreateTaskData>;
 
+export type AgentSkill = 'rewrite' | 'edit';
+export type AgentRunRuntime = 'fake';
+export type AgentThinkingStageKey = 'understand' | 'guard' | 'tool' | 'summary';
+export type AgentThinkingStageStatus = 'in_progress' | 'completed';
+export type AgentThinkingGuardResult = 'passed' | 'needs_input';
+
+export interface AgentRunUploadedFile {
+  file_path: string;
+  file_name?: string | null;
+}
+
+export interface AgentRunContextSnapshot {
+  rewrite_available: boolean;
+  uploaded_files: AgentRunUploadedFile[];
+}
+
+export interface AgentRunStreamRequest {
+  conversation_id: string;
+  message: string;
+  model: GenerateRequest['model'];
+  selected_skills: AgentSkill[];
+  context_snapshot: AgentRunContextSnapshot;
+}
+
+export interface AgentRunStartedEventData {
+  run_id: string;
+  conversation_id: string;
+  model: GenerateRequest['model'];
+  runtime: AgentRunRuntime;
+  selected_skills: AgentSkill[];
+}
+
+export interface AgentThinkingStage {
+  run_id: string;
+  stage: AgentThinkingStageKey;
+  label: string;
+  status: AgentThinkingStageStatus;
+  summary: string;
+  selected_skill?: AgentSkill;
+  guard_result?: AgentThinkingGuardResult;
+  tool_name?: string;
+}
+
+export interface AgentToolCallEventData {
+  run_id: string;
+  tool_name: string;
+  status: 'completed';
+  summary: string;
+  task_kind: TaskKind;
+}
+
+export interface AgentTaskAcceptedPayload {
+  run_id: string;
+  task_id: string;
+  task_kind: TaskKind;
+  status?: TaskStatus;
+  queue_position?: number;
+  waiting_count?: number;
+}
+
+export interface AgentNeedsInputEventData {
+  run_id: string;
+  message: string;
+  selected_skill?: AgentSkill;
+  missing_requirements: string[];
+}
+
+export interface AgentRunDoneEventData {
+  run_id: string;
+  message: string;
+  task_id?: string;
+  selected_skill?: AgentSkill;
+}
+
+export interface AgentRunErrorEventData {
+  run_id: string;
+  code: string;
+  message: string;
+}
+
+export interface AgentRunStartedEvent {
+  event: 'run_started';
+  data: AgentRunStartedEventData;
+}
+
+export interface AgentThinkingStageEvent {
+  event: 'thinking_stage';
+  data: AgentThinkingStage;
+}
+
+export interface AgentToolCallEvent {
+  event: 'tool_call';
+  data: AgentToolCallEventData;
+}
+
+export interface AgentTaskAcceptedEvent {
+  event: 'task_accepted';
+  data: AgentTaskAcceptedPayload;
+}
+
+export interface AgentNeedsInputEvent {
+  event: 'needs_input';
+  data: AgentNeedsInputEventData;
+}
+
+export interface AgentRunDoneEvent {
+  event: 'done';
+  data: AgentRunDoneEventData;
+}
+
+export interface AgentRunErrorEvent {
+  event: 'error';
+  data: AgentRunErrorEventData;
+}
+
+export type AgentRunEvent =
+  | AgentRunStartedEvent
+  | AgentThinkingStageEvent
+  | AgentToolCallEvent
+  | AgentTaskAcceptedEvent
+  | AgentNeedsInputEvent
+  | AgentRunDoneEvent
+  | AgentRunErrorEvent;
+
 export interface UserStreamMessage {
   role: 'user' | 'assistant';
   content: string;

@@ -12,11 +12,14 @@ import {
   getTaskStatus,
   selectTemplateCandidate,
   sendTaskHeartbeat,
+  streamAgentRun,
   streamNdjson,
   streamUserMessage,
   uploadFile,
 } from '@/lib/api';
 import type {
+  AgentRunEvent,
+  AgentRunStreamRequest,
   CommentSupplementTaskRequest,
   EditTaskRequest,
   GenerateRequest,
@@ -134,6 +137,17 @@ const validCommentSupplementTaskRequest: CommentSupplementTaskRequest = {
   conversation_id: 'conv-1',
   source_file: 'D:/UploadFiles/output.docx',
   model: 'deepseek',
+};
+
+const validAgentRunStreamRequest: AgentRunStreamRequest = {
+  conversation_id: 'conv-1',
+  message: '请改写第三包',
+  model: 'deepseek',
+  selected_skills: ['rewrite'],
+  context_snapshot: {
+    rewrite_available: true,
+    uploaded_files: [],
+  },
 };
 
 describe('API Client', () => {
@@ -755,6 +769,152 @@ describe('API Client', () => {
         name: 'ApiError',
         code: 'REQ_MISSING_FIELD',
         status: 400,
+      });
+    });
+  });
+
+  describe('streamAgentRun', () => {
+    it('parses typed agent run events and ignores unknown events', async () => {
+      globalThis.fetch = mockFetchStream([
+        JSON.stringify({
+          event: 'run_started',
+          data: {
+            run_id: 'run-1',
+            conversation_id: 'conv-1',
+            model: 'deepseek',
+            runtime: 'fake',
+            selected_skills: ['rewrite'],
+          },
+        }) + '\n',
+        JSON.stringify({
+          event: 'thinking_stage',
+          data: {
+            run_id: 'run-1',
+            stage: 'guard',
+            label: '检查前置条件',
+            status: 'completed',
+            summary: '已确认存在可改写上下文',
+            selected_skill: 'rewrite',
+            guard_result: 'passed',
+          },
+        }) + '\n',
+        JSON.stringify({ event: 'mystery', data: { ignored: true } }) + '\n',
+        JSON.stringify({
+          event: 'task_accepted',
+          data: {
+            run_id: 'run-1',
+            task_id: 'task-1',
+            task_kind: 'rewrite',
+            status: 'queued',
+            queue_position: 0,
+            waiting_count: 0,
+          },
+        }) + '\n',
+        JSON.stringify({
+          event: 'done',
+          data: {
+            run_id: 'run-1',
+            message: '已创建改写任务',
+            task_id: 'task-1',
+            selected_skill: 'rewrite',
+          },
+        }) + '\n',
+      ]);
+
+      const events: AgentRunEvent[] = [];
+
+      await streamAgentRun(validAgentRunStreamRequest, {
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+
+      expect(events).toEqual([
+        {
+          event: 'run_started',
+          data: {
+            run_id: 'run-1',
+            conversation_id: 'conv-1',
+            model: 'deepseek',
+            runtime: 'fake',
+            selected_skills: ['rewrite'],
+          },
+        },
+        {
+          event: 'thinking_stage',
+          data: {
+            run_id: 'run-1',
+            stage: 'guard',
+            label: '检查前置条件',
+            status: 'completed',
+            summary: '已确认存在可改写上下文',
+            selected_skill: 'rewrite',
+            guard_result: 'passed',
+          },
+        },
+        {
+          event: 'task_accepted',
+          data: {
+            run_id: 'run-1',
+            task_id: 'task-1',
+            task_kind: 'rewrite',
+            status: 'queued',
+            queue_position: 0,
+            waiting_count: 0,
+          },
+        },
+        {
+          event: 'done',
+          data: {
+            run_id: 'run-1',
+            message: '已创建改写任务',
+            task_id: 'task-1',
+            selected_skill: 'rewrite',
+          },
+        },
+      ]);
+    });
+
+    it('throws ApiError on malformed NDJSON lines', async () => {
+      globalThis.fetch = mockFetchStream([
+        JSON.stringify({
+          event: 'run_started',
+          data: {
+            run_id: 'run-1',
+            conversation_id: 'conv-1',
+            model: 'deepseek',
+            runtime: 'fake',
+            selected_skills: ['rewrite'],
+          },
+        }) + '\n',
+        'not-json\n',
+      ]);
+
+      await expect(streamAgentRun(validAgentRunStreamRequest)).rejects.toMatchObject({
+        name: 'ApiError',
+        code: 'AGENT_RUN_STREAM_PROTOCOL_ERROR',
+      });
+    });
+
+    it('converts HTTP error payloads into ApiError', async () => {
+      globalThis.fetch = mockFetchStream([], {
+        ok: false,
+        status: 422,
+        json: {
+          detail: {
+            success: false,
+            error: {
+              code: 'REQ_INVALID_AGENT_CONTEXT',
+              message: 'context_snapshot 非法',
+            },
+          },
+        },
+      });
+
+      await expect(streamAgentRun(validAgentRunStreamRequest)).rejects.toMatchObject({
+        name: 'ApiError',
+        code: 'REQ_INVALID_AGENT_CONTEXT',
+        status: 422,
       });
     });
   });
