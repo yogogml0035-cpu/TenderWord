@@ -1,6 +1,6 @@
-"""Agent runtimes used by backend graph nodes."""
+"""Task-context assistant agent factory and backend helpers."""
 
-from .task_context_assistant import (
+from .factory import (
     TASK_CONTEXT_ASSISTANT_SKILL_LIBRARY_ROUTE,
     TASK_CONTEXT_ASSISTANT_SYSTEM_PROMPT,
     TaskContextAssistantFactoryResult,

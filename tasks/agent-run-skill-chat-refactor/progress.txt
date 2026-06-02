@@ -13,6 +13,7 @@ Source: prd.json
 - 即使当前 draft 已进入 `edit` 模式，只要用户显式选中了 `/edit` 或 `$edit`，`ChatPanel` 也应优先走 agent run，而不是回退到旧的直连 `createEditTask` 路径。
 - 用户消息里的 capability 展示和复制回放应基于 `metadata.chatKind` 派生；正文始终显示去前缀后的内容，复制时再恢复 `$skill` 前缀。
 - agent run 思考过程卡应作为独立 AI 消息保存到 `metadata.agentThinking`，在 `task_accepted` 前消费 `run_started/thinking_stage/tool_call` 增量更新，`task_accepted/needs_input/done/error` 只负责把卡片收敛到终态并把后续展示交给任务卡或助手回复。
+- DeepAgents task-context assistant 不要直接把 `backend/skills` 或项目根挂给 agent；应先把允许的 skill 目录镜像到隔离 runtime，再用 `CompositeBackend` 分开 `/skills/`、`/scratch/`、`/workspace/` 三个虚拟根。
 
 ## 2026-06-02 09:48 - US-001
 - 实现了 `/api/agent/runs/stream` fake runtime，支持 `run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`done`、`needs_input` 和 `error` 终态。
@@ -145,4 +146,26 @@ Source: prd.json
     - Playwright 直接依赖 `webServer` 自启在当前环境里不稳定，复用已启动的 8502 服务更稳；若要留证据，命令输出最好单独重定向到需求目录日志文件。
   - 有用的上下文（例如，"评估面板在 component X 中"）
     - 新过程卡通过 `metadata.agentThinking` 走 `MessageList -> AgentThinkingMessage` 渲染链，不参与 `taskMessageMap`，因此不会影响现有任务日志/内容/下载三卡分组。
+---
+
+## 2026-06-02 14:16 - US-007
+- 新增 `backend/agents/task_context_assistant/factory.py`，用 `create_deep_agent` 统一创建 task-context assistant，并把 `/skills/`、`/scratch/`、`/workspace/` 三类路径隔离到独立 `FilesystemBackend(virtual_mode=True)`。
+- skills 侧只镜像 `backend/skills/rewrite` 和 `backend/skills/edit` 两个受控目录，避免把项目根、`.env`、`backend/logs` 或其它本机路径暴露给 agent。
+- 新增工厂单测，覆盖 `create_deep_agent` 入参、virtual backend 路由和越权读取失败；同时补充共享运行时知识包说明新边界。
+- 更改的文件
+  - `backend/agents/__init__.py`
+  - `backend/agents/task_context_assistant/__init__.py`
+  - `backend/agents/task_context_assistant/factory.py`
+  - `backend/tests/agents/test_task_context_assistant_factory.py`
+  - `asset/shared_runtime_word_skill_knowledge_pack.md`
+  - `tasks/agent-run-skill-chat-refactor/prd.json`
+  - `tasks/agent-run-skill-chat-refactor/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - 如果 DeepAgents skill 只需要 expose 少量受控能力，优先复制允许的 skill 目录到单次 runtime 根，再把 `/skills/` 作为唯一 source path 交给 `SkillsMiddleware`。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - `deepagents` 的 `skills=` 接受的是“skill 根目录”而不是单个 `SKILL.md` 文件；直接挂 `backend/skills/` 会把无关目录结构一起暴露给 agent。
+    - `CompositeBackend` 只负责路由，不负责权限；要限制工具侧访问范围，还需要把 `FilesystemPermission` 一起传给 `create_deep_agent`。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - 当前 deepagents 版本里 `FilesystemBackend` 暴露 `virtual_mode` 属性但不直接暴露 `root_dir`；测试工厂布局时更稳妥的是断言 route 行为和可见虚拟路径，而不是读内部字段。
 ---
