@@ -14,6 +14,8 @@ Source: prd.json
 - 用户消息里的 capability 展示和复制回放应基于 `metadata.chatKind` 派生；正文始终显示去前缀后的内容，复制时再恢复 `$skill` 前缀。
 - agent run 思考过程卡应作为独立 AI 消息保存到 `metadata.agentThinking`，在 `task_accepted` 前消费 `run_started/thinking_stage/tool_call` 增量更新，`task_accepted/needs_input/done/error` 只负责把卡片收敛到终态并把后续展示交给任务卡或助手回复。
 - DeepAgents task-context assistant 不要直接把 `backend/skills` 或项目根挂给 agent；应先把允许的 skill 目录镜像到隔离 runtime，再用 `CompositeBackend` 分开 `/skills/`、`/scratch/`、`/workspace/` 三个虚拟根。
+- task-context assistant 的 tool 如果要复用 `DocumentService`，优先在 executor factory 内部延迟导入 `get_document_service()`；模块顶层直接 import 容易触发 `document_service -> backend.agents` 的循环依赖。
+- 当某个 skill 已迁移到 DeepAgents guide、不再携带旧 workflow frontmatter 时，验证指令文本的测试应直接读取 `SKILL.md`，不要再经过 legacy `backend.skills.loader`。
 
 ## 2026-06-02 09:48 - US-001
 - 实现了 `/api/agent/runs/stream` fake runtime，支持 `run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`done`、`needs_input` 和 `error` 终态。
@@ -168,4 +170,30 @@ Source: prd.json
     - `CompositeBackend` 只负责路由，不负责权限；要限制工具侧访问范围，还需要把 `FilesystemPermission` 一起传给 `create_deep_agent`。
   - 有用的上下文（例如，"评估面板在 component X 中"）
     - 当前 deepagents 版本里 `FilesystemBackend` 暴露 `virtual_mode` 属性但不直接暴露 `root_dir`；测试工厂布局时更稳妥的是断言 route 行为和可见虚拟路径，而不是读内部字段。
+---
+
+## 2026-06-02 14:32 - US-008
+- 实现了 `create_rewrite_task_tool`，由 task-context assistant 受控复用 `DocumentService.create_rewrite_task` 创建真实 rewrite 队列任务；`AgentRunService` 的 rewrite 分支不再伪造 task_id，而是回传真实 `task_accepted` 结果。
+- 将 `backend/skills/rewrite/SKILL.md` 改成 DeepAgents guide，明确适用场景、rewrite history 前置条件、缺条件追问和工具调用方式；同时更新共享运行时知识包。
+- 修正了围绕新 guide 的测试约束：新增 tool 复用单测，agent run 服务测试覆盖创建成功、缺 rewrite history 追问和 tool 异常 `error` 终态，并把旧 skill 指令测试改为直接读取 `SKILL.md` 契约。
+- 更改的文件
+  - `asset/shared_runtime_word_skill_knowledge_pack.md`
+  - `backend/agents/__init__.py`
+  - `backend/agents/task_context_assistant/__init__.py`
+  - `backend/agents/task_context_assistant/tools.py`
+  - `backend/services/agent_run_service.py`
+  - `backend/skills/rewrite/SKILL.md`
+  - `backend/tests/agents/test_task_context_assistant_tools.py`
+  - `backend/tests/services/test_agent_run_service.py`
+  - `backend/tests/skills/test_task_skill_instructions.py`
+  - `tasks/agent-run-skill-chat-refactor/prd.json`
+  - `tasks/agent-run-skill-chat-refactor/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - tool 层最稳妥的复用方式是暴露一个可注入的 executor factory，再由 `StructuredTool` 和 runtime service 共同复用同一份调用逻辑，避免同一业务入口维护两套参数映射。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - 旧 `backend.skills.loader` 仍要求 workflow frontmatter；当某个 skill 提前迁移到 DeepAgents guide 时，相关测试若还走 loader 会直接把新 guide 判成非法格式。
+    - `document_service.py` 会经由 `backend.agents` 间接回到 task-context assistant；tool 模块如果顶层 import `DocumentService/get_document_service`，pytest 收集阶段就会因为循环导入失败。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - `DocumentService.create_rewrite_task()` 已经自带 rewrite history 兜底校验和队列状态字段，agent run 只需把失败收敛成 `needs_input` 或 `error`，不需要再复制一套任务创建逻辑。
 ---

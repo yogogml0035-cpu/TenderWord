@@ -10,6 +10,11 @@ from typing import Any, Callable, Optional
 
 from pydantic import BaseModel
 
+from backend.agents.task_context_assistant import (
+    CREATE_REWRITE_TASK_TOOL,
+    RewriteTaskExecutor,
+    make_create_rewrite_task_executor,
+)
 from backend.models import (
     AgentNeedsInputEventData,
     AgentRunDoneEventData,
@@ -21,6 +26,7 @@ from backend.models import (
     AgentThinkingStageEventData,
     AgentToolCallEventData,
     TaskKind,
+    TaskStatus,
 )
 from backend.services.chat_stream_service import to_ndjson_line
 
@@ -35,11 +41,15 @@ class AgentRunService:
         *,
         run_id_factory: Optional[Callable[[], str]] = None,
         task_id_factory: Optional[Callable[[AgentSkill], str]] = None,
+        rewrite_task_executor: RewriteTaskExecutor | None = None,
     ) -> None:
         self._run_id_factory = run_id_factory or (
             lambda: f"run-{uuid.uuid4().hex}"
         )
         self._task_id_factory = task_id_factory or self._default_task_id_factory
+        self._rewrite_task_executor = (
+            rewrite_task_executor or make_create_rewrite_task_executor()
+        )
 
     async def stream(
         self,
@@ -65,7 +75,7 @@ class AgentRunService:
         )
 
         try:
-            for event_name, event_data in self._build_run_plan(
+            for event_name, event_data in await self._build_run_plan(
                 run_id=run_id,
                 payload=payload,
                 selected_skill=selected_skill,
@@ -93,7 +103,7 @@ class AgentRunService:
                 ),
             )
 
-    def _build_run_plan(
+    async def _build_run_plan(
         self,
         *,
         run_id: str,
@@ -116,7 +126,7 @@ class AgentRunService:
         )
 
         if selected_skill == AgentSkill.REWRITE:
-            return plan + self._build_rewrite_plan(run_id=run_id, payload=payload)
+            return plan + await self._build_rewrite_plan(run_id=run_id, payload=payload)
         if selected_skill == AgentSkill.EDIT:
             return plan + self._build_edit_plan(run_id=run_id, payload=payload)
 
@@ -145,7 +155,7 @@ class AgentRunService:
         )
         return plan
 
-    def _build_rewrite_plan(
+    async def _build_rewrite_plan(
         self,
         *,
         run_id: str,
@@ -176,14 +186,53 @@ class AgentRunService:
                 ),
             ]
 
-        task_id = self._task_id_factory(AgentSkill.REWRITE)
+        rewrite_response = await self._rewrite_task_executor(
+            conversation_id=payload.conversation_id,
+            user_prompt=payload.message,
+            model=payload.model,
+            rewrite_log_path=None,
+        )
+        if not rewrite_response.success:
+            if rewrite_response.error == "REWRITE_NO_DOCUMENT":
+                return [
+                    (
+                        "thinking_stage",
+                        AgentThinkingStageEventData(
+                            run_id=run_id,
+                            stage="guard",
+                            label="检查上下文",
+                            status="completed",
+                            summary="当前会话缺少可改写文档上下文。",
+                            selected_skill=AgentSkill.REWRITE,
+                            guard_result="needs_input",
+                        ),
+                    ),
+                    (
+                        "needs_input",
+                        AgentNeedsInputEventData(
+                            run_id=run_id,
+                            message=rewrite_response.message or "当前会话没有可用文档，请先完成一次生成。",
+                            selected_skill=AgentSkill.REWRITE,
+                            missing_requirements=["rewrite_history"],
+                        ),
+                    ),
+                ]
+            raise RuntimeError(
+                rewrite_response.error
+                or rewrite_response.message
+                or "create_rewrite_task_tool failed"
+            )
+
         return self._build_task_created_plan(
             run_id=run_id,
             selected_skill=AgentSkill.REWRITE,
-            task_kind=TaskKind.REWRITE,
-            task_id=task_id,
+            task_kind=rewrite_response.task_kind,
+            task_id=rewrite_response.task_id,
+            status=rewrite_response.status or TaskStatus.QUEUED,
+            queue_position=rewrite_response.queue_position,
+            waiting_count=rewrite_response.waiting_count,
             guard_summary="检测到当前会话已有可改写文档。",
-            tool_name="create_rewrite_task_tool",
+            tool_name=CREATE_REWRITE_TASK_TOOL,
             done_message="已为你创建 rewrite 任务。",
         )
 
@@ -236,6 +285,9 @@ class AgentRunService:
         selected_skill: AgentSkill,
         task_kind: TaskKind,
         task_id: str,
+        status: TaskStatus = TaskStatus.QUEUED,
+        queue_position: int | None = None,
+        waiting_count: int | None = None,
         guard_summary: str,
         tool_name: str,
         done_message: str,
@@ -258,7 +310,7 @@ class AgentRunService:
                 AgentToolCallEventData(
                     run_id=run_id,
                     tool_name=tool_name,
-                    summary=f"fake runtime 已调用 {tool_name}。",
+                    summary=f"已调用 {tool_name}。",
                     task_kind=task_kind,
                 ),
             ),
@@ -268,6 +320,9 @@ class AgentRunService:
                     run_id=run_id,
                     task_id=task_id,
                     task_kind=task_kind,
+                    status=status,
+                    queue_position=queue_position if queue_position is not None else 0,
+                    waiting_count=waiting_count if waiting_count is not None else 0,
                 ),
             ),
             (
