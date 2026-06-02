@@ -11,7 +11,6 @@ import {
   ApiError,
   cancelTask,
   createCommentSupplementTask,
-  createEditTask,
   downloadFile,
   streamAgentRun,
   uploadFile,
@@ -20,7 +19,6 @@ import type {
   AgentRunContextSnapshot,
   AgentRunEvent,
   AgentSkill,
-  EditTaskRequest,
 } from '@/types/api';
 import type { AgentThinkingCardState, ChatMessageKind, Message } from '@/types/chat';
 import type { ModelType } from '@/components/forms/ModelSelector';
@@ -36,7 +34,7 @@ interface ChatPanelProps {
   className?: string;
 }
 
-const missingInsertionAnchorMessage = '请先补全当前页面的插入锚点';
+type EditFormType = NonNullable<AgentRunContextSnapshot['edit_context']>['form_type'];
 
 function isSyntheticAgentRunTaskId(taskId: string): boolean {
   return taskId.startsWith('fake-');
@@ -164,7 +162,7 @@ function toConversationDraftFile(uploadedFile: {
 function resolveEditFormType(
   tenderType: 'xjcg' | 'gngk' | 'gjgk',
   draft: ConversationFormDraft | null
-): EditTaskRequest['form_type'] | null {
+): EditFormType | null {
   const tenderLx = draft?.tender_lx;
   const fundSourceLx = draft?.fund_lx;
 
@@ -185,75 +183,6 @@ function resolveEditFormType(
     fund_lx: fundSourceLx,
     ifzgcg: draft?.tender_data?.ifzgcg,
   });
-}
-
-function getEditContextMessage(
-  tenderType: 'xjcg' | 'gngk' | 'gjgk',
-  draft: ConversationFormDraft | null
-): string | null {
-  if (!draft?.edit_file) {
-    return '请先上传一个 Word 文档';
-  }
-
-  if (draft.tender_lx !== 0 && draft.tender_lx !== 1 && draft.tender_lx !== 2) {
-    return '请先补全当前页面的货物/工程/服务类型';
-  }
-
-  if (draft.fund_lx !== 0 && draft.fund_lx !== 1) {
-    return '请先补全当前页面的资金性质';
-  }
-
-  const insertionConfig = draft.insertion_config;
-  if (
-    !insertionConfig ||
-    !insertionConfig.before_text?.trim() ||
-    !insertionConfig.after_text?.trim()
-  ) {
-    return missingInsertionAnchorMessage;
-  }
-
-  if (!resolveEditFormType(tenderType, draft)) {
-    return '当前页面缺少可识别的 edit 上下文';
-  }
-
-  return null;
-}
-
-function buildEditTaskRequest(
-  conversationId: string,
-  tenderType: 'xjcg' | 'gngk' | 'gjgk',
-  draft: ConversationFormDraft | null,
-  model: ModelType,
-  prompt: string
-): { request?: EditTaskRequest; error?: string } {
-  const normalizedPrompt = prompt.trim();
-  if (!normalizedPrompt) {
-    return { error: '请输入修改要求' };
-  }
-
-  const contextMessage = getEditContextMessage(tenderType, draft);
-  if (contextMessage) {
-    return { error: contextMessage };
-  }
-
-  const formType = resolveEditFormType(tenderType, draft);
-  if (!formType || !draft?.edit_file || draft.tender_lx === undefined || draft.fund_lx === undefined) {
-    return { error: '当前页面缺少可识别的 edit 上下文' };
-  }
-
-  return {
-    request: {
-      conversation_id: conversationId,
-      form_type: formType,
-      model,
-      edit_prompt: normalizedPrompt,
-      file_path: draft.edit_file.file_path,
-      insertion_config: draft.insertion_config,
-      tender_lx: draft.tender_lx,
-      fund_source_lx: draft.fund_lx,
-      tender_data_snapshot: draft.tender_data || undefined,
-    },
-  };
 }
 
 export function ChatPanel({ className = '' }: ChatPanelProps) {
@@ -639,6 +568,13 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
                 pending_rewrite_task_id: event.data.task_id,
               });
             }
+            if (!isSyntheticTask && event.data.task_kind === 'edit') {
+              updateConversationDraft(conversationId, {
+                chat_input: '',
+                pending_edit_prompt: prompt,
+                pending_edit_task_id: event.data.task_id,
+              });
+            }
             if (isSyntheticTask) {
               detachTaskTracking(event.data.task_id);
             }
@@ -789,76 +725,12 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         return false;
       }
 
-      if (isEditMode && selectedSkills.length === 0) {
-        const { request, error } = buildEditTaskRequest(
-          conversation.id,
-          conversation.tenderType,
-          conversationDraft,
-          selectedModel,
-          content
-        );
-        if (!request) {
-          setComposerNotice(error || '当前页面缺少可识别的 edit 上下文');
-          return false;
-        }
-
-        addMessage(conversation.id, {
-          type: 'user',
-          content,
-          status: 'sent',
-          metadata: {
-            chatKind: 'edit',
-          },
-        });
-        const placeholderMessageId = addMessage(conversation.id, {
-          type: 'ai',
-          content: '正在创建文件修改任务',
-          status: 'completed',
-          metadata: {
-            chatKind: 'edit',
-          },
-        });
-
-        setComposerNotice(null);
-        updateConversationDraft(conversation.id, { chat_input: '' });
-
-        void (async () => {
-          try {
-            const result = await createEditTask(request);
-            startTask(
-              conversation.id,
-              result.task_id,
-              {
-                task_kind: result.task_kind,
-                status: result.status || 'queued',
-                queue_position: result.queue_position,
-                waiting_count: result.waiting_count,
-              },
-              { logMessageId: placeholderMessageId }
-            );
-            updateConversationDraft(conversation.id, {
-              pending_edit_prompt: content,
-              pending_edit_task_id: result.task_id,
-            });
-          } catch (error) {
-            deleteMessage(conversation.id, placeholderMessageId);
-            const message =
-              error instanceof ApiError ? error.message : '创建文件修改任务失败，请稍后重试';
-            setComposerNotice(message);
-            addMessage(conversation.id, {
-              type: 'system',
-              content: message,
-              status: 'completed',
-            });
-          }
-        })();
-
-        return true;
-      }
+      const selectedSkillsForRequest: AgentSkill[] =
+        selectedSkills.length > 0 ? selectedSkills : isEditMode ? ['edit'] : [];
 
       void sendAgentRunMessage(content, {
         appendUserMessage: true,
-        selectedSkillsOverride: selectedSkills,
+        selectedSkillsOverride: selectedSkillsForRequest,
       });
       updateConversationDraft(conversation.id, {
         chat_input: '',
@@ -867,16 +739,11 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       return true;
     },
     [
-      addMessage,
       conversation,
-      conversationDraft,
-      deleteMessage,
       isEditMode,
       isBusy,
       selectedSkills,
-      selectedModel,
       sendAgentRunMessage,
-      startTask,
       updateConversationDraft,
     ]
   );
@@ -1053,21 +920,6 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     },
     []
   );
-
-  useEffect(() => {
-    if (composerNotice !== missingInsertionAnchorMessage || !conversation) {
-      return;
-    }
-
-    if (!isEditMode) {
-      setComposerNotice(null);
-      return;
-    }
-
-    if (!getEditContextMessage(conversation.tenderType, conversationDraft)) {
-      setComposerNotice(null);
-    }
-  }, [composerNotice, conversation, conversationDraft, isEditMode]);
 
   useEffect(() => {
     if (!conversation) {

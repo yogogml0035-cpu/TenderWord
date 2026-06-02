@@ -3,7 +3,6 @@ import { ChatPanel } from '@/components/chat/ChatPanel';
 import {
   cancelTask,
   createCommentSupplementTask,
-  createEditTask,
   streamAgentRun,
   uploadFile,
 } from '@/lib/api';
@@ -18,7 +17,6 @@ jest.mock('@/lib/api', () => {
     ...actual,
     cancelTask: jest.fn(),
     createCommentSupplementTask: jest.fn(),
-    createEditTask: jest.fn(),
     downloadFile: jest.fn(),
     streamAgentRun: jest.fn(),
     uploadFile: jest.fn(),
@@ -183,7 +181,6 @@ const mockCancelTask = cancelTask as jest.MockedFunction<typeof cancelTask>;
 const mockCreateCommentSupplementTask = createCommentSupplementTask as jest.MockedFunction<
   typeof createCommentSupplementTask
 >;
-const mockCreateEditTask = createEditTask as jest.MockedFunction<typeof createEditTask>;
 const mockUploadFile = uploadFile as jest.MockedFunction<typeof uploadFile>;
 
 function createDeferred<T>() {
@@ -215,7 +212,6 @@ describe('ChatPanel', () => {
     mockStreamAgentRun.mockReset();
     mockCancelTask.mockReset();
     mockCreateCommentSupplementTask.mockReset();
-    mockCreateEditTask.mockReset();
     mockUploadFile.mockReset();
     mockCancelTask.mockResolvedValue({
       success: true,
@@ -428,7 +424,7 @@ describe('ChatPanel', () => {
     });
   });
 
-  it('blocks edit send when required context is incomplete', () => {
+  it('routes incomplete edit context through agent run and shows the follow-up message', async () => {
     useChatStore.setState((state) => ({
       ...state,
       conversations: [
@@ -457,6 +453,18 @@ describe('ChatPanel', () => {
       },
     }));
 
+    mockAgentRunStream([
+      {
+        event: 'needs_input',
+        data: {
+          run_id: 'run-edit-needs-anchor',
+          message: '请先补全当前页面的插入锚点',
+          selected_skill: 'edit',
+          missing_requirements: ['edit_context.insertion_config'],
+        },
+      },
+    ]);
+
     render(<ChatPanel />);
 
     expect(screen.getByTestId('chat-input')).toHaveAttribute('data-send-disabled', 'false');
@@ -464,14 +472,40 @@ describe('ChatPanel', () => {
 
     fireEvent.click(screen.getByTestId('send-current-input-button'));
 
-    expect(mockCreateEditTask).not.toHaveBeenCalled();
-    expect(screen.getByTestId('chat-input')).toHaveAttribute(
-      'data-notice',
-      '请先补全当前页面的插入锚点'
-    );
+    await waitFor(() => {
+      expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockStreamAgentRun.mock.calls[0]?.[0]).toMatchObject({
+      conversation_id: 'conv-1',
+      message: '请补充质保条款',
+      selected_skills: ['edit'],
+      context_snapshot: {
+        rewrite_available: false,
+        uploaded_files: [
+          {
+            file_path: 'D:/UploadFiles/edit.docx',
+            file_name: 'edit.docx',
+          },
+        ],
+        edit_context: {
+          form_type: 'xjcg_tender',
+          tender_lx: 0,
+          fund_source_lx: 1,
+        },
+      },
+    });
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-notice', '');
+    const conversation = useChatStore.getState().conversations[0];
+    expect(conversation.currentTaskId).toBeUndefined();
+    expect(conversation.messages.find((message) => message.content === '请先补全当前页面的插入锚点')).toMatchObject({
+      type: 'ai',
+      content: '请先补全当前页面的插入锚点',
+      status: 'completed',
+    });
   });
 
-  it('prefers explicit edit skill over the legacy direct edit task path', async () => {
+  it('prefers explicit edit skill over the implicit upload-entry mapping', async () => {
     useChatStore.setState((state) => ({
       ...state,
       conversations: [
@@ -533,7 +567,6 @@ describe('ChatPanel', () => {
       expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
     });
 
-    expect(mockCreateEditTask).not.toHaveBeenCalled();
     expect(mockStreamAgentRun.mock.calls[0]?.[0]).toMatchObject({
       conversation_id: 'conv-1',
       message: '请把交付日期改成合同签订后 30 天内',
@@ -563,7 +596,7 @@ describe('ChatPanel', () => {
     });
   });
 
-  it('creates an edit task directly without using the user stream route', async () => {
+  it('routes uploaded file edit requests through agent run and tracks the accepted edit task', async () => {
     useChatStore.setState((state) => ({
       ...state,
       conversations: [
@@ -614,23 +647,62 @@ describe('ChatPanel', () => {
         },
       },
     }));
-    mockCreateEditTask.mockResolvedValue({
-      task_id: 'task-edit',
-      task_kind: 'edit',
-      status: 'queued',
-      queue_position: 0,
-      waiting_count: 0,
-    });
+
+    mockAgentRunStream([
+      {
+        event: 'run_started',
+        data: {
+          run_id: 'run-edit-implicit',
+          conversation_id: 'conv-1',
+          model: 'deepseek',
+          runtime: 'fake',
+          selected_skills: ['edit'],
+        },
+      },
+      {
+        event: 'thinking_stage',
+        data: {
+          run_id: 'run-edit-implicit',
+          stage: 'guard',
+          label: '检查上下文',
+          status: 'completed',
+          summary: '检测到当前会话已有上传文件和完整 edit 上下文。',
+          selected_skill: 'edit',
+          guard_result: 'passed',
+        },
+      },
+      {
+        event: 'task_accepted',
+        data: {
+          run_id: 'run-edit-implicit',
+          task_id: 'task-edit',
+          task_kind: 'edit',
+          status: 'queued',
+          queue_position: 0,
+          waiting_count: 0,
+        },
+      },
+      {
+        event: 'done',
+        data: {
+          run_id: 'run-edit-implicit',
+          message: '已为你创建 edit 任务。',
+          task_id: 'task-edit',
+          selected_skill: 'edit',
+        },
+      },
+    ]);
 
     render(<ChatPanel />);
 
     fireEvent.click(screen.getByTestId('send-current-input-button'));
 
     await waitFor(() => {
-      expect(mockCreateEditTask).toHaveBeenCalledTimes(1);
-      expect(mockStreamAgentRun).not.toHaveBeenCalled();
+      expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
       const conversation = useChatStore.getState().conversations[0];
       const draft = useChatStore.getState().getConversationDraft('conv-1');
+      const taskGroup = useChatStore.getState().findTaskMessageGroup('task-edit');
+      const thinkingMessage = conversation.messages.find((message) => message.metadata?.agentThinking);
       expect(conversation.currentTaskId).toBe('task-edit');
       expect(draft?.pending_edit_task_id).toBe('task-edit');
       expect(conversation.messages[0]).toMatchObject({
@@ -639,37 +711,64 @@ describe('ChatPanel', () => {
           chatKind: 'edit',
         },
       });
-      expect(conversation.messages[1]).toMatchObject({
+      expect(thinkingMessage).toMatchObject({
         type: 'ai',
-        content: '正在创建文件修改任务',
+        status: 'completed',
         metadata: {
-          chatKind: 'edit',
+          agentThinking: expect.objectContaining({
+            terminalState: 'task_accepted',
+          }),
+        },
+      });
+      expect(taskGroup?.logMessage).toMatchObject({
+        taskId: 'task-edit',
+        status: 'generating',
+        metadata: {
+          messageKind: 'task-log',
+          taskKind: 'edit',
+        },
+      });
+      expect(taskGroup?.contentMessage).toMatchObject({
+        taskId: 'task-edit',
+        status: 'generating',
+        metadata: {
+          messageKind: 'task-content',
+          taskKind: 'edit',
         },
       });
     });
 
-    const editPayload = mockCreateEditTask.mock.calls[0]?.[0];
+    const editPayload = mockStreamAgentRun.mock.calls[0]?.[0];
     expect(editPayload).toEqual({
       conversation_id: 'conv-1',
-      form_type: 'xjcg_tender',
       model: 'deepseek',
-      edit_prompt: '请把交付日期改成合同签订后 30 天内',
-      file_path: 'D:/UploadFiles/edit.docx',
-      insertion_config: {
-        before_text: '第三章 采购需求',
-        after_text: '第四章 响应文件有关格式',
+      message: '请把交付日期改成合同签订后 30 天内',
+      selected_skills: ['edit'],
+      context_snapshot: {
+        rewrite_available: false,
+        uploaded_files: [
+          {
+            file_path: 'D:/UploadFiles/edit.docx',
+            file_name: 'edit.docx',
+          },
+        ],
+        edit_context: {
+          form_type: 'xjcg_tender',
+          insertion_config: {
+            before_text: '第三章 采购需求',
+            after_text: '第四章 响应文件有关格式',
+          },
+          tender_lx: 0,
+          fund_source_lx: 1,
+          tender_data_snapshot: expect.objectContaining({
+            project_name: '示例项目',
+          }),
+        },
       },
-      tender_lx: 0,
-      fund_source_lx: 1,
-      tender_data_snapshot: expect.objectContaining({
-        project_name: '示例项目',
-      }),
     });
-    expect(editPayload).not.toHaveProperty('generation_mode');
-    expect(editPayload).not.toHaveProperty('comment_generation_mode');
   });
 
-  it('routes gngk goods fiscal edit with ifzgcg=2 to the self-funded goods graph', async () => {
+  it('sends the mapped gngk edit form type through agent run context', async () => {
     useChatStore.setState((state) => ({
       ...state,
       conversations: [
@@ -721,31 +820,36 @@ describe('ChatPanel', () => {
         },
       },
     }));
-    mockCreateEditTask.mockResolvedValue({
-      task_id: 'task-edit',
-      task_kind: 'edit',
-      status: 'queued',
-      queue_position: 0,
-      waiting_count: 0,
-    });
+    mockAgentRunStream([]);
 
     render(<ChatPanel />);
 
     fireEvent.click(screen.getByTestId('send-current-input-button'));
 
     await waitFor(() => {
-      expect(mockCreateEditTask).toHaveBeenCalledTimes(1);
+      expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
     });
 
-    expect(mockCreateEditTask).toHaveBeenCalledWith(
+    expect(mockStreamAgentRun.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         conversation_id: 'conv-1',
-        form_type: 'gngk_hw_zc_tender',
-        tender_lx: 0,
-        fund_source_lx: 1,
-        tender_data_snapshot: expect.objectContaining({
-          ifzgcg: 2,
-          fund_source_lx: 1,
+        message: '请补充技术要求',
+        selected_skills: ['edit'],
+        context_snapshot: expect.objectContaining({
+          uploaded_files: [
+            expect.objectContaining({
+              file_path: 'D:/UploadFiles/edit.docx',
+            }),
+          ],
+          edit_context: expect.objectContaining({
+            form_type: 'gngk_hw_zc_tender',
+            tender_lx: 0,
+            fund_source_lx: 1,
+            tender_data_snapshot: expect.objectContaining({
+              ifzgcg: 2,
+              fund_source_lx: 1,
+            }),
+          }),
         }),
       })
     );
@@ -1336,8 +1440,8 @@ describe('ChatPanel', () => {
     });
   });
 
-  it('clears the edit draft immediately after task creation starts', async () => {
-    const deferred = createDeferred<Awaited<ReturnType<typeof createEditTask>>>();
+  it('clears the edit draft immediately after agent run starts and restores pending task tracking on acceptance', async () => {
+    const deferred = createDeferred<void>();
 
     useChatStore.setState((state) => ({
       ...state,
@@ -1388,22 +1492,29 @@ describe('ChatPanel', () => {
       },
     }));
 
-    mockCreateEditTask.mockImplementationOnce(() => deferred.promise);
+    mockStreamAgentRun.mockImplementationOnce(async (_payload, options = {}) => {
+      await deferred.promise;
+      await options.onEvent?.({
+        event: 'task_accepted',
+        data: {
+          run_id: 'run-edit-deferred',
+          task_id: 'task-edit',
+          task_kind: 'edit',
+          status: 'queued',
+          queue_position: 0,
+          waiting_count: 0,
+        },
+      });
+    });
 
     render(<ChatPanel />);
 
     fireEvent.click(screen.getByTestId('send-current-input-button'));
 
-    await waitFor(() => expect(mockCreateEditTask).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockStreamAgentRun).toHaveBeenCalledTimes(1));
     expect(useChatStore.getState().getConversationDraft('conv-1')?.chat_input).toBe('');
 
-    deferred.resolve({
-      task_id: 'task-edit',
-      task_kind: 'edit',
-      status: 'queued',
-      queue_position: 0,
-      waiting_count: 0,
-    });
+    deferred.resolve();
 
     await waitFor(() => {
       const draft = useChatStore.getState().getConversationDraft('conv-1');

@@ -21,6 +21,7 @@ Source: prd.json
 - agent run 要复用 edit 这类显式任务创建能力时，受控上下文应拆成 `uploaded_files` + `edit_context`：前者只负责文件路径，后者承载 `form_type`、锚点和必要 draft 字段，方便 guard 精确区分“缺文件”和“缺页面上下文”。
 - `ChatInput` 进入 `input_mode=edit` 且存在 `edit_file` 后会切换成 edit placeholder；Playwright 断言 textarea 时不要硬编码普通聊天 placeholder，优先按当前模式文案或稳定 testid 定位。
 - 当同一个 `SKILL.md` 既要给 DeepAgents 当 guide，又要继续被旧 `SkillGraph` 当正文改写指令读取时，文档里必须显式拆分“agent run 创建任务规则”和“后台 task 正文改写规则”，否则前台 guide 很容易覆盖掉后台正文契约。
+- 上传文件修改入口如果已经把 draft 切到 `input_mode=edit` / `edit_file`，发送时也要隐式映射成 `selected_skills=["edit"]` 走 agent run；不要再保留前端直连 `createEditTask()` 的旁路，否则缺文件追问、思考过程卡和 task_accepted 生命周期会分叉。
 
 ## 2026-06-02 15:30 - US-009
 - 实现了 `backend/agents/task_context_assistant/logging.py`，为每次 agent run 写入 `backend/logs/agent-run-<run_id>.jsonl`，并对白名单字段统一做敏感信息 scrub。
@@ -299,4 +300,27 @@ Source: prd.json
     - `ChatInput` 一旦进入 edit 模式会切换 placeholder，Playwright 不能继续用普通聊天文案去定位 textarea。
   - 有用的上下文（例如，"评估面板在 component X 中"）
     - 当前 edit fake `task_accepted` 路径在消息区展示的是 `进度日志 + AI 修改内容` 卡片组合，断言不要复用 rewrite 场景里的 `修改进度` 文案。
+---
+
+## 2026-06-02 17:12 - US-011
+- 实现了上传文件修改入口到 edit agent run 的统一映射：`ChatPanel` 不再直连 `createEditTask()`，只要当前 draft 已进入 edit 模式或存在 `edit_file`，发送时就会隐式带上 `selected_skills=["edit"]` 调用 `/api/agent/runs/stream`。
+- 在 agent run `task_accepted` 分支补齐了真实 edit 任务的 pending 生命周期，确保排队取消回填、任务完成后的最新 `edit_file` 回写，以及现有 `进度日志 + AI 修改内容` 任务卡都继续沿用同一套状态流。
+- 更新了前端单测和 Playwright 场景，覆盖 `/edit` 缺文件追问、上传文件修改按钮上传后通过 agent run 创建 fake edit 任务、以及 gngk edit form type 映射仍然进入 `context_snapshot.edit_context`。
+- 更新类型身份与会话知识包，明确上传文件修改入口和显式 `/edit` / `$edit` 已共用 agent run 契约。
+- 更改的文件
+  - `asset/tender_type_identity_session_knowledge_pack.md`
+  - `frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
+  - `frontend/components/chat/ChatPanel.tsx`
+  - `frontend/e2e/test_agent_run_chat_panel.spec.ts`
+  - `tasks/agent-run-skill-chat-refactor/prd.json`
+  - `tasks/agent-run-skill-chat-refactor/progress.txt`
+  - `tasks/agent-run-skill-chat-refactor/screenshots/us-011-edit-needs-file.png`
+  - `tasks/agent-run-skill-chat-refactor/screenshots/us-011-upload-entry.png`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - 如果某个 UI 入口本身就代表确定能力（例如上传文件修改），前端最好在发送层隐式补 `selected_skills`，这样显式 `/edit` 和入口默认行为才能共享同一条 agent run、guard 和任务卡生命周期。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - 把 edit 发送路径切到 agent run 后，`pending_edit_task_id` 不能再依赖旧 `createEditTask()` Promise 成功时机，必须改成跟随 `task_accepted` 事件写入，否则排队恢复会丢。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - 当前上传文件修改入口在 Playwright 里最稳的验收方式是：先验证 `chat-plus-menu-edit` 可见，再直接对隐藏的 `chat-edit-file-input` 调 `setInputFiles()`，随后用 edit placeholder 和 capability chip 断言 agent run 已接管。
 ---

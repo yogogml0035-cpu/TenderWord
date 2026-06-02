@@ -198,12 +198,12 @@
 
 ## 聊天输入与排队恢复
 
-- `chat_input` 在普通聊天发送或显式 edit 任务创建后立即清空。
+- `chat_input` 在普通聊天发送或 edit agent run 发起后立即清空。
 - `/` 只负责打开 capability picker；`$rewrite` / `$edit` 以及手动输入 `/rewrite` / `/edit` 都必须在 `ChatInput` 当场解析成 `selected_skills + chat_input`，不能把命令前缀留在持久化草稿或用户消息正文里。
-- 显式 capability 选择优先于旧聊天分支：当 `selected_skills=["edit"]` 且当前 draft 已有 `input_mode=edit` / `edit_file` 时，`ChatPanel` 仍应走 `/api/agent/runs/stream`，并把上传文件、`form_type`、锚点、`tender_lx/fund_source_lx` 与可选 `tender_data_snapshot` 一并投影到 `context_snapshot.uploaded_files + context_snapshot.edit_context`；只有没有显式 capability 时，旧的直连 `createEditTask()` 才继续服务“上传文件修改”入口。
+- 上传文件修改入口与显式 `/edit` / `$edit` 现在统一走 `/api/agent/runs/stream`：只要当前 draft 已进入 `input_mode=edit` 或已有 `edit_file`，`ChatPanel` 就应把这次发送视为 edit capability，并把上传文件、`form_type`、锚点、`tender_lx/fund_source_lx` 与可选 `tender_data_snapshot` 一并投影到 `context_snapshot.uploaded_files + context_snapshot.edit_context`。
 - `pending_rewrite_prompt` / `pending_edit_prompt` 只用于排队阶段取消或失败后的恢复回填，不是正常发送后的延迟清空机制。
 - rewrite 只有在 `/api/user/stream` 返回 `task_accepted` 后写入 pending rewrite 字段。
-- edit 在 `createEditTask()` 成功后写入 pending edit 字段；成功完成时把最新输出文件回写到 `edit_file`。
+- edit 只有在 agent run 返回真实 `task_accepted` 后才写入 pending edit 字段；成功完成时把最新输出文件回写到 `edit_file`。
 - `frontend/app/tender/page.tsx` 的后端重启恢复继续以 pending 字段和任务摘要为依据。
 - 后端重启或 `TASK_NOT_FOUND` 触发 stale task 恢复时，不能只新增错误日志；同一 `taskId` 下仍处于 `generating` 的历史消息也必须转为 `error` 并写入 `localTaskReason=backend_restart`，避免 UI 同时显示“已中断”和旧生成中状态。
 - 从 `sessionStorage` 恢复出的 `running` task 只是本地快照，SSE 连接前必须先用任务状态接口确认任务仍存在；若状态接口返回 `TASK_NOT_FOUND` / 404，应走 stale task 恢复而不是先连 `/api/stream/{taskId}`。
