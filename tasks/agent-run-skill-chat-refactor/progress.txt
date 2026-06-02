@@ -7,6 +7,8 @@ Source: prd.json
 ## Codebase Patterns
 - 新的 NDJSON 流式接口复用 `backend.services.chat_stream_service.to_ndjson_line`，并由 `StreamingResponse` 直接返回异步迭代器。
 - 后端流式路由测试优先直接调用 API 函数并消费 `response.body_iterator`，不必额外起 `TestClient`。
+- 前端流式 API client 统一在 `frontend/lib/api.ts` 通过 `streamNdjson + parse<Event>` 组合实现，具体事件合同集中定义在 `frontend/types/api.ts`。
+- fake agent run 产出的占位 `task_accepted` 只能复用任务卡 UI，不能继续挂在 `activeTaskIds/currentTaskId/taskSummaries` 上，否则 `heartbeat/getTaskStatus` 会把占位任务误判成后端重启。
 
 ## 2026-06-02 09:48 - US-001
 - 实现了 `/api/agent/runs/stream` fake runtime，支持 `run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`done`、`needs_input` 和 `error` 终态。
@@ -28,4 +30,39 @@ Source: prd.json
     - `git diff --check` 可能被工作区无关文件阻塞，遇到这种情况只对本轮修改文件做定向检查，避免碰用户改动。
   - 有用的上下文（例如，"评估面板在 component X 中"）
     - 旧 `/api/user/stream` 的 `task_accepted` 字段形状已经能被前端任务卡消费，新协议保持 `task_id/task_kind/status/queue_position/waiting_count` 即可平滑接入。
+---
+
+## 2026-06-02 10:04 - US-002
+- 实现了 `streamAgentRun`，把 `/api/agent/runs/stream` 的 NDJSON 事件解析为类型化 `AgentRunEvent`，并复用统一流式 client 错误处理。
+- 在前端 API 类型中补充 agent run 请求、阶段化 thinking、`task_accepted` payload 和终态事件合同，供后续 ChatPanel 接入复用。
+- 补充 API 单元测试，覆盖正常事件序列、坏 JSON 协议错误和后端错误响应映射。
+- 更改的文件
+  - `frontend/lib/api.ts`
+  - `frontend/types/api.ts`
+  - `frontend/__tests__/unit/lib/test_api.test.ts`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - 新流式接口优先新增独立 `parse<Event>` 函数，再由 `streamNdjson` 统一承接 fetch、NDJSON 分帧和错误转换。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - `thinking_stage`、`needs_input` 和 `done` 里的可选 `selected_skill` 需要先把非法值收敛为 `null`，返回事件对象时再显式归一成 `undefined`，否则 TypeScript 不会自动完成窄化。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - 现有 Jest `mockFetchStream` 已经足够复用 agent run 协议测试，不需要额外引入 SSE mock 或起浏览器验证。
+---
+
+## 2026-06-02 11:32 - US-003
+- 修复了 fake `task_accepted` 被当成真实活跃任务跟踪的问题；占位任务卡仍保留，但会立刻从 `currentTaskId/activeTaskIds/taskSummaries` 摘除，避免触发 `/api/tasks/<fake>/heartbeat` 和 `getTaskStatus` 404。
+- 保持 `needs_input` 链路可继续发送后续普通消息，并补了单测覆盖 fake rewrite 后继续收到助手追问的回归场景。
+- 新增 Playwright 回归用例，验证 `/api/agent/runs/stream` 请求真实发出、fake rewrite 页面展示“修改进度 / AI 修改内容”任务卡且不轮询 fake task、普通消息能渲染 `needs_input` 追问且无控制台错误。
+- 更改的文件
+  - `frontend/components/chat/ChatPanel.tsx`
+  - `frontend/stores/chatStore.ts`
+  - `frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
+  - `frontend/e2e/test_agent_run_chat_panel.spec.ts`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - 如果某个任务只用于 UI 占位验证，优先保留任务卡消息组并移除活跃追踪，而不是伪造完整 heartbeat/status 生命周期。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - Playwright 在当前 WSL 环境下直接拉起默认 dev server 会走出错的 CSS native module 路径；复用手工启动的 `npx next dev --webpack -p 8502` 可以稳定跑浏览器验证。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - `findTaskMessageGroup` 会从现有消息回退重建任务卡分组，所以占位任务移除 summary/active tracking 后，日志卡和内容卡仍然能正常显示。
 ---

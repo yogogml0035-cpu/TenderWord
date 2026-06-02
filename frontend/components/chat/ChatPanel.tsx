@@ -13,11 +13,11 @@ import {
   createCommentSupplementTask,
   createEditTask,
   downloadFile,
-  streamUserMessage,
+  streamAgentRun,
   uploadFile,
 } from '@/lib/api';
-import type { EditTaskRequest, UserStreamEvent, UserStreamMessage } from '@/types/api';
-import type { Message } from '@/types/chat';
+import type { AgentRunEvent, EditTaskRequest } from '@/types/api';
+import type { ChatMessageKind, Message } from '@/types/chat';
 import type { ModelType } from '@/components/forms/ModelSelector';
 import type { ConversationDraftFile, ConversationFormDraft } from '@/stores/chatStore';
 import { tenderTypeDisplayNameMap } from './tenderFormRegistry';
@@ -29,37 +29,39 @@ interface ChatPanelProps {
 
 const missingInsertionAnchorMessage = '请先补全当前页面的插入锚点';
 
-function collectNormalChatContext(messages: Message[]): UserStreamMessage[] {
-  const candidates: Array<{ message: Message; content: string }> = [];
-
-  for (const message of messages) {
-    if (message.metadata?.messageKind) {
-      continue;
-    }
-    if (message.metadata?.chatKind && message.metadata.chatKind !== 'normal') {
-      continue;
-    }
-    if (message.type !== 'user' && (message.type !== 'ai' || message.status !== 'completed')) {
-      continue;
-    }
-
-    const content = typeof message.content === 'string' ? message.content.trim() : '';
-    if (!content) {
-      continue;
-    }
-
-    candidates.push({ message, content });
-  }
-
-  return candidates.slice(-6).map<UserStreamMessage>(({ message, content }) => ({
-    role: message.type === 'user' ? 'user' : 'assistant',
-    content,
-  }));
+function isSyntheticAgentRunTaskId(taskId: string): boolean {
+  return taskId.startsWith('fake-');
 }
 
-function collectUserRouteContext(messages: Message[], latestPrompt: string): UserStreamMessage[] {
-  const history = collectNormalChatContext(messages).slice(-5);
-  return [...history, { role: 'user' as const, content: latestPrompt }];
+function hasRewriteContext(messages: Message[]): boolean {
+  for (const message of messages) {
+    if (message.metadata?.messageKind !== 'task-download') {
+      continue;
+    }
+    if (message.status !== 'completed') {
+      continue;
+    }
+    if (typeof message.metadata?.outputFile !== 'string' || !message.metadata.outputFile.trim()) {
+      continue;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function buildAgentRunContextSnapshot(messages: Message[], draft: ConversationFormDraft | null) {
+  return {
+    rewrite_available: hasRewriteContext(messages),
+    uploaded_files: draft?.edit_file
+      ? [
+          {
+            file_path: draft.edit_file.file_path,
+            file_name: draft.edit_file.original_name || draft.edit_file.file_name,
+          },
+        ]
+      : [],
+  };
 }
 
 function getConversationMessagesById(conversationId: string): Message[] {
@@ -190,6 +192,9 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     deleteMessage,
     findTaskMessageGroup,
     startTask,
+    ensureTaskLogMessage,
+    ensureTaskContentMessage,
+    detachTaskTracking,
     taskSummaries,
   } =
     useChatStore();
@@ -369,7 +374,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     });
   }, [conversation, isBusy, updateConversationDraft]);
 
-  const sendUserMessage = useCallback(
+  const sendAgentRunMessage = useCallback(
     async (
       prompt: string,
       options: {
@@ -392,6 +397,8 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       const appendUserMessage = options.appendUserMessage ?? true;
       const modelForRequest = options.modelOverride || selectedModel;
       const existingMessages = getConversationMessagesById(conversationId);
+      const draftForRequest = useChatStore.getState().getConversationDraft(conversationId);
+      const contextSnapshot = buildAgentRunContextSnapshot(existingMessages, draftForRequest);
       const baseAiMetadata = {
         chatKind: 'normal' as const,
         chatPrompt: prompt,
@@ -435,112 +442,103 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         aiMessagePrepared = true;
         return aiMessageId;
       };
-      const contextMessages = appendUserMessage
-        ? collectUserRouteContext(existingMessages, prompt)
-        : collectNormalChatContext(getConversationMessagesById(conversationId));
 
       const controller = new AbortController();
       normalChatAbortRef.current[conversationId] = controller;
       setNormalChatActive(conversationId, true);
 
-      let accumulatedText = '';
       let streamFinished = false;
-      let activeRoute: 'reply' | 'rewrite' | null = null;
-      let rewritePlaceholderMessageId: string | undefined;
-      let rewriteTaskAccepted = false;
+      let taskAccepted = false;
 
-      const cleanupRewritePlaceholder = () => {
-        if (!rewritePlaceholderMessageId || rewriteTaskAccepted) {
+      const syncUserChatKind = (chatKind: ChatMessageKind) => {
+        if (!userMessageId || chatKind === 'normal' || chatKind === 'task-notice') {
           return;
         }
-        deleteMessage(conversationId, rewritePlaceholderMessageId);
-        rewritePlaceholderMessageId = undefined;
+        updateMessage(conversationId, userMessageId, {
+          metadata: {
+            chatKind,
+          },
+        });
       };
 
       try {
-        const handleStreamEvent = (event: UserStreamEvent) => {
-          if (event.event === 'route') {
-            activeRoute = event.data.route;
-            if (event.data.route === 'rewrite' && userMessageId) {
-              updateMessage(conversationId, userMessageId, {
-                metadata: {
-                  chatKind: 'rewrite',
-                },
-              });
-            }
-            if (event.data.route === 'rewrite' && !rewritePlaceholderMessageId) {
-              rewritePlaceholderMessageId = addMessage(conversationId, {
-                type: 'ai',
-                content: '正在创建修改重写任务',
-                status: 'completed',
-                metadata: {
-                  chatKind: 'rewrite',
-                },
-              });
-            }
-            return;
-          }
-
+        const handleStreamEvent = (event: AgentRunEvent) => {
           if (event.event === 'task_accepted') {
-            rewriteTaskAccepted = true;
-            if (userMessageId) {
-              updateMessage(conversationId, userMessageId, {
-                metadata: {
-                  chatKind: 'rewrite',
-                },
-              });
-            }
+            taskAccepted = true;
+            const isSyntheticTask = isSyntheticAgentRunTaskId(event.data.task_id);
+            const acceptedChatKind: ChatMessageKind =
+              event.data.task_kind === 'rewrite'
+                ? 'rewrite'
+                : event.data.task_kind === 'edit'
+                  ? 'edit'
+                  : 'normal';
+            syncUserChatKind(acceptedChatKind);
             startTask(
-              conversation.id,
+              conversationId,
               event.data.task_id,
               {
                 task_kind: event.data.task_kind,
                 status: event.data.status || 'queued',
                 queue_position: event.data.queue_position,
                 waiting_count: event.data.waiting_count,
-              },
-              rewritePlaceholderMessageId
-                ? { logMessageId: rewritePlaceholderMessageId }
-                : undefined
+              }
             );
-            updateConversationDraft(conversation.id, {
-              chat_input: '',
-              pending_rewrite_prompt: prompt,
-              pending_rewrite_task_id: event.data.task_id,
+            ensureTaskLogMessage(event.data.task_id, { status: 'generating' });
+            ensureTaskContentMessage(event.data.task_id, { status: 'generating' });
+            if (!isSyntheticTask && event.data.task_kind === 'rewrite') {
+              updateConversationDraft(conversationId, {
+                chat_input: '',
+                pending_rewrite_prompt: prompt,
+                pending_rewrite_task_id: event.data.task_id,
+              });
+            }
+            if (isSyntheticTask) {
+              detachTaskTracking(event.data.task_id);
+            }
+            return;
+          }
+
+          if (event.event === 'thinking_stage') {
+            if (event.data.selected_skill === 'rewrite') {
+              syncUserChatKind('rewrite');
+            }
+            if (event.data.selected_skill === 'edit') {
+              syncUserChatKind('edit');
+            }
+            return;
+          }
+
+          if (event.event === 'needs_input') {
+            if (event.data.selected_skill === 'rewrite') {
+              syncUserChatKind('rewrite');
+            }
+            if (event.data.selected_skill === 'edit') {
+              syncUserChatKind('edit');
+            }
+            const ensuredAiMessageId = ensureAiMessage();
+            updateMessage(conversationId, ensuredAiMessageId, {
+              content: event.data.message,
+              status: 'completed',
+              error: undefined,
             });
             streamFinished = true;
             return;
           }
 
-          if (event.event === 'chunk') {
-            if (!activeRoute) {
-              activeRoute = 'reply';
-            }
-            if (activeRoute === 'rewrite') {
-              return;
-            }
-            const ensuredAiMessageId = ensureAiMessage();
-            accumulatedText += event.data.content || '';
-            updateMessage(conversationId, ensuredAiMessageId, {
-              content: accumulatedText,
-              status: 'generating',
-            });
-            return;
-          }
-
           if (event.event === 'done') {
-            if (!activeRoute) {
-              activeRoute = 'reply';
-            }
-            if (activeRoute === 'rewrite') {
+            if (taskAccepted) {
               streamFinished = true;
               return;
             }
+            if (event.data.selected_skill === 'rewrite') {
+              syncUserChatKind('rewrite');
+            }
+            if (event.data.selected_skill === 'edit') {
+              syncUserChatKind('edit');
+            }
             const ensuredAiMessageId = ensureAiMessage();
-            const finalText = event.data.content || accumulatedText;
-            accumulatedText = finalText;
             updateMessage(conversationId, ensuredAiMessageId, {
-              content: finalText,
+              content: event.data.message,
               status: 'completed',
               error: undefined,
             });
@@ -549,35 +547,24 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           }
 
           if (event.event === 'error') {
-            if (activeRoute === 'rewrite') {
-              cleanupRewritePlaceholder();
-            }
-            const errorMessage = event.data.message || '聊天失败';
-            const shouldBindToReplyBubble = activeRoute !== 'rewrite' || !!options.reuseAiMessageId;
-            if (shouldBindToReplyBubble) {
-              const ensuredAiMessageId = ensureAiMessage();
-              updateMessage(conversationId, ensuredAiMessageId, {
-                content: accumulatedText,
-                status: 'error',
-                error: errorMessage,
-              });
-            }
-            if (activeRoute === 'rewrite' || !aiMessagePrepared) {
-              addMessage(conversationId, {
-                type: 'system',
-                content: errorMessage,
-                status: 'completed',
-              });
-            }
+            const errorMessage = event.data.message || '任务助手请求失败';
+            const ensuredAiMessageId = ensureAiMessage();
+            updateMessage(conversationId, ensuredAiMessageId, {
+              content: errorMessage,
+              status: 'error',
+              error: errorMessage,
+            });
             streamFinished = true;
           }
         };
 
-        await streamUserMessage(
+        await streamAgentRun(
           {
             conversation_id: conversationId,
+            message: prompt,
             model: modelForRequest,
-            messages: contextMessages,
+            selected_skills: [],
+            context_snapshot: contextSnapshot,
           },
           {
             signal: controller.signal,
@@ -585,19 +572,10 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           }
         );
 
-        if (!streamFinished) {
-          if (activeRoute !== 'rewrite' && aiMessagePrepared && aiMessageId) {
-            updateMessage(conversationId, aiMessageId, {
-              content: accumulatedText,
-              status: 'completed',
-              error: undefined,
-            });
-          }
+        if (!streamFinished && taskAccepted) {
+          streamFinished = true;
         }
       } catch (error) {
-        if (activeRoute === 'rewrite') {
-          cleanupRewritePlaceholder();
-        }
         const isAbort =
           error instanceof DOMException
             ? error.name === 'AbortError'
@@ -606,31 +584,20 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         if (isAbort) {
           if (aiMessagePrepared && aiMessageId) {
             updateMessage(conversationId, aiMessageId, {
-              content: accumulatedText,
+              content: '',
               status: 'cancelled',
             });
           }
-        } else {
-          const message = error instanceof ApiError ? error.message : '聊天失败，请稍后重试';
-          if (aiMessagePrepared && aiMessageId) {
-            updateMessage(conversationId, aiMessageId, {
-              content: accumulatedText,
-              status: 'error',
-              error: message,
-            });
-          }
-          if (!aiMessagePrepared) {
-            addMessage(conversationId, {
-              type: 'system',
-              content: message,
-              status: 'completed',
-            });
-          }
+        } else if (!taskAccepted) {
+          const message = error instanceof ApiError ? error.message : '任务助手请求失败，请稍后重试';
+          const ensuredAiMessageId = ensureAiMessage();
+          updateMessage(conversationId, ensuredAiMessageId, {
+            content: message,
+            status: 'error',
+            error: message,
+          });
         }
       } finally {
-        if (activeRoute === 'rewrite') {
-          cleanupRewritePlaceholder();
-        }
         delete normalChatAbortRef.current[conversationId];
         setNormalChatActive(conversationId, false);
       }
@@ -638,7 +605,9 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     [
       addMessage,
       conversation,
-      deleteMessage,
+      ensureTaskContentMessage,
+      ensureTaskLogMessage,
+      detachTaskTracking,
       isTaskBusy,
       selectedModel,
       setNormalChatActive,
@@ -721,7 +690,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         return true;
       }
 
-      void sendUserMessage(content, {
+      void sendAgentRunMessage(content, {
         appendUserMessage: true,
       });
       updateConversationDraft(conversation.id, { chat_input: '' });
@@ -735,7 +704,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       isEditMode,
       isBusy,
       selectedModel,
-      sendUserMessage,
+      sendAgentRunMessage,
       startTask,
       updateConversationDraft,
     ]
@@ -768,7 +737,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           : selectedModel;
 
       if (retryPrompt) {
-        void sendUserMessage(retryPrompt, {
+        void sendAgentRunMessage(retryPrompt, {
           appendUserMessage: false,
           modelOverride: retryModel,
           reuseAiMessageId: message.id,
@@ -776,7 +745,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         return;
       }
     },
-    [conversation, isBusy, selectedModel, sendUserMessage]
+    [conversation, isBusy, selectedModel, sendAgentRunMessage]
   );
 
   const handleDownload = async (filePath: string, fileName?: string) => {

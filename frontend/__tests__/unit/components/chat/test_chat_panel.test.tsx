@@ -1,15 +1,15 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import {
   cancelTask,
   createCommentSupplementTask,
   createEditTask,
-  streamUserMessage,
+  streamAgentRun,
   uploadFile,
 } from '@/lib/api';
 import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
-import type { UserStreamEvent } from '@/types/api';
+import type { AgentRunEvent } from '@/types/api';
 import type { Message } from '@/types/chat';
 
 jest.mock('@/lib/api', () => {
@@ -20,7 +20,7 @@ jest.mock('@/lib/api', () => {
     createCommentSupplementTask: jest.fn(),
     createEditTask: jest.fn(),
     downloadFile: jest.fn(),
-    streamUserMessage: jest.fn(),
+    streamAgentRun: jest.fn(),
     uploadFile: jest.fn(),
   };
 });
@@ -152,7 +152,7 @@ jest.mock('@/components/chat/ChatInput', () => ({
   ),
 }));
 
-const mockStreamUserMessage = streamUserMessage as jest.MockedFunction<typeof streamUserMessage>;
+const mockStreamAgentRun = streamAgentRun as jest.MockedFunction<typeof streamAgentRun>;
 const mockCancelTask = cancelTask as jest.MockedFunction<typeof cancelTask>;
 const mockCreateCommentSupplementTask = createCommentSupplementTask as jest.MockedFunction<
   typeof createCommentSupplementTask
@@ -171,8 +171,8 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
-function mockUserStream(events: UserStreamEvent[], terminalError?: unknown) {
-  mockStreamUserMessage.mockImplementationOnce(async (_payload, options = {}) => {
+function mockAgentRunStream(events: AgentRunEvent[], terminalError?: unknown) {
+  mockStreamAgentRun.mockImplementationOnce(async (_payload, options = {}) => {
     for (const event of events) {
       await options.onEvent?.(event);
     }
@@ -186,7 +186,7 @@ describe('ChatPanel', () => {
   beforeEach(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
-    mockStreamUserMessage.mockReset();
+    mockStreamAgentRun.mockReset();
     mockCancelTask.mockReset();
     mockCreateCommentSupplementTask.mockReset();
     mockCreateEditTask.mockReset();
@@ -471,7 +471,7 @@ describe('ChatPanel', () => {
 
     await waitFor(() => {
       expect(mockCreateEditTask).toHaveBeenCalledTimes(1);
-      expect(mockStreamUserMessage).not.toHaveBeenCalled();
+      expect(mockStreamAgentRun).not.toHaveBeenCalled();
       const conversation = useChatStore.getState().conversations[0];
       const draft = useChatStore.getState().getConversationDraft('conv-1');
       expect(conversation.currentTaskId).toBe('task-edit');
@@ -771,9 +771,14 @@ describe('ChatPanel', () => {
       taskSummaries: {},
     }));
 
-    mockUserStream([
-      { event: 'route', data: { route: 'reply' } },
-      { event: 'done', data: { content: '重试成功内容' } },
+    mockAgentRunStream([
+      {
+        event: 'done',
+        data: {
+          run_id: 'run-1',
+          message: '重试成功内容',
+        },
+      },
     ]);
 
     render(<ChatPanel />);
@@ -788,34 +793,60 @@ describe('ChatPanel', () => {
       expect(conversation.messages[0].content).toBe('重试成功内容');
     });
 
-    expect(mockStreamUserMessage).toHaveBeenCalledTimes(1);
+    expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
   });
 
-  it('auto routes rewrite-like input in normal mode to rewrite task flow', async () => {
+  it('creates rewrite task cards from agent run task_accepted events', async () => {
     useChatStore.setState((state) => ({
       ...state,
       conversations: [
         {
           ...state.conversations[0],
           currentTaskId: undefined,
+          messages: [
+            {
+              id: 'msg-download',
+              conversationId: 'conv-1',
+              type: 'ai',
+              content: 'output.docx',
+              timestamp: Date.now(),
+              status: 'completed',
+              taskId: 'task-generate-finished',
+              metadata: {
+                messageKind: 'task-download',
+                taskKind: 'generate',
+                outputFile: 'D:/UploadFiles/output.docx',
+                fileName: 'output.docx',
+              },
+            },
+          ],
         },
       ],
       activeTaskIds: [],
       taskSummaries: {},
       conversationDrafts: {
         'conv-1': {
-          chat_input: '请帮我修改这一段内容',
-          generation_mode: 'agent',
-          comment_generation_mode: 'off',
+          chat_input: '请帮我改写这一段内容',
         },
       },
     }));
 
-    mockUserStream([
-      { event: 'route', data: { route: 'rewrite' } },
+    mockAgentRunStream([
+      {
+        event: 'thinking_stage',
+        data: {
+          run_id: 'run-1',
+          stage: 'understand',
+          label: '理解需求',
+          status: 'completed',
+          summary: '已识别为 rewrite 请求',
+          selected_skill: 'rewrite',
+        },
+      },
       {
         event: 'task_accepted',
         data: {
+          run_id: 'run-1',
           task_id: 'task-rewrite',
           task_kind: 'rewrite',
           status: 'queued',
@@ -832,30 +863,160 @@ describe('ChatPanel', () => {
     await waitFor(() => {
       const conversation = useChatStore.getState().conversations[0];
       const draft = useChatStore.getState().getConversationDraft('conv-1');
+      const taskGroup = useChatStore.getState().findTaskMessageGroup('task-rewrite');
       expect(conversation.currentTaskId).toBe('task-rewrite');
       expect(draft?.pending_rewrite_task_id).toBe('task-rewrite');
-      expect(conversation.messages).toHaveLength(2);
-      expect(conversation.messages[0].metadata?.chatKind).toBe('rewrite');
+      expect(conversation.messages).toHaveLength(4);
       expect(conversation.messages[1]).toMatchObject({
-        type: 'ai',
-        content: '正在创建修改重写任务',
-        status: 'completed',
+        type: 'user',
         metadata: {
           chatKind: 'rewrite',
         },
       });
+      expect(taskGroup?.logMessage).toMatchObject({
+        taskId: 'task-rewrite',
+        status: 'generating',
+        metadata: {
+          messageKind: 'task-log',
+          taskKind: 'rewrite',
+        },
+      });
+      expect(taskGroup?.contentMessage).toMatchObject({
+        taskId: 'task-rewrite',
+        status: 'generating',
+        metadata: {
+          messageKind: 'task-content',
+          taskKind: 'rewrite',
+        },
+      });
     });
 
-    expect(mockStreamUserMessage).toHaveBeenCalledTimes(1);
-    expect(mockStreamUserMessage.mock.calls[0]?.[0]).toMatchObject({
+    expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
+    expect(mockStreamAgentRun.mock.calls[0]?.[0]).toMatchObject({
       conversation_id: 'conv-1',
+      message: '请帮我改写这一段内容',
       model: 'deepseek',
-      messages: [{ role: 'user', content: '请帮我修改这一段内容' }],
+      selected_skills: [],
+      context_snapshot: {
+        rewrite_available: true,
+        uploaded_files: [],
+      },
     });
-    expect(mockStreamUserMessage.mock.calls[0]?.[0]).not.toHaveProperty('generation_mode');
-    expect(mockStreamUserMessage.mock.calls[0]?.[0]).not.toHaveProperty(
-      'comment_generation_mode'
-    );
+    expect(mockStreamAgentRun.mock.calls[0]?.[0]).not.toHaveProperty('generation_mode');
+    expect(mockStreamAgentRun.mock.calls[0]?.[0]).not.toHaveProperty('comment_generation_mode');
+  });
+
+  it('keeps fake agent run task cards visible without tracking them as active tasks', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+          messages: [
+            {
+              id: 'msg-download',
+              conversationId: 'conv-1',
+              type: 'ai',
+              content: 'output.docx',
+              timestamp: Date.now(),
+              status: 'completed',
+              taskId: 'task-generate-finished',
+              metadata: {
+                messageKind: 'task-download',
+                taskKind: 'generate',
+                outputFile: 'D:/UploadFiles/output.docx',
+                fileName: 'output.docx',
+              },
+            },
+          ],
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请帮我改写这一段内容',
+        },
+      },
+    }));
+
+    mockAgentRunStream([
+      {
+        event: 'thinking_stage',
+        data: {
+          run_id: 'run-1',
+          stage: 'understand',
+          label: '理解需求',
+          status: 'completed',
+          summary: '已识别为 rewrite 请求',
+          selected_skill: 'rewrite',
+        },
+      },
+      {
+        event: 'task_accepted',
+        data: {
+          run_id: 'run-1',
+          task_id: 'fake-rewrite-task-1',
+          task_kind: 'rewrite',
+          status: 'queued',
+          queue_position: 0,
+          waiting_count: 0,
+        },
+      },
+    ]);
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      const state = useChatStore.getState();
+      const conversation = state.conversations[0];
+      const taskGroup = state.findTaskMessageGroup('fake-rewrite-task-1');
+      expect(conversation.currentTaskId).toBeUndefined();
+      expect(state.activeTaskIds).toEqual([]);
+      expect(state.getTaskSummary('fake-rewrite-task-1')).toBeNull();
+      expect(taskGroup?.logMessage).toMatchObject({
+        taskId: 'fake-rewrite-task-1',
+        status: 'generating',
+      });
+      expect(taskGroup?.contentMessage).toMatchObject({
+        taskId: 'fake-rewrite-task-1',
+        status: 'generating',
+      });
+      expect(state.getConversationDraft('conv-1')?.pending_rewrite_task_id).toBeUndefined();
+    });
+
+    act(() => {
+      useChatStore.getState().updateConversationDraft('conv-1', {
+        chat_input: '你好',
+      });
+    });
+
+    mockAgentRunStream([
+      {
+        event: 'needs_input',
+        data: {
+          run_id: 'run-2',
+          message: '请说明这次要执行 rewrite 还是 edit。',
+          missing_requirements: ['selected_skill'],
+        },
+      },
+    ]);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      const conversation = useChatStore.getState().conversations[0];
+      expect(conversation.messages[conversation.messages.length - 1]).toMatchObject({
+        type: 'ai',
+        content: '请说明这次要执行 rewrite 还是 edit。',
+        status: 'completed',
+      });
+    });
+
+    expect(mockStreamAgentRun).toHaveBeenCalledTimes(2);
   });
 
   it('keeps ordinary chat on the streaming path without creating a task', async () => {
@@ -876,9 +1037,14 @@ describe('ChatPanel', () => {
       },
     }));
 
-    mockUserStream([
-      { event: 'route', data: { route: 'reply' } },
-      { event: 'done', data: { content: '你好，请问有什么可以帮你？' } },
+    mockAgentRunStream([
+      {
+        event: 'done',
+        data: {
+          run_id: 'run-1',
+          message: '你好，请问有什么可以帮你？',
+        },
+      },
     ]);
 
     render(<ChatPanel />);
@@ -914,17 +1080,22 @@ describe('ChatPanel', () => {
       },
     }));
 
-    mockStreamUserMessage.mockImplementationOnce(async (_payload, options = {}) => {
-      await options.onEvent?.({ event: 'route', data: { route: 'reply' } });
+    mockStreamAgentRun.mockImplementationOnce(async (_payload, options = {}) => {
       await deferred.promise;
-      await options.onEvent?.({ event: 'done', data: { content: '你好，请问有什么可以帮你？' } });
+      await options.onEvent?.({
+        event: 'done',
+        data: {
+          run_id: 'run-1',
+          message: '你好，请问有什么可以帮你？',
+        },
+      });
     });
 
     render(<ChatPanel />);
 
     fireEvent.click(screen.getByTestId('send-current-input-button'));
 
-    await waitFor(() => expect(mockStreamUserMessage).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockStreamAgentRun).toHaveBeenCalledTimes(1));
     expect(useChatStore.getState().getConversationDraft('conv-1')?.chat_input).toBe('');
 
     deferred.resolve();
@@ -1010,105 +1181,7 @@ describe('ChatPanel', () => {
     });
   });
 
-  it('excludes task-notice ai bubbles from normal chat context', async () => {
-    useChatStore.setState((state) => ({
-      ...state,
-      conversations: [
-        {
-          ...state.conversations[0],
-          currentTaskId: undefined,
-          messages: [
-            {
-              id: 'msg-task-notice',
-              conversationId: 'conv-1',
-              type: 'ai',
-              content: '正在创建生成招标文件任务',
-              timestamp: Date.now(),
-              status: 'completed',
-              metadata: {
-                chatKind: 'task-notice',
-              },
-            },
-          ],
-        },
-      ],
-      activeTaskIds: [],
-      taskSummaries: {},
-      conversationDrafts: {
-        'conv-1': {
-          chat_input: '继续帮我解释一下',
-        },
-      },
-    }));
-
-    mockUserStream([
-      { event: 'route', data: { route: 'reply' } },
-      { event: 'done', data: { content: '好的，我继续说明。' } },
-    ]);
-
-    render(<ChatPanel />);
-
-    fireEvent.click(screen.getByTestId('send-current-input-button'));
-
-    await waitFor(() => {
-      expect(mockStreamUserMessage).toHaveBeenCalledTimes(1);
-    });
-
-    expect(mockStreamUserMessage.mock.calls[0]?.[0].messages).toEqual([
-      { role: 'user', content: '继续帮我解释一下' },
-    ]);
-  });
-
-  it('excludes empty completed ai bubbles from the next user stream context', async () => {
-    useChatStore.setState((state) => ({
-      ...state,
-      conversations: [
-        {
-          ...state.conversations[0],
-          currentTaskId: undefined,
-          messages: [
-            {
-              id: 'msg-ai-empty',
-              conversationId: 'conv-1',
-              type: 'ai',
-              content: '',
-              timestamp: Date.now(),
-              status: 'completed',
-              metadata: {
-                chatKind: 'normal',
-              },
-            },
-          ],
-        },
-      ],
-      activeTaskIds: [],
-      taskSummaries: {},
-      conversationDrafts: {
-        'conv-1': {
-          chat_input: '继续修改第二包技术参数',
-        },
-      },
-    }));
-
-    mockUserStream([
-      { event: 'route', data: { route: 'reply' } },
-      { event: 'done', data: { content: '好的，我继续处理。' } },
-    ]);
-
-    render(<ChatPanel />);
-
-    fireEvent.click(screen.getByTestId('send-current-input-button'));
-
-    await waitFor(() => {
-      expect(mockStreamUserMessage).toHaveBeenCalledTimes(1);
-    });
-
-    expect(mockStreamUserMessage.mock.calls[0]?.[0].messages).toEqual([
-      { role: 'user', content: '继续修改第二包技术参数' },
-    ]);
-  });
-
-  it('removes the rewrite placeholder bubble when the rewrite stream fails before task acceptance', async () => {
+  it('shows needs_input follow-up messages without creating a task card', async () => {
     useChatStore.setState((state) => ({
       ...state,
       conversations: [
@@ -1121,17 +1194,18 @@ describe('ChatPanel', () => {
       taskSummaries: {},
       conversationDrafts: {
         'conv-1': {
-          chat_input: '请帮我修改这一段内容',
+          chat_input: '你好',
         },
       },
     }));
 
-    mockUserStream([
-      { event: 'route', data: { route: 'rewrite' } },
+    mockAgentRunStream([
       {
-        event: 'error',
+        event: 'needs_input',
         data: {
-          message: '修改任务创建失败',
+          run_id: 'run-1',
+          message: '请说明这次要执行 rewrite 还是 edit。',
+          missing_requirements: ['selected_skill'],
         },
       },
     ]);
@@ -1144,18 +1218,57 @@ describe('ChatPanel', () => {
       const conversation = useChatStore.getState().conversations[0];
       expect(conversation.currentTaskId).toBeUndefined();
       expect(conversation.messages).toHaveLength(2);
-      expect(conversation.messages[0]).toMatchObject({
-        type: 'user',
-        metadata: {
-          chatKind: 'rewrite',
-        },
-      });
       expect(conversation.messages[1]).toMatchObject({
-        type: 'system',
-        content: '修改任务创建失败',
+        type: 'ai',
+        content: '请说明这次要执行 rewrite 还是 edit。',
         status: 'completed',
       });
-      expect(conversation.messages.find((message) => message.content === '正在创建修改重写任务')).toBeUndefined();
+    });
+  });
+
+  it('shows explicit error messages when the agent run returns an error terminal', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请帮我改写这一段内容',
+        },
+      },
+    }));
+
+    mockAgentRunStream([
+      {
+        event: 'error',
+        data: {
+          run_id: 'run-1',
+          code: 'AGENT_RUN_FAILED',
+          message: 'agent run 执行失败，请稍后重试',
+        },
+      },
+    ]);
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      const conversation = useChatStore.getState().conversations[0];
+      expect(conversation.currentTaskId).toBeUndefined();
+      expect(conversation.messages).toHaveLength(2);
+      expect(conversation.messages[1]).toMatchObject({
+        type: 'ai',
+        content: 'agent run 执行失败，请稍后重试',
+        status: 'error',
+      });
+      expect(screen.getByTestId('chat-input')).toHaveAttribute('data-loading', 'false');
     });
   });
 
@@ -1177,13 +1290,9 @@ describe('ChatPanel', () => {
       },
     }));
 
-    mockStreamUserMessage.mockImplementationOnce(
+    mockStreamAgentRun.mockImplementationOnce(
       async (_payload, options = {}) =>
         new Promise<void>((_resolve, reject) => {
-          void (async () => {
-            await options.onEvent?.({ event: 'route', data: { route: 'reply' } });
-            await options.onEvent?.({ event: 'chunk', data: { content: '正在生成中' } });
-          })();
           options.signal?.addEventListener(
             'abort',
             () => reject(new DOMException('Aborted', 'AbortError')),
@@ -1197,22 +1306,18 @@ describe('ChatPanel', () => {
     fireEvent.click(screen.getByTestId('send-current-input-button'));
 
     await waitFor(() => {
-      const conversation = useChatStore.getState().conversations[0];
-      expect(conversation.messages[1]).toMatchObject({
-        type: 'ai',
-        status: 'generating',
-        content: '正在生成中',
-      });
+      expect(screen.getByTestId('chat-input')).toHaveAttribute('data-loading', 'true');
     });
 
     fireEvent.click(screen.getByTestId('cancel-chat-button'));
 
     await waitFor(() => {
       const conversation = useChatStore.getState().conversations[0];
-      expect(conversation.messages[1]).toMatchObject({
-        type: 'ai',
-        status: 'cancelled',
-        content: '正在生成中',
+      expect(screen.getByTestId('chat-input')).toHaveAttribute('data-loading', 'false');
+      expect(conversation.messages).toHaveLength(1);
+      expect(conversation.messages[0]).toMatchObject({
+        type: 'user',
+        content: '帮我写一段说明',
       });
     });
   });

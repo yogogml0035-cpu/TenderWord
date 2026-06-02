@@ -937,6 +937,7 @@ interface ChatStore {
   interruptTaskForBackendRestart: (taskId: string) => void;
   handleBackendRestart: () => void;
   discardStaleTask: (taskId: string) => void;
+  detachTaskTracking: (taskId: string) => void;
   upsertTaskSummary: (
     taskId: string,
     summary: Omit<TaskSummarySnapshot, 'task_id' | 'updated_at'>
@@ -2141,6 +2142,19 @@ export const useChatStore = create<ChatStore>()(
             ),
           }));
         },
+
+        detachTaskTracking: (taskId) =>
+          set((state) => ({
+            conversations: state.conversations.map((conv) =>
+              conv.currentTaskId === taskId
+                ? { ...conv, currentTaskId: undefined, updatedAt: Date.now() }
+                : conv
+            ),
+            activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
+            taskSummaries: Object.fromEntries(
+              Object.entries(state.taskSummaries).filter(([id]) => id !== taskId)
+            ),
+          })),
 
         upsertTaskSummary: (taskId, summary) =>
           set((state) => ({
