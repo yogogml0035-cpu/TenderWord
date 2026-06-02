@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from backend.nodes.skills_nodes import edit_nodes
 
 
-class _FakeRegistry:
-    def get_definition(self, name: str):
+class _FakeGuide:
+    def __call__(self, name: str):
         return SimpleNamespace(name=name, instruction="你是编辑助手。")
 
 
@@ -23,7 +23,7 @@ def test_edit_text_writes_prompt_and_request_message_stages(tmp_path, monkeypatc
         callbacks.on_request_messages(request_messages)
         return "最终修改结果"
 
-    monkeypatch.setattr(edit_nodes, "get_skill_registry", lambda: _FakeRegistry())
+    monkeypatch.setattr(edit_nodes, "get_skill_guide", _FakeGuide())
     monkeypatch.setattr(edit_nodes, "stream_llm_completion", _fake_stream_llm_completion)
 
     result = edit_nodes.edit_text(
@@ -63,7 +63,7 @@ def test_edit_text_does_not_require_audit_path(monkeypatch):
             )
         return "无日志也能完成"
 
-    monkeypatch.setattr(edit_nodes, "get_skill_registry", lambda: _FakeRegistry())
+    monkeypatch.setattr(edit_nodes, "get_skill_guide", _FakeGuide())
     monkeypatch.setattr(edit_nodes, "stream_llm_completion", _fake_stream_llm_completion)
 
     result = edit_nodes.edit_text(
@@ -95,7 +95,7 @@ def test_edit_text_writes_generate_log_artifacts_without_breaking_edit_log(
         callbacks.on_request_messages(request_messages)
         return "最终修改结果"
 
-    monkeypatch.setattr(edit_nodes, "get_skill_registry", lambda: _FakeRegistry())
+    monkeypatch.setattr(edit_nodes, "get_skill_guide", _FakeGuide())
     monkeypatch.setattr(edit_nodes, "stream_llm_completion", _fake_stream_llm_completion)
     monkeypatch.setattr(
         "backend.util.log_util.prompt_log.get_generate_prompt_log_dir",

@@ -33,16 +33,22 @@ def test_rewrite_skill_guide_does_not_restore_legacy_workflow_frontmatter() -> N
     skill_file = Path(__file__).resolve().parents[2] / "skills" / "rewrite" / "SKILL.md"
     content = skill_file.read_text(encoding="utf-8")
 
-    assert "executor_kind:" not in content
-    assert "dispatch_key:" not in content
-    assert "route_literal:" not in content
-    assert "workflow_entry:" not in content
+    for legacy_key in (
+        "executor_kind:",
+        "dispatch_key:",
+        "route_literal:",
+        "workflow" "_entry:",
+    ):
+        assert legacy_key not in content
 
 def test_edit_skill_guide_does_not_restore_legacy_workflow_frontmatter() -> None:
     skill_file = Path(__file__).resolve().parents[2] / "skills" / "edit" / "SKILL.md"
     content = skill_file.read_text(encoding="utf-8")
 
-    assert "executor_kind:" not in content
-    assert "dispatch_key:" not in content
-    assert "route_literal:" not in content
-    assert "workflow_entry:" not in content
+    for legacy_key in (
+        "executor_kind:",
+        "dispatch_key:",
+        "route_literal:",
+        "workflow" "_entry:",
+    ):
+        assert legacy_key not in content

@@ -7,8 +7,9 @@ from typing import Optional
 from langgraph.graph import END, START, StateGraph
 
 from backend.graphs.base_graph import BaseGraph
-from backend.skills import get_skill_registry
-from backend.skills.types import TaskSkillWorkflow
+
+from .task_skill_types import TaskSkillWorkflow
+from .task_skill_workflows import get_task_skill_workflow
 
 
 class SkillGraph(BaseGraph):
@@ -34,7 +35,7 @@ class SkillGraph(BaseGraph):
 
     def _get_workflow(self) -> TaskSkillWorkflow:
         if self._workflow is None:
-            self._workflow = get_skill_registry().get_task_workflow(self._skill_id)
+            self._workflow = get_task_skill_workflow(self._skill_id)
         return self._workflow
 
     def get_state_class(self):

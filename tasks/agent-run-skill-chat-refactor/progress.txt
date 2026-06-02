@@ -18,7 +18,7 @@ Source: prd.json
 - DeepAgents task-context assistant 不要直接把 `backend/skills` 或项目根挂给 agent；应先把允许的 skill 目录镜像到隔离 runtime，再用 `CompositeBackend` 分开 `/skills/`、`/scratch/`、`/workspace/` 三个虚拟根。
 - task-context assistant 的 tool 如果要复用 `DocumentService`，优先在 executor factory 内部延迟导入 `get_document_service()`；模块顶层直接 import 容易触发 `document_service -> backend.agents` 的循环依赖。
 - 当某个 skill 已迁移到 DeepAgents guide、不再携带旧 workflow frontmatter 时，验证指令文本的测试应直接读取 `SKILL.md`，不要再经过 legacy `backend.skills.loader`。
-- 旧 task skill runtime 仍依赖 `SkillGraph` 时，可以让 loader 在检测到 `scripts/workflow.py` 后按约定补出 task binding 和 `scripts.workflow:get_workflow`，这样 `SKILL.md` 可以只保留 DeepAgents guide 所需的最小 frontmatter。
+- 旧 `SkillGraph` 仍可保留为 task runtime 入口，但 graph 定义应直接收敛到 `backend/graphs/task_skill_workflows.py`；`SKILL.md` 只保留 DeepAgents guide 和后台正文改写说明，不再承担 workflow 装配。
 - agent run 要复用 edit 这类显式任务创建能力时，受控上下文应拆成 `uploaded_files` + `edit_context`：前者只负责文件路径，后者承载 `form_type`、锚点和必要 draft 字段，方便 guard 精确区分“缺文件”和“缺页面上下文”。
 - `ChatInput` 进入 `input_mode=edit` 且存在 `edit_file` 后会切换成 edit placeholder；Playwright 断言 textarea 时不要硬编码普通聊天 placeholder，优先按当前模式文案或稳定 testid 定位。
 - 当同一个 `SKILL.md` 既要给 DeepAgents 当 guide，又要继续被旧 `SkillGraph` 当正文改写指令读取时，文档里必须显式拆分“agent run 创建任务规则”和“后台 task 正文改写规则”，否则前台 guide 很容易覆盖掉后台正文契约。
@@ -342,4 +342,39 @@ Source: prd.json
     - `rg -n "/api/user/stream|streamUserMessage" frontend` 没结果时会返回退出码 1，这是成功的“无匹配”而不是命令失败；自动化验证要按“无输出”判断，不要把它误当报错。
   - 有用的上下文（例如，"评估面板在 component X 中"）
     - `frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx` 已经覆盖真实聊天面板里的普通回复、`needs_input`、`task_accepted` 和 `error` 终态，API 层单测更适合专注 NDJSON 合同本身。
+---
+
+## 2026-06-02 17:57 - US-013
+- 删除了后端旧 user routing 入口：`backend/main.py` 不再注册 `backend.api.user`，并移除了 `backend/api/user.py`、`backend/graphs/user_graph.py`、`backend/states/user_state.py`、`backend/services/user_routing_service.py` 以及仅服务旧 stream 的 prompt/test 残留。
+- 将 rewrite/edit 后台任务图改成后端直接注册：新增 `backend/graphs/task_skill_workflows.py`、`backend/graphs/task_skill_types.py` 和 `backend/skills/catalog.py`，让 `SkillGraph` 直接读取受控 workflow registry 与 `SKILL.md` guide，而不是经过 legacy loader/registry/`scripts/workflow.py`。
+- 同步更新了 task runtime、prompt 和知识包：`generate_polished_text` / `edit_text` 改为读取 `get_skill_guide()`，rewrite 目标选择 prompt 独立成 `backend/prompts/rewrite_target_selection_prompt.py`，并补齐了新的 runtime 回归测试与共享运行时知识包。
+- 更改的文件
+  - `asset/shared_runtime_word_skill_knowledge_pack.md`
+  - `backend/graphs/task_skill_types.py`
+  - `backend/graphs/task_skill_workflows.py`
+  - `backend/graphs/skill_graph.py`
+  - `backend/skills/catalog.py`
+  - `backend/skills/__init__.py`
+  - `backend/main.py`
+  - `backend/prompts/__init__.py`
+  - `backend/prompts/rewrite_target_selection_prompt.py`
+  - `backend/prompts/types.py`
+  - `backend/nodes/common_word_nodes/generate_polished_text.py`
+  - `backend/nodes/skills_nodes/edit_nodes.py`
+  - `backend/nodes/skills_nodes/rewrite_nodes.py`
+  - `backend/tests/nodes/test_tender_aware_word_dispatch.py`
+  - `backend/tests/nodes/test_edit_audit_logging.py`
+  - `backend/tests/skills/test_task_skill_instructions.py`
+  - `backend/tests/skills/test_task_skill_runtime.py`
+  - `tasks/agent-run-skill-chat-refactor/prd.json`
+  - `tasks/agent-run-skill-chat-refactor/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - 删除旧流式入口时，除了 API 路由本体，还要同步清理包级 `__init__` 导出、prompt 聚合导出和测试残留；这些“只读导出”很容易继续把已删除模块拉进 import 图。
+    - 如果 rewrite/edit 仍共享 `SkillGraph` 这一 task runtime 外壳，最稳的做法是把 workflow 定义收敛到 `backend/graphs/`，把 `SKILL.md` 只当作 guide / instruction 真源，避免文档 frontmatter 再次反向影响后台装配。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - 删掉 `backend/skills/*/scripts/workflow.py` 后，别忘了检查同目录 `__init__.py` 是否还在 re-export 旧入口；这类残留会在 pytest collection 阶段直接炸掉。
+    - `git diff --check` 在这个仓库可能会被工作区里已有的无关尾随空格噪音打断；需要对本次触碰的路径单独做 diff 校验，避免把他人的脏改动误记到当前 story。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - 这次 story 的最小回归组合已经固定为 `backend/tests/skills/test_task_skill_runtime.py`、`backend/tests/nodes/test_tender_aware_word_dispatch.py`、`backend/tests/nodes/test_edit_audit_logging.py`，它们能最快证明新的 direct workflow registry 没把 rewrite/edit task runtime 打断。
 ---

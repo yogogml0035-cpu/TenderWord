@@ -8,7 +8,7 @@ import uuid
 from typing import Any, Dict, List
 
 from backend.nodes.common_word_nodes.generate_polished_text import generate_polished_text
-from backend.prompts.routing_prompt import (
+from backend.prompts.rewrite_target_selection_prompt import (
     build_rewrite_target_selection_bundle,
     parse_rewrite_target_selection,
 )

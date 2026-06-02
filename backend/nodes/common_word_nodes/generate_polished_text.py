@@ -6,7 +6,6 @@ import sys
 import time
 from typing import Callable, Optional
 
-from backend.skills import get_skill_registry
 from backend.prompts.generate_prompt import render_generate_prompt
 from backend.prompts.skill_prompt import render_task_skill_prompt
 from backend.prompts.types import (
@@ -14,6 +13,7 @@ from backend.prompts.types import (
     TaskSkillPromptInput,
     TaskSkillPromptSection,
 )
+from backend.skills import get_skill_guide
 from backend.states import TenderGraphStateBase
 from backend.util.common_util import (
     StreamCallbacks,
@@ -55,7 +55,7 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
     
     rewrite_mode = bool(state.get("rewrite_mode"))
     if rewrite_mode:
-        rewrite_skill = get_skill_registry().get_definition("rewrite")
+        rewrite_skill = get_skill_guide("rewrite")
         rewrite_base_text = str(
             state.get("rewrite_base_text")
             or state.get("polished_text")

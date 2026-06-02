@@ -1,8 +1,7 @@
 from __future__ import annotations
 
+from backend.graphs.task_skill_workflows import get_task_skill_workflow
 from backend.nodes.skills_nodes import tender_aware_word_dispatch
-from backend.skills.edit.scripts.workflow import get_workflow as get_edit_workflow
-from backend.skills.rewrite.scripts.workflow import get_workflow as get_rewrite_workflow
 
 
 def test_dispatch_tender_aware_delete_section_routes_all_gjgk_variants(monkeypatch) -> None:
@@ -104,7 +103,7 @@ def test_dispatch_tender_aware_update_word_routes_gngk_fw_zc_to_service_handler(
 
 
 def test_edit_workflow_keeps_public_node_names_and_uses_shared_dispatch_handlers() -> None:
-    workflow = get_edit_workflow()
+    workflow = get_task_skill_workflow("edit")
     node_map = {node.name: node.handler for node in workflow.nodes}
 
     assert workflow.start_node == "resolve_edit_target"
@@ -121,7 +120,7 @@ def test_edit_workflow_keeps_public_node_names_and_uses_shared_dispatch_handlers
 
 
 def test_rewrite_workflow_keeps_public_node_names_and_uses_shared_dispatch_handlers() -> None:
-    workflow = get_rewrite_workflow()
+    workflow = get_task_skill_workflow("rewrite")
     node_map = {node.name: node.handler for node in workflow.nodes}
 
     assert workflow.start_node == "resolve_rewrite_target"

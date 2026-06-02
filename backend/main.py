@@ -51,7 +51,6 @@ from backend.api.edit import router as edit_router
 from backend.api.comment_supplement import router as comment_supplement_router
 from backend.api.download import router as download_router
 from backend.api.agent import router as agent_router
-from backend.api.user import router as user_router
 from backend.api.conversations import router as conversations_router
 from backend.api.template_candidates import router as template_candidates_router
 
@@ -184,7 +183,6 @@ def create_application() -> FastAPI:
     app.include_router(comment_supplement_router, prefix="/api")
     app.include_router(download_router, prefix="/api")
     app.include_router(agent_router, prefix="/api")
-    app.include_router(user_router, prefix="/api")
     app.include_router(conversations_router, prefix="/api")
     app.include_router(template_candidates_router, prefix="/api")
 

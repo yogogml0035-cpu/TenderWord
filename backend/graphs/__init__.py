@@ -36,7 +36,6 @@ from .gngk_hw_cz_tender_graph import GngkHwCzTenderGraph
 from .gngk_fw_zc_tender_graph import GngkFwZcTenderGraph
 from .gngk_fw_cz_tender_graph import GngkFwCzTenderGraph
 from .gjgk_tender_graph import GjgkTenderGraph
-from .user_graph import UserGraph
 
 __all__ = [
     "BaseGraph",
@@ -53,5 +52,4 @@ __all__ = [
     "GngkFwZcTenderGraph",
     "GngkFwCzTenderGraph",
     "GjgkTenderGraph",
-    "UserGraph",
 ]

@@ -5,20 +5,6 @@ from typing import Any, Callable, Mapping, Optional, Type, TypedDict
 
 
 @dataclass(frozen=True)
-class SkillSummary:
-    name: str
-    description: str
-
-
-@dataclass(frozen=True)
-class SkillExecutorBinding:
-    skill_id: str
-    executor_kind: str
-    dispatch_key: str
-    route_literal: str
-
-
-@dataclass(frozen=True)
 class TaskSkillWorkflowNode:
     name: str
     handler: Callable[..., Any]
@@ -42,16 +28,3 @@ class TaskSkillWorkflow:
     waiting_edges: tuple[tuple[tuple[str, ...], str], ...] = ()
     conditional_edges: tuple[TaskSkillConditionalEdge, ...] = ()
     total_nodes_estimator: Optional[Callable[[Mapping[str, Any]], int]] = None
-
-
-@dataclass(frozen=True)
-class SkillDefinition:
-    name: str
-    description: str
-    instruction: str
-    source_path: str
-    executor_binding: Optional[SkillExecutorBinding] = None
-    workflow_entry: str = ""
-
-    def as_summary(self) -> SkillSummary:
-        return SkillSummary(name=self.name, description=self.description)

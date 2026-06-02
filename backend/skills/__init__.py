@@ -1,29 +1,5 @@
-"""Skill loading and registry helpers."""
+"""Skill guide helpers for runtime prompt assembly."""
 
-from backend.skills.loader import load_skill_definitions
-from backend.skills.registry import (
-    SkillRegistry,
-    build_skill_registry,
-    get_skill_registry,
-)
-from backend.skills.types import (
-    SkillDefinition,
-    SkillExecutorBinding,
-    SkillSummary,
-    TaskSkillConditionalEdge,
-    TaskSkillWorkflow,
-    TaskSkillWorkflowNode,
-)
+from backend.skills.catalog import SkillGuide, get_skill_guide
 
-__all__ = [
-    "SkillDefinition",
-    "SkillExecutorBinding",
-    "SkillRegistry",
-    "SkillSummary",
-    "TaskSkillConditionalEdge",
-    "TaskSkillWorkflow",
-    "TaskSkillWorkflowNode",
-    "build_skill_registry",
-    "get_skill_registry",
-    "load_skill_definitions",
-]
+__all__ = ["SkillGuide", "get_skill_guide"]

@@ -17,7 +17,7 @@ from backend.nodes.common_word_nodes.comment_extraction import (
 )
 from backend.prompts.skill_prompt import render_task_skill_prompt
 from backend.prompts.types import TaskSkillPromptInput, TaskSkillPromptSection
-from backend.skills import get_skill_registry
+from backend.skills import get_skill_guide
 from backend.states import TaskSkillGraphState
 from backend.util.common_util import StreamCallbacks, stream_llm_completion
 from backend.util.log_util.progress_log import progress_log
@@ -206,7 +206,7 @@ def extract_edit_context(state: TaskSkillGraphState, config) -> TaskSkillGraphSt
 
 
 def edit_text(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
-    skill = get_skill_registry().get_definition("edit")
+    skill = get_skill_guide("edit")
     edit_user_prompt = str(state.get("edit_user_prompt") or "").strip()
     if not edit_user_prompt:
         raise ValueError("edit_user_prompt 不能为空")
