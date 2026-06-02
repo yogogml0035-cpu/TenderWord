@@ -40,6 +40,19 @@ from .generate import (
     GenerateResult,
     LLMModel,
 )
+from .agent_run import (
+    AgentNeedsInputEventData,
+    AgentRunContextSnapshot,
+    AgentRunDoneEventData,
+    AgentRunErrorEventData,
+    AgentRunStartedEventData,
+    AgentRunStreamRequest,
+    AgentRunUploadedFile,
+    AgentSkill,
+    AgentTaskAcceptedEventData,
+    AgentThinkingStageEventData,
+    AgentToolCallEventData,
+)
 
 # 文件上传模型
 from .upload import (
@@ -132,6 +145,17 @@ __all__ = [
     "GenerateResult",
     "FileRequirement",
     "FormRequirementsResponse",
+    "AgentSkill",
+    "AgentRunUploadedFile",
+    "AgentRunContextSnapshot",
+    "AgentRunStreamRequest",
+    "AgentRunStartedEventData",
+    "AgentThinkingStageEventData",
+    "AgentToolCallEventData",
+    "AgentTaskAcceptedEventData",
+    "AgentNeedsInputEventData",
+    "AgentRunDoneEventData",
+    "AgentRunErrorEventData",
     
     # 文件上传
     "UploadedFileInfo",

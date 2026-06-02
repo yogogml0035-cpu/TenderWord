@@ -5,3 +5,27 @@ Started: 2026-06-01 18:25
 Source: prd.json
 
 ## Codebase Patterns
+- 新的 NDJSON 流式接口复用 `backend.services.chat_stream_service.to_ndjson_line`，并由 `StreamingResponse` 直接返回异步迭代器。
+- 后端流式路由测试优先直接调用 API 函数并消费 `response.body_iterator`，不必额外起 `TestClient`。
+
+## 2026-06-02 09:48 - US-001
+- 实现了 `/api/agent/runs/stream` fake runtime，支持 `run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`done`、`needs_input` 和 `error` 终态。
+- 新增 agent run 请求/事件模型，并将新路由注册到 `backend/main.py`。
+- 补充后端测试，覆盖 rewrite fake 任务创建、缺 rewrite 上下文追问和 runtime 异常收敛为 `error` 终态。
+- 更改的文件
+  - `backend/api/agent.py`
+  - `backend/main.py`
+  - `backend/models/__init__.py`
+  - `backend/models/agent_run.py`
+  - `backend/services/agent_run_service.py`
+  - `backend/tests/api/test_agent_run_api.py`
+  - `backend/tests/services/test_agent_run_service.py`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - agent run 事件可以先用受控 fake runtime 固定协议，再让前端按同一 NDJSON 合同接入。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - 仓库根环境没有 `python`/`pytest`，后端验证要走 `backend/.venv/Scripts/python.exe`。
+    - `git diff --check` 可能被工作区无关文件阻塞，遇到这种情况只对本轮修改文件做定向检查，避免碰用户改动。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - 旧 `/api/user/stream` 的 `task_accepted` 字段形状已经能被前端任务卡消费，新协议保持 `task_id/task_kind/status/queue_position/waiting_count` 即可平滑接入。
+---
