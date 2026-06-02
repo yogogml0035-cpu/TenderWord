@@ -58,11 +58,12 @@ Source: prd.json
   - `frontend/stores/chatStore.ts`
   - `frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
   - `frontend/e2e/test_agent_run_chat_panel.spec.ts`
+  - `frontend/playwright.config.ts`
 - **未来迭代的学习：**
   - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
     - 如果某个任务只用于 UI 占位验证，优先保留任务卡消息组并移除活跃追踪，而不是伪造完整 heartbeat/status 生命周期。
   - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
-    - Playwright 在当前 WSL 环境下直接拉起默认 dev server 会走出错的 CSS native module 路径；复用手工启动的 `npx next dev --webpack -p 8502` 可以稳定跑浏览器验证。
+    - 这个仓库在当前 WSL 环境下跑 E2E 需要让 Playwright `webServer` 显式走 `npm run dev -- --webpack`，否则默认 dev server 会触发 `lightningcss` 原生模块加载错误。
   - 有用的上下文（例如，"评估面板在 component X 中"）
     - `findTaskMessageGroup` 会从现有消息回退重建任务卡分组，所以占位任务移除 summary/active tracking 后，日志卡和内容卡仍然能正常显示。
 ---
