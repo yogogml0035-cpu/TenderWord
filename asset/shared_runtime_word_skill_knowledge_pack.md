@@ -68,6 +68,7 @@
 ### Skill 声明
 
 - skill loader 与 registry 负责 fail-fast 校验 frontmatter、workflow 入口、返回类型和 `workflow.skill_id`。
+- 当 task skill 的 `SKILL.md` 已迁移为 DeepAgents guide、只保留 `name/description` 时，loader 仍可在目录存在 `scripts/workflow.py` 的前提下按约定补出 task binding 和 `scripts.workflow:get_workflow`；这样 rewrite / edit 队列任务不会因为移除旧 frontmatter 而在后台执行阶段失败。
 - 修改 skill workflow、dispatch 路由或 audit log 时，必须同时检查 `backend/skills/`、`backend/graphs/skill_graph.py`、`backend/services/document_service.py` 和对应 tests。
 - edit / rewrite 的 LLM 输出会作为当前文档内容或当前锚点区正文的完整替换载荷；skill instruction 必须明确“输出范围守恒”。分包名、章节名、锚点、`从……起` 等用户表述默认只定位修改范围，不能让模型把局部定位误解为只输出该局部，否则写回会丢失未修改分包或章节。
 

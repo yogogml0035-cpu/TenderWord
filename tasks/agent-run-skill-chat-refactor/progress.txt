@@ -16,6 +16,7 @@ Source: prd.json
 - DeepAgents task-context assistant 不要直接把 `backend/skills` 或项目根挂给 agent；应先把允许的 skill 目录镜像到隔离 runtime，再用 `CompositeBackend` 分开 `/skills/`、`/scratch/`、`/workspace/` 三个虚拟根。
 - task-context assistant 的 tool 如果要复用 `DocumentService`，优先在 executor factory 内部延迟导入 `get_document_service()`；模块顶层直接 import 容易触发 `document_service -> backend.agents` 的循环依赖。
 - 当某个 skill 已迁移到 DeepAgents guide、不再携带旧 workflow frontmatter 时，验证指令文本的测试应直接读取 `SKILL.md`，不要再经过 legacy `backend.skills.loader`。
+- 旧 task skill runtime 仍依赖 `SkillGraph` 时，可以让 loader 在检测到 `scripts/workflow.py` 后按约定补出 task binding 和 `scripts.workflow:get_workflow`，这样 `SKILL.md` 可以只保留 DeepAgents guide 所需的最小 frontmatter。
 
 ## 2026-06-02 09:48 - US-001
 - 实现了 `/api/agent/runs/stream` fake runtime，支持 `run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`done`、`needs_input` 和 `error` 终态。
@@ -196,4 +197,23 @@ Source: prd.json
     - `document_service.py` 会经由 `backend.agents` 间接回到 task-context assistant；tool 模块如果顶层 import `DocumentService/get_document_service`，pytest 收集阶段就会因为循环导入失败。
   - 有用的上下文（例如，"评估面板在 component X 中"）
     - `DocumentService.create_rewrite_task()` 已经自带 rewrite history 兜底校验和队列状态字段，agent run 只需把失败收敛成 `needs_input` 或 `error`，不需要再复制一套任务创建逻辑。
+---
+
+## 2026-06-02 14:51 - US-008
+- 修复了 rewrite guide 与旧 task runtime 的兼容性：`backend.skills.loader` 现在只要求 `name/description`，并会在存在 `scripts/workflow.py` 时自动补出 task binding 与 `workflow_entry`，因此真实 rewrite 任务不再因为缺少 legacy frontmatter 在后台执行阶段失败。
+- 新增 loader/SkillGraph 回归测试，覆盖 rewrite guide 仍保持无 `executor_kind/dispatch_key/route_literal/workflow_entry` 字段、同时旧 `SkillGraph` 仍能成功编译并驱动任务图；共享运行时知识包同步记录该兼容边界。
+- 更改的文件
+  - `asset/shared_runtime_word_skill_knowledge_pack.md`
+  - `backend/skills/loader.py`
+  - `backend/tests/skills/test_skill_loader_compat.py`
+  - `backend/tests/skills/test_task_skill_instructions.py`
+  - `tasks/agent-run-skill-chat-refactor/prd.json`
+  - `tasks/agent-run-skill-chat-refactor/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - 如果 task graph 运行时还没完全迁出旧 registry，可以把 skill guide 和 task workflow 绑定解耦：guide 只保留 DeepAgents 需要的最小 frontmatter，legacy task 元数据由目录约定回推。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - 只修 `SkillGraph` 还不够，`generate_polished_text()` 这类节点也会通过 `get_skill_registry().get_definition()` 读取 skill instruction；loader 必须先能解析 guide-only 的 `SKILL.md`，否则任务会在真正进入节点前失败。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - 这条兼容层的最小验收是 `SkillGraph.for_skill(\"rewrite\")().compile()` 能通过，因为真实 rewrite 任务从队列线程启动后就是在这里首次触发 workflow 加载。
 ---

@@ -5,16 +5,16 @@ from pathlib import Path
 
 from backend.skills.types import SkillDefinition, SkillExecutorBinding
 
-
-_SUPPORTED_FRONTMATTER_FIELDS = frozenset(
+_REQUIRED_FRONTMATTER_FIELDS = frozenset({"name", "description"})
+_LEGACY_EXECUTOR_FIELDS = frozenset(
     {
-        "name",
-        "description",
         "executor_kind",
         "dispatch_key",
         "route_literal",
-        "workflow_entry",
     }
+)
+_SUPPORTED_FRONTMATTER_FIELDS = frozenset(
+    _REQUIRED_FRONTMATTER_FIELDS | _LEGACY_EXECUTOR_FIELDS | {"workflow_entry"}
 )
 _FRONTMATTER_PATTERN = re.compile(
     r"\A---\s*\r?\n(?P<frontmatter>.*?)\r?\n---\s*\r?\n?(?P<body>.*)\Z",
@@ -54,12 +54,41 @@ def _parse_frontmatter_block(frontmatter_text: str, source_path: Path) -> dict[s
             )
         values[normalized_key] = normalized_value
 
-    missing_fields = sorted(_SUPPORTED_FRONTMATTER_FIELDS - set(values))
-    if missing_fields:
+    missing_required_fields = sorted(_REQUIRED_FRONTMATTER_FIELDS - set(values))
+    if missing_required_fields:
         raise ValueError(
-            f"Skill frontmatter 缺少字段: {source_path} missing={', '.join(missing_fields)}"
+            "Skill frontmatter 缺少字段: "
+            f"{source_path} missing={', '.join(missing_required_fields)}"
+        )
+
+    present_legacy_fields = _LEGACY_EXECUTOR_FIELDS & set(values)
+    if present_legacy_fields and present_legacy_fields != _LEGACY_EXECUTOR_FIELDS:
+        missing_legacy_fields = sorted(_LEGACY_EXECUTOR_FIELDS - set(values))
+        raise ValueError(
+            "Skill frontmatter 缺少 legacy task 字段: "
+            f"{source_path} missing={', '.join(missing_legacy_fields)}"
         )
     return values
+
+
+def _infer_task_runtime_defaults(
+    skill_file: Path,
+    *,
+    skill_name: str,
+) -> tuple[SkillExecutorBinding | None, str]:
+    workflow_file = skill_file.parent / "scripts" / "workflow.py"
+    if not workflow_file.is_file():
+        return None, ""
+
+    return (
+        SkillExecutorBinding(
+            skill_id=skill_name,
+            executor_kind="task",
+            dispatch_key=skill_name,
+            route_literal=skill_name,
+        ),
+        "scripts.workflow:get_workflow",
+    )
 
 
 def _parse_skill_definition(skill_file: Path) -> SkillDefinition:
@@ -73,18 +102,33 @@ def _parse_skill_definition(skill_file: Path) -> SkillDefinition:
     if not instruction:
         raise ValueError(f"Skill instruction 不能为空: {skill_file}")
 
-    return SkillDefinition(
-        name=metadata["name"],
-        description=metadata["description"],
-        instruction=instruction,
-        source_path=str(skill_file.resolve()),
-        executor_binding=SkillExecutorBinding(
-            skill_id=metadata["name"],
+    skill_name = metadata["name"]
+    executor_binding = None
+    if _LEGACY_EXECUTOR_FIELDS <= set(metadata):
+        executor_binding = SkillExecutorBinding(
+            skill_id=skill_name,
             executor_kind=metadata["executor_kind"],
             dispatch_key=metadata["dispatch_key"],
             route_literal=metadata["route_literal"],
-        ),
-        workflow_entry=metadata["workflow_entry"],
+        )
+
+    workflow_entry = str(metadata.get("workflow_entry") or "").strip()
+    inferred_binding, inferred_workflow_entry = _infer_task_runtime_defaults(
+        skill_file,
+        skill_name=skill_name,
+    )
+    if executor_binding is None:
+        executor_binding = inferred_binding
+    if not workflow_entry:
+        workflow_entry = inferred_workflow_entry
+
+    return SkillDefinition(
+        name=skill_name,
+        description=metadata["description"],
+        instruction=instruction,
+        source_path=str(skill_file.resolve()),
+        executor_binding=executor_binding,
+        workflow_entry=workflow_entry,
     )
 
 

@@ -23,3 +23,13 @@ def test_rewrite_and_edit_instructions_preserve_full_output_scope() -> None:
     assert "不能理解为只输出该范围" in edit_instruction
     assert "不得省略、裁剪或用省略号代替未修改内容" in edit_instruction
     assert "只输出完整最终正文文本" in edit_instruction
+
+
+def test_rewrite_skill_guide_does_not_restore_legacy_workflow_frontmatter() -> None:
+    skill_file = Path(__file__).resolve().parents[2] / "skills" / "rewrite" / "SKILL.md"
+    content = skill_file.read_text(encoding="utf-8")
+
+    assert "executor_kind:" not in content
+    assert "dispatch_key:" not in content
+    assert "route_literal:" not in content
+    assert "workflow_entry:" not in content
