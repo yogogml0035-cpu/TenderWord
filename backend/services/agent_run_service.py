@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional
 from pydantic import BaseModel
 
 from backend.agents.task_context_assistant import (
+    AgentRunAuditLogger,
     CREATE_REWRITE_TASK_TOOL,
     RewriteTaskExecutor,
     make_create_rewrite_task_executor,
@@ -42,6 +43,7 @@ class AgentRunService:
         run_id_factory: Optional[Callable[[], str]] = None,
         task_id_factory: Optional[Callable[[AgentSkill], str]] = None,
         rewrite_task_executor: RewriteTaskExecutor | None = None,
+        audit_logger: AgentRunAuditLogger | None = None,
     ) -> None:
         self._run_id_factory = run_id_factory or (
             lambda: f"run-{uuid.uuid4().hex}"
@@ -50,6 +52,7 @@ class AgentRunService:
         self._rewrite_task_executor = (
             rewrite_task_executor or make_create_rewrite_task_executor()
         )
+        self._audit_logger = audit_logger or AgentRunAuditLogger()
 
     async def stream(
         self,
@@ -64,14 +67,15 @@ class AgentRunService:
         if await self._is_disconnected(request):
             return
 
-        yield self._event_line(
-            "run_started",
-            AgentRunStartedEventData(
+        yield self._emit_event(
+            event_name="run_started",
+            payload=AgentRunStartedEventData(
                 run_id=run_id,
                 conversation_id=payload.conversation_id,
                 model=payload.model,
                 selected_skills=payload.selected_skills,
             ),
+            request_payload=payload,
         )
 
         try:
@@ -82,7 +86,11 @@ class AgentRunService:
             ):
                 if await self._is_disconnected(request):
                     return
-                yield self._event_line(event_name, event_data)
+                yield self._emit_event(
+                    event_name=event_name,
+                    payload=event_data,
+                    request_payload=payload,
+                )
                 await asyncio.sleep(0)
         except asyncio.CancelledError:
             return
@@ -94,13 +102,14 @@ class AgentRunService:
             )
             if await self._is_disconnected(request):
                 return
-            yield self._event_line(
-                "error",
-                AgentRunErrorEventData(
+            yield self._emit_event(
+                event_name="error",
+                payload=AgentRunErrorEventData(
                     run_id=run_id,
                     code="AGENT_RUN_FAILED",
                     message="agent run 执行失败，请稍后重试",
                 ),
+                request_payload=payload,
             )
 
     async def _build_run_plan(
@@ -370,6 +379,21 @@ class AgentRunService:
 
     def _default_task_id_factory(self, skill: AgentSkill) -> str:
         return f"fake-{skill.value}-task-{uuid.uuid4().hex[:12]}"
+
+    def _emit_event(
+        self,
+        *,
+        event_name: str,
+        payload: BaseModel,
+        request_payload: AgentRunStreamRequest,
+    ) -> str:
+        self._audit_logger.append_event(
+            event_name=event_name,
+            conversation_id=request_payload.conversation_id,
+            selected_skills=request_payload.selected_skills,
+            payload=payload,
+        )
+        return self._event_line(event_name, payload)
 
     def _event_line(self, event_name: str, payload: BaseModel) -> str:
         return to_ndjson_line(event_name, payload.model_dump(mode="json"))

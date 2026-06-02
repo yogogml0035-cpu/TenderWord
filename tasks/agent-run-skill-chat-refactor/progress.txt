@@ -8,6 +8,7 @@ Source: prd.json
 - 新的 NDJSON 流式接口复用 `backend.services.chat_stream_service.to_ndjson_line`，并由 `StreamingResponse` 直接返回异步迭代器。
 - 后端流式路由测试优先直接调用 API 函数并消费 `response.body_iterator`，不必额外起 `TestClient`。
 - 前端流式 API client 统一在 `frontend/lib/api.ts` 通过 `streamNdjson + parse<Event>` 组合实现，具体事件合同集中定义在 `frontend/types/api.ts`。
+- agent run 审计日志不要直接 dump 整个 event payload；优先写白名单结构化字段，并在落盘前统一 scrub 凭证、`.env`、私有绝对路径和 traceback。
 - fake agent run 产出的占位 `task_accepted` 只能复用任务卡 UI，不能继续挂在 `activeTaskIds/currentTaskId/taskSummaries` 上，否则 `heartbeat/getTaskStatus` 会把占位任务误判成后端重启。
 - 显式 agent skill 选择应该放在 `conversationDraft.selected_skills`，发送时写入 `streamAgentRun.selected_skills`，并在消息发出后立即清空，避免把一次性 capability 泄漏到下一条消息。
 - 即使当前 draft 已进入 `edit` 模式，只要用户显式选中了 `/edit` 或 `$edit`，`ChatPanel` 也应优先走 agent run，而不是回退到旧的直连 `createEditTask` 路径。
@@ -17,6 +18,33 @@ Source: prd.json
 - task-context assistant 的 tool 如果要复用 `DocumentService`，优先在 executor factory 内部延迟导入 `get_document_service()`；模块顶层直接 import 容易触发 `document_service -> backend.agents` 的循环依赖。
 - 当某个 skill 已迁移到 DeepAgents guide、不再携带旧 workflow frontmatter 时，验证指令文本的测试应直接读取 `SKILL.md`，不要再经过 legacy `backend.skills.loader`。
 - 旧 task skill runtime 仍依赖 `SkillGraph` 时，可以让 loader 在检测到 `scripts/workflow.py` 后按约定补出 task binding 和 `scripts.workflow:get_workflow`，这样 `SKILL.md` 可以只保留 DeepAgents guide 所需的最小 frontmatter。
+
+## 2026-06-02 15:30 - US-009
+- 实现了 `backend/agents/task_context_assistant/logging.py`，为每次 agent run 写入 `backend/logs/agent-run-<run_id>.jsonl`，并对白名单字段统一做敏感信息 scrub。
+- `AgentRunService` 现在会把 `run_started/thinking_stage/tool_call/task_accepted/done/error` 同步写入 JSONL；日志保留 `run_id`、`conversation_id`、`selected_skills`、阶段摘要、`guard_result`、`tool_name` 和 `task_id`，不会落原始用户消息、绝对路径或 traceback。
+- 新增 `read_current_conversation_summary_tool` 与 `read_current_task_public_summary_tool`，只允许 agent 读取当前会话的最近 run 摘要、rewrite 可用性和任务公共进度摘要，不暴露下载路径、完整结果或隐藏推理。
+- 补充后端测试并更新共享运行时知识包，覆盖日志 scrub、会话/任务摘要工具和 agent run 审计落盘闭环。
+- 更改的文件
+  - `asset/shared_runtime_word_skill_knowledge_pack.md`
+  - `backend/agents/__init__.py`
+  - `backend/agents/task_context_assistant/__init__.py`
+  - `backend/agents/task_context_assistant/logging.py`
+  - `backend/agents/task_context_assistant/tools.py`
+  - `backend/services/agent_run_service.py`
+  - `backend/tests/agents/test_task_context_assistant_logging.py`
+  - `backend/tests/agents/test_task_context_assistant_tools.py`
+  - `backend/tests/services/test_agent_run_service.py`
+  - `tasks/agent-run-skill-chat-refactor/prd.json`
+  - `tasks/agent-run-skill-chat-refactor/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - 需要给 agent 暴露运行态上下文时，优先做只读摘要 tool，底层日志和任务结果只保留服务端读取权，不直接给 agent backend 路径。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - `Enum` 直接写日志会变成 `TaskKind.REWRITE` 这类内部表示；agent run 审计落盘前要统一取 `.value`，否则测试合同和后续工具摘要都会漂移。
+    - `thinking_stage.summary` 在 `understand` 阶段默认会带上原始用户消息；如果日志侧不单独降采样，即使做正则 scrub 也容易残留过长原文。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - `ConversationService` 已经能提供 rewrite history 可用性与 latest rewrite state，因此 conversation summary tool 只需返回布尔/摘要，不必再复制完整 `rewrite_state` 结构。
+---
 
 ## 2026-06-02 09:48 - US-001
 - 实现了 `/api/agent/runs/stream` fake runtime，支持 `run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`done`、`needs_input` 和 `error` 终态。
