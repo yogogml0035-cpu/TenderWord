@@ -17,11 +17,15 @@ import {
   uploadFile,
 } from '@/lib/api';
 import type { AgentRunEvent, AgentSkill, EditTaskRequest } from '@/types/api';
-import type { ChatMessageKind, Message } from '@/types/chat';
+import type { AgentThinkingCardState, ChatMessageKind, Message } from '@/types/chat';
 import type { ModelType } from '@/components/forms/ModelSelector';
 import type { ConversationDraftFile, ConversationFormDraft } from '@/stores/chatStore';
 import { tenderTypeDisplayNameMap } from './tenderFormRegistry';
 import { resolveGngkFormType } from '@/lib/gngkFormType';
+import {
+  applyAgentThinkingEvent,
+  finalizeCancelledAgentThinkingState,
+} from '@/lib/agentThinking';
 
 interface ChatPanelProps {
   className?: string;
@@ -459,6 +463,8 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
       let aiMessageId = options.reuseAiMessageId;
       let aiMessagePrepared = false;
+      let thinkingMessageId: string | undefined;
+      let thinkingCardState: AgentThinkingCardState | null = null;
       const ensureAiMessage = (): string => {
         if (aiMessagePrepared && aiMessageId) {
           return aiMessageId;
@@ -482,6 +488,44 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         aiMessagePrepared = true;
         return aiMessageId;
       };
+      const upsertThinkingMessage = (
+        event: AgentRunEvent,
+        status: Message['status'] = 'generating'
+      ) => {
+        const nextThinkingState = applyAgentThinkingEvent(thinkingCardState, event);
+        if (!nextThinkingState) {
+          return;
+        }
+
+        thinkingCardState = nextThinkingState;
+        const errorMessage =
+          status === 'error'
+            ? nextThinkingState.stages.find((stage) => stage.key === 'retry')?.summary ||
+              '任务助手请求失败'
+            : undefined;
+
+        if (!thinkingMessageId) {
+          thinkingMessageId = addMessage(conversationId, {
+            type: 'ai',
+            content: '',
+            status,
+            ...(errorMessage ? { error: errorMessage } : {}),
+            metadata: {
+              agentThinking: nextThinkingState,
+            },
+          });
+          return;
+        }
+
+        updateMessage(conversationId, thinkingMessageId, {
+          content: '',
+          status,
+          error: errorMessage,
+          metadata: {
+            agentThinking: nextThinkingState,
+          },
+        });
+      };
 
       const controller = new AbortController();
       normalChatAbortRef.current[conversationId] = controller;
@@ -503,6 +547,11 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
       try {
         const handleStreamEvent = (event: AgentRunEvent) => {
+          if (event.event === 'run_started') {
+            upsertThinkingMessage(event, 'generating');
+            return;
+          }
+
           if (event.event === 'task_accepted') {
             taskAccepted = true;
             const isSyntheticTask = isSyntheticAgentRunTaskId(event.data.task_id);
@@ -513,6 +562,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
                   ? 'edit'
                   : 'normal';
             syncUserChatKind(acceptedChatKind);
+            upsertThinkingMessage(event, 'completed');
             startTask(
               conversationId,
               event.data.task_id,
@@ -545,6 +595,12 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             if (event.data.selected_skill === 'edit') {
               syncUserChatKind('edit');
             }
+            upsertThinkingMessage(event, 'generating');
+            return;
+          }
+
+          if (event.event === 'tool_call') {
+            upsertThinkingMessage(event, 'generating');
             return;
           }
 
@@ -555,6 +611,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             if (event.data.selected_skill === 'edit') {
               syncUserChatKind('edit');
             }
+            upsertThinkingMessage(event, 'completed');
             const ensuredAiMessageId = ensureAiMessage();
             updateMessage(conversationId, ensuredAiMessageId, {
               content: event.data.message,
@@ -576,6 +633,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             if (event.data.selected_skill === 'edit') {
               syncUserChatKind('edit');
             }
+            upsertThinkingMessage(event, 'completed');
             const ensuredAiMessageId = ensureAiMessage();
             updateMessage(conversationId, ensuredAiMessageId, {
               content: event.data.message,
@@ -587,6 +645,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           }
 
           if (event.event === 'error') {
+            upsertThinkingMessage(event, 'error');
             const errorMessage = event.data.message || '任务助手请求失败';
             const ensuredAiMessageId = ensureAiMessage();
             updateMessage(conversationId, ensuredAiMessageId, {
@@ -622,6 +681,16 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             : error instanceof Error && error.name === 'AbortError';
 
         if (isAbort) {
+          if (thinkingMessageId && thinkingCardState) {
+            thinkingCardState = finalizeCancelledAgentThinkingState(thinkingCardState);
+            updateMessage(conversationId, thinkingMessageId, {
+              content: '',
+              status: 'cancelled',
+              metadata: {
+                agentThinking: thinkingCardState,
+              },
+            });
+          }
           if (aiMessagePrepared && aiMessageId) {
             updateMessage(conversationId, aiMessageId, {
               content: '',

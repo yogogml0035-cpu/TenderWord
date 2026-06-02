@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 const conversationId = 'conv-agent-run-chat-panel';
 const stableInstanceId = 'agent-run-chat-panel-instance';
 const us005ScreenshotPath = '../tasks/agent-run-skill-chat-refactor/screenshots/us-005-capability-chip.png';
+const us006ScreenshotPath = '../tasks/agent-run-skill-chat-refactor/screenshots/us-006-thinking-card.png';
 
 function toNdjsonLines(events: Array<Record<string, unknown>>): string {
   return `${events.map((event) => JSON.stringify(event)).join('\n')}\n`;
@@ -286,6 +287,160 @@ test.describe('Agent run chat panel', () => {
         uploaded_files: [],
       },
     });
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test('shows a structured agent thinking card and completes it after task creation', async ({
+    page,
+  }) => {
+    const consoleErrors: string[] = [];
+    const taskRequests: string[] = [];
+
+    page.on('console', (message) => {
+      if (message.type() === 'error') {
+        consoleErrors.push(message.text());
+      }
+    });
+    page.on('pageerror', (error) => {
+      consoleErrors.push(error.message);
+    });
+
+    await seedConversation(page, {
+      messages: [
+        {
+          id: 'msg-download',
+          conversationId,
+          type: 'ai',
+          content: 'output.docx',
+          timestamp: 1,
+          status: 'completed',
+          taskId: 'task-generate-finished',
+          metadata: {
+            messageKind: 'task-download',
+            taskKind: 'generate',
+            outputFile: 'D:/UploadFiles/output.docx',
+            fileName: 'output.docx',
+          },
+        },
+      ],
+    });
+    await stubConversationHeartbeat(page);
+
+    await page.route('**/api/tasks/**', async (route) => {
+      taskRequests.push(route.request().url());
+      await route.fulfill({
+        status: 418,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: false,
+          error: {
+            code: 'UNEXPECTED_FAKE_TASK_REQUEST',
+            message: 'fake task should not be polled',
+          },
+        }),
+      });
+    });
+
+    await page.route('**/api/agent/runs/stream', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/x-ndjson',
+        body: toNdjsonLines([
+          {
+            event: 'run_started',
+            data: {
+              run_id: 'run-thinking-card',
+              conversation_id: conversationId,
+              model: 'deepseek',
+              runtime: 'fake',
+              selected_skills: [],
+            },
+          },
+          {
+            event: 'thinking_stage',
+            data: {
+              run_id: 'run-thinking-card',
+              stage: 'understand',
+              label: '理解需求',
+              status: 'completed',
+              summary: '已识别为 rewrite 请求：请帮我改写第三包',
+              selected_skill: 'rewrite',
+            },
+          },
+          {
+            event: 'thinking_stage',
+            data: {
+              run_id: 'run-thinking-card',
+              stage: 'guard',
+              label: '检查上下文',
+              status: 'completed',
+              summary: '检测到当前会话已有可改写文档。',
+              selected_skill: 'rewrite',
+              guard_result: 'passed',
+            },
+          },
+          {
+            event: 'tool_call',
+            data: {
+              run_id: 'run-thinking-card',
+              tool_name: 'create_rewrite_task_tool',
+              status: 'completed',
+              summary: 'fake runtime 已调用 create_rewrite_task_tool。',
+              task_kind: 'rewrite',
+            },
+          },
+          {
+            event: 'task_accepted',
+            data: {
+              run_id: 'run-thinking-card',
+              task_id: 'fake-rewrite-thinking-task',
+              task_kind: 'rewrite',
+              status: 'queued',
+              queue_position: 0,
+              waiting_count: 0,
+            },
+          },
+          {
+            event: 'done',
+            data: {
+              run_id: 'run-thinking-card',
+              message: '已为你创建 rewrite 任务。',
+              task_id: 'fake-rewrite-thinking-task',
+              selected_skill: 'rewrite',
+            },
+          },
+        ]),
+      });
+    });
+
+    await page.goto('/tender');
+    await expect(page.getByRole('heading', { name: 'US003-001' })).toBeVisible();
+
+    await page.getByPlaceholder('输入文字并发送即可对话...').fill('请帮我改写第三包');
+    await page.getByTestId('chat-send-button').click();
+
+    await expect(page.getByTestId('agent-thinking-card')).toBeVisible();
+    await expect(page.getByTestId('agent-thinking-stage-understand')).toContainText('理解需求');
+    await expect(page.getByTestId('agent-thinking-stage-execute')).toContainText('执行任务');
+    await expect(page.getByTestId('agent-thinking-stage-execute')).toContainText('条件满足');
+    await expect(page.getByTestId('agent-thinking-stage-tool')).toContainText(
+      'create_rewrite_task_tool'
+    );
+    await expect(page.getByTestId('agent-thinking-stage-retry')).toContainText('异常与重试');
+    await expect(page.getByTestId('agent-thinking-stage-summary')).toContainText(
+      '已创建 rewrite 任务，后续进度由任务卡继续展示。'
+    );
+    await expect(page.getByText('修改进度')).toBeVisible();
+    await expect(page.getByText('AI 修改内容')).toBeVisible();
+
+    await expect
+      .poll(() => taskRequests.length, {
+        timeout: 1000,
+      })
+      .toBe(0);
+
+    await page.screenshot({ path: us006ScreenshotPath });
+
     expect(consoleErrors).toEqual([]);
   });
 

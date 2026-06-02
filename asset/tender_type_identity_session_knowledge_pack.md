@@ -170,6 +170,7 @@
 - `generation_mode` 是全局 generate 表单态，不参与 tender identity，也不按 `gngk` 的 `tender_lx` / `fund_lx` 分桶。新会话和旧草稿缺省值都是 `workflow`，用户在高级设置切换到 `agent` 后写入当前 `ConversationFormDraft.generation_mode`。
 - `comment_generation_mode` 是全局 generate 表单态，不参与 tender identity，也不按 `gngk` 的 `tender_lx` / `fund_lx` 分桶。新会话和旧草稿缺省值都是 `on`；高级设置“批注生成”切换到“关”后写入当前 `ConversationFormDraft.comment_generation_mode=off`，提交 generate 时进入 `formDataConverter`。
 - `selected_skills` 是右侧任务上下文助手的会话级聊天草稿字段，不参与 tender identity、URL 判型或 generate/edit payload。当前只允许一个显式 capability（`rewrite` 或 `edit`），持久化在 `chat-storage.conversationDrafts[conversationId]` 里，并在普通聊天消息发送后立即清空。
+- `agent run` 的思考过程卡与任务 `agent-step` 卡是两套链路：右侧任务上下文助手过程卡存为普通 AI 消息 `metadata.agentThinking`，固定五阶段 `理解需求 / 执行任务 / 调用工具 / 异常与重试 / 汇总结论`；`thinking_stage`、`tool_call`、`task_accepted`、`needs_input`、`done`、`error` 只能写结构化摘要、guard 结果和工具名，不得把原始 `reasoning_content`、完整工具参数或隐藏推理写进消息。
 - `TenderFormShared` 的“生成方式”控件位于高级设置，选项为“工作流”和“智能体”；提交 generate 时 `BaseTenderFormData.generation_mode` 进入 `formDataConverter`，未显式选择时 converter 也要兜底为 `workflow`。
 - `TenderFormShared` 的“批注生成”控件位于高级设置，选项为“开”和“关”；提交 generate 时 `BaseTenderFormData.comment_generation_mode` 进入 `formDataConverter`，未显式选择时 converter 兜底为 `on`。
 - rewrite / edit 请求 payload 不包含 `generation_mode` 或 `comment_generation_mode`。如果聊天草稿中保留 `generation_mode: "agent"` 或 `comment_generation_mode: "off"`，`ChatPanel` 创建 rewrite / edit 任务时也不能透传它。
@@ -182,6 +183,7 @@
 - 点击类型头时，若该类型已有会话则切到 `updatedAt` 最新的一条，否则立即创建新会话。
 - 删除当前会话时，优先回退到同类型最新会话；同类型为空再回退到全局剩余会话。
 - 智能体过程卡最终态是会话历史消息，运行中正文快照是临时 stream。`agent_step` 会在 `chat-storage` 里保存为 `metadata.messageKind = "agent-step"` 的 AI 消息，刷新后随会话消息恢复；但 `is_complete=false` 的高频正文片段只存在 `chatStreamStore.streams[taskId].agentSteps`，由 `ChatPanel` 合并进当前渲染，不直接持久化到会话消息。
+- 任务上下文助手过程卡在 `task_accepted` 时必须先收敛为 completed，再由现有 `task-log` / `task-content` 任务卡继续展示队列与 Word COM 进度；缺条件追问和普通 `done` 也保留过程卡历史，但单独追加助手文字回复。
 - `agent-step` 消息不纳入旧 `taskMessageMap` 的 `task-log` / `task-content` / `task-download` 三卡分组；done 事件仍只负责生成下载入口卡。
 - 参数生成智能体过程卡优先消费 `agent_step.content_agent` 结构字段，并按固定 `metadata.agentStepKey = "content_agent"` 聚合为一张“参数生成智能体”卡。后端结构字段按确定性规则提供 `phase`、阶段 `rounds`、问题数、修复数、`highlights` 和 `final_result`；前端主视图只展示阶段摘要和问题项，初稿正文、审核原始 JSON、修复正文和最终正文默认放在折叠详情里。
 - 旧版无 `content_agent` 结构字段的 generate 子 agent 事件继续按 `metadata.agentStepNode + metadata.agentStepRound` 文本 fallback 展示：`content_generate_agent`、`content_verify_agent`、`content_revise_agent` 各自保留对应原始 streaming 内容；只有相同 `node + round` 的 streaming 增量才 upsert 同一张旧卡。

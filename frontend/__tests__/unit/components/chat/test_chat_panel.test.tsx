@@ -954,6 +954,16 @@ describe('ChatPanel', () => {
 
     mockAgentRunStream([
       {
+        event: 'run_started',
+        data: {
+          run_id: 'run-1',
+          conversation_id: 'conv-1',
+          model: 'deepseek',
+          runtime: 'fake',
+          selected_skills: [],
+        },
+      },
+      {
         event: 'thinking_stage',
         data: {
           run_id: 'run-1',
@@ -962,6 +972,28 @@ describe('ChatPanel', () => {
           status: 'completed',
           summary: '已识别为 rewrite 请求',
           selected_skill: 'rewrite',
+        },
+      },
+      {
+        event: 'thinking_stage',
+        data: {
+          run_id: 'run-1',
+          stage: 'guard',
+          label: '检查上下文',
+          status: 'completed',
+          summary: '检测到当前会话已有可改写文档。',
+          selected_skill: 'rewrite',
+          guard_result: 'passed',
+        },
+      },
+      {
+        event: 'tool_call',
+        data: {
+          run_id: 'run-1',
+          tool_name: 'create_rewrite_task_tool',
+          status: 'completed',
+          summary: 'fake runtime 已调用 create_rewrite_task_tool。',
+          task_kind: 'rewrite',
         },
       },
       {
@@ -985,13 +1017,23 @@ describe('ChatPanel', () => {
       const conversation = useChatStore.getState().conversations[0];
       const draft = useChatStore.getState().getConversationDraft('conv-1');
       const taskGroup = useChatStore.getState().findTaskMessageGroup('task-rewrite');
+      const thinkingMessage = conversation.messages.find((message) => message.metadata?.agentThinking);
       expect(conversation.currentTaskId).toBe('task-rewrite');
       expect(draft?.pending_rewrite_task_id).toBe('task-rewrite');
-      expect(conversation.messages).toHaveLength(4);
+      expect(conversation.messages).toHaveLength(5);
       expect(conversation.messages[1]).toMatchObject({
         type: 'user',
         metadata: {
           chatKind: 'rewrite',
+        },
+      });
+      expect(thinkingMessage).toMatchObject({
+        type: 'ai',
+        status: 'completed',
+        metadata: {
+          agentThinking: expect.objectContaining({
+            terminalState: 'task_accepted',
+          }),
         },
       });
       expect(taskGroup?.logMessage).toMatchObject({
@@ -1064,6 +1106,16 @@ describe('ChatPanel', () => {
 
     mockAgentRunStream([
       {
+        event: 'run_started',
+        data: {
+          run_id: 'run-1',
+          conversation_id: 'conv-1',
+          model: 'deepseek',
+          runtime: 'fake',
+          selected_skills: [],
+        },
+      },
+      {
         event: 'thinking_stage',
         data: {
           run_id: 'run-1',
@@ -1072,6 +1124,18 @@ describe('ChatPanel', () => {
           status: 'completed',
           summary: '已识别为 rewrite 请求',
           selected_skill: 'rewrite',
+        },
+      },
+      {
+        event: 'thinking_stage',
+        data: {
+          run_id: 'run-1',
+          stage: 'guard',
+          label: '检查上下文',
+          status: 'completed',
+          summary: '检测到当前会话已有可改写文档。',
+          selected_skill: 'rewrite',
+          guard_result: 'passed',
         },
       },
       {
@@ -1095,9 +1159,18 @@ describe('ChatPanel', () => {
       const state = useChatStore.getState();
       const conversation = state.conversations[0];
       const taskGroup = state.findTaskMessageGroup('fake-rewrite-task-1');
+      const thinkingMessage = conversation.messages.find((message) => message.metadata?.agentThinking);
       expect(conversation.currentTaskId).toBeUndefined();
       expect(state.activeTaskIds).toEqual([]);
       expect(state.getTaskSummary('fake-rewrite-task-1')).toBeNull();
+      expect(thinkingMessage).toMatchObject({
+        status: 'completed',
+        metadata: {
+          agentThinking: expect.objectContaining({
+            terminalState: 'task_accepted',
+          }),
+        },
+      });
       expect(taskGroup?.logMessage).toMatchObject({
         taskId: 'fake-rewrite-task-1',
         status: 'generating',
@@ -1322,6 +1395,27 @@ describe('ChatPanel', () => {
 
     mockAgentRunStream([
       {
+        event: 'run_started',
+        data: {
+          run_id: 'run-1',
+          conversation_id: 'conv-1',
+          model: 'deepseek',
+          runtime: 'fake',
+          selected_skills: [],
+        },
+      },
+      {
+        event: 'thinking_stage',
+        data: {
+          run_id: 'run-1',
+          stage: 'guard',
+          label: '检查上下文',
+          status: 'completed',
+          summary: 'fake runtime 暂时只支持 rewrite 或 edit 任务创建。',
+          guard_result: 'needs_input',
+        },
+      },
+      {
         event: 'needs_input',
         data: {
           run_id: 'run-1',
@@ -1338,8 +1432,25 @@ describe('ChatPanel', () => {
     await waitFor(() => {
       const conversation = useChatStore.getState().conversations[0];
       expect(conversation.currentTaskId).toBeUndefined();
-      expect(conversation.messages).toHaveLength(2);
+      expect(conversation.messages).toHaveLength(3);
+      expect(conversation.messages.find((message) => message.metadata?.agentThinking)).toMatchObject({
+        status: 'completed',
+        metadata: {
+          agentThinking: expect.objectContaining({
+            terminalState: 'needs_input',
+          }),
+        },
+      });
       expect(conversation.messages[1]).toMatchObject({
+        type: 'ai',
+        status: 'completed',
+        metadata: {
+          agentThinking: expect.objectContaining({
+            terminalState: 'needs_input',
+          }),
+        },
+      });
+      expect(conversation.messages[2]).toMatchObject({
         type: 'ai',
         content: '请说明这次要执行 rewrite 还是 edit。',
         status: 'completed',
@@ -1367,6 +1478,16 @@ describe('ChatPanel', () => {
 
     mockAgentRunStream([
       {
+        event: 'run_started',
+        data: {
+          run_id: 'run-1',
+          conversation_id: 'conv-1',
+          model: 'deepseek',
+          runtime: 'fake',
+          selected_skills: [],
+        },
+      },
+      {
         event: 'error',
         data: {
           run_id: 'run-1',
@@ -1383,8 +1504,17 @@ describe('ChatPanel', () => {
     await waitFor(() => {
       const conversation = useChatStore.getState().conversations[0];
       expect(conversation.currentTaskId).toBeUndefined();
-      expect(conversation.messages).toHaveLength(2);
+      expect(conversation.messages).toHaveLength(3);
       expect(conversation.messages[1]).toMatchObject({
+        type: 'ai',
+        status: 'error',
+        metadata: {
+          agentThinking: expect.objectContaining({
+            terminalState: 'error',
+          }),
+        },
+      });
+      expect(conversation.messages[2]).toMatchObject({
         type: 'ai',
         content: 'agent run 执行失败，请稍后重试',
         status: 'error',

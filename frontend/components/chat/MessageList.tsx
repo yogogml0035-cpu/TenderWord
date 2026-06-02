@@ -6,6 +6,7 @@ import type { ChatMessageKind, Message } from '@/types/chat';
 import { TaskLogMessage } from './TaskLogMessage';
 import { TaskContentMessage } from './TaskContentMessage';
 import { TaskDownloadMessage } from './TaskDownloadMessage';
+import { AgentThinkingMessage } from './AgentThinkingMessage';
 
 interface MessageListProps {
   messages: Message[];
@@ -305,6 +306,7 @@ function MessageItem({
 
   if (message.type === 'ai') {
     const messageKind = message.metadata?.messageKind;
+    const hasAgentThinkingCard = !!message.metadata?.agentThinking;
 
     return (
       <div className="animate-fade-in-up flex gap-3">
@@ -335,7 +337,8 @@ function MessageItem({
               onCommentSupplement={onCommentSupplement}
             />
           )}
-          {!messageKind && (
+          {hasAgentThinkingCard && <AgentThinkingMessage message={message} />}
+          {!messageKind && !hasAgentThinkingCard && (
             <div className="rounded border border-gray-200 bg-white px-4 py-3 shadow-sm">
               <SimpleMarkdown content={typeof message.content === 'string' ? message.content : '...'} />
 

@@ -9,6 +9,8 @@
 
 import type { TenderType } from './index';
 import type {
+  AgentSkill,
+  AgentThinkingGuardResult,
   CommentWritebackSummary,
   SSECommentAgentStep,
   SSEContentAgentStep,
@@ -31,6 +33,9 @@ export type TaskMessageKind = 'task-log' | 'task-content' | 'task-download' | 'a
 export type ChatMessageKind = 'normal' | 'rewrite' | 'edit' | 'task-notice';
 export type LocalTaskReason = 'backend_restart';
 export type AgentStepType = string;
+export type AgentThinkingViewStageKey = 'understand' | 'execute' | 'tool' | 'retry' | 'summary';
+export type AgentThinkingViewStageStatus = 'pending' | 'in_progress' | 'completed' | 'error';
+export type AgentThinkingTerminalState = 'task_accepted' | 'needs_input' | 'done' | 'error' | 'cancelled';
 
 export interface AgentStepFinding {
   evidence: string;
@@ -40,6 +45,22 @@ export interface AgentStepFinding {
 export interface AgentAuditRound {
   round: number;
   findings: AgentStepFinding[];
+}
+
+export interface AgentThinkingViewStage {
+  key: AgentThinkingViewStageKey;
+  label: string;
+  status: AgentThinkingViewStageStatus;
+  summary: string;
+  toolName?: string;
+  guardResult?: AgentThinkingGuardResult;
+}
+
+export interface AgentThinkingCardState {
+  runId?: string;
+  selectedSkill?: AgentSkill;
+  terminalState?: AgentThinkingTerminalState;
+  stages: AgentThinkingViewStage[];
 }
 
 // ============================================
@@ -107,6 +128,7 @@ export interface Message {
     lastEventId?: string;
     styleWriteback?: StyleWritebackSummary;
     commentWriteback?: CommentWritebackSummary;
+    agentThinking?: AgentThinkingCardState;
     localTaskReason?: LocalTaskReason;
     [key: string]: unknown;
   };

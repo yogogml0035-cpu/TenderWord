@@ -12,6 +12,7 @@ Source: prd.json
 - 显式 agent skill 选择应该放在 `conversationDraft.selected_skills`，发送时写入 `streamAgentRun.selected_skills`，并在消息发出后立即清空，避免把一次性 capability 泄漏到下一条消息。
 - 即使当前 draft 已进入 `edit` 模式，只要用户显式选中了 `/edit` 或 `$edit`，`ChatPanel` 也应优先走 agent run，而不是回退到旧的直连 `createEditTask` 路径。
 - 用户消息里的 capability 展示和复制回放应基于 `metadata.chatKind` 派生；正文始终显示去前缀后的内容，复制时再恢复 `$skill` 前缀。
+- agent run 思考过程卡应作为独立 AI 消息保存到 `metadata.agentThinking`，在 `task_accepted` 前消费 `run_started/thinking_stage/tool_call` 增量更新，`task_accepted/needs_input/done/error` 只负责把卡片收敛到终态并把后续展示交给任务卡或助手回复。
 
 ## 2026-06-02 09:48 - US-001
 - 实现了 `/api/agent/runs/stream` fake runtime，支持 `run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`done`、`needs_input` 和 `error` 终态。
@@ -116,4 +117,32 @@ Source: prd.json
     - `MessageList` 的用户消息复制回调用了 `metadata.chatKind` 后，要把派生值提到 `useCallback` 外部，否则 React Compiler 的 `preserve-manual-memoization` 会直接让 `eslint` 失败。
   - 有用的上下文（例如，"评估面板在 component X 中"）
     - 真实页面里的复制按钮默认隐藏在 `user-message-frame` hover/focus 态下；Playwright 验证前需要先 `hover()` 才能稳定点击。
+---
+
+## 2026-06-02 13:12 - US-006
+- 实现了独立的 agent thinking 过程卡：`run_started` 会创建五阶段卡片，`thinking_stage`/`tool_call` 增量更新结构化摘要，`task_accepted`、`needs_input`、`done` 和 `error` 会把卡片收敛到终态，不暴露原始推理或工具参数。
+- `ChatPanel` 现在会在 fake rewrite/create task 路径下先显示过程卡，再由现有任务卡继续展示队列与 Word COM 进度；缺条件追问和错误路径也会保留过程卡历史并追加助手文本。
+- 补充了过程卡组件单测、`ChatPanel` 状态单测和 Playwright 回归，并保存了截图与浏览器日志证据。
+- 更改的文件
+  - `asset/tender_type_identity_session_knowledge_pack.md`
+  - `frontend/types/chat.ts`
+  - `frontend/lib/agentThinking.ts`
+  - `frontend/components/chat/AgentThinkingMessage.tsx`
+  - `frontend/components/chat/MessageList.tsx`
+  - `frontend/components/chat/ChatPanel.tsx`
+  - `frontend/__tests__/unit/components/chat/test_agent_thinking_message.test.tsx`
+  - `frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
+  - `frontend/e2e/test_agent_run_chat_panel.spec.ts`
+  - `tasks/agent-run-skill-chat-refactor/prd.json`
+  - `tasks/agent-run-skill-chat-refactor/progress.txt`
+  - `tasks/agent-run-skill-chat-refactor/screenshots/us-006-thinking-card.png`
+  - `tasks/agent-run-skill-chat-refactor/logs/us-006-playwright.log`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - agent run 这类短生命周期流如果既要保留过程历史又要在终态切回任务卡，最稳妥的做法是把过程卡做成独立 AI 消息，而不是复用最终回复气泡。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - `ChatPanel` 的 stream handler 如果只在 `task_accepted` 后创建任务卡、却不先收敛过程卡，UI 会同时残留一个永远 `generating` 的思考卡；终态事件必须显式把卡片状态改完。
+    - Playwright 直接依赖 `webServer` 自启在当前环境里不稳定，复用已启动的 8502 服务更稳；若要留证据，命令输出最好单独重定向到需求目录日志文件。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - 新过程卡通过 `metadata.agentThinking` 走 `MessageList -> AgentThinkingMessage` 渲染链，不参与 `taskMessageMap`，因此不会影响现有任务日志/内容/下载三卡分组。
 ---
