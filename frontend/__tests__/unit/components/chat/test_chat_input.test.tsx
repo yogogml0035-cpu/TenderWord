@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { useState } from 'react';
 import type { ConversationDraftFile } from '@/stores/chatStore';
+import type { AgentSkill } from '@/types/api';
 
 function ControlledChatInput({
   onSend = jest.fn(),
@@ -21,19 +22,25 @@ function ControlledChatInput({
   noticeMessage?: string | null;
 }) {
   const [value, setValue] = useState('');
+  const [selectedSkills, setSelectedSkills] = useState<AgentSkill[]>([]);
 
   return (
-    <ChatInput
-      value={value}
-      onValueChange={setValue}
-      onSend={onSend}
-      selectedModel={selectedModel}
-      onModelChange={onModelChange}
-      loading={loading}
-      actionMode={actionMode}
-      disabled={disabled}
-      noticeMessage={noticeMessage}
-    />
+    <>
+      <ChatInput
+        value={value}
+        onValueChange={setValue}
+        onSend={onSend}
+        selectedModel={selectedModel}
+        onModelChange={onModelChange}
+        loading={loading}
+        actionMode={actionMode}
+        disabled={disabled}
+        noticeMessage={noticeMessage}
+        selectedSkills={selectedSkills}
+        onSelectedSkillsChange={setSelectedSkills}
+      />
+      <div data-testid="selected-skills-debug">{selectedSkills.join(',')}</div>
+    </>
   );
 }
 
@@ -211,6 +218,34 @@ describe('ChatInput', () => {
 
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByTestId('chat-plus-menu')).not.toBeInTheDocument();
+  });
+
+  it('shows the slash skill picker and stores the selected skill separately', () => {
+    render(<ControlledChatInput />);
+
+    const textarea = screen.getByRole('textbox');
+
+    fireEvent.change(textarea, { target: { value: '/' } });
+    expect(screen.getByTestId('chat-skill-picker')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('chat-skill-option-rewrite'));
+
+    expect(screen.getByTestId('chat-selected-skill-rewrite')).toBeInTheDocument();
+    expect(screen.getByTestId('selected-skills-debug')).toHaveTextContent('rewrite');
+    expect(textarea).toHaveValue('');
+  });
+
+  it('parses $skill prefixes into selected_skills and removes the prefix from the textarea', () => {
+    render(<ControlledChatInput />);
+
+    const textarea = screen.getByRole('textbox');
+
+    fireEvent.change(textarea, { target: { value: '$rewrite 改写第三包' } });
+
+    expect(screen.getByTestId('selected-skills-debug')).toHaveTextContent('rewrite');
+    expect(screen.getByTestId('chat-selected-skill-rewrite')).toBeInTheDocument();
+    expect(textarea).toHaveValue('改写第三包');
+    expect(screen.queryByTestId('chat-skill-picker')).not.toBeInTheDocument();
   });
 
   it('rejects non-word files in edit mode entry', () => {

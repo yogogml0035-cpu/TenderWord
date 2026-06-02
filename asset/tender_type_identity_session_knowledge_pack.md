@@ -169,6 +169,7 @@
 - `generation_style` 是 generate 表单态：货物、工程、服务默认都为 `template`；后端只在 generate runtime 使用该字段。
 - `generation_mode` 是全局 generate 表单态，不参与 tender identity，也不按 `gngk` 的 `tender_lx` / `fund_lx` 分桶。新会话和旧草稿缺省值都是 `workflow`，用户在高级设置切换到 `agent` 后写入当前 `ConversationFormDraft.generation_mode`。
 - `comment_generation_mode` 是全局 generate 表单态，不参与 tender identity，也不按 `gngk` 的 `tender_lx` / `fund_lx` 分桶。新会话和旧草稿缺省值都是 `on`；高级设置“批注生成”切换到“关”后写入当前 `ConversationFormDraft.comment_generation_mode=off`，提交 generate 时进入 `formDataConverter`。
+- `selected_skills` 是右侧任务上下文助手的会话级聊天草稿字段，不参与 tender identity、URL 判型或 generate/edit payload。当前只允许一个显式 capability（`rewrite` 或 `edit`），持久化在 `chat-storage.conversationDrafts[conversationId]` 里，并在普通聊天消息发送后立即清空。
 - `TenderFormShared` 的“生成方式”控件位于高级设置，选项为“工作流”和“智能体”；提交 generate 时 `BaseTenderFormData.generation_mode` 进入 `formDataConverter`，未显式选择时 converter 也要兜底为 `workflow`。
 - `TenderFormShared` 的“批注生成”控件位于高级设置，选项为“开”和“关”；提交 generate 时 `BaseTenderFormData.comment_generation_mode` 进入 `formDataConverter`，未显式选择时 converter 兜底为 `on`。
 - rewrite / edit 请求 payload 不包含 `generation_mode` 或 `comment_generation_mode`。如果聊天草稿中保留 `generation_mode: "agent"` 或 `comment_generation_mode: "off"`，`ChatPanel` 创建 rewrite / edit 任务时也不能透传它。
@@ -196,6 +197,8 @@
 ## 聊天输入与排队恢复
 
 - `chat_input` 在普通聊天发送或显式 edit 任务创建后立即清空。
+- `/` 只负责打开 capability picker；`$rewrite` / `$edit` 以及手动输入 `/rewrite` / `/edit` 都必须在 `ChatInput` 当场解析成 `selected_skills + chat_input`，不能把命令前缀留在持久化草稿或用户消息正文里。
+- 显式 capability 选择优先于旧聊天分支：当 `selected_skills=["edit"]` 且当前 draft 已有 `input_mode=edit` / `edit_file` 时，`ChatPanel` 仍应走 `/api/agent/runs/stream`，把上传文件上下文放进 `context_snapshot.uploaded_files`；只有没有显式 capability 时，旧的直连 `createEditTask()` 才继续服务“上传文件修改”入口。
 - `pending_rewrite_prompt` / `pending_edit_prompt` 只用于排队阶段取消或失败后的恢复回填，不是正常发送后的延迟清空机制。
 - rewrite 只有在 `/api/user/stream` 返回 `task_accepted` 后写入 pending rewrite 字段。
 - edit 在 `createEditTask()` 成功后写入 pending edit 字段；成功完成时把最新输出文件回写到 `edit_file`。

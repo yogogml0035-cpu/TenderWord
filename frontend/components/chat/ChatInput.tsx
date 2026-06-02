@@ -1,14 +1,67 @@
 'use client';
 
-import React, { useRef, useCallback, useEffect, useState } from 'react';
+import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowUp, FileText, Loader2, Plus, Square, X } from 'lucide-react';
 import { cn, formatFileSize } from '@/lib/utils';
 import type { ModelType } from '@/components/forms/ModelSelector';
 import type { ConversationDraftFile } from '@/stores/chatStore';
+import type { AgentSkill } from '@/types/api';
 import { ChatModelPicker } from './ChatModelPicker';
 
 const MIN_TEXTAREA_HEIGHT = 44;
 const MAX_TEXTAREA_HEIGHT = 180;
+const AGENT_SKILL_OPTIONS: Array<{
+  skill: AgentSkill;
+  title: string;
+  description: string;
+}> = [
+  {
+    skill: 'rewrite',
+    title: 'rewrite',
+    description: '基于当前生成文档继续修改内容',
+  },
+  {
+    skill: 'edit',
+    title: 'edit',
+    description: '修改上传 Word 文件的当前锚点区正文',
+  },
+];
+
+function isAgentSkill(value: unknown): value is AgentSkill {
+  return value === 'rewrite' || value === 'edit';
+}
+
+function normalizeSelectedSkills(skills: AgentSkill[] | undefined): AgentSkill[] {
+  if (!Array.isArray(skills)) {
+    return [];
+  }
+  return skills.filter(isAgentSkill).slice(0, 1);
+}
+
+function parseExplicitSkillPrefix(rawValue: string): { skill: AgentSkill; nextValue: string } | null {
+  const match = rawValue.match(/^\s*([$\/])(rewrite|edit)(?=\s|$)\s*/i);
+  if (!match) {
+    return null;
+  }
+
+  const skill = match[2]?.toLowerCase();
+  if (!isAgentSkill(skill)) {
+    return null;
+  }
+
+  return {
+    skill,
+    nextValue: rawValue.slice(match[0].length),
+  };
+}
+
+function getSlashSkillQuery(rawValue: string): string | null {
+  const match = rawValue.match(/^\s*\/([^\s]*)$/);
+  if (!match) {
+    return null;
+  }
+  return match[1]?.toLowerCase() || '';
+}
 
 interface ChatInputProps {
   value: string;
@@ -25,6 +78,8 @@ interface ChatInputProps {
   editFile?: ConversationDraftFile | null;
   onEditFileSelect?: (file: File) => void | Promise<void>;
   onEditFileRemove?: () => void;
+  selectedSkills?: AgentSkill[];
+  onSelectedSkillsChange?: (skills: AgentSkill[]) => void;
   sendDisabled?: boolean;
   noticeMessage?: string | null;
 }
@@ -57,21 +112,37 @@ export function ChatInput({
   editFile = null,
   onEditFileSelect,
   onEditFileRemove,
+  selectedSkills,
+  onSelectedSkillsChange,
   sendDisabled = false,
   noticeMessage,
 }: ChatInputProps) {
   const internalTextareaRef = useRef<HTMLTextAreaElement>(null);
   const menuContainerRef = useRef<HTMLDivElement>(null);
+  const skillPickerContainerRef = useRef<HTMLDivElement>(null);
   const hiddenEditInputRef = useRef<HTMLInputElement>(null);
   const isCancelAction = actionMode === 'cancel';
   const inputDisabled = disabled;
   const controlsLocked = disabled || loading;
   const sendLocked = disabled || loading || isCancelAction || sendDisabled;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [skillPickerQuery, setSkillPickerQuery] = useState<string | null>(null);
   const [localNotice, setLocalNotice] = useState<string | null>(null);
 
   const composerNotice = noticeMessage || localNotice;
   const isEditMode = inputMode === 'edit';
+  const normalizedSelectedSkills = useMemo(
+    () => normalizeSelectedSkills(selectedSkills),
+    [selectedSkills]
+  );
+  const selectedSkill = normalizedSelectedSkills[0] || null;
+  const filteredSkillOptions = useMemo(() => {
+    if (skillPickerQuery === null || skillPickerQuery === '') {
+      return AGENT_SKILL_OPTIONS;
+    }
+    return AGENT_SKILL_OPTIONS.filter((option) => option.skill.includes(skillPickerQuery));
+  }, [skillPickerQuery]);
+  const skillPickerOpen = !controlsLocked && skillPickerQuery !== null;
 
   const syncTextareaHeight = useCallback((textarea: HTMLTextAreaElement | null) => {
     if (!textarea) {
@@ -104,19 +175,25 @@ export function ChatInput({
   }, [syncTextareaHeight, value]);
 
   useEffect(() => {
-    if (!menuOpen) {
+    if (!menuOpen && !skillPickerOpen) {
       return;
     }
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (!menuContainerRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        !menuContainerRef.current?.contains(target) &&
+        !skillPickerContainerRef.current?.contains(target)
+      ) {
         setMenuOpen(false);
+        setSkillPickerQuery(null);
       }
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setMenuOpen(false);
+        setSkillPickerQuery(null);
       }
     };
 
@@ -126,7 +203,7 @@ export function ChatInput({
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [menuOpen]);
+  }, [menuOpen, skillPickerOpen]);
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
@@ -162,9 +239,37 @@ export function ChatInput({
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const target = e.target;
+    const parsedPrefix = parseExplicitSkillPrefix(target.value);
+    if (parsedPrefix) {
+      onSelectedSkillsChange?.([parsedPrefix.skill]);
+      onValueChange(parsedPrefix.nextValue);
+      setSkillPickerQuery(null);
+      target.value = parsedPrefix.nextValue;
+      syncTextareaHeight(target);
+      return;
+    }
+
+    const slashQuery = getSlashSkillQuery(target.value);
+    setSkillPickerQuery(slashQuery);
     onValueChange(target.value);
     syncTextareaHeight(target);
   };
+
+  const handleSkillSelect = useCallback(
+    (skill: AgentSkill) => {
+      onSelectedSkillsChange?.([skill]);
+      onValueChange('');
+      setSkillPickerQuery(null);
+      resetTextareaHeight(internalTextareaRef.current);
+      internalTextareaRef.current?.focus();
+    },
+    [onSelectedSkillsChange, onValueChange, resetTextareaHeight]
+  );
+
+  const handleSelectedSkillClear = useCallback(() => {
+    onSelectedSkillsChange?.([]);
+    internalTextareaRef.current?.focus();
+  }, [onSelectedSkillsChange]);
 
   const openEditPicker = useCallback(() => {
     if (controlsLocked) {
@@ -261,7 +366,34 @@ export function ChatInput({
             </div>
           ) : null}
 
-          <div>
+          {selectedSkill ? (
+            <div className="flex items-center gap-2 px-2" data-testid="chat-selected-skill-row">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                已选能力
+              </span>
+              <div
+                className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700"
+                data-testid={`chat-selected-skill-${selectedSkill}`}
+              >
+                <span>{selectedSkill}</span>
+                <button
+                  type="button"
+                  onClick={handleSelectedSkillClear}
+                  disabled={controlsLocked}
+                  aria-label="清除已选能力"
+                  data-testid="chat-selected-skill-clear"
+                  className={cn(
+                    'inline-flex h-4 w-4 items-center justify-center rounded-full text-emerald-700 transition-colors',
+                    controlsLocked ? 'cursor-not-allowed opacity-60' : 'hover:bg-emerald-100'
+                  )}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          <div ref={skillPickerContainerRef} className="relative">
             <textarea
               ref={internalTextareaRef}
               value={value}
@@ -282,6 +414,38 @@ export function ChatInput({
                 overflowY: 'hidden',
               }}
             />
+
+            {skillPickerOpen ? (
+              <div
+                className="absolute left-2 right-2 top-full z-30 mt-2 overflow-hidden rounded-[22px] border border-slate-200 bg-white/96 p-2 shadow-2xl shadow-slate-300/30 backdrop-blur"
+                data-testid="chat-skill-picker"
+              >
+                {filteredSkillOptions.map((option) => {
+                  const isSelected = option.skill === selectedSkill;
+                  return (
+                    <button
+                      key={option.skill}
+                      type="button"
+                      onClick={() => handleSkillSelect(option.skill)}
+                      data-testid={`chat-skill-option-${option.skill}`}
+                      className={cn(
+                        'flex w-full items-start gap-3 rounded-2xl border px-3.5 py-3 text-left transition-colors',
+                        isSelected
+                          ? 'border-emerald-200 bg-emerald-50/80'
+                          : 'border-transparent bg-slate-50/80 hover:border-blue-200 hover:bg-blue-50/70'
+                      )}
+                    >
+                      <div className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-sm font-semibold text-slate-900">{option.title}</span>
+                        <span className="mt-1 text-xs leading-5 text-slate-600">
+                          {option.description}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
 
           <div className="flex items-end justify-between gap-3 px-2 pb-0.5">

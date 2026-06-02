@@ -16,7 +16,7 @@ import {
   streamAgentRun,
   uploadFile,
 } from '@/lib/api';
-import type { AgentRunEvent, EditTaskRequest } from '@/types/api';
+import type { AgentRunEvent, AgentSkill, EditTaskRequest } from '@/types/api';
 import type { ChatMessageKind, Message } from '@/types/chat';
 import type { ModelType } from '@/components/forms/ModelSelector';
 import type { ConversationDraftFile, ConversationFormDraft } from '@/stores/chatStore';
@@ -67,6 +67,25 @@ function buildAgentRunContextSnapshot(messages: Message[], draft: ConversationFo
 function getConversationMessagesById(conversationId: string): Message[] {
   const state = useChatStore.getState();
   return state.conversations.find((item) => item.id === conversationId)?.messages || [];
+}
+
+function isAgentSkill(value: unknown): value is AgentSkill {
+  return value === 'rewrite' || value === 'edit';
+}
+
+function normalizeSelectedSkills(skills: AgentSkill[] | undefined | null): AgentSkill[] {
+  if (!Array.isArray(skills)) {
+    return [];
+  }
+  return skills.filter(isAgentSkill).slice(0, 1);
+}
+
+function getSelectedSkillChatKind(skills: AgentSkill[]): ChatMessageKind {
+  const selectedSkill = skills[0];
+  if (selectedSkill === 'rewrite' || selectedSkill === 'edit') {
+    return selectedSkill;
+  }
+  return 'normal';
 }
 
 function toConversationDraftFile(uploadedFile: {
@@ -222,6 +241,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   const inputValue = conversationDraft?.chat_input || '';
   const inputMode = conversationDraft?.input_mode || 'normal';
   const editFile = conversationDraft?.edit_file || null;
+  const selectedSkills = normalizeSelectedSkills(conversationDraft?.selected_skills);
   const currentEditFileSize = conversationDraft?.edit_file?.size || 0;
   const isEditMode = inputMode === 'edit' || !!editFile;
   const messages = conversation?.messages || [];
@@ -374,6 +394,21 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     });
   }, [conversation, isBusy, updateConversationDraft]);
 
+  const updateSelectedSkills = useCallback(
+    (nextSkills: AgentSkill[]) => {
+      if (!conversation) {
+        return;
+      }
+      if (composerNotice) {
+        setComposerNotice(null);
+      }
+      updateConversationDraft(conversation.id, {
+        selected_skills: nextSkills.length > 0 ? nextSkills : undefined,
+      });
+    },
+    [composerNotice, conversation, updateConversationDraft]
+  );
+
   const sendAgentRunMessage = useCallback(
     async (
       prompt: string,
@@ -381,6 +416,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         appendUserMessage?: boolean;
         modelOverride?: ModelType;
         reuseAiMessageId?: string;
+        selectedSkillsOverride?: AgentSkill[];
       } = {}
     ) => {
       if (!conversation) {
@@ -398,9 +434,13 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       const modelForRequest = options.modelOverride || selectedModel;
       const existingMessages = getConversationMessagesById(conversationId);
       const draftForRequest = useChatStore.getState().getConversationDraft(conversationId);
+      const selectedSkillsForRequest = normalizeSelectedSkills(
+        options.selectedSkillsOverride ?? draftForRequest?.selected_skills
+      );
+      const selectedSkillChatKind = getSelectedSkillChatKind(selectedSkillsForRequest);
       const contextSnapshot = buildAgentRunContextSnapshot(existingMessages, draftForRequest);
       const baseAiMetadata = {
-        chatKind: 'normal' as const,
+        chatKind: selectedSkillChatKind,
         chatPrompt: prompt,
         chatModel: modelForRequest,
       };
@@ -412,7 +452,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           content: prompt,
           status: 'sent',
           metadata: {
-            chatKind: 'normal',
+            chatKind: selectedSkillChatKind,
           },
         });
       }
@@ -563,7 +603,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
             conversation_id: conversationId,
             message: prompt,
             model: modelForRequest,
-            selected_skills: [],
+            selected_skills: selectedSkillsForRequest,
             context_snapshot: contextSnapshot,
           },
           {
@@ -623,7 +663,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         return false;
       }
 
-      if (isEditMode) {
+      if (isEditMode && selectedSkills.length === 0) {
         const { request, error } = buildEditTaskRequest(
           conversation.id,
           conversation.tenderType,
@@ -692,8 +732,12 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
       void sendAgentRunMessage(content, {
         appendUserMessage: true,
+        selectedSkillsOverride: selectedSkills,
       });
-      updateConversationDraft(conversation.id, { chat_input: '' });
+      updateConversationDraft(conversation.id, {
+        chat_input: '',
+        selected_skills: undefined,
+      });
       return true;
     },
     [
@@ -703,6 +747,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       deleteMessage,
       isEditMode,
       isBusy,
+      selectedSkills,
       selectedModel,
       sendAgentRunMessage,
       startTask,
@@ -735,12 +780,17 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         message.metadata?.chatModel === 'doubao'
           ? message.metadata.chatModel
           : selectedModel;
+      const retrySelectedSkills =
+        message.metadata?.chatKind === 'rewrite' || message.metadata?.chatKind === 'edit'
+          ? [message.metadata.chatKind]
+          : [];
 
       if (retryPrompt) {
         void sendAgentRunMessage(retryPrompt, {
           appendUserMessage: false,
           modelOverride: retryModel,
           reuseAiMessageId: message.id,
+          selectedSkillsOverride: retrySelectedSkills,
         });
         return;
       }
@@ -1141,6 +1191,8 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         editFile={editFile}
         onEditFileSelect={handleEditFileSelect}
         onEditFileRemove={handleEditFileRemove}
+        selectedSkills={selectedSkills}
+        onSelectedSkillsChange={updateSelectedSkills}
         noticeMessage={composerNotice}
         placeholder={
           isBusy

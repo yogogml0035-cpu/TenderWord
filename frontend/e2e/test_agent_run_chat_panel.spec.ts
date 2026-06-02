@@ -75,6 +75,71 @@ async function stubConversationHeartbeat(page: Page) {
 }
 
 test.describe('Agent run chat panel', () => {
+  test('shows the slash skill picker and sends the selected rewrite skill in the payload', async ({
+    page,
+  }) => {
+    const consoleErrors: string[] = [];
+    let agentRunPayload: Record<string, unknown> | null = null;
+
+    page.on('console', (message) => {
+      if (message.type() === 'error') {
+        consoleErrors.push(message.text());
+      }
+    });
+    page.on('pageerror', (error) => {
+      consoleErrors.push(error.message);
+    });
+
+    await seedConversation(page);
+    await stubConversationHeartbeat(page);
+
+    await page.route('**/api/agent/runs/stream', async (route) => {
+      agentRunPayload = (await route.request().postDataJSON()) as Record<string, unknown>;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/x-ndjson',
+        body: toNdjsonLines([
+          {
+            event: 'done',
+            data: {
+              run_id: 'run-slash-picker',
+              message: 'rewrite 能力已收到，请继续描述修改目标。',
+              selected_skill: 'rewrite',
+            },
+          },
+        ]),
+      });
+    });
+
+    await page.goto('/tender');
+    await expect(page.getByRole('heading', { name: 'US003-001' })).toBeVisible();
+
+    const textarea = page.getByPlaceholder('输入文字并发送即可对话...');
+    await textarea.fill('/');
+    await expect(page.getByTestId('chat-skill-picker')).toBeVisible();
+
+    await page.getByTestId('chat-skill-option-rewrite').click();
+    await expect(page.getByTestId('chat-selected-skill-rewrite')).toBeVisible();
+    await expect(textarea).toHaveValue('');
+
+    await textarea.fill('请帮我改写第三包');
+    await page.getByTestId('chat-send-button').click();
+
+    await expect(page.getByText('rewrite 能力已收到，请继续描述修改目标。')).toBeVisible();
+
+    expect(agentRunPayload).toMatchObject({
+      conversation_id: conversationId,
+      message: '请帮我改写第三包',
+      model: 'deepseek',
+      selected_skills: ['rewrite'],
+      context_snapshot: {
+        rewrite_available: false,
+        uploaded_files: [],
+      },
+    });
+    expect(consoleErrors).toEqual([]);
+  });
+
   test('renders fake rewrite task cards without polling fake task endpoints', async ({ page }) => {
     const consoleErrors: string[] = [];
     const taskRequests: string[] = [];

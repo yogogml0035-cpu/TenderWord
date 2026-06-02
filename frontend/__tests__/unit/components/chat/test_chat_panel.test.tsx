@@ -9,7 +9,7 @@ import {
 } from '@/lib/api';
 import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
-import type { AgentRunEvent } from '@/types/api';
+import type { AgentRunEvent, AgentSkill } from '@/types/api';
 import type { Message } from '@/types/chat';
 
 jest.mock('@/lib/api', () => {
@@ -85,6 +85,7 @@ jest.mock('@/components/chat/ChatInput', () => ({
     selectedModel,
     inputMode,
     editFile,
+    selectedSkills,
     sendDisabled,
     noticeMessage,
     onModelChange,
@@ -92,6 +93,7 @@ jest.mock('@/components/chat/ChatInput', () => ({
     onSend,
     onEditFileSelect,
     onEditFileRemove,
+    onSelectedSkillsChange,
   }: {
     value?: string;
     disabled?: boolean;
@@ -100,6 +102,7 @@ jest.mock('@/components/chat/ChatInput', () => ({
     selectedModel?: string;
     inputMode?: 'normal' | 'edit';
     editFile?: { original_name?: string } | null;
+    selectedSkills?: AgentSkill[];
     sendDisabled?: boolean;
     noticeMessage?: string | null;
     onModelChange?: (model: string) => void;
@@ -107,6 +110,7 @@ jest.mock('@/components/chat/ChatInput', () => ({
     onSend?: (message: string) => boolean | void | Promise<boolean | void>;
     onEditFileSelect?: (file: File) => void | Promise<void>;
     onEditFileRemove?: () => void;
+    onSelectedSkillsChange?: (skills: AgentSkill[]) => void;
   }) => (
     <div
       data-testid="chat-input"
@@ -118,6 +122,7 @@ jest.mock('@/components/chat/ChatInput', () => ({
       data-send-disabled={sendDisabled ? 'true' : 'false'}
       data-notice={noticeMessage || ''}
       data-edit-file={editFile?.original_name || ''}
+      data-selected-skills={selectedSkills?.join(',') || ''}
     >
       <button type="button" data-testid="change-model-button" onClick={() => onModelChange?.('qwen')}>
         change model
@@ -147,6 +152,27 @@ jest.mock('@/components/chat/ChatInput', () => ({
       </button>
       <button type="button" data-testid="remove-edit-file-button" onClick={() => onEditFileRemove?.()}>
         remove edit file
+      </button>
+      <button
+        type="button"
+        data-testid="select-rewrite-skill-button"
+        onClick={() => onSelectedSkillsChange?.(['rewrite'])}
+      >
+        select rewrite skill
+      </button>
+      <button
+        type="button"
+        data-testid="select-edit-skill-button"
+        onClick={() => onSelectedSkillsChange?.(['edit'])}
+      >
+        select edit skill
+      </button>
+      <button
+        type="button"
+        data-testid="clear-selected-skills-button"
+        onClick={() => onSelectedSkillsChange?.([])}
+      >
+        clear selected skills
       </button>
     </div>
   ),
@@ -337,6 +363,45 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('chat-input')).toHaveAttribute('data-placeholder', '回复生成中，请稍候...');
   });
 
+  it('sends selected_skills through agent run and clears the draft selection after send', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请帮我改写这一段内容',
+        },
+      },
+    }));
+
+    mockAgentRunStream([]);
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('select-rewrite-skill-button'));
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-selected-skills', 'rewrite');
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockStreamAgentRun.mock.calls[0]?.[0]).toMatchObject({
+      conversation_id: 'conv-1',
+      message: '请帮我改写这一段内容',
+      selected_skills: ['rewrite'],
+    });
+    expect(useChatStore.getState().getConversationDraft('conv-1')?.selected_skills).toBeUndefined();
+  });
+
   it('uploads a file and switches the draft into edit mode', async () => {
     useChatStore.setState((state) => ({
       ...state,
@@ -404,6 +469,62 @@ describe('ChatPanel', () => {
       'data-notice',
       '请先补全当前页面的插入锚点'
     );
+  });
+
+  it('prefers explicit edit skill over the legacy direct edit task path', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+          tenderType: 'xjcg',
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请把交付日期改成合同签订后 30 天内',
+          input_mode: 'edit',
+          selected_skills: ['edit'],
+          edit_file: {
+            id: 'file-1',
+            file_path: 'D:/UploadFiles/edit.docx',
+            file_name: 'edit.docx',
+            original_name: 'edit.docx',
+            size: 128,
+            upload_time: new Date().toISOString(),
+          },
+        },
+      },
+    }));
+
+    mockAgentRunStream([]);
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockCreateEditTask).not.toHaveBeenCalled();
+    expect(mockStreamAgentRun.mock.calls[0]?.[0]).toMatchObject({
+      conversation_id: 'conv-1',
+      message: '请把交付日期改成合同签订后 30 天内',
+      selected_skills: ['edit'],
+      context_snapshot: {
+        rewrite_available: false,
+        uploaded_files: [
+          {
+            file_path: 'D:/UploadFiles/edit.docx',
+            file_name: 'edit.docx',
+          },
+        ],
+      },
+    });
   });
 
   it('creates an edit task directly without using the user stream route', async () => {

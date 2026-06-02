@@ -9,6 +9,8 @@ Source: prd.json
 - 后端流式路由测试优先直接调用 API 函数并消费 `response.body_iterator`，不必额外起 `TestClient`。
 - 前端流式 API client 统一在 `frontend/lib/api.ts` 通过 `streamNdjson + parse<Event>` 组合实现，具体事件合同集中定义在 `frontend/types/api.ts`。
 - fake agent run 产出的占位 `task_accepted` 只能复用任务卡 UI，不能继续挂在 `activeTaskIds/currentTaskId/taskSummaries` 上，否则 `heartbeat/getTaskStatus` 会把占位任务误判成后端重启。
+- 显式 agent skill 选择应该放在 `conversationDraft.selected_skills`，发送时写入 `streamAgentRun.selected_skills`，并在消息发出后立即清空，避免把一次性 capability 泄漏到下一条消息。
+- 即使当前 draft 已进入 `edit` 模式，只要用户显式选中了 `/edit` 或 `$edit`，`ChatPanel` 也应优先走 agent run，而不是回退到旧的直连 `createEditTask` 路径。
 
 ## 2026-06-02 09:48 - US-001
 - 实现了 `/api/agent/runs/stream` fake runtime，支持 `run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`done`、`needs_input` 和 `error` 终态。
@@ -66,4 +68,29 @@ Source: prd.json
     - 这个仓库在当前 WSL 环境下跑 E2E 需要让 Playwright `webServer` 显式走 `npm run dev -- --webpack`，否则默认 dev server 会触发 `lightningcss` 原生模块加载错误。
   - 有用的上下文（例如，"评估面板在 component X 中"）
     - `findTaskMessageGroup` 会从现有消息回退重建任务卡分组，所以占位任务移除 summary/active tracking 后，日志卡和内容卡仍然能正常显示。
+---
+
+## 2026-06-02 12:20 - US-004
+- 实现了右侧输入区的显式 skill 选择：输入 `/` 会弹出 `rewrite/edit` picker，点击后把能力写入 `selected_skills`，正文不保留命令前缀。
+- 支持 `$rewrite`、`$edit` 以及手动输入 `/rewrite`、`/edit` 前缀自动解析；`ChatPanel` 会把显式选择带入 `streamAgentRun`，并在发送后清空草稿级选择。
+- 保留上传文件修改入口，同时让显式 `/edit` 在已有 edit draft 时也优先走 agent run；补充单测和 Playwright 用例，并保存了浏览器截图与日志产物。
+- 更改的文件
+  - `asset/README.md`
+  - `asset/tender_type_identity_session_knowledge_pack.md`
+  - `frontend/components/chat/ChatInput.tsx`
+  - `frontend/components/chat/ChatPanel.tsx`
+  - `frontend/stores/chatStore.ts`
+  - `frontend/__tests__/unit/components/chat/test_chat_input.test.tsx`
+  - `frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
+  - `frontend/e2e/test_agent_run_chat_panel.spec.ts`
+  - `tasks/agent-run-skill-chat-refactor/screenshots/us-004-skill-picker.png`
+  - `tasks/agent-run-skill-chat-refactor/logs/us-004-dev-server.log`
+  - `tasks/agent-run-skill-chat-refactor/logs/us-004-playwright.log`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - `ChatInput` 这种受控输入如果要吞掉命令前缀，最好在 `onChange` 当场解析，再分别写回 `chat_input` 和 `selected_skills`，这样不会把 `$skill` 脏数据留到 store 或消息正文里。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - 当前 WSL 里后台起 Next dev 需要用长会话或 `tee` 持有进程；简单的 shell 后台 `&` 很容易随父 shell 退出，导致 Playwright 等不到 8502。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - `frontend/e2e/test_agent_run_chat_panel.spec.ts` 已经有一套 seed `sessionStorage` + route stub 的 fake agent run harness，后续 capability chip、thinking card 和 edit flow 可以继续复用。
 ---

@@ -14,6 +14,7 @@ import type {
   TaskStatus,
   TenderData,
   TenderTypeInfo,
+  AgentSkill,
 } from '@/types/api';
 import type { TenderFetchState } from '@/lib/tenderFetch';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
@@ -139,6 +140,7 @@ export interface ConversationFormDraft {
   };
   manual_insertion_config_scope_keys?: string[];
   chat_input?: string;
+  selected_skills?: AgentSkill[];
   pending_rewrite_prompt?: string;
   pending_rewrite_task_id?: string;
   pending_edit_prompt?: string;
@@ -203,6 +205,19 @@ function normalizeDraftFile(file: ConversationDraftFile | undefined): Conversati
   };
 }
 
+function isAgentSkill(value: unknown): value is AgentSkill {
+  return value === 'rewrite' || value === 'edit';
+}
+
+function normalizeDraftSelectedSkills(skills: AgentSkill[] | undefined): AgentSkill[] | undefined {
+  if (!Array.isArray(skills)) {
+    return undefined;
+  }
+
+  const normalized = skills.filter(isAgentSkill).slice(0, 1);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function mergeConversationDraft(
   base: ConversationFormDraft,
   updates: Partial<ConversationFormDraft>
@@ -214,6 +229,10 @@ function mergeConversationDraft(
 
   if (Object.prototype.hasOwnProperty.call(updates, 'edit_file')) {
     nextDraft.edit_file = normalizeDraftFile(updates.edit_file || undefined) || undefined;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, 'selected_skills')) {
+    nextDraft.selected_skills = normalizeDraftSelectedSkills(updates.selected_skills);
   }
 
   if (updates.insertion_config) {
@@ -276,6 +295,8 @@ function mergeConversationDraft(
         .filter((file): file is ConversationDraftFile => !!file),
     };
   }
+
+  nextDraft.selected_skills = normalizeDraftSelectedSkills(nextDraft.selected_skills);
 
   return nextDraft;
 }
