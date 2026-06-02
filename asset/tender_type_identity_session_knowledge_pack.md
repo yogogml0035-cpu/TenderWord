@@ -202,7 +202,7 @@
 - `/` 只负责打开 capability picker；`$rewrite` / `$edit` 以及手动输入 `/rewrite` / `/edit` 都必须在 `ChatInput` 当场解析成 `selected_skills + chat_input`，不能把命令前缀留在持久化草稿或用户消息正文里。
 - 上传文件修改入口与显式 `/edit` / `$edit` 现在统一走 `/api/agent/runs/stream`：只要当前 draft 已进入 `input_mode=edit` 或已有 `edit_file`，`ChatPanel` 就应把这次发送视为 edit capability，并把上传文件、`form_type`、锚点、`tender_lx/fund_source_lx` 与可选 `tender_data_snapshot` 一并投影到 `context_snapshot.uploaded_files + context_snapshot.edit_context`。
 - `pending_rewrite_prompt` / `pending_edit_prompt` 只用于排队阶段取消或失败后的恢复回填，不是正常发送后的延迟清空机制。
-- rewrite 只有在 `/api/user/stream` 返回 `task_accepted` 后写入 pending rewrite 字段。
+- rewrite 只有在 `/api/agent/runs/stream` 返回 `task_accepted` 后写入 pending rewrite 字段。
 - edit 只有在 agent run 返回真实 `task_accepted` 后才写入 pending edit 字段；成功完成时把最新输出文件回写到 `edit_file`。
 - `frontend/app/tender/page.tsx` 的后端重启恢复继续以 pending 字段和任务摘要为依据。
 - 后端重启或 `TASK_NOT_FOUND` 触发 stale task 恢复时，不能只新增错误日志；同一 `taskId` 下仍处于 `generating` 的历史消息也必须转为 `error` 并写入 `localTaskReason=backend_restart`，避免 UI 同时显示“已中断”和旧生成中状态。

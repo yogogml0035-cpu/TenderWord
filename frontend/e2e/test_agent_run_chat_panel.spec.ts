@@ -141,7 +141,7 @@ test.describe('Agent run chat panel', () => {
     await page.goto('/tender');
     await expect(page.getByRole('heading', { name: 'US003-001' })).toBeVisible();
 
-    const textarea = page.getByPlaceholder('输入修改要求，系统将只修改当前锚点区正文...');
+    const textarea = page.locator('textarea');
     await textarea.fill('/');
     await expect(page.getByTestId('chat-skill-picker')).toBeVisible();
 
@@ -276,7 +276,7 @@ test.describe('Agent run chat panel', () => {
 
     await expect(page.getByText('进度日志')).toBeVisible();
     await expect(page.getByText('AI 修改内容')).toBeVisible();
-    await expect(page.getByText('请帮我改写第三包')).toBeVisible();
+    await expect(page.getByText('请帮我改写第三包', { exact: true })).toBeVisible();
 
     await expect
       .poll(() => taskRequests.length, {
@@ -530,7 +530,7 @@ test.describe('Agent run chat panel', () => {
     await page.getByPlaceholder('输入文字并发送即可对话...').fill('你好');
     await page.getByTestId('chat-send-button').click();
 
-    await expect(page.getByText('请说明这次要执行 rewrite 还是 edit。')).toBeVisible();
+    await expect(page.getByText('请说明这次要执行 rewrite 还是 edit。', { exact: true }).last()).toBeVisible();
 
     expect(agentRunPayload).toMatchObject({
       conversation_id: conversationId,

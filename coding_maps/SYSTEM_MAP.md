@@ -1,6 +1,6 @@
 # TenderWord 系统地图
 
-**生成日期：** 2026-06-01
+**生成日期：** 2026-06-02
 
 本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它不替代代码真源、不替代根级 `AGENTS.md` 的执行红线，也不替代 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 的子系统事实文档。
 
@@ -38,12 +38,13 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - 前端 SSE runtime 是 `frontend/lib/sse.ts`，任务事件到 UI 的映射是 `frontend/hooks/useChatSSE.ts`；`agent_step` 必须在 runtime 层注册 named event。
 - 下载由 `backend/api/download.py` 和上传存储 helper 保护，前端使用 `downloadFile()` / `getDownloadUrl()`。
 
-### 普通聊天、rewrite 与 edit
+### 任务上下文助手、rewrite 与 edit
 
-- 普通聊天和 rewrite 从 `frontend/components/chat/ChatPanel.tsx` 发起，通过 `frontend/lib/api.ts` 调用 `POST /api/user/stream`。
-- 后端 `backend/api/user.py` 返回 NDJSON，路由和 prompt 逻辑收敛在 `backend/services/user_routing_service.py`、`backend/graphs/user_graph.py` 和 `backend/prompts/`。
-- rewrite / edit 是 task skill runtime，声明和 workflow 在 `backend/skills/rewrite/`、`backend/skills/edit/`，执行图在 `backend/graphs/skill_graph.py`。
-- edit 只走 `POST /api/edit`，前端入口在 `ChatPanel.tsx`，后端入口在 `backend/api/edit.py`。
+- 右侧聊天统一从 `frontend/components/chat/ChatPanel.tsx` 发起，通过 `frontend/lib/api.ts` 调用 `POST /api/agent/runs/stream`。
+- 后端 `backend/api/agent.py` 返回 NDJSON agent run 事件，编排真源是 `backend/services/agent_run_service.py`；这里负责显式 `selected_skills`、自然语言兜底、guard、`needs_input`、`task_accepted` 和 JSONL 审计日志。
+- task-context assistant 运行时与 tool 真源在 `backend/agents/task_context_assistant/`：它只暴露受控 skills、受控上下文读取工具，以及 `create_rewrite_task_tool` / `create_edit_task_tool` 这类复用 `DocumentService` 的任务创建入口。
+- rewrite / edit 真正进入队列后，仍走既有 task runtime：声明和 guide 在 `backend/skills/rewrite/`、`backend/skills/edit/`，执行图在 `backend/graphs/skill_graph.py` 与 `backend/graphs/task_skill_workflows.py`，后续 SSE、取消、下载和结果卡继续复用同一任务主链路。
+- `POST /api/edit` 仍保留为显式 edit task API，但当前工作台的右侧聊天与上传文件修改入口已经统一先走 agent run，不再直接从 `ChatPanel.tsx` 创建 edit task。
 
 ### 补充批注任务
 

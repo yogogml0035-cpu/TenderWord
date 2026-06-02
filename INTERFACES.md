@@ -1,6 +1,6 @@
 # TenderWord 接口边界
 
-**生成日期：** 2026-06-01
+**生成日期：** 2026-06-02
 
 本文件记录 TenderWord 当前已确认的系统级接口边界。具体模型和行为以 `backend/api/`、`backend/models/`、`frontend/types/api.ts` 和 `frontend/lib/api.ts` 为准。
 
@@ -70,27 +70,28 @@
 - `agent_step` 是智能体生成过程事件，允许断线重放和前端过程卡展示，但不替代 `done` / `error` 终态。
 - `comment_supplement` 任务复用同一 SSE 通道，`comment_agent` 过程卡仍通过 `agent_step` 展示。
 
-### 用户流式、聊天与 Rewrite
+### Agent Run、聊天与任务创建
 
 | 项 | 当前边界 |
 | --- | --- |
 | 前端调用方 | `frontend/components/chat/ChatPanel.tsx` |
-| API client | `frontend/lib/api.ts` 中的 `streamUserMessage()` / `streamNdjson()` |
-| 后端路由 | `backend/api/user.py` 中的 `POST /api/user/stream` |
-| 路由 service | `backend/services/user_routing_service.py` |
-| 路由 graph | `backend/graphs/user_graph.py` |
-| Skill runtime | `backend/graphs/skill_graph.py`, `backend/skills/rewrite/` |
+| API client | `frontend/lib/api.ts` 中的 `streamAgentRun()` / `streamNdjson()` |
+| 后端路由 | `backend/api/agent.py` 中的 `POST /api/agent/runs/stream` |
+| 路由 service | `backend/services/agent_run_service.py` |
+| Agent / tool runtime | `backend/agents/task_context_assistant/` |
+| 后续 task runtime | `backend/graphs/skill_graph.py`, `backend/graphs/task_skill_workflows.py`, `backend/skills/rewrite/`, `backend/skills/edit/` |
 
 同步要求：
 - NDJSON event shape 变化必须同步 `frontend/types/api.ts` 和 `ChatPanel`。
-- rewrite 可创建任务，但 edit 不应重新并入 `/api/user/stream` 的模型判路链路。
+- `selected_skills`、`context_snapshot.uploaded_files` 和 `context_snapshot.edit_context` 变化必须同步 `backend/models/agent_run.py`、`frontend/types/api.ts`、`frontend/stores/chatStore.ts` 和 `ChatPanel`。
+- `task_accepted` 只负责把 agent run 收敛为“已创建任务”；后续排队、SSE、取消、下载和结果卡仍沿用既有 task / stream 契约，不能在 agent run 自己复制第二套任务状态机。
 - `generation_style` 和 `generation_mode` 是 generate-only 字段，不得透传进 rewrite / edit 请求模型、skill state 或 prompt surface。
 
 ### Edit 任务
 
 | 项 | 当前边界 |
 | --- | --- |
-| 前端调用方 | `frontend/components/chat/ChatPanel.tsx` |
+| 前端调用方 | 当前右侧聊天通过 `frontend/components/chat/ChatPanel.tsx` 先走 `streamAgentRun()`；如需显式直调，统一通过 `frontend/lib/api.ts` 中的 `createEditTask()` |
 | 上传 helper | `frontend/lib/api.ts` 中的 `uploadFile()` |
 | API client | `frontend/lib/api.ts` 中的 `createEditTask()` |
 | 后端路由 | `backend/api/edit.py` 中的 `POST /api/edit` |
@@ -98,7 +99,7 @@
 | Skill runtime | `backend/skills/edit/`, `backend/graphs/skill_graph.py` |
 
 同步要求：
-- Edit 是显式入口，只走 `POST /api/edit`。
+- 当前工作台右侧聊天与上传文件修改入口默认不直连 `POST /api/edit`，而是通过 `/api/agent/runs/stream` 做缺条件追问和 task 创建；保留的 edit API 仍可服务显式 direct client。
 - edit request / response 变化必须同步 `frontend/types/api.ts`、`frontend/lib/api.ts` 和后端模型。
 
 ### 补充批注任务

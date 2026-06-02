@@ -23,6 +23,7 @@ Source: prd.json
 - `ChatInput` 进入 `input_mode=edit` 且存在 `edit_file` 后会切换成 edit placeholder；Playwright 断言 textarea 时不要硬编码普通聊天 placeholder，优先按当前模式文案或稳定 testid 定位。
 - 当同一个 `SKILL.md` 既要给 DeepAgents 当 guide，又要继续被旧 `SkillGraph` 当正文改写指令读取时，文档里必须显式拆分“agent run 创建任务规则”和“后台 task 正文改写规则”，否则前台 guide 很容易覆盖掉后台正文契约。
 - 上传文件修改入口如果已经把 draft 切到 `input_mode=edit` / `edit_file`，发送时也要隐式映射成 `selected_skills=["edit"]` 走 agent run；不要再保留前端直连 `createEditTask()` 的旁路，否则缺文件追问、思考过程卡和 task_accepted 生命周期会分叉。
+- agent run 相关 Playwright 用例里，thinking card、助手追问和用户气泡可能故意复用同一句文案；断言应优先使用稳定 testid、精确文本或 `.first()/.last()` 收窄定位，避免 substring 命中多个可见节点。
 
 ## 2026-06-02 15:30 - US-009
 - 实现了 `backend/agents/task_context_assistant/logging.py`，为每次 agent run 写入 `backend/logs/agent-run-<run_id>.jsonl`，并对白名单字段统一做敏感信息 scrub。
@@ -377,4 +378,26 @@ Source: prd.json
     - `git diff --check` 在这个仓库可能会被工作区里已有的无关尾随空格噪音打断；需要对本次触碰的路径单独做 diff 校验，避免把他人的脏改动误记到当前 story。
   - 有用的上下文（例如，"评估面板在 component X 中"）
     - 这次 story 的最小回归组合已经固定为 `backend/tests/skills/test_task_skill_runtime.py`、`backend/tests/nodes/test_tender_aware_word_dispatch.py`、`backend/tests/nodes/test_edit_audit_logging.py`，它们能最快证明新的 direct workflow registry 没把 rewrite/edit task runtime 打断。
+---
+
+## 2026-06-02 18:20 - US-014
+- 更新根级系统文档与类型会话知识包，统一记录右侧聊天唯一入口为 `POST /api/agent/runs/stream`，并明确 agent run 只负责显式 skill、guard、`needs_input` 与 `task_accepted`，后续队列、SSE、取消和下载继续走现有 task 主链路。
+- 收窄了 `frontend/e2e/test_agent_run_chat_panel.spec.ts` 的 3 处定位器，让 rewrite 用户气泡、thinking card 摘要和助手追问共享文案时仍能稳定通过；真实 UI 行为无须改动。
+- 复跑了 rewrite fake、edit 缺文件、上传后 edit task、generation agent 下载卡等回归链路，并补做 `lint`、`type-check`、前端 Jest、后端 agent run / task skill pytest、定向 `git diff --check` 与文档/日志凭证扫描。
+- 更改的文件
+  - `ARCHITECTURE.md`
+  - `INTERFACES.md`
+  - `coding_maps/SYSTEM_MAP.md`
+  - `asset/tender_type_identity_session_knowledge_pack.md`
+  - `frontend/e2e/test_agent_run_chat_panel.spec.ts`
+  - `tasks/agent-run-skill-chat-refactor/prd.json`
+  - `tasks/agent-run-skill-chat-refactor/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - 右侧聊天的最终回归最好分成两条 Playwright 线：`frontend/e2e/test_agent_run_chat_panel.spec.ts` 覆盖 rewrite/edit 的 agent run 与 task 卡衔接，`frontend/e2e/test_generation_mode_agent.spec.ts` 兜底验证既有 generate 任务的 agent-step 卡和下载卡没有被聊天重构带坏。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - agent thinking 摘要和最终助手/用户消息可能会刻意复用同一句中文，Playwright 不能直接用宽松 `getByText()` 断言，否则 strict mode 会把正常页面误报成失败。
+    - 当前工作区已有无关 PowerShell / ESLint 文件尾随空格改动时，仓库级 `git diff --check` 会被一并拦住；遵循“不碰用户改动”前提下，需要额外补一条“仅针对本轮路径”的 diff 校验结果。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - `tasks/agent-run-skill-chat-refactor/logs/us-014-dev-server.log` 和 `tasks/agent-run-skill-chat-refactor/logs/us-014-playwright.log` 保存了本轮复用 8502 dev server 的验证输出，后续排查 UI 回归可以直接从这里对照。
 ---
