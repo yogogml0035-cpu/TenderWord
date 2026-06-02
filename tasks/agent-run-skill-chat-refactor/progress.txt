@@ -10,6 +10,7 @@ Source: prd.json
 - 前端流式 API client 统一在 `frontend/lib/api.ts` 通过 `streamNdjson + parse<Event>` 组合实现，具体事件合同集中定义在 `frontend/types/api.ts`。
 - 前端淘汰旧流式协议时，要同步删掉导出的请求/事件类型、解析函数、client 包装和对应单测；只删调用点会留下 `rg` 可见的死合同。
 - agent run 审计日志不要直接 dump 整个 event payload；优先写白名单结构化字段，并在落盘前统一 scrub 凭证、`.env`、私有绝对路径和 traceback。
+- requirement 目录下保留的 validator NDJSON/JSON 样例也要纳入敏感信息扫描；即使只是测试占位文本，提交前也要 scrub 掉 bearer/password/私有路径模式。
 - fake agent run 产出的占位 `task_accepted` 只能复用任务卡 UI，不能继续挂在 `activeTaskIds/currentTaskId/taskSummaries` 上，否则 `heartbeat/getTaskStatus` 会把占位任务误判成后端重启。
 - 显式 agent skill 选择应该放在 `conversationDraft.selected_skills`，发送时写入 `streamAgentRun.selected_skills`，并在消息发出后立即清空，避免把一次性 capability 泄漏到下一条消息。
 - 即使当前 draft 已进入 `edit` 模式，只要用户显式选中了 `/edit` 或 `$edit`，`ChatPanel` 也应优先走 agent run，而不是回退到旧的直连 `createEditTask` 路径。
@@ -400,4 +401,22 @@ Source: prd.json
     - 当前工作区已有无关 PowerShell / ESLint 文件尾随空格改动时，仓库级 `git diff --check` 会被一并拦住；遵循“不碰用户改动”前提下，需要额外补一条“仅针对本轮路径”的 diff 校验结果。
   - 有用的上下文（例如，"评估面板在 component X 中"）
     - `tasks/agent-run-skill-chat-refactor/logs/us-014-dev-server.log` 和 `tasks/agent-run-skill-chat-refactor/logs/us-014-playwright.log` 保存了本轮复用 8502 dev server 的验证输出，后续排查 UI 回归可以直接从这里对照。
+---
+
+## 2026-06-02 18:46 - US-014
+- 修正了 `ARCHITECTURE.md` 中仍提及旧 `user` 工作流的系统级描述，确保根级架构文档与当前 agent run / task 边界一致。
+- 清理了 requirement 目录下残留的敏感占位样例，脱敏 `validator-us-009-stream-response.ndjson` 中的 bearer/password/私有路径文本，并重新跑文档与日志扫描。
+- 复跑前端 Playwright agent-run 聊天回归、前端 lint/type-check/Jest，以及后端 agent run / task-skill 相关 pytest；同时重新执行 `git diff --check`，确认此前 validator 标出的尾随空格阻塞已消失。
+- 更改的文件
+  - `ARCHITECTURE.md`
+  - `tasks/agent-run-skill-chat-refactor/logs/validator-us-009-stream-response.ndjson`
+  - `tasks/agent-run-skill-chat-refactor/prd.json`
+  - `tasks/agent-run-skill-chat-refactor/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+    - 收口型 story 不只要看源码和文档，还要复查 requirement 目录里的验证产物；这些保留下来的日志样例会参与后续 scanner / validator，是交付的一部分。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+    - `git status` 可能显示没有内容 diff 的 `.M` 噪音路径；在决定是否纳入提交前，先用 `git diff --name-only` 确认真正变更的文件集合，避免把无内容差异的工作树状态误当成需要提交的文件。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+    - 本轮 US-014 的最终验证日志落在 `tasks/agent-run-skill-chat-refactor/logs/us-014-*.log`，其中 `us-014-playwright.log` 覆盖了整份 `frontend/e2e/test_agent_run_chat_panel.spec.ts` 的 7 条 agent-run 回归用例。
 ---

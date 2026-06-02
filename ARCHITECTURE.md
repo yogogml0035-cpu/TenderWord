@@ -121,7 +121,7 @@ backend/task/
 backend/core/
   SSE 管理与跨线程基础设施
 backend/graphs/
-  LangGraph tender、skill、user 工作流
+  LangGraph tender、skill 与 comment_supplement 工作流
 backend/agents/generation/
   初次生成 content_agent 主/子智能体与工作区
 backend/agents/comments/
