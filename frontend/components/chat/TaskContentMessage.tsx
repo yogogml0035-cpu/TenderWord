@@ -90,6 +90,9 @@ function getContentTitle(message: Message) {
     const node = message.metadata.agentStepNode;
     if (typeof node === 'string' && node.trim()) {
       if (message.metadata.contentAgent || node.trim() === 'content_agent') {
+        if (message.metadata.taskKind === 'rewrite') {
+          return '重写智能体';
+        }
         return '参数生成智能体';
       }
       if (node.trim() === 'comment_agent') {

@@ -275,7 +275,7 @@ test.describe('Agent run chat panel', () => {
     await page.getByTestId('chat-send-button').click();
 
     await expect(page.getByText('进度日志')).toBeVisible();
-    await expect(page.getByText('AI 修改内容')).toBeVisible();
+    await expect(page.getByText('AI 修改内容')).not.toBeVisible();
     await expect(page.getByText('请帮我改写第三包', { exact: true })).toBeVisible();
 
     await expect
@@ -297,7 +297,7 @@ test.describe('Agent run chat panel', () => {
     expect(consoleErrors).toEqual([]);
   });
 
-  test('shows a structured agent thinking card and completes it after task creation', async ({
+  test('suppresses the task context thinking card after rewrite task creation', async ({
     page,
   }) => {
     const consoleErrors: string[] = [];
@@ -426,19 +426,10 @@ test.describe('Agent run chat panel', () => {
     await page.getByPlaceholder('输入文字并发送即可对话...').fill('请帮我改写第三包');
     await page.getByTestId('chat-send-button').click();
 
-    await expect(page.getByTestId('agent-thinking-card')).toBeVisible();
-    await expect(page.getByTestId('agent-thinking-stage-understand')).toContainText('理解需求');
-    await expect(page.getByTestId('agent-thinking-stage-execute')).toContainText('执行任务');
-    await expect(page.getByTestId('agent-thinking-stage-execute')).toContainText('条件满足');
-    await expect(page.getByTestId('agent-thinking-stage-tool')).toContainText(
-      'create_rewrite_task_tool'
-    );
-    await expect(page.getByTestId('agent-thinking-stage-retry')).toContainText('异常与重试');
-    await expect(page.getByTestId('agent-thinking-stage-summary')).toContainText(
-      '已创建 rewrite 任务，后续进度由任务卡继续展示。'
-    );
     await expect(page.getByText('进度日志')).toBeVisible();
-    await expect(page.getByText('AI 修改内容')).toBeVisible();
+    await expect(page.getByTestId('agent-thinking-card')).not.toBeVisible();
+    await expect(page.getByText('任务上下文助手')).not.toBeVisible();
+    await expect(page.getByText('AI 修改内容')).not.toBeVisible();
 
     await expect
       .poll(() => taskRequests.length, {

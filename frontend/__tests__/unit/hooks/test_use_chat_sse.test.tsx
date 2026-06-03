@@ -1868,7 +1868,7 @@ describe('useChatSSE', () => {
     expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
   });
 
-  it('treats rewrite_text as the AI content trigger for rewrite tasks', async () => {
+  it('uses rewrite agent-step cards instead of task-content for rewrite tasks', async () => {
     useChatStore.setState((state) => ({
       ...state,
       taskSummaries: {
@@ -1923,8 +1923,57 @@ describe('useChatSSE', () => {
         },
       });
       latestOptions?.onMessage?.({
-        event: 'done',
+        event: 'agent_step',
         id: '3',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'rewrite',
+          step_type: 'final',
+          round: 1,
+          node: 'rewrite_agent',
+          is_complete: true,
+          content: '最终完成，修复 0 轮，最终正文约 6 字。',
+          findings: [],
+          content_agent: {
+            phase: 'final',
+            summary: '最终完成，修复 0 轮，最终正文约 6 字。',
+            rounds: [
+              {
+                round: 1,
+                phase: 'draft',
+                label: '重写正文',
+                summary: '重写正文完成，约 6 字。',
+                issue_count: 0,
+                fix_count: 0,
+                content: '修改后的内容',
+                findings: [],
+              },
+              {
+                round: 1,
+                phase: 'audit',
+                label: '重写审核',
+                summary: '第 1 轮审核通过。',
+                issue_count: 0,
+                fix_count: 0,
+                content: '[]',
+                findings: [],
+              },
+            ],
+            highlights: [],
+            final_result: {
+              summary: '最终完成，修复 0 轮，最终正文约 6 字。',
+              revision_rounds: 0,
+              final_chars: 6,
+              issue_count: 0,
+              content: '修改后的内容',
+            },
+          },
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'done',
+        id: '4',
         data: {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
@@ -1938,9 +1987,16 @@ describe('useChatSSE', () => {
     });
 
     const group = getTaskGroup();
-    expect(group?.contentMessage?.status).toBe('completed');
-    expect(group?.contentMessage?.content).toBe('修改后的内容');
-    expect(group?.contentMessage?.metadata?.taskKind).toBe('rewrite');
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+    expect(group?.contentMessage).toBeUndefined();
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].content).toBe('修改后的内容');
+    expect(agentMessages?.[0].metadata?.taskKind).toBe('rewrite');
+    expect(agentMessages?.[0].metadata?.agentStepNode).toBe('content_agent');
+    expect(agentMessages?.[0].metadata?.contentAgent?.phase).toBe('final');
     expect(group?.downloadMessage?.metadata?.taskKind).toBe('rewrite');
   });
 

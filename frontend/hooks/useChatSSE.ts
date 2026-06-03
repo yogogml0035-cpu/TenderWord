@@ -128,6 +128,9 @@ function shouldUseAgentStepCards(
   if (hasAgentStepCard(taskId)) {
     return true;
   }
+  if (taskKind === 'rewrite') {
+    return true;
+  }
   if (taskKind === 'comment_supplement') {
     return true;
   }
@@ -148,6 +151,9 @@ function shouldAcceptAgentStep(
   taskKind: TaskKind,
   node: string
 ): boolean {
+  if (taskKind === 'rewrite') {
+    return true;
+  }
   if (taskKind === 'comment_supplement') {
     return node === 'comment_agent';
   }

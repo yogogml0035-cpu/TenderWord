@@ -197,8 +197,7 @@ describe('ChatPage', () => {
       expect(conversation?.id).toBe('conv-1');
       expect(conversation?.currentTaskId).toBeUndefined();
       expect(group?.logMessage?.status).toBe('error');
-      expect(group?.contentMessage?.status).toBe('error');
-      expect(group?.contentMessage?.content).toBe('保留中的修改内容');
+      expect(group?.contentMessage).toBeUndefined();
       expect(draft?.chat_input).toBe('请补充售后条款');
       expect(useChatStore.getState().activeTaskIds).toHaveLength(0);
       expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();

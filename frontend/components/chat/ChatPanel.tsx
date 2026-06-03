@@ -451,6 +451,20 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       let aiMessagePrepared = false;
       let thinkingMessageId: string | undefined;
       let thinkingCardState: AgentThinkingCardState | null = null;
+      let shouldRenderThinkingCard = selectedSkillsForRequest.length === 0;
+      const clearThinkingMessage = () => {
+        if (thinkingMessageId) {
+          deleteMessage(conversationId, thinkingMessageId);
+          thinkingMessageId = undefined;
+        }
+        thinkingCardState = null;
+      };
+      const suppressThinkingCardForSkill = (skill?: AgentSkill) => {
+        if (skill === 'rewrite' || skill === 'edit') {
+          shouldRenderThinkingCard = false;
+          clearThinkingMessage();
+        }
+      };
       const ensureAiMessage = (): string => {
         if (aiMessagePrepared && aiMessageId) {
           return aiMessageId;
@@ -478,6 +492,9 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         event: AgentRunEvent,
         status: Message['status'] = 'generating'
       ) => {
+        if (!shouldRenderThinkingCard) {
+          return;
+        }
         const nextThinkingState = applyAgentThinkingEvent(thinkingCardState, event);
         if (!nextThinkingState) {
           return;
@@ -534,6 +551,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       try {
         const handleStreamEvent = (event: AgentRunEvent) => {
           if (event.event === 'run_started') {
+            suppressThinkingCardForSkill(event.data.selected_skills[0]);
             upsertThinkingMessage(event, 'generating');
             return;
           }
@@ -548,7 +566,8 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
                   ? 'edit'
                   : 'normal';
             syncUserChatKind(acceptedChatKind);
-            upsertThinkingMessage(event, 'completed');
+            shouldRenderThinkingCard = false;
+            clearThinkingMessage();
             startTask(
               conversationId,
               event.data.task_id,
@@ -560,7 +579,9 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
               }
             );
             ensureTaskLogMessage(event.data.task_id, { status: 'generating' });
-            ensureTaskContentMessage(event.data.task_id, { status: 'generating' });
+            if (event.data.task_kind !== 'rewrite') {
+              ensureTaskContentMessage(event.data.task_id, { status: 'generating' });
+            }
             if (!isSyntheticTask && event.data.task_kind === 'rewrite') {
               updateConversationDraft(conversationId, {
                 chat_input: '',
@@ -582,6 +603,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           }
 
           if (event.event === 'thinking_stage') {
+            suppressThinkingCardForSkill(event.data.selected_skill);
             if (event.data.selected_skill === 'rewrite') {
               syncUserChatKind('rewrite');
             }
@@ -707,6 +729,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     [
       addMessage,
       conversation,
+      deleteMessage,
       ensureTaskContentMessage,
       ensureTaskLogMessage,
       detachTaskTracking,

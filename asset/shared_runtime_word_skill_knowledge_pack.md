@@ -73,6 +73,8 @@
 - rewrite / edit task workflow 的真源是 `backend/graphs/task_skill_workflows.py` 与 `backend/graphs/task_skill_types.py`；不要再从 `SKILL.md` 推导 workflow，也不要恢复旧 workflow 入口文件。
 - 修改 skill guide、task workflow、dispatch 路由或 audit log 时，必须同时检查 `backend/skills/`、`backend/graphs/task_skill_workflows.py`、`backend/graphs/skill_graph.py`、`backend/services/document_service.py` 和对应 tests。
 - edit / rewrite 的 LLM 输出会作为当前文档内容或当前锚点区正文的完整替换载荷；skill instruction 必须明确“输出范围守恒”。分包名、章节名、锚点、`从……起` 等用户表述默认只定位修改范围，不能让模型把局部定位误解为只输出该局部，否则写回会丢失未修改分包或章节。
+- `backend/skills/rewrite/SKILL.md` 同时承载两层指令：任务上下文助手阶段只做前置条件检查和 `create_rewrite_task_tool` 任务创建；后台 `rewrite_text` 节点只抽取“后台 rewrite 任务正文改写指令”段作为 LLM runtime prompt，恢复“先复制全文，再局部修改”的完整输出契约，并显式要求受保护字段行的字段名、冒号和相对顺序不得丢失。
+- `backend/nodes/skills_nodes/rewrite_nodes.py` 的 rewrite 正文生成不再复用 `generate_polished_text`；当前闭环为 `rewrite_generate_agent` 生成完整正文、`rewrite_verify_agent` 审核 JSON、必要时 `rewrite_revise_agent` 最小修订，再由 `rewrite_agent` 发送最终摘要。受保护字段 profile 由 `tender_config.py` 决定，direct-replace 类型跳过；protected-fields 类型会做确定性字段缺失/顺序审核，最终仍缺字段必须在写回前失败。
 
 ### Prompt Layer 与 LLM 流式
 
@@ -160,10 +162,10 @@
 - `progress_log` 只写用户可理解的进度和状态；排障堆栈、候选打分、淘汰原因、阈值与诊断 marker 留在 `execution_log` 或 debug log。
 - `/api/stream/{task_id}` 是任务 SSE 主入口，支持 `Last-Event-ID` 断线续传。
 - 用户态实时展示依赖 `log`、`llm`、`progress`、`done`、`error`。
-- `agent_step` 是智能体 generate 的用户态 SSE 显式例外，用于展示 `content_agent` 的结构化正文生成总览，以及 `comment_agent` 的结构化锚点校验、修复复核和最终写入统计，不替代 `done` / `error` 终态。
-- 后端 `AgentStepEventData` 字段包括 `task_id`、`task_kind`、`step_type`、`round`、`node`、`timestamp`、`is_complete`、可选 `content`、`findings`、`content_agent` 与 `comment_agent`。`round` 是 1-based；当前智能体子 agent 流使用 `step_type=stream`，主 agent 终局事件使用 `step_type=final`。`content_agent` 结构字段是参数生成智能体主展示数据，包含 `phase`、确定性 `summary`、阶段 `rounds`、当前问题 `highlights` 和 `final_result`；`content` 只作旧前端 fallback 或复制原文来源。`comment_agent` 过程事件使用 `step_type=tool_snapshot` / `final`，`comment_agent` 是批注生成智能体主展示数据，`content` 是完整快照 fallback 而非增量追加。
+- `agent_step` 是智能体 generate / rewrite 的用户态 SSE 显式例外，用于展示 `content_agent` / rewrite 的结构化正文生成总览，以及 `comment_agent` 的结构化锚点校验、修复复核和最终写入统计，不替代 `done` / `error` 终态。
+- 后端 `AgentStepEventData` 字段包括 `task_id`、`task_kind`、`step_type`、`round`、`node`、`timestamp`、`is_complete`、可选 `content`、`findings`、`content_agent` 与 `comment_agent`。`round` 是 1-based；当前智能体子 agent 流使用 `step_type=stream`，主 agent 终局事件使用 `step_type=final`，rewrite 使用 `draft` / `audit` / `revision` / `final` 作为阶段类型。`content_agent` 结构字段是参数生成智能体主展示数据，也被 rewrite 复用为“重写智能体”过程卡数据，包含 `phase`、确定性 `summary`、阶段 `rounds`、当前问题 `highlights` 和 `final_result`；`content` 只作旧前端 fallback 或复制原文来源。`comment_agent` 过程事件使用 `step_type=tool_snapshot` / `final`，`comment_agent` 是批注生成智能体主展示数据，`content` 是完整快照 fallback 而非增量追加。
 - `DocumentService` 在 graph config 中注入 `agent_step_callback`，智能体生成链路统一经 `SSECallback.push_agent_step()` 进入本地缓冲与 `SSEManager.send_agent_step_threadsafe()`；子 agent 与 runner stream 不再各自直连 `sse_manager`，避免同一过程卡双通道重复推送。`SSEManager.send_agent_step()` 会进入缓冲，断线续传时可重放。
-- 前端合并 `agent_step` 时必须把终态视为单调状态：迟到的 `is_complete=false` 快照不得覆盖已完成卡片；旧版无 `content_agent` 结构的 generate 子 agent 事件继续按 `node + round` 文本 fallback 展示，带 `content_agent` 结构的事件必须统一聚合到一张“参数生成智能体”卡。
+- 前端合并 `agent_step` 时必须把终态视为单调状态：迟到的 `is_complete=false` 快照不得覆盖已完成卡片；旧版无 `content_agent` 结构的 generate 子 agent 事件继续按 `node + round` 文本 fallback 展示，带 `content_agent` 结构的 generate 事件必须统一聚合到一张“参数生成智能体”卡，带 `content_agent` 结构的 rewrite 事件必须统一聚合到一张“重写智能体”卡。rewrite task 接受后不应预建 `task-content` / “AI 修改内容”卡，任务上下文助手 thinking 卡若已出现也要清除，后续只保留任务日志、重写智能体过程卡和下载卡。
 - 高频 `agent_step` 运行中快照只进入 `frontend/stores/chatStreamStore.ts` 的临时 stream，不写入持久化 `chat-storage`；只有完成事件才把最终正文 / JSON 固化到 `chatStore.conversations`。否则每个 SSE 片段都会触发会话数组重写、React 消息列表重渲染和 `sessionStorage` JSON 序列化，长文本或重复任务会让浏览器主线程卡死。
 - 前端实时日志展示要优先降低主线程工作量，而不是只做视觉隐藏：生成中日志明细默认不挂载，复制文本点击时才构造；外层消息列表自动滚动只跟消息数量变化，不跟每个 SSE 内容片段变化。
 - `frontend/hooks/useChatSSE.ts` 负责接收 done metadata；下载卡片是否展示摘要属于 UI 决策，不能影响任务结果透传契约。
@@ -174,7 +176,7 @@
 - 招标详情 API：`backend/tests/api/test_tender_api.py`、`backend/tests/util/test_fetch_tender_data.py`
 - 生成任务 API：`backend/tests/api/test_generate_api.py`
 - 任务上下文助手与 task skill：`backend/tests/services/test_agent_run_service.py`、`backend/tests/skills/test_task_skill_runtime.py`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
-- skill 与 edit/rewrite：`backend/tests/nodes/test_tender_aware_word_dispatch.py`、`backend/tests/nodes/test_edit_audit_logging.py`、`backend/tests/progress/test_edit_progress_tracking.py`
+- skill 与 edit/rewrite：`backend/tests/nodes/test_tender_aware_word_dispatch.py`、`backend/tests/nodes/test_rewrite_nodes.py`、`backend/tests/nodes/test_edit_audit_logging.py`、`backend/tests/progress/test_edit_progress_tracking.py`
 - Word helper：`backend/tests/helper/test_content_ops.py`、`backend/tests/helper/test_paragraph_boundary_ops.py`、`backend/tests/helper/test_inline_style_ops.py`
 - 锁感知删除 helper：`backend/tests/helper/test_delete_ops.py`、`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`
 - 批注写回：`backend/tests/nodes/test_comment_writeback.py`
@@ -191,7 +193,7 @@
 - task-context assistant 日志与受控摘要工具：`backend/tests/agents/test_task_context_assistant_logging.py`、`backend/tests/agents/test_task_context_assistant_tools.py`、`backend/tests/services/test_agent_run_service.py`
 - generation mode graph 分流与逐类型闭环：`backend/tests/graphs/test_generation_mode_branching.py`、`backend/tests/graphs/test_xjcg_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_hw_zc_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_hw_cz_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_fw_zc_generation_mode_agent.py`、`backend/tests/graphs/test_gngk_fw_cz_generation_mode_agent.py`、`backend/tests/graphs/test_gjgk_generation_mode_agent.py`
 - agent_step SSE：`backend/tests/models/test_sse_agent_step.py`、`backend/tests/services/test_sse_manager_agent_step.py`、`backend/tests/services/test_document_service_agent_step.py`
-- 前端 SSE / 日志性能边界：`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/components/chat/test_message_list.test.tsx`
+- 前端 SSE / 日志性能边界：`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/components/chat/test_task_content_message.test.tsx`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`、`frontend/__tests__/unit/components/chat/test_message_list.test.tsx`
 
 ## 回归风险
 

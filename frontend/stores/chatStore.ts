@@ -713,7 +713,7 @@ function hasAgentStepMessages(messages: Message[], taskId: string): boolean {
 }
 
 function isAgentProcessTaskKind(taskKind?: TaskKind): boolean {
-  return taskKind === 'generate' || taskKind === 'comment_supplement';
+  return taskKind === 'generate' || taskKind === 'rewrite' || taskKind === 'comment_supplement';
 }
 
 function shouldUseAgentProcessCards(
@@ -733,6 +733,9 @@ function shouldUseAgentProcessCards(
     return true;
   }
   if (summary?.current_node === 'content_agent' || summary?.current_node === 'comment_agent') {
+    return true;
+  }
+  if (summary?.task_kind === 'rewrite') {
     return true;
   }
   if (summary?.task_kind === 'comment_supplement') {

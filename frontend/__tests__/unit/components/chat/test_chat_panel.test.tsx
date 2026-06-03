@@ -711,15 +711,7 @@ describe('ChatPanel', () => {
           chatKind: 'edit',
         },
       });
-      expect(thinkingMessage).toMatchObject({
-        type: 'ai',
-        status: 'completed',
-        metadata: {
-          agentThinking: expect.objectContaining({
-            terminalState: 'task_accepted',
-          }),
-        },
-      });
+      expect(thinkingMessage).toBeUndefined();
       expect(taskGroup?.logMessage).toMatchObject({
         taskId: 'task-edit',
         status: 'generating',
@@ -1160,22 +1152,14 @@ describe('ChatPanel', () => {
       const thinkingMessage = conversation.messages.find((message) => message.metadata?.agentThinking);
       expect(conversation.currentTaskId).toBe('task-rewrite');
       expect(draft?.pending_rewrite_task_id).toBe('task-rewrite');
-      expect(conversation.messages).toHaveLength(5);
+      expect(conversation.messages).toHaveLength(3);
       expect(conversation.messages[1]).toMatchObject({
         type: 'user',
         metadata: {
           chatKind: 'rewrite',
         },
       });
-      expect(thinkingMessage).toMatchObject({
-        type: 'ai',
-        status: 'completed',
-        metadata: {
-          agentThinking: expect.objectContaining({
-            terminalState: 'task_accepted',
-          }),
-        },
-      });
+      expect(thinkingMessage).toBeUndefined();
       expect(taskGroup?.logMessage).toMatchObject({
         taskId: 'task-rewrite',
         status: 'generating',
@@ -1184,14 +1168,7 @@ describe('ChatPanel', () => {
           taskKind: 'rewrite',
         },
       });
-      expect(taskGroup?.contentMessage).toMatchObject({
-        taskId: 'task-rewrite',
-        status: 'generating',
-        metadata: {
-          messageKind: 'task-content',
-          taskKind: 'rewrite',
-        },
-      });
+      expect(taskGroup?.contentMessage).toBeUndefined();
     });
 
     expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
@@ -1303,22 +1280,12 @@ describe('ChatPanel', () => {
       expect(conversation.currentTaskId).toBeUndefined();
       expect(state.activeTaskIds).toEqual([]);
       expect(state.getTaskSummary('fake-rewrite-task-1')).toBeNull();
-      expect(thinkingMessage).toMatchObject({
-        status: 'completed',
-        metadata: {
-          agentThinking: expect.objectContaining({
-            terminalState: 'task_accepted',
-          }),
-        },
-      });
+      expect(thinkingMessage).toBeUndefined();
       expect(taskGroup?.logMessage).toMatchObject({
         taskId: 'fake-rewrite-task-1',
         status: 'generating',
       });
-      expect(taskGroup?.contentMessage).toMatchObject({
-        taskId: 'fake-rewrite-task-1',
-        status: 'generating',
-      });
+      expect(taskGroup?.contentMessage).toBeUndefined();
       expect(state.getConversationDraft('conv-1')?.pending_rewrite_task_id).toBeUndefined();
     });
 
