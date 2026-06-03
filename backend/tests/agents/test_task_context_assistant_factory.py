@@ -43,7 +43,7 @@ def test_factory_builds_deep_agent_with_isolated_backend(monkeypatch, tmp_path) 
     assert kwargs["name"] == "task_context_assistant"
 
 
-def test_backend_exposes_only_rewrite_and_edit_skill_roots(tmp_path) -> None:
+def test_backend_exposes_only_rewrite_skill_root(tmp_path) -> None:
     result = create_task_context_assistant_backend(runtime_root=tmp_path / "runtime")
 
     assert isinstance(result.backend, CompositeBackend)
@@ -55,17 +55,12 @@ def test_backend_exposes_only_rewrite_and_edit_skill_roots(tmp_path) -> None:
     skill_entries = result.backend.ls(TASK_CONTEXT_ASSISTANT_SKILL_LIBRARY_ROUTE)
     assert skill_entries.error is None
     assert [item["path"] for item in skill_entries.entries or []] == [
-        "/skills/edit/",
         "/skills/rewrite/",
     ]
 
     rewrite_skill = result.backend.read("/skills/rewrite/SKILL.md")
     assert rewrite_skill.error is None
     assert "name: rewrite" in str(rewrite_skill.file_data["content"])
-
-    edit_skill = result.backend.read("/skills/edit/SKILL.md")
-    assert edit_skill.error is None
-    assert "name: edit" in str(edit_skill.file_data["content"])
 
     hidden_loader = result.backend.read("/skills/loader.py")
     assert hidden_loader.file_data is None

@@ -30,7 +30,7 @@ export type MessageStatus =
   | 'cancelled';
 
 export type TaskMessageKind = 'task-log' | 'task-content' | 'task-download' | 'agent-step';
-export type ChatMessageKind = 'normal' | 'rewrite' | 'edit' | 'task-notice';
+export type ChatMessageKind = 'normal' | 'rewrite' | 'task-notice';
 export type LocalTaskReason = 'backend_restart';
 export type AgentStepType = string;
 export type AgentThinkingViewStageKey = 'understand' | 'execute' | 'tool' | 'retry' | 'summary';

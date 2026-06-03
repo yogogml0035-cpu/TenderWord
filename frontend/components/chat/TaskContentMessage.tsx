@@ -107,7 +107,7 @@ function getContentTitle(message: Message) {
     return '智能体过程';
   }
 
-  if (message.metadata?.taskKind === 'rewrite' || message.metadata?.taskKind === 'edit') {
+  if (message.metadata?.taskKind === 'rewrite') {
     return 'AI 修改内容';
   }
 

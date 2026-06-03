@@ -2,7 +2,6 @@ import {
   ApiError,
   cancelTask,
   createCommentSupplementTask,
-  createEditTask,
   createGenerateTask,
   downloadFile,
   fetchTemplateCandidates,
@@ -20,7 +19,6 @@ import type {
   AgentRunEvent,
   AgentRunStreamRequest,
   CommentSupplementTaskRequest,
-  EditTaskRequest,
   GenerateRequest,
   TemplateCandidateSelectRequest,
 } from '@/types/api';
@@ -116,21 +114,6 @@ const validTemplateSelectRequest: TemplateCandidateSelectRequest = {
   },
 };
 
-const validEditTaskRequest: EditTaskRequest = {
-  conversation_id: 'conv-1',
-  form_type: 'xjcg_tender',
-  model: 'deepseek',
-  edit_prompt: '请把交付日期改成合同签订后 30 天内',
-  file_path: 'D:/UploadFiles/edit.docx',
-  insertion_config: {
-    before_text: '第三章 采购需求',
-    after_text: '第四章 响应文件有关格式',
-  },
-  tender_lx: 0,
-  fund_source_lx: 1,
-  tender_data_snapshot: validGenerateRequest.tender_data,
-};
-
 const validCommentSupplementTaskRequest: CommentSupplementTaskRequest = {
   conversation_id: 'conv-1',
   source_file: 'D:/UploadFiles/output.docx',
@@ -215,44 +198,6 @@ describe('API Client', () => {
         code: 'NETWORK_ERROR',
         status: 0,
       });
-    });
-  });
-
-  describe('createEditTask', () => {
-    it('should return task info on success', async () => {
-      globalThis.fetch = mockFetchJson({
-        success: true,
-        task_id: 'edit-task-123',
-        task_kind: 'edit',
-        status: 'queued',
-        queue_position: 0,
-        waiting_count: 0,
-      });
-
-      const result = await createEditTask(validEditTaskRequest);
-      expect(result.task_id).toBe('edit-task-123');
-      expect(result.task_kind).toBe('edit');
-      expect(result.status).toBe('queued');
-    });
-
-    it('should send correct request body', async () => {
-      const fetchSpy = jest.fn().mockResolvedValue({
-        ok: true,
-        status: 202,
-        json: async () => ({
-          success: true,
-          task_id: 'edit-task-123',
-          task_kind: 'edit',
-          status: 'queued',
-        }),
-      } as unknown as Response) as unknown as FetchMock;
-      globalThis.fetch = fetchSpy;
-
-      await createEditTask(validEditTaskRequest);
-
-      const [, init] = fetchSpy.mock.calls[0];
-      const body = (init as RequestInit).body as string;
-      expect(JSON.parse(body)).toEqual(validEditTaskRequest);
     });
   });
 
@@ -774,16 +719,16 @@ describe('API Client', () => {
             conversation_id: 'conv-1',
             model: 'deepseek',
             runtime: 'fake',
-            selected_skills: ['edit'],
+            selected_skills: ['rewrite'],
           },
         }) + '\n',
         JSON.stringify({
           event: 'needs_input',
           data: {
             run_id: 'run-need-input',
-            message: '请先上传要修改的 Word 文件。',
-            selected_skill: 'edit',
-            missing_requirements: ['uploaded_file'],
+            message: '请先上传要重写的 Word 文件。',
+            selected_skill: 'rewrite',
+            missing_requirements: ['uploaded_word_file'],
           },
         }) + '\n',
       ]);
@@ -804,16 +749,16 @@ describe('API Client', () => {
             conversation_id: 'conv-1',
             model: 'deepseek',
             runtime: 'fake',
-            selected_skills: ['edit'],
+            selected_skills: ['rewrite'],
           },
         },
         {
           event: 'needs_input',
           data: {
             run_id: 'run-need-input',
-            message: '请先上传要修改的 Word 文件。',
-            selected_skill: 'edit',
-            missing_requirements: ['uploaded_file'],
+            message: '请先上传要重写的 Word 文件。',
+            selected_skill: 'rewrite',
+            missing_requirements: ['uploaded_word_file'],
           },
         },
       ]);
@@ -935,12 +880,12 @@ describe('API Client', () => {
       const file = new File(['test'], 'test.docx', {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
-      const result = await uploadFile(file, 'edit_source');
+      const result = await uploadFile(file, 'rewrite_source');
       expect(result.file_path).toBe('/uploads/test.docx');
 
       const [, init] = fetchSpy.mock.calls[0];
       const body = (init as RequestInit).body as FormData;
-      expect(body.get('file_type')).toBe('edit_source');
+      expect(body.get('file_type')).toBe('rewrite_source');
     });
 
     it('should handle flat upload response without data wrapper', async () => {
@@ -957,7 +902,7 @@ describe('API Client', () => {
       const file = new File(['test'], 'flat-test.docx', {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
-      const result = await uploadFile(file, 'edit_source');
+      const result = await uploadFile(file, 'rewrite_source');
       expect(result.file_path).toBe('/uploads/flat-test.docx');
     });
   });

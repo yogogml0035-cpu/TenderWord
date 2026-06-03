@@ -37,8 +37,8 @@ TenderWord 是招标文档生成、修改、补充批注和模板复用系统。
 - 从 `sessionStorage` 恢复 running task 前必须先查任务状态；404 或 `TASK_NOT_FOUND` 收敛为本地中断态。
 - 模板候选列表、下载代理、年份限制、白名单和文件落盘统一由后端处理，前端只消费项目内 API。
 - Prompt Layer 只负责 prompt 渲染和机器契约解析，不承载日志、副作用、SSE、Word COM 或会话状态。
-- `generation_style`、`generation_mode`、`comment_generation_mode` 和 `style_writeback_mode` 都是 generate-only 字段，不得进入 rewrite/edit 请求模型、skill state 或 prompt surface。
-- `edit` 是显式入口，只走 `POST /api/edit`，不得重新并回用户流式判路。
+- `generation_style`、`generation_mode`、`comment_generation_mode` 和 `style_writeback_mode` 都是 generate-only 字段，不得进入 rewrite 请求模型、skill state 或 prompt surface。
+- 上传 Word 文件后的修改统一走 `rewrite`；`/api/edit`、edit skill 和 edit task kind 已删除，不保留兼容入口。
 - LLM 流式超时统一复用后端 settings 中的 `LLM_STREAM_TIMEOUT_SECONDS`。
 
 ## 5. 招标类型扩展规则
@@ -61,7 +61,7 @@ TenderWord 是招标文档生成、修改、补充批注和模板复用系统。
 
 ## 7. 文档与知识回写
 
-- 改 Prompt Layer、task skill、generate/rewrite/edit/comment_supplement runtime、`generation_mode`/`comment_generation_mode`、content/comment agent、Word COM、任务结果、SSE、批注/样式写回或 Word helper：更新共享运行时知识包。
+- 改 Prompt Layer、task skill、generate/rewrite/comment_supplement runtime、`generation_mode`/`comment_generation_mode`、content/comment agent、Word COM、任务结果、SSE、批注/样式写回或 Word helper：更新共享运行时知识包。
 - 改招标类型 identity、`form_type` 分派、anchor、graph/state/node/replacement、URL、会话、`sessionStorage`、生成草稿字段、过程卡或排队恢复：更新类型身份与会话知识包。
 - 改模板候选、AI 重排、下载代理、文件回填或模板弹窗：更新模板候选知识包。
 - 大范围改动后若 `.planning/codebase/` 或系统地图明显过期，先刷新对应子项目事实地图，再更新系统地图。

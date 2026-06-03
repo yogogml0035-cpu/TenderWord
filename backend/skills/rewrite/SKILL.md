@@ -1,6 +1,6 @@
 ---
 name: rewrite
-description: 当用户希望基于当前会话里已经生成过的招标正文继续修改、改写、润色或重写某一版内容时使用。
+description: 当用户希望基于当前会话里已经生成过的招标正文，或已上传的 Word 文件，继续修改、改写、润色或重写时使用。
 ---
 
 # Rewrite Skill
@@ -9,24 +9,26 @@ description: 当用户希望基于当前会话里已经生成过的招标正文�
 
 ## 何时使用
 
-- 用户显式选择了 `/rewrite`、`$rewrite`，或消息明确要求“改写 / 润色 / 重写”当前会话里已经生成过的文档正文。
-- 用户目标是继续修改“刚才生成的文档”或“当前会话中的最新正文”，而不是上传一个外部 Word 文件做定点编辑。
+- 用户显式选择了 `/rewrite`、`$rewrite`，或消息明确要求“改写 / 润色 / 重写 / 修改”当前会话里已经生成过的文档正文。
+- 用户上传了一个 Word 文件并输入重写指令，希望系统按当前页面锚点重写上传文件中的目标正文。
 
 ## 前置条件
 
 - 必须有当前 `conversation_id`。
 - 必须有用户本轮 rewrite 指令正文，不能是空字符串。
-- 必须确认当前会话已有可用的 rewrite history，也就是系统已经保存过一次生成成功后的文档上下文。
+- 会话历史来源：必须确认当前会话已有可用的 rewrite history，也就是系统已经保存过一次生成成功后的文档上下文。
+- 上传文件来源：必须确认已有上传 Word 文件、当前页面 form type、完整锚点、标的类型和资金性质；上传文件优先于会话 history。
 
 ## 缺条件时怎么做
 
-- 如果当前会话没有 rewrite history，不要调用工具。
+- 如果没有上传文件且当前会话没有 rewrite history，不要调用工具。
+- 如果有上传文件但缺 form type、锚点、标的类型或资金性质，不要调用工具。
 - 直接追问用户先完成一次生成，或确认要基于哪一份当前会话文档继续修改。
 - 追问只保留最小必要信息，不要猜测文档内容，也不要要求用户重复已经提供的 rewrite 指令。
 
 ## 调用工具
 
-当且仅当 rewrite history 已存在时，调用 `create_rewrite_task_tool`：
+会话历史来源具备时，调用 `create_rewrite_task_tool`：
 
 ```text
 create_rewrite_task_tool(
@@ -34,6 +36,23 @@ create_rewrite_task_tool(
   user_prompt="<去掉 capability 前缀后的 rewrite 指令正文>",
   model="<当前选择的模型>",
   rewrite_log_path=null
+)
+```
+
+上传文件来源具备时，调用同一个工具，并附带上传文件和当前页面上下文：
+
+```text
+create_rewrite_task_tool(
+  conversation_id="<当前会话 ID>",
+  user_prompt="<去掉 capability 前缀后的 rewrite 指令正文>",
+  model="<当前选择的模型>",
+  rewrite_log_path=null,
+  file_path="<上传 Word 文件路径>",
+  form_type="<当前页面后端 form type>",
+  insertion_config={"before_text": "<前置锚点>", "after_text": "<后置锚点>"},
+  tender_lx=<0|1|2>,
+  fund_source_lx=<0|1>,
+  tender_data_snapshot=<可选当前页面招标数据快照>
 )
 ```
 
@@ -45,7 +64,7 @@ create_rewrite_task_tool(
 
 ## 后台 rewrite 任务正文改写指令
 
-以下内容只在 rewrite 队列任务已经创建、后台 `rewrite_text` 节点正在根据“当前文档内容 + 技术参数参考资料 + 用户修改指令”生成最终正文时适用。
+以下内容只在 rewrite 队列任务已经创建、后台 `rewrite_text` 节点正在根据“当前文档内容 / 当前锚点区正文 + 技术参数参考资料 + 用户修改指令”生成最终正文时适用。
 如果你当前处于 agent run 的前置条件检查阶段，请忽略本节并只执行上面的任务创建规则。
 
 你是招标文档重写子智能体。

@@ -20,6 +20,15 @@ async def _collect_events(service: AgentRunService, payload: AgentRunStreamReque
         lines.append(line)
     return [json.loads(line) for line in lines]
 
+TENDER_DATA_SNAPSHOT = {
+    "project_name": "测试项目",
+    "project_number": "XJ-001",
+    "project_content": "采购需求",
+    "buyer_name": "采购人",
+    "tender_lx": 0,
+    "fund_source_lx": 1,
+}
+
 
 @pytest.mark.asyncio
 async def test_stream_emits_task_created_sequence_for_rewrite(tmp_path) -> None:
@@ -179,23 +188,23 @@ async def test_stream_returns_error_terminal_when_rewrite_tool_raises(tmp_path) 
     assert log_entries[-1]["summary"] == "agent run 执行失败，请稍后重试"
 
 @pytest.mark.asyncio
-async def test_stream_emits_task_created_sequence_for_edit(tmp_path) -> None:
-    async def _create_edit_task(**kwargs) -> GenerateResponse:
-        assert kwargs["conversation_id"] == "conv-edit-1"
+async def test_stream_emits_task_created_sequence_for_uploaded_file_rewrite(tmp_path) -> None:
+    async def _create_rewrite_task(**kwargs) -> GenerateResponse:
+        assert kwargs["conversation_id"] == "conv-rewrite-upload-1"
         assert getattr(kwargs["form_type"], "value", kwargs["form_type"]) == "xjcg_tender"
         assert getattr(kwargs["model"], "value", kwargs["model"]) == "deepseek"
-        assert kwargs["edit_prompt"] == "请修改第三章采购需求"
-        assert kwargs["file_path"] == "D:/UploadFiles/edit.docx"
+        assert kwargs["user_prompt"] == "请修改第三章采购需求"
+        assert kwargs["file_path"] == "D:/UploadFiles/source.docx"
         assert kwargs["insertion_config"].before_text == "第三章 采购需求"
         assert kwargs["insertion_config"].after_text == "第四章 响应文件有关格式"
         assert kwargs["tender_lx"] == 0
         assert kwargs["fund_source_lx"] == 1
-        assert kwargs["tender_data_snapshot"] is None
+        assert kwargs["tender_data_snapshot"].project_name == "测试项目"
         return GenerateResponse(
             success=True,
-            task_id="edit-task-1",
+            task_id="rewrite-upload-task-1",
             message="queued",
-            task_kind=TaskKind.EDIT,
+            task_kind=TaskKind.REWRITE,
             status=TaskStatus.QUEUED,
             queue_position=1,
             waiting_count=0,
@@ -203,25 +212,25 @@ async def test_stream_emits_task_created_sequence_for_edit(tmp_path) -> None:
 
     audit_logger = AgentRunAuditLogger(logs_dir=tmp_path)
     service = AgentRunService(
-        run_id_factory=lambda: "run-edit-1",
-        edit_task_executor=_create_edit_task,
+        run_id_factory=lambda: "run-rewrite-upload-1",
+        rewrite_task_executor=_create_rewrite_task,
         audit_logger=audit_logger,
     )
     payload = AgentRunStreamRequest.model_validate(
         {
-            "conversation_id": "conv-edit-1",
+            "conversation_id": "conv-rewrite-upload-1",
             "message": "请修改第三章采购需求",
             "model": "deepseek",
-            "selected_skills": ["edit"],
+            "selected_skills": ["rewrite"],
             "context_snapshot": {
                 "rewrite_available": False,
                 "uploaded_files": [
                     {
-                        "file_path": "D:/UploadFiles/edit.docx",
-                        "file_name": "edit.docx",
+                        "file_path": "D:/UploadFiles/source.docx",
+                        "file_name": "source.docx",
                     }
                 ],
-                "edit_context": {
+                "rewrite_context": {
                     "form_type": "xjcg_tender",
                     "insertion_config": {
                         "before_text": "第三章 采购需求",
@@ -229,6 +238,7 @@ async def test_stream_emits_task_created_sequence_for_edit(tmp_path) -> None:
                     },
                     "tender_lx": 0,
                     "fund_source_lx": 1,
+                    "tender_data_snapshot": TENDER_DATA_SNAPSHOT,
                 },
             },
         }
@@ -244,20 +254,20 @@ async def test_stream_emits_task_created_sequence_for_edit(tmp_path) -> None:
         "task_accepted",
         "done",
     ]
-    assert events[3]["data"]["tool_name"] == "create_edit_task_tool"
+    assert events[3]["data"]["tool_name"] == "create_rewrite_task_tool"
     assert events[4]["data"] == {
-        "run_id": "run-edit-1",
-        "task_id": "edit-task-1",
-        "task_kind": "edit",
+        "run_id": "run-rewrite-upload-1",
+        "task_id": "rewrite-upload-task-1",
+        "task_kind": "rewrite",
         "status": "queued",
         "queue_position": 1,
         "waiting_count": 0,
     }
-    assert events[5]["data"]["task_id"] == "edit-task-1"
+    assert events[5]["data"]["task_id"] == "rewrite-upload-task-1"
 
     log_entries = [
         json.loads(line)
-        for line in audit_logger.log_path_for_run("run-edit-1").read_text(encoding="utf-8").splitlines()
+        for line in audit_logger.log_path_for_run("run-rewrite-upload-1").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     assert [entry["event"] for entry in log_entries] == [
@@ -269,19 +279,19 @@ async def test_stream_emits_task_created_sequence_for_edit(tmp_path) -> None:
         "done",
     ]
     assert log_entries[2]["guard_result"] == "passed"
-    assert log_entries[3]["tool_name"] == "create_edit_task_tool"
-    assert log_entries[4]["task_id"] == "edit-task-1"
+    assert log_entries[3]["tool_name"] == "create_rewrite_task_tool"
+    assert log_entries[4]["task_id"] == "rewrite-upload-task-1"
 
 @pytest.mark.asyncio
-async def test_stream_returns_needs_input_when_edit_file_missing(tmp_path) -> None:
+async def test_stream_returns_needs_input_when_rewrite_skill_has_no_file_or_history(tmp_path) -> None:
     audit_logger = AgentRunAuditLogger(logs_dir=tmp_path)
-    service = AgentRunService(run_id_factory=lambda: "run-edit-2", audit_logger=audit_logger)
+    service = AgentRunService(run_id_factory=lambda: "run-rewrite-2", audit_logger=audit_logger)
     payload = AgentRunStreamRequest.model_validate(
         {
-            "conversation_id": "conv-edit-2",
+            "conversation_id": "conv-rewrite-2",
             "message": "请修改第三章采购需求",
             "model": "deepseek",
-            "selected_skills": ["edit"],
+            "selected_skills": ["rewrite"],
             "context_snapshot": {
                 "rewrite_available": False,
                 "uploaded_files": [],
@@ -297,28 +307,28 @@ async def test_stream_returns_needs_input_when_edit_file_missing(tmp_path) -> No
         "thinking_stage",
         "needs_input",
     ]
-    assert events[-1]["data"]["message"] == "请先上传要修改的 Word 文件。"
-    assert events[-1]["data"]["missing_requirements"] == ["uploaded_word_file"]
+    assert events[-1]["data"]["message"] == "当前会话没有可用文档，请先完成一次生成。"
+    assert events[-1]["data"]["missing_requirements"] == ["rewrite_history"]
 
 @pytest.mark.asyncio
-async def test_stream_returns_needs_input_when_edit_anchor_missing(tmp_path) -> None:
+async def test_stream_returns_needs_input_when_uploaded_rewrite_anchor_missing(tmp_path) -> None:
     audit_logger = AgentRunAuditLogger(logs_dir=tmp_path)
-    service = AgentRunService(run_id_factory=lambda: "run-edit-3", audit_logger=audit_logger)
+    service = AgentRunService(run_id_factory=lambda: "run-rewrite-upload-3", audit_logger=audit_logger)
     payload = AgentRunStreamRequest.model_validate(
         {
-            "conversation_id": "conv-edit-3",
+            "conversation_id": "conv-rewrite-upload-3",
             "message": "请修改第三章采购需求",
             "model": "deepseek",
-            "selected_skills": ["edit"],
+            "selected_skills": ["rewrite"],
             "context_snapshot": {
                 "rewrite_available": False,
                 "uploaded_files": [
                     {
-                        "file_path": "D:/UploadFiles/edit.docx",
-                        "file_name": "edit.docx",
+                        "file_path": "D:/UploadFiles/source.docx",
+                        "file_name": "source.docx",
                     }
                 ],
-                "edit_context": {
+                "rewrite_context": {
                     "form_type": "xjcg_tender",
                     "insertion_config": {
                         "before_text": "第三章 采购需求",
@@ -326,6 +336,7 @@ async def test_stream_returns_needs_input_when_edit_anchor_missing(tmp_path) -> 
                     },
                     "tender_lx": 0,
                     "fund_source_lx": 1,
+                    "tender_data_snapshot": TENDER_DATA_SNAPSHOT,
                 },
             },
         }
@@ -343,24 +354,67 @@ async def test_stream_returns_needs_input_when_edit_anchor_missing(tmp_path) -> 
     assert events[-1]["data"]["missing_requirements"] == ["insertion_config"]
 
 @pytest.mark.asyncio
-async def test_stream_returns_needs_input_when_edit_form_context_missing(tmp_path) -> None:
+async def test_stream_returns_needs_input_when_uploaded_rewrite_form_context_missing(tmp_path) -> None:
     audit_logger = AgentRunAuditLogger(logs_dir=tmp_path)
-    service = AgentRunService(run_id_factory=lambda: "run-edit-4", audit_logger=audit_logger)
+    service = AgentRunService(run_id_factory=lambda: "run-rewrite-upload-4", audit_logger=audit_logger)
     payload = AgentRunStreamRequest.model_validate(
         {
-            "conversation_id": "conv-edit-4",
+            "conversation_id": "conv-rewrite-upload-4",
             "message": "请修改第三章采购需求",
             "model": "deepseek",
-            "selected_skills": ["edit"],
+            "selected_skills": ["rewrite"],
             "context_snapshot": {
                 "rewrite_available": False,
                 "uploaded_files": [
                     {
-                        "file_path": "D:/UploadFiles/edit.docx",
-                        "file_name": "edit.docx",
+                        "file_path": "D:/UploadFiles/source.docx",
+                        "file_name": "source.docx",
                     }
                 ],
-                "edit_context": {
+                "rewrite_context": {
+                    "insertion_config": {
+                        "before_text": "第三章 采购需求",
+                        "after_text": "第四章 响应文件有关格式",
+                    },
+                    "tender_lx": 0,
+                    "fund_source_lx": 1,
+                    "tender_data_snapshot": TENDER_DATA_SNAPSHOT,
+                },
+            },
+        }
+    )
+
+    events = await _collect_events(service, payload)
+
+    assert [item["event"] for item in events] == [
+        "run_started",
+        "thinking_stage",
+        "thinking_stage",
+        "needs_input",
+    ]
+    assert events[-1]["data"]["message"] == "请先补全当前页面的招标类型。"
+    assert events[-1]["data"]["missing_requirements"] == ["form_type"]
+
+@pytest.mark.asyncio
+async def test_stream_returns_needs_input_when_uploaded_rewrite_tender_data_missing(tmp_path) -> None:
+    audit_logger = AgentRunAuditLogger(logs_dir=tmp_path)
+    service = AgentRunService(run_id_factory=lambda: "run-rewrite-upload-5", audit_logger=audit_logger)
+    payload = AgentRunStreamRequest.model_validate(
+        {
+            "conversation_id": "conv-rewrite-upload-5",
+            "message": "请修改第三章采购需求",
+            "model": "deepseek",
+            "selected_skills": ["rewrite"],
+            "context_snapshot": {
+                "rewrite_available": False,
+                "uploaded_files": [
+                    {
+                        "file_path": "D:/UploadFiles/source.docx",
+                        "file_name": "source.docx",
+                    }
+                ],
+                "rewrite_context": {
+                    "form_type": "xjcg_tender",
                     "insertion_config": {
                         "before_text": "第三章 采购需求",
                         "after_text": "第四章 响应文件有关格式",
@@ -380,5 +434,5 @@ async def test_stream_returns_needs_input_when_edit_form_context_missing(tmp_pat
         "thinking_stage",
         "needs_input",
     ]
-    assert events[-1]["data"]["message"] == "请先补全当前页面的招标类型。"
-    assert events[-1]["data"]["missing_requirements"] == ["form_type"]
+    assert events[-1]["data"]["message"] == "请先补全当前页面的招标数据。"
+    assert events[-1]["data"]["missing_requirements"] == ["tender_data_snapshot"]

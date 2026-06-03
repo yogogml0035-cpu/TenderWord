@@ -7,7 +7,6 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.models import (
-    EditTaskRequest,
     FormType,
     GenerateResponse,
     InsertionConfig,
@@ -22,7 +21,6 @@ if TYPE_CHECKING:
     from backend.services.document_service import DocumentService
     from backend.services.task_service import TaskService
 
-CREATE_EDIT_TASK_TOOL = "create_edit_task_tool"
 CREATE_REWRITE_TASK_TOOL = "create_rewrite_task_tool"
 READ_CURRENT_CONVERSATION_SUMMARY_TOOL = "read_current_conversation_summary_tool"
 READ_CURRENT_TASK_PUBLIC_SUMMARY_TOOL = "read_current_task_public_summary_tool"
@@ -41,6 +39,30 @@ class CreateRewriteTaskToolInput(BaseModel):
         default=None,
         description="可选的审计日志路径，由后端受控写入",
     )
+    file_path: str | None = Field(
+        default=None,
+        description="可选。上传文件 rewrite 的待重写 Word 文件路径",
+    )
+    form_type: FormType | None = Field(
+        default=None,
+        description="可选。上传文件 rewrite 的当前页面 form type",
+    )
+    insertion_config: InsertionConfig | None = Field(
+        default=None,
+        description="可选。上传文件 rewrite 的插入锚点配置",
+    )
+    tender_lx: int | None = Field(
+        default=None,
+        description="可选。上传文件 rewrite 的标的类型编码（0=货物, 1=工程, 2=服务）",
+    )
+    fund_source_lx: int | None = Field(
+        default=None,
+        description="可选。上传文件 rewrite 的资金性质编码（0=自筹, 1=财政）",
+    )
+    tender_data_snapshot: TenderData | None = Field(
+        default=None,
+        description="可选的招标数据快照",
+    )
 
     @field_validator("conversation_id", "user_prompt")
     @classmethod
@@ -50,59 +72,47 @@ class CreateRewriteTaskToolInput(BaseModel):
             raise ValueError("字段不能为空")
         return normalized
 
-    @field_validator("rewrite_log_path")
+    @field_validator("rewrite_log_path", "file_path")
     @classmethod
     def _normalize_optional_path(cls, value: str | None) -> str | None:
         normalized = str(value or "").strip()
         return normalized or None
 
-class CreateEditTaskToolInput(BaseModel):
-    """受控 edit task tool 入参。"""
-
-    conversation_id: str = Field(..., min_length=1, description="当前会话 ID")
-    form_type: FormType = Field(..., description="当前页面 form type")
-    model: LLMModel = Field(
-        default=LLMModel.DEEPSEEK,
-        description="任务使用的模型提供方",
-    )
-    edit_prompt: str = Field(..., min_length=1, description="edit 指令正文")
-    file_path: str = Field(..., min_length=1, description="待修改 Word 文件路径")
-    insertion_config: InsertionConfig = Field(..., description="插入锚点配置")
-    tender_lx: int = Field(..., description="标的类型编码（0=货物, 1=工程, 2=服务）")
-    fund_source_lx: int = Field(..., description="资金性质编码（0=自筹, 1=财政）")
-    tender_data_snapshot: TenderData | None = Field(
-        default=None,
-        description="可选的招标数据快照",
-    )
-
-    @field_validator("conversation_id", "edit_prompt", "file_path")
-    @classmethod
-    def _normalize_required_text(cls, value: str) -> str:
-        normalized = str(value or "").strip()
-        if not normalized:
-            raise ValueError("字段不能为空")
-        return normalized
-
     @field_validator("fund_source_lx")
     @classmethod
-    def _validate_binary_flag(cls, value: int) -> int:
+    def _validate_binary_flag(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
         if value not in (0, 1):
             raise ValueError("字段必须是 0 或 1")
         return int(value)
 
     @field_validator("tender_lx")
     @classmethod
-    def _validate_tender_lx(cls, value: int) -> int:
+    def _validate_tender_lx(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
         if value not in (0, 1, 2):
             raise ValueError("tender_lx 必须是 0、1 或 2")
         return int(value)
 
     @model_validator(mode="after")
-    def _validate_anchor_texts(self) -> "CreateEditTaskToolInput":
+    def _validate_uploaded_rewrite_context(self) -> "CreateRewriteTaskToolInput":
+        if not self.file_path:
+            return self
+
+        if self.form_type is None:
+            raise ValueError("上传文件 rewrite 需要 form_type")
+        if self.insertion_config is None:
+            raise ValueError("上传文件 rewrite 需要 insertion_config")
         before_text = str(self.insertion_config.before_text or "").strip()
         after_text = str(self.insertion_config.after_text or "").strip()
         if not before_text or not after_text:
-            raise ValueError("插入锚点不能为空")
+            raise ValueError("上传文件 rewrite 的插入锚点不能为空")
+        if self.tender_lx is None:
+            raise ValueError("上传文件 rewrite 需要 tender_lx")
+        if self.fund_source_lx is None:
+            raise ValueError("上传文件 rewrite 需要 fund_source_lx")
         return self
 
 
@@ -141,7 +151,6 @@ class TaskContextAssistantToolContext:
 
 
 RewriteTaskExecutor = Callable[..., Awaitable[GenerateResponse]]
-EditTaskExecutor = Callable[..., Awaitable[GenerateResponse]]
 ConversationSummaryExecutor = Callable[..., Awaitable[dict[str, object]]]
 TaskPublicSummaryExecutor = Callable[..., Awaitable[dict[str, object]]]
 
@@ -162,12 +171,24 @@ def make_create_rewrite_task_executor(
         user_prompt: str,
         model: LLMModel = LLMModel.DEEPSEEK,
         rewrite_log_path: str | None = None,
+        file_path: str | None = None,
+        form_type: FormType | None = None,
+        insertion_config: InsertionConfig | None = None,
+        tender_lx: int | None = None,
+        fund_source_lx: int | None = None,
+        tender_data_snapshot: TenderData | None = None,
     ) -> GenerateResponse:
         return await document_service.create_rewrite_task(
             conversation_id=conversation_id,
             user_prompt=user_prompt,
             model_provider=model.value,
             rewrite_log_path=rewrite_log_path,
+            file_path=file_path,
+            form_type=form_type,
+            insertion_config=insertion_config,
+            tender_lx=tender_lx,
+            fund_source_lx=fund_source_lx,
+            tender_data_snapshot=tender_data_snapshot,
         )
 
     return _execute
@@ -183,12 +204,24 @@ def create_rewrite_task_tool(
         user_prompt: str,
         model: LLMModel = LLMModel.DEEPSEEK,
         rewrite_log_path: str | None = None,
+        file_path: str | None = None,
+        form_type: FormType | None = None,
+        insertion_config: InsertionConfig | None = None,
+        tender_lx: int | None = None,
+        fund_source_lx: int | None = None,
+        tender_data_snapshot: TenderData | None = None,
     ) -> dict[str, object]:
         response = await executor(
             conversation_id=conversation_id,
             user_prompt=user_prompt,
             model=model,
             rewrite_log_path=rewrite_log_path,
+            file_path=file_path,
+            form_type=form_type,
+            insertion_config=insertion_config,
+            tender_lx=tender_lx,
+            fund_source_lx=fund_source_lx,
+            tender_data_snapshot=tender_data_snapshot,
         )
         return response.model_dump(mode="json")
 
@@ -196,89 +229,11 @@ def create_rewrite_task_tool(
         coroutine=_create_rewrite_task,
         name=CREATE_REWRITE_TASK_TOOL,
         description=(
-            "在已有 rewrite history 的当前会话里创建 rewrite 队列任务。"
-            "缺少会话上下文时不要调用这个工具，应先追问用户补齐条件。"
+            "创建 rewrite 队列任务。上传文件 rewrite 必须传入 file_path、form_type、完整锚点、"
+            "tender_lx 和 fund_source_lx；没有上传文件时必须已有 rewrite history。"
+            "缺少上下文时不要调用这个工具，应先追问用户补齐条件。"
         ),
         args_schema=CreateRewriteTaskToolInput,
-    )
-
-def make_create_edit_task_executor(
-    context: TaskContextAssistantToolContext | None = None,
-) -> EditTaskExecutor:
-    if context is not None and context.document_service is not None:
-        document_service = context.document_service
-    else:
-        from backend.services.document_service import get_document_service
-
-        document_service = get_document_service()
-
-    async def _execute(
-        *,
-        conversation_id: str,
-        form_type: FormType,
-        model: LLMModel = LLMModel.DEEPSEEK,
-        edit_prompt: str,
-        file_path: str,
-        insertion_config: InsertionConfig,
-        tender_lx: int,
-        fund_source_lx: int,
-        tender_data_snapshot: TenderData | None = None,
-    ) -> GenerateResponse:
-        request = EditTaskRequest(
-            conversation_id=conversation_id,
-            form_type=form_type,
-            model=model,
-            edit_prompt=edit_prompt,
-            file_path=file_path,
-            insertion_config=insertion_config,
-            tender_lx=tender_lx,
-            fund_source_lx=fund_source_lx,
-            tender_data_snapshot=tender_data_snapshot,
-        )
-        return await document_service.create_edit_task(request)
-
-    return _execute
-
-def create_edit_task_tool(
-    context: TaskContextAssistantToolContext | None = None,
-) -> StructuredTool:
-    executor = make_create_edit_task_executor(context)
-
-    async def _create_edit_task(
-        conversation_id: str,
-        form_type: FormType,
-        model: LLMModel = LLMModel.DEEPSEEK,
-        edit_prompt: str = "",
-        file_path: str = "",
-        insertion_config: InsertionConfig | None = None,
-        tender_lx: int = 0,
-        fund_source_lx: int = 0,
-        tender_data_snapshot: TenderData | None = None,
-    ) -> dict[str, object]:
-        if insertion_config is None:
-            raise ValueError("insertion_config 不能为空")
-
-        response = await executor(
-            conversation_id=conversation_id,
-            form_type=form_type,
-            model=model,
-            edit_prompt=edit_prompt,
-            file_path=file_path,
-            insertion_config=insertion_config,
-            tender_lx=tender_lx,
-            fund_source_lx=fund_source_lx,
-            tender_data_snapshot=tender_data_snapshot,
-        )
-        return response.model_dump(mode="json")
-
-    return StructuredTool.from_function(
-        coroutine=_create_edit_task,
-        name=CREATE_EDIT_TASK_TOOL,
-        description=(
-            "在已有上传 Word 文件、完整锚点和当前页面 edit 上下文时创建 edit 队列任务。"
-            "缺少上传文件、锚点或表单上下文时不要调用这个工具，应先追问用户补齐条件。"
-        ),
-        args_schema=CreateEditTaskToolInput,
     )
 
 
@@ -446,12 +401,9 @@ def _summarize_rewrite_state(
 
 
 __all__ = [
-    "CREATE_EDIT_TASK_TOOL",
     "CREATE_REWRITE_TASK_TOOL",
-    "CreateEditTaskToolInput",
     "CreateRewriteTaskToolInput",
     "ConversationSummaryExecutor",
-    "EditTaskExecutor",
     "READ_CURRENT_CONVERSATION_SUMMARY_TOOL",
     "READ_CURRENT_TASK_PUBLIC_SUMMARY_TOOL",
     "ReadCurrentConversationSummaryToolInput",
@@ -459,11 +411,9 @@ __all__ = [
     "RewriteTaskExecutor",
     "TaskContextAssistantToolContext",
     "TaskPublicSummaryExecutor",
-    "create_edit_task_tool",
     "create_read_current_conversation_summary_tool",
     "create_read_current_task_public_summary_tool",
     "create_rewrite_task_tool",
-    "make_create_edit_task_executor",
     "make_create_rewrite_task_executor",
     "make_read_current_conversation_summary_executor",
     "make_read_current_task_public_summary_executor",

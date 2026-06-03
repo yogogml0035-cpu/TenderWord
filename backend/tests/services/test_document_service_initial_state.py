@@ -6,7 +6,6 @@ from pydantic import ValidationError
 from backend.config.tender_config import get_default_anchor_texts
 from backend.models.generate import (
     CommentGenerationMode,
-    EditTaskRequest,
     FormType,
     GenerateRequest,
     GenerationMode,
@@ -257,14 +256,15 @@ def test_build_initial_state_uses_gngk_mode_specific_default_anchors(
     assert state["tender_lx"] == tender_lx
 
 
-def test_edit_and_rewrite_initial_state_do_not_receive_generation_style() -> None:
+def test_uploaded_rewrite_and_rewrite_initial_state_do_not_receive_generation_style() -> None:
     service = object.__new__(DocumentService)
-    edit_request = EditTaskRequest(
+    uploaded_rewrite_state = service._build_uploaded_rewrite_initial_state(
+        task_id="task-4",
         conversation_id="conv-1",
-        form_type=FormType.XJCG_TENDER,
-        model=LLMModel.DEEPSEEK,
-        edit_prompt="请微调商务条款",
+        user_prompt="请微调商务条款",
         file_path="D:/UploadFiles/output.docx",
+        form_type=FormType.XJCG_TENDER,
+        insertion_config=None,
         tender_lx=0,
         fund_source_lx=1,
         tender_data_snapshot=TenderData(
@@ -286,7 +286,6 @@ def test_edit_and_rewrite_initial_state_do_not_receive_generation_style() -> Non
         ),
     )
 
-    edit_state = service._build_edit_graph_initial_state(request=edit_request, task_id="task-4")
     rewrite_state = service._build_skill_graph_initial_state(
         task_id="task-5",
         skill_id="rewrite",
@@ -294,7 +293,11 @@ def test_edit_and_rewrite_initial_state_do_not_receive_generation_style() -> Non
         user_prompt="请重写技术要求",
     )
 
-    assert "generation_style" not in edit_state
+    assert uploaded_rewrite_state["skill_id"] == "rewrite"
+    assert uploaded_rewrite_state["rewrite_user_prompt"] == "请微调商务条款"
+    assert uploaded_rewrite_state["source_document_path"] == "D:/UploadFiles/output.docx"
+    assert uploaded_rewrite_state["rewrite_source"] == "uploaded_file"
+    assert "generation_style" not in uploaded_rewrite_state
     assert "generation_style" not in rewrite_state
-    assert "generation_mode" not in edit_state
+    assert "generation_mode" not in uploaded_rewrite_state
     assert "generation_mode" not in rewrite_state

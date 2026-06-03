@@ -19,8 +19,6 @@ REWRITE_STAGE_SKILL_PROMPT_RENDER = "skill_prompt_render"
 TASK_AUDIT_STAGE_SKILL_PROMPT_RENDER = REWRITE_STAGE_SKILL_PROMPT_RENDER
 REWRITE_STAGE_TARGET_SELECTION = "rewrite_target_selection"
 REWRITE_STAGE_TEXT = "rewrite_text"
-EDIT_STAGE_PROMPT_RENDER = TASK_AUDIT_STAGE_SKILL_PROMPT_RENDER
-EDIT_STAGE_TEXT_REQUEST = "edit_text_request"
 
 TASK_AUDIT_STAGES = frozenset(
     {
@@ -28,7 +26,6 @@ TASK_AUDIT_STAGES = frozenset(
         REWRITE_STAGE_SKILL_PROMPT_RENDER,
         REWRITE_STAGE_TARGET_SELECTION,
         REWRITE_STAGE_TEXT,
-        EDIT_STAGE_TEXT_REQUEST,
     }
 )
 REWRITE_AUDIT_STAGES = TASK_AUDIT_STAGES
@@ -36,7 +33,7 @@ REWRITE_AUDIT_STAGES = TASK_AUDIT_STAGES
 
 def _get_task_audit_dir(prefix: str = "rewrite") -> Path:
     safe_prefix = _sanitize_filename_part(prefix)
-    subdir = "edit_log" if safe_prefix == "edit" else "rewrite_log"
+    subdir = "rewrite_log"
     target = Path(__file__).resolve().parents[2] / "prompts_log" / subdir
     target.mkdir(parents=True, exist_ok=True)
     return target
@@ -118,10 +115,6 @@ def create_rewrite_audit_log(conversation_id: str, *, now: float | None = None) 
     return create_task_audit_log(conversation_id, prefix="rewrite", now=now)
 
 
-def create_edit_audit_log(audit_id: str, *, now: float | None = None) -> str:
-    return create_task_audit_log(audit_id, prefix="edit", now=now)
-
-
 def resolve_task_audit_log_path(config: Mapping[str, Any] | None) -> str:
     if not isinstance(config, Mapping):
         return ""
@@ -163,8 +156,6 @@ def write_rewrite_audit_stage(
 
 
 __all__ = [
-    "EDIT_STAGE_PROMPT_RENDER",
-    "EDIT_STAGE_TEXT_REQUEST",
     "LEGACY_REWRITE_AUDIT_LOG_PATH_KEY",
     "REWRITE_AUDIT_STAGES",
     "REWRITE_STAGE_ROUTE_OR_REPLY",
@@ -175,7 +166,6 @@ __all__ = [
     "TASK_AUDIT_LOG_PATH_KEY",
     "TASK_AUDIT_STAGE_SKILL_PROMPT_RENDER",
     "TASK_AUDIT_STAGES",
-    "create_edit_audit_log",
     "create_rewrite_audit_log",
     "create_task_audit_log",
     "resolve_task_audit_log_path",

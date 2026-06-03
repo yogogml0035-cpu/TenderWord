@@ -2,7 +2,7 @@
 
 ## 背景与范围
 
-本包适用于后端 generate / rewrite / edit / comment_supplement 运行时、Prompt Layer、task skill runtime、Word COM、共享 Word helper、批注/样式回写、任务结果与 SSE 透传相关改动。
+本包适用于后端 generate / rewrite / comment_supplement 运行时、Prompt Layer、task skill runtime、Word COM、共享 Word helper、批注/样式回写、任务结果与 SSE 透传相关改动。
 
 本包只记录当前仍存在的共享主干、稳定契约、验证入口和回归风险；实现细节以代码为准，不保留历史分叉、临时脚本或已删除文件名。
 
@@ -26,30 +26,30 @@
 ### 招标详情 API
 
 - `GET /api/tender/{tender_no}` 会把外部招标详情接口数据装配成 `backend.models.tender.TenderData`；外部接口字段类型可能波动，例如 `investment` 可能返回数字而不是字符串。
-- `TenderData` 是前端表单和后续 generate/rewrite/edit 快照的文本契约边界；预算、项目编号、联系人、日期、平台等文本字段必须在模型边界转成字符串，不能把可显示数字误判成“招标数据格式错误”。
+- `TenderData` 是前端表单和后续 generate/rewrite 快照的文本契约边界；预算、项目编号、联系人、日期、平台等文本字段必须在模型边界转成字符串，不能把可显示数字误判成“招标数据格式错误”。
 - 排查“输入招标编号显示格式错误”时，先看后端响应体里的 Pydantic 字段错误；若外部数据已返回且只是字段类型不匹配，应修归一化契约，而不是收紧招标编号格式。
 - 未支持的外部采购方式不能阻断信息展示：`TenderType.purchase_method` 保留外部原值，当前只把 `0/2/5` 视为可路由类型；其它值通过 `/api/tender` 的 `warning` 透传给前端黄色提示，并由用户当前页面/按钮状态决定后续生成 graph。
 
-### Generate / Rewrite / Edit
+### Generate / Rewrite
 
 - generate 任务通过 `DocumentService.create_task()` 进入 `GRAPH_REGISTRY`，按 `GenerateRequest.form_type` 选择具体 graph。
 - `GET /api/generate/{task_id}` 必须通过 `backend.services.task_service` 查询任务状态；API 路由中的函数内延迟导入也要使用 `backend.*` 包绝对路径，避免在不同启动/测试入口下退化为 `ModuleNotFoundError`。
-- rewrite 与 edit 走 `SkillGraph.for_skill(...)` 返回的 task graph，但图结构真源已经收敛到 `backend/graphs/task_skill_workflows.py`；`backend/skills/rewrite/SKILL.md`、`backend/skills/edit/SKILL.md` 只保留 DeepAgents guide 和后台正文改写指令，不再承担 task workflow 装配。
-- `POST /api/agent/runs/stream` 的 rewrite 分支当前通过 `backend/agents/task_context_assistant/tools.py` 中的 `create_rewrite_task_tool` 复用 `DocumentService.create_rewrite_task()`；guard 先检查 `rewrite history`，缺条件时返回 `needs_input`，不能直接操作 Word COM。
-- `POST /api/agent/runs/stream` 的 edit 分支必须通过 `create_edit_task_tool` 复用 `DocumentService.create_edit_task()`；guard 必须先确认上传 Word 文件、`form_type`、完整锚点和 `tender_lx/fund_source_lx` 等当前页面草稿字段齐备，缺条件时只返回 `needs_input`，不能回退成直接 Word COM 或裸调 `/api/edit`。
-- `backend/agents/task_context_assistant/factory.py` 是右侧 agent run DeepAgents 工厂真源。运行时 backend 必须通过 `CompositeBackend` 把 `/skills/`、`/scratch/`、`/workspace/` 分隔到独立 `FilesystemBackend(virtual_mode=True)`；`/skills/` 只镜像 rewrite / edit 两个受控 skill 目录，不能裸挂项目根、`.env`、`backend/logs` 或任意本机绝对路径。
+- rewrite 走 `SkillGraph.for_skill(...)` 返回的 task graph，但图结构真源已经收敛到 `backend/graphs/task_skill_workflows.py`；`backend/skills/rewrite/SKILL.md` 只保留 DeepAgents guide 和后台正文改写指令，不再承担 task workflow 装配。
+- `POST /api/agent/runs/stream` 的 rewrite 分支当前通过 `backend/agents/task_context_assistant/tools.py` 中的 `create_rewrite_task_tool` 复用 `DocumentService.create_rewrite_task()`；guard 先检查上传 Word 文件链路，其次检查 `rewrite history`，缺条件时返回 `needs_input`，不能直接操作 Word COM。
+- 上传 Word 文件后的修改统一走 rewrite。上传文件 rewrite 必须有非空用户重写指令、上传文件路径、当前页面 `form_type`、完整锚点、`tender_lx`、`fund_source_lx` 和 `tender_data_snapshot`；缺任一关键上下文时只返回 `needs_input`，不能自动猜测文档类型或锚点。
+- `backend/agents/task_context_assistant/factory.py` 是右侧 agent run DeepAgents 工厂真源。运行时 backend 必须通过 `CompositeBackend` 把 `/skills/`、`/scratch/`、`/workspace/` 分隔到独立 `FilesystemBackend(virtual_mode=True)`；`/skills/` 只镜像 rewrite 受控 skill 目录，不能裸挂项目根、`.env`、`backend/logs` 或任意本机绝对路径。
 - `backend/agents/task_context_assistant/logging.py` 是 agent run JSONL 审计真源：每个 run 写 `backend/logs/agent-run-<run_id>.jsonl`，只记录白名单结构化字段（`run_id`、`conversation_id`、`selected_skills`、阶段摘要、`guard_result`、`tool_name`、`task_id` 等），并统一 scrub 掉凭证、认证头、`.env`、私有绝对路径、完整原文和 traceback。
 - task-context assistant 读取上下文时不能直接读 `backend/logs` 或任务结果原始 payload；必须通过 `read_current_conversation_summary_tool` / `read_current_task_public_summary_tool` 这种受控工具，只返回当前会话的最近 agent run 摘要、rewrite 可用性和任务公共进度概览，不暴露输出路径、完整结果或隐藏推理。
-- `POST /api/edit` 仍是显式 edit 入口；右侧聊天与任务判路统一走 `POST /api/agent/runs/stream`，不再保留 `/api/user/stream`。
+- `/api/edit`、edit skill、edit task kind 和 `create_edit_task_tool` 已删除；右侧聊天与任务判路统一走 `POST /api/agent/runs/stream`，不再保留 `/api/user/stream` 或 edit 兼容入口。
 - `POST /api/comment-supplement` 是独立补充批注入口；请求只携带会话、当前下载卡文件路径和模型。`DocumentService.create_comment_supplement_task()` 必须校验 latest `rewrite_state`、`polished_text`、当前文件存在且等于 latest `prepared_doc_path` 后才创建任务。
-- `generation_mode`、`generation_style`、`comment_generation_mode` 与 `style_writeback_mode` 都是 generate-only 字段：`DocumentService._build_initial_state()` 可写入 generate state，edit / rewrite 请求模型和初始 state 不得注入这些字段。
+- `generation_mode`、`generation_style`、`comment_generation_mode` 与 `style_writeback_mode` 都是 generate-only 字段：`DocumentService._build_initial_state()` 可写入 generate state，rewrite 请求模型和初始 state 不得注入这些字段。
 - `generation_mode` 当前只允许 `workflow` 与 `agent`，默认 `workflow`。`workflow` 继续走 `generate_polished_text`，保留 `render_generate_prompt()`、`stream_llm_completion()` 和旧 `llm` snapshot 事件；`agent` 只影响初次 generate 的生成节点选择，最终仍必须产出 `polished_text` 给批注开关开启时的批注分支、样式回写、Word 写回和下载主干。
 - `comment_generation_mode` 当前只允许 `on` 与 `off`，默认 `on`。`on` 时 workflow generate 继续经过 `generate_comments`，agent generate 继续在 `update_word` 后经过公共 `comment_agent`；`off` 时两种生成方式都跳过批注生成逻辑，并在 `comments_branch_done` 设置 `suppress_ai_comment_writeback=True`、清空临时批注计数。
 - generate 成功后的后端 `rewrite_state` 可以保留 `generation_mode`、`polished_text`、`prepared_doc_path` 和后续链路所需的稳定运行态字段；初次生成时的临时批注推导结果不应进入任务 result、SSE `done`、前端下载卡 metadata 或 `sessionStorage`。
 - 标准生成 graph 的分流只在 `StandardTenderWorkflowGraph` 基类实现：`generation_mode_gate` 后按 `_select_generation_node()` 进入 `generate_polished_text` 或 `content_agent`；正文生成后再按 `comment_generation_mode` 选择 workflow 的 `generate_comments` 或跳过，`update_word` 后再按 `generation_mode=agent && comment_generation_mode=on` 选择是否进入公共 `comment_agent`。类型 graph 不应复制这段分流。
 - `generation_mode=agent` 的 `update_word` 只负责正文、样式和保存：`comments_branch_done` 会在 agent 分支或 `comment_generation_mode=off` 时设置 `suppress_ai_comment_writeback=True`，各类型 update 节点必须跳过确定性 AI 批注写回；`comment_generation_mode=on` 时，agent generate 的 `update_word` 完成后由标准 graph 路由到公共 `comment_agent` 节点，workflow 分支不得进入该节点。agent generate 无 `polished_comments` 时，`comment_agent` 可复用 `backend/prompts/comment_prompt.py` 自主生成批注候选。
 - 公共 `comment_agent` graph 节点位于 `backend/nodes/common_word_nodes/comment_agent.py`，只作为批注增强项运行：它重新按锚点解析 Word 正文范围，调用 `backend/agents/comments/run_comment_agent()`，并把结果收敛成 `comment_writeback` 摘要；节点异常、保存失败或上下文缺失只能降级为 warning，不能让已保存正文的 generate 任务失败。
-- 独立 `comment_supplement` 任务通过 `CommentSupplementGraph` 执行，节点顺序为 `prepare_comment_supplement -> comment_agent -> finalize_comment_supplement`。准备节点复制 latest 文档为新副本；`comment_agent` 在补充批注任务里直接基于 latest `rewrite_state.polished_text` 复用 `comment_prompt.py` 生成批注候选，再做锚点校验和 Word 写回；完成后会话最新 `rewrite_state.prepared_doc_path` 指向补充批注后的副本，后续 rewrite / edit 应继续使用该路径。
+- 独立 `comment_supplement` 任务通过 `CommentSupplementGraph` 执行，节点顺序为 `prepare_comment_supplement -> comment_agent -> finalize_comment_supplement`。准备节点复制 latest 文档为新副本；`comment_agent` 在补充批注任务里直接基于 latest `rewrite_state.polished_text` 复用 `comment_prompt.py` 生成批注候选，再做锚点校验和 Word 写回；完成后会话最新 `rewrite_state.prepared_doc_path` 指向补充批注后的副本，后续 rewrite 应继续使用该路径。
 
 ### DeepAgents 初次生成
 
@@ -70,9 +70,9 @@
 ### Skill 声明
 
 - skill guide 解析的真源是 `backend/skills/catalog.py`：这里只允许 `name/description` frontmatter，读取出的正文同时供 DeepAgents 和后台 task prompt 复用。
-- rewrite / edit task workflow 的真源是 `backend/graphs/task_skill_workflows.py` 与 `backend/graphs/task_skill_types.py`；不要再从 `SKILL.md` 推导 workflow，也不要恢复旧 workflow 入口文件。
-- 修改 skill guide、task workflow、dispatch 路由或 audit log 时，必须同时检查 `backend/skills/`、`backend/graphs/task_skill_workflows.py`、`backend/graphs/skill_graph.py`、`backend/services/document_service.py` 和对应 tests。
-- edit / rewrite 的 LLM 输出会作为当前文档内容或当前锚点区正文的完整替换载荷；skill instruction 必须明确“输出范围守恒”。分包名、章节名、锚点、`从……起` 等用户表述默认只定位修改范围，不能让模型把局部定位误解为只输出该局部，否则写回会丢失未修改分包或章节。
+- rewrite task workflow 的真源是 `backend/graphs/task_skill_workflows.py` 与 `backend/graphs/task_skill_types.py`；不要再从 `SKILL.md` 推导 workflow，也不要恢复旧 workflow 入口文件。
+- 修改 skill guide、task workflow、dispatch 路由或 audit log 时，必须同时检查 `backend/skills/rewrite/`、`backend/graphs/task_skill_workflows.py`、`backend/graphs/skill_graph.py`、`backend/services/document_service.py` 和对应 tests。
+- rewrite 的 LLM 输出会作为当前文档内容或当前锚点区正文的完整替换载荷；skill instruction 必须明确“输出范围守恒”。分包名、章节名、锚点、`从……起` 等用户表述默认只定位修改范围，不能让模型把局部定位误解为只输出该局部，否则写回会丢失未修改分包或章节。
 - `backend/skills/rewrite/SKILL.md` 同时承载两层指令：任务上下文助手阶段只做前置条件检查和 `create_rewrite_task_tool` 任务创建；后台 `rewrite_text` 节点只抽取“后台 rewrite 任务正文改写指令”段作为 LLM runtime prompt，恢复“先复制全文，再局部修改”的完整输出契约，并显式要求受保护字段行的字段名、冒号和相对顺序不得丢失。
 - `backend/nodes/skills_nodes/rewrite_nodes.py` 的 rewrite 正文生成不再复用 `generate_polished_text`；当前闭环为 `rewrite_generate_agent` 生成完整正文、`rewrite_verify_agent` 审核 JSON、必要时 `rewrite_revise_agent` 最小修订，再由 `rewrite_agent` 发送最终摘要。受保护字段 profile 由 `tender_config.py` 决定，direct-replace 类型跳过；protected-fields 类型会做确定性字段缺失/顺序审核，最终仍缺字段必须在写回前失败。
 
@@ -103,7 +103,7 @@
 
 - Word COM 任务统一经过 `backend/task/task_queue_manager.py` 排队，不能绕开。
 - Graph 节点必须复用 `backend/graphs/base_graph.py` 的锁、取消检查、进度包装和异常汇总。
-- edit 当前会复制工作副本，再把 `source_document_path` 和 `prepared_doc_path` 指向副本；源文件不直接改写。
+- 上传文件 rewrite 当前会复制工作副本，再把 `source_document_path` 和 `prepared_doc_path` 指向副本；源文件不直接改写，输出文件保留原扩展名并使用“重写后”语义后缀。
 
 ### Helper 分层
 
@@ -176,7 +176,7 @@
 - 招标详情 API：`backend/tests/api/test_tender_api.py`、`backend/tests/util/test_fetch_tender_data.py`
 - 生成任务 API：`backend/tests/api/test_generate_api.py`
 - 任务上下文助手与 task skill：`backend/tests/services/test_agent_run_service.py`、`backend/tests/skills/test_task_skill_runtime.py`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`
-- skill 与 edit/rewrite：`backend/tests/nodes/test_tender_aware_word_dispatch.py`、`backend/tests/nodes/test_rewrite_nodes.py`、`backend/tests/nodes/test_edit_audit_logging.py`、`backend/tests/progress/test_edit_progress_tracking.py`
+- skill 与 rewrite：`backend/tests/nodes/test_tender_aware_word_dispatch.py`、`backend/tests/nodes/test_rewrite_nodes.py`、`backend/tests/nodes/test_rewrite_audit_logging.py`、`backend/tests/nodes/test_uploaded_rewrite_inline_style_context.py`、`backend/tests/progress/test_uploaded_rewrite_progress_tracking.py`
 - Word helper：`backend/tests/helper/test_content_ops.py`、`backend/tests/helper/test_paragraph_boundary_ops.py`、`backend/tests/helper/test_inline_style_ops.py`
 - 锁感知删除 helper：`backend/tests/helper/test_delete_ops.py`、`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`
 - 批注写回：`backend/tests/nodes/test_comment_writeback.py`
@@ -197,7 +197,7 @@
 
 ## 回归风险
 
-- 改 skill workflow、dispatch 或 task result 时，容易出现 generate/rewrite/edit 某一条链路漏同步。
+- 改 skill workflow、dispatch 或 task result 时，容易出现 generate/rewrite/comment_supplement 某一条链路漏同步。
 - 改招标详情模型或外部接口解析时，容易把上游字段类型波动误报为编号不存在或数据格式错误；需要覆盖数字预算、缺失可选字段和类型路由三类回归。
 - 改 `generation_mode`、content_agent 或标准 graph 分流时，必须证明默认 `workflow` 不触发 `content_agent`，同时证明 `agent` 分支的 `polished_text` 会继续进入各类型既有 delete / replacement / update / post-update 主干。
 - 改智能体输出协议时，必须同步检查 `backend/agents/generation/json_utils.py`、`backend/agents/generation/types.py`、`content_agent_generate`、`AgentStepEventData` 与前端 `agent-step` 消息格式；审核阶段可以用合法 fallback finding 兜底格式异常，但不要把纯文本最终输出当作成功兜底。

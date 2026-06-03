@@ -98,8 +98,7 @@ export interface ConversationFormDraft {
     2?: GenerationStyle;
   };
   style_writeback_mode?: StyleWritebackMode;
-  input_mode?: 'normal' | 'edit';
-  edit_file?: ConversationDraftFile | null;
+  rewrite_file?: ConversationDraftFile | null;
   insertion_config?: {
     before_text: string;
     after_text: string;
@@ -143,8 +142,6 @@ export interface ConversationFormDraft {
   selected_skills?: AgentSkill[];
   pending_rewrite_prompt?: string;
   pending_rewrite_task_id?: string;
-  pending_edit_prompt?: string;
-  pending_edit_task_id?: string;
   files?: {
     template?: ConversationDraftFile;
     tender_params: ConversationDraftFile[];
@@ -206,7 +203,7 @@ function normalizeDraftFile(file: ConversationDraftFile | undefined): Conversati
 }
 
 function isAgentSkill(value: unknown): value is AgentSkill {
-  return value === 'rewrite' || value === 'edit';
+  return value === 'rewrite';
 }
 
 function normalizeDraftSelectedSkills(skills: AgentSkill[] | undefined): AgentSkill[] | undefined {
@@ -227,8 +224,8 @@ function mergeConversationDraft(
     ...updates,
   };
 
-  if (Object.prototype.hasOwnProperty.call(updates, 'edit_file')) {
-    nextDraft.edit_file = normalizeDraftFile(updates.edit_file || undefined) || undefined;
+  if (Object.prototype.hasOwnProperty.call(updates, 'rewrite_file')) {
+    nextDraft.rewrite_file = normalizeDraftFile(updates.rewrite_file || undefined) || undefined;
   }
 
   if (Object.prototype.hasOwnProperty.call(updates, 'selected_skills')) {
@@ -2120,11 +2117,9 @@ export const useChatStore = create<ChatStore>()(
                   chat_input:
                     typeof draft.chat_input === 'string' && draft.chat_input.length > 0
                       ? draft.chat_input
-                      : draft.pending_rewrite_prompt || draft.pending_edit_prompt,
+                      : draft.pending_rewrite_prompt,
                   pending_rewrite_prompt: undefined,
                   pending_rewrite_task_id: undefined,
-                  pending_edit_prompt: undefined,
-                  pending_edit_task_id: undefined,
                 }),
               ])
             ),

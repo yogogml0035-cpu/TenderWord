@@ -480,8 +480,7 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
       : '';
   const currentTaskKind = currentTaskSummary?.task_kind || 'generate';
   const isRewriteTask = currentTaskKind === 'rewrite';
-  const isEditTask = currentTaskKind === 'edit';
-  const taskActionLabel = isEditTask ? '文件修改' : isRewriteTask ? '修改' : '生成';
+  const taskActionLabel = isRewriteTask ? '修改' : '生成';
   const runningStepSummary = isCurrentTaskStarting
     ? `系统正在建立${taskActionLabel}任务与进度流`
     : runningTaskProgress
@@ -493,23 +492,17 @@ export function FormPanel({ className = '', initialTenderData }: FormPanelProps)
     runningCurrentNodeDisplay ||
     (isCurrentTaskStarting
       ? '当前没有前置任务，系统正在获取执行权并初始化 Word 与进度流。'
-      : isEditTask
-        ? '系统正在提取当前锚点区正文、生成修改结果并写回文档，请稍候，不建议关闭当前页面。'
-        : isRewriteTask
+      : isRewriteTask
         ? '系统正在选择目标版本、重写内容并写回文档，请稍候，不建议关闭当前页面。'
         : '系统正在整理章节、参数与格式，请稍候，不建议关闭当前页面。');
   const runningStatusTitle = isCurrentTaskStarting
     ? `正在启动${taskActionLabel}流程...`
-    : isEditTask
-      ? '正在修改上传文档...'
-      : isRewriteTask
+    : isRewriteTask
       ? '正在修改文档...'
       : '正在生成招标文档...';
   const runningStatusLabel = isCurrentTaskStarting
     ? '准备执行中'
-    : isEditTask
-      ? '文件修改中'
-      : isRewriteTask
+    : isRewriteTask
       ? '修改处理中'
       : '文档生成中';
   const runningProgressLabel = runningTaskProgress

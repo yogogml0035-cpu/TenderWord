@@ -9,7 +9,7 @@
 // ============================================
 
 export type TaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-export type TaskKind = 'generate' | 'rewrite' | 'edit' | 'comment_supplement';
+export type TaskKind = 'generate' | 'rewrite' | 'comment_supplement';
 
 // ============================================
 // Tender Data Types
@@ -117,7 +117,7 @@ export interface UploadedFile {
   upload_time?: string;
 }
 
-export type FileType = 'template' | 'edit_source' | 'params' | 'qualification';
+export type FileType = 'template' | 'rewrite_source' | 'params' | 'qualification';
 
 // ============================================
 // Generate Task Types
@@ -155,18 +155,6 @@ export interface GenerateRequest {
   style_writeback_mode: StyleWritebackMode;
   conversation_id?: string;
   model: 'deepseek' | 'qwen' | 'doubao';
-}
-
-export interface EditTaskRequest {
-  conversation_id: string;
-  form_type: GenerateRequest['form_type'];
-  model: 'deepseek' | 'qwen' | 'doubao';
-  edit_prompt: string;
-  file_path?: string;
-  insertion_config?: InsertionConfig;
-  tender_lx: 0 | 1 | 2;
-  fund_source_lx: 0 | 1;
-  tender_data_snapshot?: TenderData;
 }
 
 export interface CommentSupplementTaskRequest {
@@ -350,7 +338,7 @@ export interface CreateTaskData {
 
 export type CreateTaskResponse = ApiResponse<CreateTaskData>;
 
-export type AgentSkill = 'rewrite' | 'edit';
+export type AgentSkill = 'rewrite';
 export type AgentRunRuntime = 'fake';
 export type AgentThinkingStageKey = 'understand' | 'guard' | 'tool' | 'summary';
 export type AgentThinkingStageStatus = 'in_progress' | 'completed';
@@ -361,18 +349,18 @@ export interface AgentRunUploadedFile {
   file_name?: string | null;
 }
 
-export interface AgentRunEditContextSnapshot {
-  form_type?: EditTaskRequest['form_type'];
+export interface AgentRunRewriteContextSnapshot {
+  form_type?: GenerateRequest['form_type'];
   insertion_config?: InsertionConfig;
-  tender_lx?: EditTaskRequest['tender_lx'];
-  fund_source_lx?: EditTaskRequest['fund_source_lx'];
+  tender_lx?: 0 | 1 | 2;
+  fund_source_lx?: 0 | 1;
   tender_data_snapshot?: TenderData;
 }
 
 export interface AgentRunContextSnapshot {
   rewrite_available: boolean;
   uploaded_files: AgentRunUploadedFile[];
-  edit_context?: AgentRunEditContextSnapshot;
+  rewrite_context?: AgentRunRewriteContextSnapshot;
 }
 
 export interface AgentRunStreamRequest {
@@ -701,7 +689,6 @@ export const ErrorCodes = {
 
   // Rewrite / User Stream
   REWRITE_TARGET_NOT_RESOLVED: 'REWRITE_TARGET_NOT_RESOLVED',
-  EDIT_TARGET_NOT_RESOLVED: 'EDIT_TARGET_NOT_RESOLVED',
   CONVERSATION_INSTANCE_RESET: 'CONVERSATION_INSTANCE_RESET',
 } as const;
 
@@ -715,11 +702,11 @@ export const NodeDisplayNames: Record<string, string> = {
   prepare_template: '复制原始模板文件',
   extract_tender_params: '提取原始采购需求',
   delete_tender_param: '删除原始采购需求',
-  resolve_edit_target: '准备编辑副本',
-  extract_edit_context: '提取修改上下文',
+  resolve_rewrite_target: '准备重写副本',
+  extract_rewrite_context: '提取重写上下文',
   get_replacements: '获取原始项目信息',
   replace_content: '替换最新项目信息',
   generate_polished_text: 'AI生成采购需求',
-  edit_text: 'AI生成修改正文',
+  rewrite_text: 'AI生成重写正文',
   update_word: '生成招标文件',
 };

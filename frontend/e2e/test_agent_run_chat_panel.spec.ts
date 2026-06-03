@@ -5,7 +5,7 @@ const stableInstanceId = 'agent-run-chat-panel-instance';
 const us005ScreenshotPath = '../tasks/agent-run-skill-chat-refactor/screenshots/us-005-capability-chip.png';
 const us006ScreenshotPath = '../tasks/agent-run-skill-chat-refactor/screenshots/us-006-thinking-card.png';
 const us011NeedsFileScreenshotPath =
-  '../tasks/agent-run-skill-chat-refactor/screenshots/us-011-edit-needs-file.png';
+  '../tasks/agent-run-skill-chat-refactor/screenshots/us-011-rewrite-only.png';
 const us011UploadEntryScreenshotPath =
   '../tasks/agent-run-skill-chat-refactor/screenshots/us-011-upload-entry.png';
 
@@ -499,7 +499,7 @@ test.describe('Agent run chat panel', () => {
               stage: 'guard',
               label: '检查上下文',
               status: 'completed',
-              summary: 'fake runtime 暂时只支持 rewrite 或 edit 任务创建。',
+              summary: 'fake runtime 暂时只支持 rewrite 任务创建。',
               guard_result: 'needs_input',
             },
           },
@@ -507,7 +507,7 @@ test.describe('Agent run chat panel', () => {
             event: 'needs_input',
             data: {
               run_id: 'run-needs-input',
-              message: '请说明这次要执行 rewrite 还是 edit。',
+              message: '请说明这次要执行 rewrite。',
               missing_requirements: ['selected_skill'],
             },
           },
@@ -521,7 +521,7 @@ test.describe('Agent run chat panel', () => {
     await page.getByPlaceholder('输入文字并发送即可对话...').fill('你好');
     await page.getByTestId('chat-send-button').click();
 
-    await expect(page.getByText('请说明这次要执行 rewrite 还是 edit。', { exact: true }).last()).toBeVisible();
+    await expect(page.getByText('请说明这次要执行 rewrite。', { exact: true }).last()).toBeVisible();
 
     expect(agentRunPayload).toMatchObject({
       conversation_id: conversationId,
@@ -537,12 +537,11 @@ test.describe('Agent run chat panel', () => {
     expect(consoleErrors).toEqual([]);
   });
 
-  test('shows a follow-up when /edit is selected without an uploaded Word file', async ({
+  test('only exposes rewrite in the skill picker', async ({
     page,
   }) => {
     const consoleErrors: string[] = [];
     const taskRequests: string[] = [];
-    let agentRunPayload: Record<string, unknown> | null = null;
 
     page.on('console', (message) => {
       if (message.type() === 'error') {
@@ -571,38 +570,14 @@ test.describe('Agent run chat panel', () => {
       });
     });
 
-    await page.route('**/api/agent/runs/stream', async (route) => {
-      agentRunPayload = (await route.request().postDataJSON()) as Record<string, unknown>;
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/x-ndjson',
-        body: toNdjsonLines([
-          {
-            event: 'needs_input',
-            data: {
-              run_id: 'run-edit-needs-file',
-              message: '请先上传要修改的 Word 文件。',
-              selected_skill: 'edit',
-              missing_requirements: ['uploaded_word_file'],
-            },
-          },
-        ]),
-      });
-    });
-
     await page.goto('/tender');
     await expect(page.getByRole('heading', { name: 'US003-001' })).toBeVisible();
 
     const textarea = page.getByPlaceholder('输入文字并发送即可对话...');
     await textarea.fill('/');
     await expect(page.getByTestId('chat-skill-picker')).toBeVisible();
-    await page.getByTestId('chat-skill-option-edit').click();
-    await expect(page.getByTestId('chat-selected-skill-edit')).toBeVisible();
-
-    await textarea.fill('请补充质保条款');
-    await page.getByTestId('chat-send-button').click();
-
-    await expect(page.getByText('请先上传要修改的 Word 文件。')).toBeVisible();
+    await expect(page.getByTestId('chat-skill-option-rewrite')).toBeVisible();
+    await expect(page.getByTestId('chat-skill-option-edit')).toHaveCount(0);
 
     await expect
       .poll(() => taskRequests.length, {
@@ -612,20 +587,10 @@ test.describe('Agent run chat panel', () => {
 
     await page.screenshot({ path: us011NeedsFileScreenshotPath });
 
-    expect(agentRunPayload).toMatchObject({
-      conversation_id: conversationId,
-      message: '请补充质保条款',
-      model: 'deepseek',
-      selected_skills: ['edit'],
-      context_snapshot: {
-        rewrite_available: false,
-        uploaded_files: [],
-      },
-    });
     expect(consoleErrors).toEqual([]);
   });
 
-  test('uploads a file through the existing entry and then creates an edit task via agent run', async ({
+  test('uploads a file through the rewrite entry and then creates a rewrite task via agent run', async ({
     page,
   }) => {
     const consoleErrors: string[] = [];
@@ -648,8 +613,8 @@ test.describe('Agent run chat panel', () => {
           after_text: '第四章 响应文件有关格式',
         },
         tender_data: {
-          project_name: 'US011-EDIT',
-          project_number: 'US011-EDIT-001',
+          project_name: 'US011-REWRITE',
+          project_number: 'US011-REWRITE-001',
           project_content: '原始内容',
           bzj_rule: '',
           buyer_name: '示例单位',
@@ -675,9 +640,9 @@ test.describe('Agent run chat panel', () => {
         body: JSON.stringify({
           success: true,
           data: {
-            file_path: 'D:/UploadFiles/edit-source.docx',
-            file_name: 'edit-source.docx',
-            original_name: 'edit-source.docx',
+            file_path: 'D:/UploadFiles/rewrite-source.docx',
+            file_name: 'rewrite-source.docx',
+            original_name: 'rewrite-source.docx',
             size: 256,
             upload_time: '2026-06-02T16:20:00.000Z',
           },
@@ -711,41 +676,41 @@ test.describe('Agent run chat panel', () => {
           {
             event: 'run_started',
             data: {
-              run_id: 'run-edit-upload-entry',
+              run_id: 'run-rewrite-upload-entry',
               conversation_id: conversationId,
               model: 'deepseek',
               runtime: 'fake',
-              selected_skills: ['edit'],
+              selected_skills: ['rewrite'],
             },
           },
           {
             event: 'thinking_stage',
             data: {
-              run_id: 'run-edit-upload-entry',
+              run_id: 'run-rewrite-upload-entry',
               stage: 'guard',
               label: '检查上下文',
               status: 'completed',
-              summary: '检测到当前会话已有上传文件和完整 edit 上下文。',
-              selected_skill: 'edit',
+              summary: '检测到当前会话已有上传文件和完整 rewrite 上下文。',
+              selected_skill: 'rewrite',
               guard_result: 'passed',
             },
           },
           {
             event: 'tool_call',
             data: {
-              run_id: 'run-edit-upload-entry',
-              tool_name: 'create_edit_task_tool',
+              run_id: 'run-rewrite-upload-entry',
+              tool_name: 'create_rewrite_task_tool',
               status: 'completed',
-              summary: 'fake runtime 已调用 create_edit_task_tool。',
-              task_kind: 'edit',
+              summary: 'fake runtime 已调用 create_rewrite_task_tool。',
+              task_kind: 'rewrite',
             },
           },
           {
             event: 'task_accepted',
             data: {
-              run_id: 'run-edit-upload-entry',
-              task_id: 'fake-edit-task-e2e',
-              task_kind: 'edit',
+              run_id: 'run-rewrite-upload-entry',
+              task_id: 'fake-rewrite-task-e2e',
+              task_kind: 'rewrite',
               status: 'queued',
               queue_position: 0,
               waiting_count: 0,
@@ -754,10 +719,10 @@ test.describe('Agent run chat panel', () => {
           {
             event: 'done',
             data: {
-              run_id: 'run-edit-upload-entry',
-              message: '已为你创建 edit 任务。',
-              task_id: 'fake-edit-task-e2e',
-              selected_skill: 'edit',
+              run_id: 'run-rewrite-upload-entry',
+              message: '已为你创建 rewrite 任务。',
+              task_id: 'fake-rewrite-task-e2e',
+              selected_skill: 'rewrite',
             },
           },
         ]),
@@ -768,27 +733,26 @@ test.describe('Agent run chat panel', () => {
     await expect(page.getByRole('heading', { name: 'US003-001' })).toBeVisible();
 
     await page.getByTestId('chat-plus-trigger').click();
-    await expect(page.getByTestId('chat-plus-menu-edit')).toBeVisible();
-    await page.getByTestId('chat-plus-menu-edit').click();
-    await page.getByTestId('chat-edit-file-input').setInputFiles({
-      name: 'edit-source.docx',
+    await expect(page.getByTestId('chat-plus-menu-rewrite-file')).toBeVisible();
+    await page.getByTestId('chat-plus-menu-rewrite-file').click();
+    await page.getByTestId('chat-rewrite-file-input').setInputFiles({
+      name: 'rewrite-source.docx',
       mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       buffer: Buffer.from('fake docx payload'),
     });
 
-    await expect(page.getByTestId('chat-edit-file-card')).toBeVisible();
-    await expect(page.getByTestId('chat-edit-file-card')).toContainText('edit-source.docx');
+    await expect(page.getByTestId('chat-rewrite-file-card')).toBeVisible();
+    await expect(page.getByTestId('chat-rewrite-file-card')).toContainText('rewrite-source.docx');
 
-    const textarea = page.getByPlaceholder('输入修改要求，系统将只修改当前锚点区正文...');
-    await textarea.fill('/edit 请把交付日期改成合同签订后 30 天内');
-    await expect(page.getByTestId('chat-selected-skill-edit')).toBeVisible();
+    const textarea = page.getByPlaceholder('输入重写要求，系统将重写当前锚点区正文...');
+    await textarea.fill('/rewrite 请把交付日期改成合同签订后 30 天内');
+    await expect(page.getByTestId('chat-selected-skill-rewrite')).toBeVisible();
     await expect(textarea).toHaveValue('请把交付日期改成合同签订后 30 天内');
 
     await page.getByTestId('chat-send-button').click();
 
-    await expect(page.getByTestId('user-message-capability-chip-edit')).toBeVisible();
+    await expect(page.getByTestId('user-message-capability-chip-rewrite')).toBeVisible();
     await expect(page.getByText('进度日志')).toBeVisible();
-    await expect(page.getByText('AI 修改内容')).toBeVisible();
 
     await expect
       .poll(() => taskRequests.length, {
@@ -802,16 +766,16 @@ test.describe('Agent run chat panel', () => {
       conversation_id: conversationId,
       message: '请把交付日期改成合同签订后 30 天内',
       model: 'deepseek',
-      selected_skills: ['edit'],
+      selected_skills: ['rewrite'],
       context_snapshot: {
         rewrite_available: false,
         uploaded_files: [
           {
-            file_path: 'D:/UploadFiles/edit-source.docx',
-            file_name: 'edit-source.docx',
+            file_path: 'D:/UploadFiles/rewrite-source.docx',
+            file_name: 'rewrite-source.docx',
           },
         ],
-        edit_context: {
+        rewrite_context: {
           form_type: 'xjcg_tender',
           insertion_config: {
             before_text: '第三章 采购需求',
@@ -820,7 +784,7 @@ test.describe('Agent run chat panel', () => {
           tender_lx: 0,
           fund_source_lx: 0,
           tender_data_snapshot: {
-            project_name: 'US011-EDIT',
+            project_name: 'US011-REWRITE',
           },
         },
       },

@@ -46,11 +46,11 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 
 `backend/` 是 FastAPI + LangGraph + Word COM 后端。它负责：
 
-- `/api` 前缀下的生成、编辑、补充批注、任务、SSE、任务上下文助手 agent run、会话心跳、上传下载和模板候选接口。
+- `/api` 前缀下的生成、重写、补充批注、任务、SSE、任务上下文助手 agent run、会话心跳、上传下载和模板候选接口。
 - `DocumentService` 任务创建、graph 选择、初始 state 构造、任务提交和结果 payload。
 - `TaskQueueManager` 串行化文档任务、跟踪进度、取消、心跳和清理。
 - `SSEManager` 事件缓冲、客户端管理和重连重放。
-- 标准 tender graph、rewrite/edit task skill graph、任务上下文助手 `task_context_assistant` 和 `generation_mode=agent` 的 content agent 分支。
+- 标准 tender graph、rewrite task skill graph、任务上下文助手 `task_context_assistant` 和 `generation_mode=agent` 的 content agent 分支。
 - agent generate 与补充批注共用的 `comment_agent` 批注生成、锚点校验、写回统计和过程事件。
 - Word COM 生命周期、共享 Word helper、类型特化节点和 Prompt Layer。
 - 外部 LLM provider、招标详情接口和模板候选接口的后端代理。
@@ -163,9 +163,9 @@ backend/prompts/ 与 backend/skills/
 - `backend/agents/generation/`
 - `backend/services/document_service.py`
 
-### 任务上下文助手 / Rewrite / Edit
+### 任务上下文助手 / Rewrite
 
-`POST /api/agent/runs/stream` 是右侧聊天唯一流式入口。它返回 NDJSON agent run 事件，由任务上下文助手结合 `selected_skills`、受控 `context_snapshot` 和确定性 guard，决定是返回 `needs_input` 追问，还是通过受控 tool 创建 rewrite / edit task。`task_accepted` 后，agent run 即结束；后续排队、Word COM 执行、SSE、取消和下载继续沿用现有任务主链路。
+`POST /api/agent/runs/stream` 是右侧聊天唯一流式入口。它返回 NDJSON agent run 事件，由任务上下文助手结合 `selected_skills`、受控 `context_snapshot` 和确定性 guard，决定是返回 `needs_input` 追问，还是通过受控 tool 创建 rewrite task。上传 Word 文件后的修改也统一归入 rewrite：必须有用户重写指令、当前页面 `form_type`、完整锚点、标的类型、资金性质和招标数据快照；缺条件时只返回 `needs_input`。`task_accepted` 后，agent run 即结束；后续排队、Word COM 执行、SSE、取消和下载继续沿用现有任务主链路。
 
 关键入口：
 - `frontend/components/chat/ChatPanel.tsx`
@@ -174,16 +174,7 @@ backend/prompts/ 与 backend/skills/
 - `backend/services/agent_run_service.py`
 - `backend/agents/task_context_assistant/`
 - `backend/services/document_service.py`
-
-### Edit
-
-`POST /api/edit` 仍是保留的显式 edit task 入口，复用同一任务队列、SSE、下载和会话结果机制。当前右侧聊天和上传文件修改入口不再直连它，而是先经过 `POST /api/agent/runs/stream` 做 guard 与任务创建；直接 edit API 仅保留给非聊天直调方。
-
-关键入口：
-- `frontend/components/chat/ChatPanel.tsx`
-- `backend/api/edit.py`
-- `backend/services/document_service.py`
-- `backend/skills/edit/`
+- `backend/skills/rewrite/`
 
 ### 补充批注
 

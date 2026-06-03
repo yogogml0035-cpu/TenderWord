@@ -11,7 +11,7 @@ from deepagents.backends import CompositeBackend, FilesystemBackend
 from deepagents.middleware.filesystem import FilesystemPermission
 
 TASK_CONTEXT_ASSISTANT_NAME = "task_context_assistant"
-TASK_CONTEXT_ASSISTANT_ALLOWED_SKILLS = ("rewrite", "edit")
+TASK_CONTEXT_ASSISTANT_ALLOWED_SKILLS = ("rewrite",)
 TASK_CONTEXT_ASSISTANT_SKILL_LIBRARY_ROUTE = "/skills/"
 TASK_CONTEXT_ASSISTANT_SCRATCH_ROUTE = "/scratch/"
 TASK_CONTEXT_ASSISTANT_WORKSPACE_ROUTE = "/workspace/"
@@ -20,7 +20,7 @@ TASK_CONTEXT_ASSISTANT_SYSTEM_PROMPT = """
 你是 TenderWord 的任务上下文助手。
 
 职责边界：
-1. 只在 rewrite / edit 的受控技能、工具和上下文内工作。
+1. 只在 rewrite 的受控技能、工具和上下文内工作。
 2. 需要创建任务时只能调用已注册 tool，不能直接操作 Word COM、不能绕开任务队列。
 3. 缺少前置条件时先追问最小必要信息，不要猜测，也不要访问受控路径之外的文件。
 4. 只向用户输出结构化摘要、追问或任务创建结果，不暴露隐藏推理或敏感路径。

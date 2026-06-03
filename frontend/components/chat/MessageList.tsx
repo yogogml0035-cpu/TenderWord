@@ -106,15 +106,14 @@ async function copyPlainText(text: string) {
   document.body.removeChild(textarea);
 }
 
-type UserCapability = Extract<ChatMessageKind, 'rewrite' | 'edit'>;
+type UserCapability = Extract<ChatMessageKind, 'rewrite'>;
 
 const USER_CAPABILITY_PREFIX_PATTERNS: Record<UserCapability, RegExp> = {
   rewrite: /^\s*(?:\[\s*\$?rewrite\s*\]|[$/]rewrite)(?=\s|$)\s*/i,
-  edit: /^\s*(?:\[\s*\$?edit\s*\]|[$/]edit)(?=\s|$)\s*/i,
 };
 
 function getUserCapability(chatKind: ChatMessageKind | undefined): UserCapability | null {
-  if (chatKind === 'rewrite' || chatKind === 'edit') {
+  if (chatKind === 'rewrite') {
     return chatKind;
   }
   return null;

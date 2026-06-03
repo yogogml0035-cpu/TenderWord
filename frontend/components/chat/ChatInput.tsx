@@ -18,17 +18,12 @@ const AGENT_SKILL_OPTIONS: Array<{
   {
     skill: 'rewrite',
     title: 'rewrite',
-    description: '基于当前生成文档继续修改内容',
-  },
-  {
-    skill: 'edit',
-    title: 'edit',
-    description: '修改上传 Word 文件的当前锚点区正文',
+    description: '基于当前生成文档或上传 Word 文件重写内容',
   },
 ];
 
 function isAgentSkill(value: unknown): value is AgentSkill {
-  return value === 'rewrite' || value === 'edit';
+  return value === 'rewrite';
 }
 
 function normalizeSelectedSkills(skills: AgentSkill[] | undefined): AgentSkill[] {
@@ -39,7 +34,7 @@ function normalizeSelectedSkills(skills: AgentSkill[] | undefined): AgentSkill[]
 }
 
 function parseExplicitSkillPrefix(rawValue: string): { skill: AgentSkill; nextValue: string } | null {
-  const match = rawValue.match(/^\s*([$\/])(rewrite|edit)(?=\s|$)\s*/i);
+  const match = rawValue.match(/^\s*([$\/])(rewrite)(?=\s|$)\s*/i);
   if (!match) {
     return null;
   }
@@ -74,10 +69,9 @@ interface ChatInputProps {
   disabled?: boolean;
   placeholder?: string;
   loading?: boolean;
-  inputMode?: 'normal' | 'edit';
-  editFile?: ConversationDraftFile | null;
-  onEditFileSelect?: (file: File) => void | Promise<void>;
-  onEditFileRemove?: () => void;
+  rewriteFile?: ConversationDraftFile | null;
+  onRewriteFileSelect?: (file: File) => void | Promise<void>;
+  onRewriteFileRemove?: () => void;
   selectedSkills?: AgentSkill[];
   onSelectedSkillsChange?: (skills: AgentSkill[]) => void;
   sendDisabled?: boolean;
@@ -108,10 +102,9 @@ export function ChatInput({
   disabled = false,
   placeholder = '输入文字并发送即可对话...',
   loading = false,
-  inputMode = 'normal',
-  editFile = null,
-  onEditFileSelect,
-  onEditFileRemove,
+  rewriteFile = null,
+  onRewriteFileSelect,
+  onRewriteFileRemove,
   selectedSkills,
   onSelectedSkillsChange,
   sendDisabled = false,
@@ -120,7 +113,7 @@ export function ChatInput({
   const internalTextareaRef = useRef<HTMLTextAreaElement>(null);
   const menuContainerRef = useRef<HTMLDivElement>(null);
   const skillPickerContainerRef = useRef<HTMLDivElement>(null);
-  const hiddenEditInputRef = useRef<HTMLInputElement>(null);
+  const hiddenRewriteInputRef = useRef<HTMLInputElement>(null);
   const isCancelAction = actionMode === 'cancel';
   const inputDisabled = disabled;
   const controlsLocked = disabled || loading;
@@ -130,7 +123,7 @@ export function ChatInput({
   const [localNotice, setLocalNotice] = useState<string | null>(null);
 
   const composerNotice = noticeMessage || localNotice;
-  const isEditMode = inputMode === 'edit';
+  const isRewriteFileMode = !!rewriteFile;
   const normalizedSelectedSkills = useMemo(
     () => normalizeSelectedSkills(selectedSkills),
     [selectedSkills]
@@ -271,15 +264,15 @@ export function ChatInput({
     internalTextareaRef.current?.focus();
   }, [onSelectedSkillsChange]);
 
-  const openEditPicker = useCallback(() => {
+  const openRewritePicker = useCallback(() => {
     if (controlsLocked) {
       return;
     }
     setMenuOpen(false);
-    hiddenEditInputRef.current?.click();
+    hiddenRewriteInputRef.current?.click();
   }, [controlsLocked]);
 
-  const handleEditFileChange = useCallback(
+  const handleRewriteFileChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       event.target.value = '';
@@ -291,9 +284,9 @@ export function ChatInput({
         return;
       }
       setLocalNotice(null);
-      await onEditFileSelect?.(file);
+      await onRewriteFileSelect?.(file);
     },
-    [onEditFileSelect]
+    [onRewriteFileSelect]
   );
 
   const isEmpty = !value.trim();
@@ -308,18 +301,18 @@ export function ChatInput({
       >
         <div className="flex flex-col gap-3">
           <input
-            ref={hiddenEditInputRef}
+            ref={hiddenRewriteInputRef}
             type="file"
             accept=".doc,.docx"
             className="hidden"
-            data-testid="chat-edit-file-input"
-            onChange={handleEditFileChange}
+            data-testid="chat-rewrite-file-input"
+            onChange={handleRewriteFileChange}
           />
 
-          {isEditMode && editFile ? (
+          {isRewriteFileMode && rewriteFile ? (
             <div
               className="flex items-start justify-between gap-3 rounded-2xl border border-blue-200/90 bg-blue-50/70 px-3.5 py-3"
-              data-testid="chat-edit-file-card"
+              data-testid="chat-rewrite-file-card"
             >
               <div className="flex min-w-0 items-start gap-3">
                 <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-blue-600 shadow-sm">
@@ -327,22 +320,22 @@ export function ChatInput({
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700">
-                    <span>上传文件修改</span>
+                    <span>上传文件重写</span>
                   </div>
                   <p className="mt-1 truncate text-sm font-semibold text-slate-900">
-                    {editFile.original_name}
+                    {rewriteFile.original_name}
                   </p>
                   <p className="mt-1 text-xs text-slate-600">
-                    {formatFileSize(editFile.size)}
+                    {formatFileSize(rewriteFile.size)}
                   </p>
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={openEditPicker}
+                  onClick={openRewritePicker}
                   disabled={controlsLocked}
-                  data-testid="chat-edit-file-replace"
+                  data-testid="chat-rewrite-file-replace"
                   className={cn(
                     'rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition-colors',
                     controlsLocked ? 'cursor-not-allowed opacity-60' : 'hover:bg-blue-100/60'
@@ -352,9 +345,9 @@ export function ChatInput({
                 </button>
                 <button
                   type="button"
-                  onClick={onEditFileRemove}
+                  onClick={onRewriteFileRemove}
                   disabled={controlsLocked}
-                  data-testid="chat-edit-file-remove"
+                  data-testid="chat-rewrite-file-remove"
                   className={cn(
                     'flex h-8 w-8 items-center justify-center rounded-xl border border-blue-200 bg-white text-slate-500 transition-colors',
                     controlsLocked ? 'cursor-not-allowed opacity-60' : 'hover:bg-blue-100/60'
@@ -477,17 +470,17 @@ export function ChatInput({
                     <button
                       type="button"
                       role="menuitem"
-                      onClick={openEditPicker}
-                      data-testid="chat-plus-menu-edit"
+                      onClick={openRewritePicker}
+                      data-testid="chat-plus-menu-rewrite-file"
                       className="flex w-full items-start gap-3 rounded-2xl border border-transparent bg-slate-50/80 px-3.5 py-3 text-left transition-colors hover:border-blue-200 hover:bg-blue-50/70"
                     >
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-blue-600 shadow-sm">
                         <FileText className="h-5 w-5" />
                       </div>
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900">上传文件修改</p>
+                        <p className="text-sm font-semibold text-slate-900">上传文件重写</p>
                         <p className="mt-1 text-xs leading-5 text-slate-600">
-                          上传一个 Word 文档，并按输入要求只修改当前锚点区正文。
+                          上传一个 Word 文档，并按输入要求重写当前锚点区正文。
                         </p>
                       </div>
                     </button>

@@ -93,7 +93,7 @@ def test_agent_run_audit_logger_reads_recent_conversation_summaries(tmp_path) ->
     logger.append_event(
         event_name="run_started",
         conversation_id="conv-2",
-        selected_skills=["edit"],
+        selected_skills=["rewrite"],
         payload=type("RunStarted2", (), {"run_id": "run-2", "runtime": "fake"})(),
     )
 

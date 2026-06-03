@@ -7,7 +7,6 @@ import pytest
 from backend.agents.task_context_assistant import (
     AgentRunAuditLogger,
     TaskContextAssistantToolContext,
-    create_edit_task_tool,
     create_read_current_conversation_summary_tool,
     create_read_current_task_public_summary_tool,
     create_rewrite_task_tool,
@@ -58,28 +57,34 @@ async def test_create_rewrite_task_tool_reuses_document_service() -> None:
         "user_prompt": "改写第三包技术参数",
         "model_provider": "deepseek",
         "rewrite_log_path": "backend/logs/rewrite-task-42.jsonl",
+        "file_path": None,
+        "form_type": None,
+        "insertion_config": None,
+        "tender_lx": None,
+        "fund_source_lx": None,
+        "tender_data_snapshot": None,
     }
     assert result["task_id"] == "rewrite-task-42"
     assert result["task_kind"] == "rewrite"
 
 @pytest.mark.asyncio
-async def test_create_edit_task_tool_reuses_document_service() -> None:
+async def test_create_rewrite_task_tool_accepts_uploaded_file_context() -> None:
     captured: dict[str, object] = {}
 
     class FakeDocumentService:
-        async def create_edit_task(self, request) -> GenerateResponse:
-            captured.update(request.model_dump(mode="json"))
+        async def create_rewrite_task(self, **kwargs) -> GenerateResponse:
+            captured.update(kwargs)
             return GenerateResponse(
                 success=True,
-                task_id="edit-task-42",
+                task_id="rewrite-upload-task-42",
                 message="queued",
-                task_kind=TaskKind.EDIT,
+                task_kind=TaskKind.REWRITE,
                 status=TaskStatus.QUEUED,
                 queue_position=1,
                 waiting_count=0,
             )
 
-    tool = create_edit_task_tool(
+    tool = create_rewrite_task_tool(
         TaskContextAssistantToolContext(document_service=FakeDocumentService())
     )
 
@@ -88,8 +93,8 @@ async def test_create_edit_task_tool_reuses_document_service() -> None:
             "conversation_id": "conv-42",
             "form_type": "xjcg_tender",
             "model": "deepseek",
-            "edit_prompt": "把第三章采购需求补充完整",
-            "file_path": "D:/UploadFiles/edit.docx",
+            "user_prompt": "把第三章采购需求补充完整",
+            "file_path": "D:/UploadFiles/source.docx",
             "insertion_config": {
                 "before_text": "第三章 采购需求",
                 "after_text": "第四章 响应文件有关格式",
@@ -116,25 +121,28 @@ async def test_create_edit_task_tool_reuses_document_service() -> None:
         }
     )
 
-    assert tool.name == "create_edit_task_tool"
+    assert tool.name == "create_rewrite_task_tool"
     assert captured["conversation_id"] == "conv-42"
-    assert captured["form_type"] == "xjcg_tender"
-    assert captured["model"] == "deepseek"
-    assert captured["edit_prompt"] == "把第三章采购需求补充完整"
-    assert captured["file_path"] == "D:/UploadFiles/edit.docx"
-    assert captured["insertion_config"] == {
+    assert getattr(captured["form_type"], "value", captured["form_type"]) == "xjcg_tender"
+    assert captured["model_provider"] == "deepseek"
+    assert captured["user_prompt"] == "把第三章采购需求补充完整"
+    assert captured["file_path"] == "D:/UploadFiles/source.docx"
+    insertion_config = captured["insertion_config"]
+    if hasattr(insertion_config, "model_dump"):
+        insertion_config = insertion_config.model_dump(mode="json")
+    assert insertion_config == {
         "before_text": "第三章 采购需求",
         "after_text": "第四章 响应文件有关格式",
     }
     assert captured["tender_lx"] == 0
     assert captured["fund_source_lx"] == 1
-    assert isinstance(captured["tender_data_snapshot"], dict)
-    assert captured["tender_data_snapshot"]["project_name"] == "测试项目"
-    assert captured["tender_data_snapshot"]["project_number"] == "XJ-001"
-    assert captured["tender_data_snapshot"]["tender_lx"] == 0
-    assert captured["tender_data_snapshot"]["fund_source_lx"] == 1
-    assert result["task_id"] == "edit-task-42"
-    assert result["task_kind"] == "edit"
+    snapshot = captured["tender_data_snapshot"]
+    assert snapshot.project_name == "测试项目"
+    assert snapshot.project_number == "XJ-001"
+    assert snapshot.tender_lx == 0
+    assert snapshot.fund_source_lx == 1
+    assert result["task_id"] == "rewrite-upload-task-42"
+    assert result["task_kind"] == "rewrite"
 
 
 @pytest.mark.asyncio

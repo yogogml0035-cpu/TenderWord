@@ -22,7 +22,7 @@ export function TaskDownloadMessage({
   const outputFile =
     typeof message.metadata?.outputFile === 'string' ? message.metadata.outputFile : '';
   const taskKind = message.metadata?.taskKind;
-  const isModifyTask = taskKind === 'rewrite' || taskKind === 'edit';
+  const isModifyTask = taskKind === 'rewrite';
   const isGenerateTask = taskKind === 'generate';
   const commentWarning = message.metadata?.commentWriteback?.warning === true;
   const fileName =

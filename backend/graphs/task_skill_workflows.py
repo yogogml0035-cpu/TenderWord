@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 from backend.nodes.common_word_nodes import get_rewrite_comments
-from backend.nodes.skills_nodes.edit_nodes import (
-    edit_text,
-    extract_edit_context,
-    resolve_edit_target,
+from backend.nodes.skills_nodes.rewrite_nodes import (
+    extract_rewrite_context,
+    resolve_rewrite_target,
+    rewrite_text,
 )
-from backend.nodes.skills_nodes.rewrite_nodes import resolve_rewrite_target, rewrite_text
 from backend.nodes.skills_nodes.tender_aware_word_dispatch import (
     dispatch_tender_aware_delete_section,
     dispatch_tender_aware_update_word,
 )
-from backend.skills.edit.scripts.runtime import estimate_total_nodes as estimate_edit_nodes
 from backend.skills.rewrite.scripts.runtime import (
     estimate_total_nodes as estimate_rewrite_nodes,
 )
-from backend.skills.rewrite.scripts.runtime import select_comment_branch
+from backend.skills.rewrite.scripts.runtime import select_comment_branch, select_resolve_branch
 from backend.states import TaskSkillGraphState
 
 from .task_skill_types import (
@@ -33,6 +31,7 @@ _TASK_SKILL_WORKFLOWS = {
         end_node="update_word",
         nodes=(
             TaskSkillWorkflowNode("resolve_rewrite_target", resolve_rewrite_target),
+            TaskSkillWorkflowNode("extract_rewrite_context", extract_rewrite_context),
             TaskSkillWorkflowNode("get_rewrite_comments", get_rewrite_comments),
             TaskSkillWorkflowNode("delete_section", dispatch_tender_aware_delete_section),
             TaskSkillWorkflowNode("rewrite_text", rewrite_text),
@@ -40,7 +39,8 @@ _TASK_SKILL_WORKFLOWS = {
         ),
         edges=(
             ("get_rewrite_comments", "delete_section"),
-            ("resolve_rewrite_target", "rewrite_text"),
+            ("extract_rewrite_context", "delete_section"),
+            ("extract_rewrite_context", "rewrite_text"),
         ),
         waiting_edges=(
             (("delete_section", "rewrite_text"), "update_word"),
@@ -48,6 +48,14 @@ _TASK_SKILL_WORKFLOWS = {
         conditional_edges=(
             TaskSkillConditionalEdge(
                 start="resolve_rewrite_target",
+                condition=select_resolve_branch,
+                mapping={
+                    "extract_rewrite_context": "extract_rewrite_context",
+                    "rewrite_text": "rewrite_text",
+                },
+            ),
+            TaskSkillConditionalEdge(
+                start="rewrite_text",
                 condition=select_comment_branch,
                 mapping={
                     "get_rewrite_comments": "get_rewrite_comments",
@@ -56,28 +64,6 @@ _TASK_SKILL_WORKFLOWS = {
             ),
         ),
         total_nodes_estimator=estimate_rewrite_nodes,
-    ),
-    "edit": TaskSkillWorkflow(
-        skill_id="edit",
-        state_cls=TaskSkillGraphState,
-        start_node="resolve_edit_target",
-        end_node="update_word",
-        nodes=(
-            TaskSkillWorkflowNode("resolve_edit_target", resolve_edit_target),
-            TaskSkillWorkflowNode("extract_edit_context", extract_edit_context),
-            TaskSkillWorkflowNode("delete_section", dispatch_tender_aware_delete_section),
-            TaskSkillWorkflowNode("edit_text", edit_text),
-            TaskSkillWorkflowNode("update_word", dispatch_tender_aware_update_word),
-        ),
-        edges=(
-            ("resolve_edit_target", "extract_edit_context"),
-            ("extract_edit_context", "delete_section"),
-            ("extract_edit_context", "edit_text"),
-        ),
-        waiting_edges=(
-            (("delete_section", "edit_text"), "update_word"),
-        ),
-        total_nodes_estimator=estimate_edit_nodes,
     ),
 }
 

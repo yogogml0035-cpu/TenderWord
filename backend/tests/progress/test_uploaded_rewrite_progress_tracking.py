@@ -8,18 +8,18 @@ from backend.core.sse_manager import sse_manager
 from backend.graphs.base_graph import TRACKED_PROGRESS_NODES, wrap_node_with_progress
 from backend.task.task_queue_manager import Task, TaskKind, TaskQueueManager
 
-EDIT_WORKFLOW_NODES = [
-    "resolve_edit_target",
-    "extract_edit_context",
+UPLOADED_REWRITE_WORKFLOW_NODES = [
+    "resolve_rewrite_target",
+    "extract_rewrite_context",
     "delete_section",
-    "edit_text",
+    "rewrite_text",
     "update_word",
 ]
 
-MISSING_EDIT_PROGRESS_NODES = [
-    "resolve_edit_target",
-    "extract_edit_context",
-    "edit_text",
+UPLOADED_REWRITE_PROGRESS_NODES = [
+    "resolve_rewrite_target",
+    "extract_rewrite_context",
+    "rewrite_text",
 ]
 
 
@@ -48,12 +48,12 @@ def stub_progress_sse(monkeypatch):
     monkeypatch.setattr(sse_manager, "send_progress_threadsafe", lambda **kwargs: None)
 
 
-def test_tracked_progress_nodes_include_edit_workflow_nodes():
-    assert set(MISSING_EDIT_PROGRESS_NODES).issubset(TRACKED_PROGRESS_NODES)
+def test_tracked_progress_nodes_include_uploaded_rewrite_workflow_nodes():
+    assert set(UPLOADED_REWRITE_PROGRESS_NODES).issubset(TRACKED_PROGRESS_NODES)
 
 
-@pytest.mark.parametrize("node_name", MISSING_EDIT_PROGRESS_NODES)
-def test_wrap_node_with_progress_updates_missing_edit_nodes(monkeypatch, node_name: str):
+@pytest.mark.parametrize("node_name", UPLOADED_REWRITE_PROGRESS_NODES)
+def test_wrap_node_with_progress_updates_uploaded_rewrite_nodes(monkeypatch, node_name: str):
     calls: list[tuple[str, str, bool]] = []
 
     class RecordingQueue:
@@ -69,36 +69,36 @@ def test_wrap_node_with_progress_updates_missing_edit_nodes(monkeypatch, node_na
     )
 
     wrapped = wrap_node_with_progress(lambda state, config=None: {"ok": True}, node_name)
-    result = wrapped({}, {"configurable": {"task_id": "task-edit-1"}})
+    result = wrapped({}, {"configurable": {"task_id": "task-rewrite-1"}})
 
     assert result == {"ok": True}
     assert calls == [
-        ("task-edit-1", node_name, False),
-        ("task-edit-1", node_name, True),
+        ("task-rewrite-1", node_name, False),
+        ("task-rewrite-1", node_name, True),
     ]
 
 
-def test_edit_progress_can_reach_declared_total():
+def test_uploaded_rewrite_progress_can_reach_declared_total():
     queue = TaskQueueManager()
-    task_id = "task-edit-1"
+    task_id = "task-rewrite-1"
 
     with queue._data_lock:
         queue._tasks[task_id] = Task(
             task_id=task_id,
             user_session_id="session-1",
             created_at=datetime.now(),
-            task_kind=TaskKind.EDIT,
+            task_kind=TaskKind.REWRITE,
         )
 
     assert queue.set_total_nodes(task_id, 5) is True
 
-    for node_name in EDIT_WORKFLOW_NODES:
+    for node_name in UPLOADED_REWRITE_WORKFLOW_NODES:
         queue.update_progress(task_id, node_name, completed=False)
         queue.update_progress(task_id, node_name, completed=True)
 
     task = queue.get_task(task_id)
     assert task is not None
-    assert task.progress.completed_nodes == EDIT_WORKFLOW_NODES
+    assert task.progress.completed_nodes == UPLOADED_REWRITE_WORKFLOW_NODES
     assert task.progress.running_nodes == []
     assert task.progress.progress_text == "5/5"
     assert task.progress.progress_percent == 100.0

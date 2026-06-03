@@ -261,7 +261,7 @@ describe('MessageList', () => {
     expect(onCommentSupplement).toHaveBeenCalledWith(messages[2]);
   });
 
-  it.each(['rewrite', 'edit', 'comment_supplement'] as const)(
+  it.each(['rewrite', 'comment_supplement'] as const)(
     'does not show comment supplement action on %s download cards',
     (taskKind) => {
       const messages = createTaskMessages();

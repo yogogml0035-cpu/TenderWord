@@ -108,9 +108,6 @@ function taskKindLabel(taskKind: TaskKind): string {
   if (taskKind === 'rewrite') {
     return 'rewrite';
   }
-  if (taskKind === 'edit') {
-    return 'edit';
-  }
   return taskKind;
 }
 

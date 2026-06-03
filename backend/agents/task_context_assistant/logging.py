@@ -263,8 +263,6 @@ class AgentRunAuditLogger:
             selected_skill = self._skill_value(getattr(payload, "selected_skill", None))
             if selected_skill == "rewrite":
                 return "已识别为 rewrite 请求。"
-            if selected_skill == "edit":
-                return "已识别为 edit 请求。"
             return "已接收用户消息并等待能力确认。"
         return scrub_sensitive_text(getattr(payload, "summary", ""))
 

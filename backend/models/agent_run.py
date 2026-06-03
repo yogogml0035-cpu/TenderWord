@@ -16,7 +16,6 @@ class AgentSkill(str, Enum):
     """支持的 agent skill。"""
 
     REWRITE = "rewrite"
-    EDIT = "edit"
 
 
 class AgentRunUploadedFile(BaseModel):
@@ -49,13 +48,13 @@ class AgentRunContextSnapshot(BaseModel):
         default_factory=list,
         description="当前会话可见的上传文件摘要",
     )
-    edit_context: Optional["AgentRunEditContextSnapshot"] = Field(
+    rewrite_context: Optional["AgentRunRewriteContextSnapshot"] = Field(
         default=None,
-        description="edit 任务创建所需的受控上下文摘要",
+        description="上传文件 rewrite 任务创建所需的受控上下文摘要",
     )
 
-class AgentRunEditContextSnapshot(BaseModel):
-    """受控 edit 任务上下文。"""
+class AgentRunRewriteContextSnapshot(BaseModel):
+    """受控上传文件 rewrite 任务上下文。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -68,7 +67,7 @@ class AgentRunEditContextSnapshot(BaseModel):
     fund_source_lx: Optional[int] = Field(default=None, description="资金性质编码")
     tender_data_snapshot: Optional[TenderData] = Field(
         default=None,
-        description="可选的招标数据快照摘要",
+        description="当前页面招标数据快照摘要",
     )
 
     @field_validator("fund_source_lx")

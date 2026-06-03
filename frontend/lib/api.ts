@@ -24,7 +24,6 @@ import type {
   CancelTaskData,
   CommentSupplementTaskRequest,
   CreateTaskData,
-  EditTaskRequest,
   GenerateRequest,
   ConversationHeartbeatData,
   ApiSuccessResponse,
@@ -176,7 +175,6 @@ function createStreamRequestConfig(
 function parseTaskKind(value: unknown): TaskKind | null {
   return value === 'generate' ||
     value === 'rewrite' ||
-    value === 'edit' ||
     value === 'comment_supplement'
     ? value
     : null;
@@ -193,7 +191,7 @@ function parseTaskStatus(value: unknown): TaskStatus | null {
 }
 
 function parseAgentSkill(value: unknown): AgentSkill | null {
-  return value === 'rewrite' || value === 'edit' ? value : null;
+  return value === 'rewrite' ? value : null;
 }
 
 function parseAgentSkillList(value: unknown): AgentSkill[] | null {
@@ -800,13 +798,6 @@ export async function uploadFiles(
 
 export async function createGenerateTask(params: GenerateRequest): Promise<CreateTaskData> {
   return request<CreateTaskData>('/api/generate', {
-    method: 'POST',
-    body: JSON.stringify(params),
-  });
-}
-
-export async function createEditTask(params: EditTaskRequest): Promise<CreateTaskData> {
-  return request<CreateTaskData>('/api/edit', {
     method: 'POST',
     body: JSON.stringify(params),
   });

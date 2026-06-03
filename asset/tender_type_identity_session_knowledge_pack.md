@@ -13,7 +13,7 @@
 - 前端 URL 与 canonical 化：`frontend/utils/tenderTypeMapper.ts`
 - `gngk` 后端 `form_type` 分派：`frontend/lib/gngkFormType.ts`
 - 表单到后端请求转换：`frontend/lib/formDataConverter.ts`
-- chat/edit 任务创建：`frontend/components/chat/ChatPanel.tsx`
+- chat/rewrite 任务创建：`frontend/components/chat/ChatPanel.tsx`
 - 表单注册与默认锚点：`frontend/components/chat/tenderFormRegistry.ts`、`frontend/components/forms/tenderFormConfig.ts`、`frontend/components/forms/TenderFormShared.tsx`
 - 当前页面会话、智能体过程卡与任务恢复：`frontend/stores/chatStore.ts`、`frontend/hooks/useChatSSE.ts`、`frontend/components/chat/TaskContentMessage.tsx`、`frontend/app/tender/page.tsx`
 
@@ -98,7 +98,7 @@
 | `gngk_fw_cz` | `第三章 招标内容及要求` | `第四章 投标文件有关格式` |
 | `gjgk` | `技术规格及要求` | `附件1：投标文件封面（格式）` |
 
-- generate 与 edit 默认锚点读取 `get_default_anchor_texts()`。
+- generate 与上传文件 rewrite 默认锚点读取 `get_default_anchor_texts()`。
 - rewrite 当前还保留 `DocumentService.REWRITE_DEFAULT_ANCHORS` 快照回退，内容必须与 `tender_config.py` 保持同步。
 
 ### Graph 与运行时分流
@@ -109,7 +109,7 @@
 - `GngkFwZcTenderGraph` 当前覆盖服务特化的 delete / replacement / update。
 - `GngkFwCzTenderGraph` 当前继承 `GngkHwZcTenderGraph`，没有额外覆盖。
 - `GjgkTenderGraph` 使用 `gjgk_*` 专属 delete / replacement / update，并保留 post-update hook。
-- `backend/nodes/skills_nodes/tender_aware_word_dispatch.py` 当前只 special-case `gjgk` 与 `gngk_fw_zc`；`gngk_hw_cz` 当前没有扩张到 rewrite / edit，仍在 skill runtime 中回落 common delete / update。
+- `backend/nodes/skills_nodes/tender_aware_word_dispatch.py` 当前只 special-case `gjgk` 与 `gngk_fw_zc`；`gngk_hw_cz` 当前没有扩张到 rewrite，仍在 skill runtime 中回落 common delete / update。
 
 ### Replacement 与 profile
 
@@ -134,7 +134,7 @@
 
 ### `gngk` 到后端 `form_type`
 
-`frontend/lib/gngkFormType.ts` 是 generate 与 edit 共享的 `gngk` 后端 `form_type` 分派真源，`frontend/lib/formDataConverter.ts` 与 `frontend/components/chat/ChatPanel.tsx` 都必须调用它：
+`frontend/lib/gngkFormType.ts` 是 generate 与上传文件 rewrite 共享的 `gngk` 后端 `form_type` 分派真源，`frontend/lib/formDataConverter.ts` 与 `frontend/components/chat/ChatPanel.tsx` 都必须调用它：
 
 | `tender_lx` | `fund_lx` | 附加条件 | 后端 `form_type` |
 | --- | --- | --- | --- |
@@ -146,10 +146,10 @@
 | `2` | `0` | - | `gngk_fw_zc_tender` |
 | `2` | `1` | - | `gngk_fw_cz_tender` |
 
-- 当前仓库仍没有独立 `工程` graph / `form_type`；`tender_lx=1` 的工程模式在 generate / edit 中临时复用现有 `gngk_fw_*` 服务链路。
-- 当前未新增独立工程前端类型；国内公开 `货物 + 财政 + ifzgcg=2` 仍保持 URL、会话身份、按钮态与请求业务资金字段为财政，但 generate / edit 的 `form_type` 映射到 `gngk_hw_zc_tender`，复用货物自筹 graph。
+- 当前仓库仍没有独立 `工程` graph / `form_type`；`tender_lx=1` 的工程模式在 generate / uploaded rewrite 中临时复用现有 `gngk_fw_*` 服务链路。
+- 当前未新增独立工程前端类型；国内公开 `货物 + 财政 + ifzgcg=2` 仍保持 URL、会话身份、按钮态与请求业务资金字段为财政，但 generate / uploaded rewrite 的 `form_type` 映射到 `gngk_hw_zc_tender`，复用货物自筹 graph。
 
-分派规则只改 `resolveGngkFormType()`；调用点保持复用 helper，并同步补生成转换器与 ChatPanel edit 测试。
+分派规则只改 `resolveGngkFormType()`；调用点保持复用 helper，并同步补生成转换器与 ChatPanel 上传文件 rewrite 测试。
 
 ### `TenderFormShared` 初始化与模式缓存
 
@@ -165,15 +165,15 @@
 - 判断“手改后的锚点”不能只看文本值是否等于某个已知默认值，因为用户可能手动输入另一个场景的默认文案；前端草稿用 `manual_insertion_config_scope_keys` 按 `tenderType + tender_lx + fund_lx` 标记用户已手改的组合，命中后 `ifdzpt2` / `ifzgcg` 默认锚点修正不得再覆盖。
 - 工程模式默认锚点为 `第三章 招标内容及要求` -> `第四章 投标文件有关格式`，即使 `ifdzpt2 = 2` 也不会切到 `第四章 合同条款`。
 - 服务模式默认锚点为 `第三章 招标内容及要求` -> `第四章 投标文件有关格式`（若命中上一条服务合同条款规则，则改为 `第四章 合同条款`）。
-- 财政货物默认锚点为 `第四章  招标需求` -> `第五章  评标方法与程序`；若“获取信息”成功且接口返回类型为“货物 + 财政 + ifzgcg = 2”，当次回填按货物自筹默认锚点 `第三章 招标内容及要求` -> `第四章 投标文件有关格式` 显示，且 generate / edit 走 `gngk_hw_zc_tender` graph。用户后续切出再切回“货物 + 财政”时，不再继续受 `ifzgcg` 影响，恢复财政货物默认锚点，除非该组合已被用户手动编辑锁定。
+- 财政货物默认锚点为 `第四章  招标需求` -> `第五章  评标方法与程序`；若“获取信息”成功且接口返回类型为“货物 + 财政 + ifzgcg = 2”，当次回填按货物自筹默认锚点 `第三章 招标内容及要求` -> `第四章 投标文件有关格式` 显示，且 generate / uploaded rewrite 走 `gngk_hw_zc_tender` graph。用户后续切出再切回“货物 + 财政”时，不再继续受 `ifzgcg` 影响，恢复财政货物默认锚点，除非该组合已被用户手动编辑锁定。
 - `generation_style` 是 generate 表单态：货物、工程、服务默认都为 `template`；后端只在 generate runtime 使用该字段。
 - `generation_mode` 是全局 generate 表单态，不参与 tender identity，也不按 `gngk` 的 `tender_lx` / `fund_lx` 分桶。新会话和旧草稿缺省值都是 `workflow`，用户在高级设置切换到 `agent` 后写入当前 `ConversationFormDraft.generation_mode`。
 - `comment_generation_mode` 是全局 generate 表单态，不参与 tender identity，也不按 `gngk` 的 `tender_lx` / `fund_lx` 分桶。新会话和旧草稿缺省值都是 `on`；高级设置“批注生成”切换到“关”后写入当前 `ConversationFormDraft.comment_generation_mode=off`，提交 generate 时进入 `formDataConverter`。
-- `selected_skills` 是右侧任务上下文助手的会话级聊天草稿字段，不参与 tender identity、URL 判型或 generate/edit payload。当前只允许一个显式 capability（`rewrite` 或 `edit`），持久化在 `chat-storage.conversationDrafts[conversationId]` 里，并在普通聊天消息发送后立即清空。
+- `selected_skills` 是右侧任务上下文助手的会话级聊天草稿字段，不参与 tender identity、URL 判型或 generate payload。当前只允许一个显式 capability（`rewrite`），持久化在 `chat-storage.conversationDrafts[conversationId]` 里，并在普通聊天消息发送后立即清空。
 - `agent run` 的思考过程卡与任务 `agent-step` 卡是两套链路：右侧任务上下文助手过程卡存为普通 AI 消息 `metadata.agentThinking`，固定五阶段 `理解需求 / 执行任务 / 调用工具 / 异常与重试 / 汇总结论`；`thinking_stage`、`tool_call`、`task_accepted`、`needs_input`、`done`、`error` 只能写结构化摘要、guard 结果和工具名，不得把原始 `reasoning_content`、完整工具参数或隐藏推理写进消息。
 - `TenderFormShared` 的“生成方式”控件位于高级设置，选项为“工作流”和“智能体”；提交 generate 时 `BaseTenderFormData.generation_mode` 进入 `formDataConverter`，未显式选择时 converter 也要兜底为 `workflow`。
 - `TenderFormShared` 的“批注生成”控件位于高级设置，选项为“开”和“关”；提交 generate 时 `BaseTenderFormData.comment_generation_mode` 进入 `formDataConverter`，未显式选择时 converter 兜底为 `on`。
-- rewrite / edit 请求 payload 不包含 `generation_mode` 或 `comment_generation_mode`。如果聊天草稿中保留 `generation_mode: "agent"` 或 `comment_generation_mode: "off"`，`ChatPanel` 创建 rewrite / edit 任务时也不能透传它。
+- rewrite 请求 payload 不包含 `generation_mode` 或 `comment_generation_mode`。如果聊天草稿中保留 `generation_mode: "agent"` 或 `comment_generation_mode: "off"`，`ChatPanel` 创建 rewrite 任务时也不能透传它。
 
 ## 当前页面会话生命周期
 
@@ -198,12 +198,12 @@
 
 ## 聊天输入与排队恢复
 
-- `chat_input` 在普通聊天发送或 edit agent run 发起后立即清空。
-- `/` 只负责打开 capability picker；`$rewrite` / `$edit` 以及手动输入 `/rewrite` / `/edit` 都必须在 `ChatInput` 当场解析成 `selected_skills + chat_input`，不能把命令前缀留在持久化草稿或用户消息正文里。
-- 上传文件修改入口与显式 `/edit` / `$edit` 现在统一走 `/api/agent/runs/stream`：只要当前 draft 已进入 `input_mode=edit` 或已有 `edit_file`，`ChatPanel` 就应把这次发送视为 edit capability，并把上传文件、`form_type`、锚点、`tender_lx/fund_source_lx` 与可选 `tender_data_snapshot` 一并投影到 `context_snapshot.uploaded_files + context_snapshot.edit_context`。
-- `pending_rewrite_prompt` / `pending_edit_prompt` 只用于排队阶段取消或失败后的恢复回填，不是正常发送后的延迟清空机制。
+- `chat_input` 在普通聊天发送或 rewrite agent run 发起后立即清空。
+- `/` 只负责打开 capability picker；`$rewrite` 以及手动输入 `/rewrite` 都必须在 `ChatInput` 当场解析成 `selected_skills + chat_input`，不能把命令前缀留在持久化草稿或用户消息正文里。`$edit` / `/edit` 不再解析为能力。
+- 上传文件修改入口现在统一走 rewrite：只要当前 draft 有 `rewrite_file`，`ChatPanel` 就应把这次发送视为 rewrite capability，并把上传文件、`form_type`、锚点、`tender_lx/fund_source_lx` 与可选 `tender_data_snapshot` 一并投影到 `context_snapshot.uploaded_files + context_snapshot.rewrite_context`。上传文件 rewrite 必须有非空用户指令；空输入不可发送。
+- `pending_rewrite_prompt` 只用于排队阶段取消或失败后的恢复回填，不是正常发送后的延迟清空机制。
 - rewrite 只有在 `/api/agent/runs/stream` 返回 `task_accepted` 后写入 pending rewrite 字段。
-- edit 只有在 agent run 返回真实 `task_accepted` 后才写入 pending edit 字段；成功完成时把最新输出文件回写到 `edit_file`。
+- 上传文件 rewrite 只有在 agent run 返回真实 `task_accepted` 后才写入 pending rewrite 字段；成功完成时用 SSE `done.output_file` 把最新输出文件回写到 `rewrite_file`，后续 rewrite 继续修改该文件链路。用户删除文件卡后清空上传链路，后续 rewrite 回到会话历史。
 - `frontend/app/tender/page.tsx` 的后端重启恢复继续以 pending 字段和任务摘要为依据。
 - 后端重启或 `TASK_NOT_FOUND` 触发 stale task 恢复时，不能只新增错误日志；同一 `taskId` 下仍处于 `generating` 的历史消息也必须转为 `error` 并写入 `localTaskReason=backend_restart`，避免 UI 同时显示“已中断”和旧生成中状态。
 - 从 `sessionStorage` 恢复出的 `running` task 只是本地快照，SSE 连接前必须先用任务状态接口确认任务仍存在；若状态接口返回 `TASK_NOT_FOUND` / 404，应走 stale task 恢复而不是先连 `/api/stream/{taskId}`。
@@ -213,7 +213,7 @@
 
 - 后端至少检查：`backend/models/generate.py`、`backend/config/tender_config.py`、`backend/services/document_service.py`、`backend/graphs/`、`backend/states/`、`backend/nodes/`。
 - 前端至少检查：`frontend/types/api.ts`、`frontend/utils/tenderTypeMapper.ts`、`frontend/lib/formDataConverter.ts`、`frontend/components/chat/ChatPanel.tsx`、`frontend/components/chat/tenderFormRegistry.ts`、`frontend/components/forms/tenderFormConfig.ts`、`frontend/components/forms/TenderFormShared.tsx`、`frontend/stores/chatStore.ts`。
-- 若类型影响 rewrite / edit 的 Word 路由，还必须检查 `backend/nodes/skills_nodes/tender_aware_word_dispatch.py`。
+- 若类型影响 rewrite 的 Word 路由，还必须检查 `backend/nodes/skills_nodes/tender_aware_word_dispatch.py`。
 - 改完类型或会话边界后，必须同步更新本知识包和 `asset/README.md`。
 
 ## 关联测试与验证入口
@@ -237,7 +237,7 @@
 - 预算金额提取不能为了覆盖正文最高限价而反向读取 `最高限价` 行；同金额联动应保持在后续全局替换机制内。
 - 联系人姓名与联系方式可能被 Word 文本读成同一行；`project_zbr_xbr` 需要依赖停止标签截断，而不是假设换行一定存在。
 - 公开招标模板后文常有“投标人基本情况简介格式”里的 `邮编：`、`电话/传真：` 空表字段；联系人提取的二级锚点必须限制在当前代理机构块内，避免跳过首页或前附表的真实联系人。
-- `tender_config.py` 与 `DocumentService.REWRITE_DEFAULT_ANCHORS` 当前存在双份默认锚点语义，只改其中一处会导致 rewrite 与 generate / edit 漂移。
+- `tender_config.py` 与 `DocumentService.REWRITE_DEFAULT_ANCHORS` 当前存在双份默认锚点语义，只改其中一处会导致 rewrite 与 generate 漂移。
 - `gngk_fw_cz` 当前没有像 `gngk_fw_zc` 那样在 skill runtime 专门分发；若业务希望两者一致，必须显式改代码与测试。
 - 绕过 canonical URL helper 手工 patch 参数，容易留下与当前会话不一致的残余 URL。
 - 反转 `TenderFormShared` 的 `draft > URL > default` 优先级，会破坏已有会话草稿恢复与深链创建的约定。

@@ -14,9 +14,17 @@ from backend.config.tender_config import (
     CONTENT_UPDATE_MODE_PROTECTED_FIELDS,
     get_content_update_mode,
     get_protected_field_profile,
+    get_anchor_target_sizes,
+)
+from backend.helper.word_helper.inline_style_ops import (
+    build_inline_style_extraction_logs,
+    extract_inline_style_fragments,
 )
 from backend.helper.word_helper.protected_fields import match_protected_field_line
 from backend.models import AgentStepEventData
+from backend.nodes.common_word_nodes.comment_extraction import (
+    result_to_polished_comments,
+)
 from backend.prompts.skill_prompt import render_task_skill_prompt
 from backend.prompts.rewrite_target_selection_prompt import (
     build_rewrite_target_selection_bundle,
@@ -41,6 +49,15 @@ from backend.util.log_util.skill_audit_log import (
     resolve_task_audit_log_path,
     write_task_audit_stage,
 )
+from backend.util.word_util import (
+    WordDocumentInspector,
+    close_word_application,
+    create_word_application,
+    extract_content_with_tables,
+    open_document_with_retry,
+    unprotect_document,
+)
+from backend.util.word_util.anchor_utils import find_anchor_range, resolve_anchor_content_range
 
 
 REWRITE_RUNTIME_SECTION_HEADING = "## 后台 rewrite 任务正文改写指令"
@@ -49,6 +66,7 @@ REWRITE_GENERATE_AGENT_NODE = "rewrite_generate_agent"
 REWRITE_VERIFY_AGENT_NODE = "rewrite_verify_agent"
 REWRITE_REVISE_AGENT_NODE = "rewrite_revise_agent"
 REWRITE_MAX_AUDIT_ROUNDS = 2
+UPLOADED_REWRITE_SOURCE = "uploaded_file"
 
 REWRITE_VERIFY_SYSTEM_PROMPT = """
 你是招标文件重写审核子智能体 rewrite_verify_agent。
@@ -356,6 +374,17 @@ def _build_rewrite_output_path(source_path: pathlib.Path) -> pathlib.Path:
     return candidate
 
 
+def _build_uploaded_rewrite_output_path(source_path: pathlib.Path) -> pathlib.Path:
+    timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    suffix = source_path.suffix or ".docx"
+    candidate = source_path.with_name(f"{source_path.stem}_重写后_{timestamp}{suffix}")
+    if candidate.exists():
+        candidate = source_path.with_name(
+            f"{source_path.stem}_重写后_{timestamp}_{uuid.uuid4().hex[:4]}{suffix}"
+        )
+    return candidate
+
+
 def resolve_rewrite_target(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
     conversation_id = str(state.get("conversation_id") or "").strip()
     rewrite_user_prompt = str(state.get("rewrite_user_prompt") or "").strip()
@@ -363,6 +392,36 @@ def resolve_rewrite_target(state: TaskSkillGraphState, config) -> TaskSkillGraph
         raise ValueError("conversation_id 不能为空")
     if not rewrite_user_prompt:
         raise ValueError("rewrite_user_prompt 不能为空")
+
+    if str(state.get("rewrite_source") or "").strip() == UPLOADED_REWRITE_SOURCE:
+        source_document_path = pathlib.Path(
+            str(state.get("source_document_path") or "")
+        ).expanduser()
+        if not source_document_path.is_file():
+            raise FileNotFoundError(f"rewrite 上传文档不存在: {source_document_path}")
+
+        rewrite_output_path = _build_uploaded_rewrite_output_path(source_document_path.resolve())
+        rewrite_output_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(source_document_path), str(rewrite_output_path))
+
+        configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+        cleanup_holder = configurable.get("rewrite_cleanup_holder")
+        if isinstance(cleanup_holder, dict):
+            cleanup_holder["path"] = str(rewrite_output_path)
+
+        updates: Dict[str, Any] = {
+            "conversation_id": conversation_id,
+            "rewrite_user_prompt": rewrite_user_prompt,
+            "source_document_path": str(source_document_path.resolve()),
+            "source_prepared_doc_path": str(source_document_path.resolve()),
+            "prepared_doc_path": str(rewrite_output_path),
+            "rewrite_temp_output_path": str(rewrite_output_path),
+            "rewrite_mode": True,
+            "rewrite_source": UPLOADED_REWRITE_SOURCE,
+            "verbose_style_progress_logs": True,
+            "suppress_comment_progress_logs": True,
+        }
+        return TaskSkillGraphState(**updates)
 
     conversation_service = get_conversation_service()
     rewrite_messages = conversation_service.list_rewrite_messages(conversation_id)
@@ -407,6 +466,123 @@ def resolve_rewrite_target(state: TaskSkillGraphState, config) -> TaskSkillGraph
             updates[key] = value
 
     return TaskSkillGraphState(**updates)
+
+
+def extract_rewrite_context(state: TaskSkillGraphState, config) -> TaskSkillGraphState:
+    del config
+    document_path = str(state.get("prepared_doc_path") or "").strip()
+    if not document_path:
+        raise ValueError("extract_rewrite_context 需要 prepared_doc_path")
+
+    before_text = state.get("insertion_before_text")
+    after_text = state.get("insertion_after_text")
+    if not before_text or not after_text:
+        raise ValueError("extract_rewrite_context 需要 insertion_before_text 和 insertion_after_text")
+
+    file_path = pathlib.Path(document_path).expanduser()
+    if not file_path.is_file():
+        raise FileNotFoundError(f"extract_rewrite_context 文档不存在: {file_path}")
+
+    tender_type = str(state.get("tender_type") or "xjcg")
+    verbose_style_progress_logs = bool(state.get("verbose_style_progress_logs"))
+    before_size, after_size = get_anchor_target_sizes(tender_type)
+
+    word_app = None
+    doc = None
+    com_initialized = False
+    try:
+        word_app, com_initialized = create_word_application(
+            initial_delay=0.5,
+            post_init_delay=0.5,
+            use_existing=False,
+            verify=True,
+            node_name="extract_rewrite_context",
+        )
+        doc = open_document_with_retry(
+            word_app=word_app,
+            file_path=str(file_path),
+            read_only=True,
+            node_name="extract_rewrite_context",
+        )
+        unprotect_document(doc, node_name="extract_rewrite_context")
+
+        before_hit, after_hit = find_anchor_range(
+            doc=doc,
+            before_text=str(before_text),
+            after_text=str(after_text),
+            before_size=before_size,
+            after_size=after_size,
+            prefer_before="last",
+            prefer_after="first",
+        )
+        if not before_hit:
+            raise ValueError(f"未找到前置锚点: {before_text}")
+        if not after_hit:
+            raise ValueError(f"未找到后置锚点: {after_text}")
+
+        content_range = resolve_anchor_content_range(
+            doc=doc,
+            word_app=word_app,
+            before_hit=before_hit,
+            after_hit=after_hit,
+            tender_type=tender_type,
+        )
+        range_start = int(content_range["range_start"])
+        range_end = int(content_range["range_end"])
+        start_page = int(content_range["start_page"])
+        end_page = int(content_range["end_page"])
+
+        extracted_content = extract_content_with_tables(doc.Range(range_start, range_end))
+        if not str(extracted_content or "").strip():
+            raise ValueError("未识别到锚点区正文，请上传可识别的招标正文文件")
+
+        inspector = WordDocumentInspector(
+            word_app=word_app,
+            doc=doc,
+            node_name="extract_rewrite_context",
+        )
+        result = inspector.analyze_document(
+            range_start=range_start,
+            range_end=range_end,
+        )
+        polished_comments = result_to_polished_comments(result)
+        inline_style_fragments = extract_inline_style_fragments(
+            doc=doc,
+            bound_start=range_start,
+            bound_end=range_end,
+        )
+
+        progress_log.info(
+            "[extract_rewrite_context] 已提取重写正文、批注和样式: comments=%d, styles=%d, pages=%d-%d",
+            len(polished_comments),
+            len(inline_style_fragments),
+            start_page,
+            end_page,
+        )
+        if verbose_style_progress_logs:
+            for message in build_inline_style_extraction_logs(
+                inline_style_fragments,
+                step_label="样式提取",
+            ):
+                progress_log.info("[extract_rewrite_context] %s", message)
+        return TaskSkillGraphState(
+            source_section_text=extracted_content,
+            rewrite_base_text=extracted_content,
+            polished_comments=polished_comments,
+            inline_style_fragments=inline_style_fragments,
+            start_page=start_page,
+            end_page=end_page,
+            verbose_style_progress_logs=verbose_style_progress_logs,
+            suppress_comment_progress_logs=bool(state.get("suppress_comment_progress_logs")),
+        )
+    finally:
+        close_word_application(
+            word_app=word_app,
+            doc=doc,
+            com_initialized=com_initialized,
+            wait_time=1.0,
+            node_name="extract_rewrite_context",
+        )
 
 
 def _build_rewrite_prompt(

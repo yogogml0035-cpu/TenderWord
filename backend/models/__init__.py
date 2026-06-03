@@ -28,7 +28,6 @@ from .task import (
 from .generate import (
     CommentGenerationMode,
     CommentSupplementRequest,
-    EditTaskRequest,
     FileRequirement,
     FormRequirementsResponse,
     FormType,
@@ -42,7 +41,7 @@ from .generate import (
     LLMModel,
 )
 from .agent_run import (
-    AgentRunEditContextSnapshot,
+    AgentRunRewriteContextSnapshot,
     AgentNeedsInputEventData,
     AgentRunContextSnapshot,
     AgentRunDoneEventData,
@@ -141,7 +140,6 @@ __all__ = [
     "GenerationMode",
     "GenerationStyle",
     "CommentSupplementRequest",
-    "EditTaskRequest",
     "GenerateFilePaths",
     "GenerateRequest",
     "GenerateResponse",
@@ -150,7 +148,7 @@ __all__ = [
     "FormRequirementsResponse",
     "AgentSkill",
     "AgentRunUploadedFile",
-    "AgentRunEditContextSnapshot",
+    "AgentRunRewriteContextSnapshot",
     "AgentRunContextSnapshot",
     "AgentRunStreamRequest",
     "AgentRunStartedEventData",
