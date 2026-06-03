@@ -227,6 +227,9 @@ describe('ChatInput', () => {
 
     fireEvent.change(textarea, { target: { value: '/' } });
     expect(screen.getByTestId('chat-skill-picker')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-skill-picker')).toHaveClass('bottom-full');
+    expect(screen.getByTestId('chat-skill-option-rewrite')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-skill-option-edit')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('chat-skill-option-rewrite'));
 

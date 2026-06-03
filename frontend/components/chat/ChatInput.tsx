@@ -417,7 +417,7 @@ export function ChatInput({
 
             {skillPickerOpen ? (
               <div
-                className="absolute left-2 right-2 top-full z-30 mt-2 overflow-hidden rounded-[22px] border border-slate-200 bg-white/96 p-2 shadow-2xl shadow-slate-300/30 backdrop-blur"
+                className="absolute bottom-full left-2 right-2 z-30 mb-2 overflow-hidden rounded-[22px] border border-slate-200 bg-white/96 p-2 shadow-2xl shadow-slate-300/30 backdrop-blur"
                 data-testid="chat-skill-picker"
               >
                 {filteredSkillOptions.map((option) => {
