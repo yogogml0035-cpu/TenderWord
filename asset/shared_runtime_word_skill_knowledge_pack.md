@@ -117,6 +117,7 @@
 - `xjcg`、`gngk_hw_zc`、`gngk_fw_cz` 使用 `common_two_field`；`gngk_fw_zc` 使用 `gngk_three_field`；`gngk_hw_cz` 与 `gjgk` 是 `direct_replace`，不支持受保护字段 profile。
 - 受保护字段唯一真源是带中文冒号的 canonical marker；英文冒号兼容必须先规范化，再进入扫描、重绑或 AI 文本拆块。
 - 字段识别必须严格匹配“可选编号前缀 + canonical marker + 值”的字段行；表格行、单元格文本或普通叙述句里的关键字命中不算有效字段。
+- 受保护字段重绑必须按最新 Word 段落重新扫描；既有 Word `Range` 只能在仍位于当前插入边界内、且文本仍是单段合法字段行时复用。真正段落符 `\r/\n/\f` 不能出现在字段行内部；Word 手动换行 `\v` 可作为同一段落内的旧模板尾巴保留给字段值更新覆盖。字段值和编号前缀更新必须调用 `protected_fields.py` 共享 helper，避免 live Range 在删除/插入后漂移到后续正文。
 - 关键字段缺失、格式非法或顺序非法时必须 fail-fast，不能部分写回后再靠 cleanup 兜底。
 
 ### 正文写回与段落边界

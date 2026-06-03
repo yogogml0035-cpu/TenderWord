@@ -84,6 +84,8 @@ def match_protected_field_line(
     visible_text = _strip_paragraph_tail(str(text or ""))
     if not visible_text.strip():
         return None
+    if any(ch in visible_text for ch in ("\r", "\n", "\a", "\f")):
+        return None
     if _is_markdown_table_line(visible_text):
         return None
 
@@ -401,12 +403,38 @@ def refresh_protected_fields(
     existing_fields: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """在删除可编辑内容后，按最新文档位置重新绑定受保护字段段落。"""
-    refreshed = dict(existing_fields or {})
-    refreshed.update(
-        scan_protected_fields_in_range(
-            doc, markers, int(range_start), int(range_end)
-        )
+    refreshed = scan_protected_fields_in_range(
+        doc, markers, int(range_start), int(range_end)
     )
+
+    # Word Range objects are live. After deleting paragraphs around protected
+    # fields, a previously captured Range can drift or expand into following
+    # body text. Only keep an existing Range if it is still a strict single
+    # protected-field paragraph inside the current insertion bounds.
+    if existing_fields:
+        for marker in normalize_protected_field_markers(markers):
+            if marker in refreshed:
+                continue
+            existing = existing_fields.get(marker)
+            if existing is None:
+                continue
+            try:
+                existing_start = int(existing.Start)
+                existing_end = int(existing.End)
+            except Exception:
+                continue
+            if (
+                existing_start < int(range_start)
+                or existing_end > int(range_end)
+                or existing_end <= existing_start
+            ):
+                continue
+            try:
+                existing_text = str(getattr(existing, "Text", "") or "")
+            except Exception:
+                continue
+            if match_protected_field_line(existing_text, marker):
+                refreshed[marker] = existing
     return refreshed
 
 

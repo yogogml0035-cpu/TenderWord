@@ -11,6 +11,7 @@ from backend.helper.word_helper.protected_fields import (
     normalize_protected_field_paragraphs,
     normalize_protected_field_text,
     refind_protected_paragraph,
+    refresh_profile_protected_fields,
     refresh_protected_fields,
     update_protected_field,
 )
@@ -232,6 +233,13 @@ def test_match_protected_field_line_rejects_table_and_prose_hits() -> None:
         is None
     )
     assert match_protected_field_line("本项目交付日期：合同签订后30天", DELIVERY_DATE_MARKER) is None
+    assert (
+        match_protected_field_line(
+            "付款方式：设备安装验收合格后的三个月内付清全款。\r三、技术规格要求：",
+            PAYMENT_METHOD_MARKER,
+        )
+        is None
+    )
 
 
 def test_normalize_protected_field_text_only_rewrites_legal_field_lines() -> None:
@@ -267,6 +275,21 @@ def test_update_protected_field_resets_generated_value_font_only() -> None:
     )
 
     assert doc._records[0].text == "付款方式：按季度结算"
+    _assert_clean_generated_format(doc.created_ranges[-1])
+
+
+def test_update_protected_field_accepts_word_manual_line_break_tail() -> None:
+    doc = _FakeDoc([("3、付款方式：旧值\v二、总体需求\v1．适配设备", False)])
+    protected_fields = {PAYMENT_METHOD_MARKER: doc.Range(0, doc.Content.End)}
+
+    assert update_protected_field(
+        doc,
+        PAYMENT_METHOD_MARKER,
+        "设备安装验收合格后的三个月内付清全款。",
+        protected_fields,
+    )
+
+    assert doc._records[0].text == "3、付款方式：设备安装验收合格后的三个月内付清全款。"
     _assert_clean_generated_format(doc.created_ranges[-1])
 
 
@@ -319,6 +342,59 @@ def test_normalize_protected_field_paragraphs_and_collect_refresh_use_canonical_
     )
     assert set(refreshed.keys()) == {DELIVERY_DATE_MARKER, PAYMENT_METHOD_MARKER}
     assert refreshed[PAYMENT_METHOD_MARKER].Text == "付款方式：按季度结算"
+
+
+def test_refresh_profile_protected_fields_rejects_stale_cross_paragraph_existing_range() -> None:
+    doc = _FakeDoc(
+        [
+            ("2、交付日期：合同签订后30天", False),
+            ("三、技术规格要求：", False),
+        ]
+    )
+    stale_payment_range = type(
+        "_StalePaymentRange",
+        (),
+        {
+            "Start": 20,
+            "End": 80,
+            "Text": "付款方式：设备安装验收合格后的三个月内付清全款。\r三、技术规格要求：",
+        },
+    )()
+
+    try:
+        refresh_profile_protected_fields(
+            doc=doc,
+            profile=COMMON_TWO_FIELD_PROFILE,
+            range_start=0,
+            range_end=10_000,
+            existing_fields={PAYMENT_METHOD_MARKER: stale_payment_range},
+        )
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected stale cross-paragraph range to be rejected")
+
+    assert "缺少关键受保护字段: 付款方式：" in message
+
+
+def test_refresh_profile_protected_fields_keeps_manual_line_break_field_range() -> None:
+    doc = _FakeDoc(
+        [
+            ("2、交付日期：合同签订后30天", False),
+            ("3、付款方式：旧值\v二、总体需求\v1．适配设备", False),
+        ]
+    )
+
+    refreshed = refresh_profile_protected_fields(
+        doc=doc,
+        profile=COMMON_TWO_FIELD_PROFILE,
+        range_start=0,
+        range_end=10_000,
+        existing_fields={},
+    )
+
+    assert set(refreshed.keys()) == {DELIVERY_DATE_MARKER, PAYMENT_METHOD_MARKER}
+    assert refreshed[PAYMENT_METHOD_MARKER].Text == "3、付款方式：旧值\v二、总体需求\v1．适配设备"
 
 
 def test_collect_profile_protected_fields_fails_fast_with_suspicious_hits() -> None:
