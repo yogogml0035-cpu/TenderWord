@@ -171,6 +171,8 @@
 - `comment_generation_mode` 是全局 generate 表单态，不参与 tender identity，也不按 `gngk` 的 `tender_lx` / `fund_lx` 分桶。新会话和旧草稿缺省值都是 `on`；高级设置“批注生成”切换到“关”后写入当前 `ConversationFormDraft.comment_generation_mode=off`，提交 generate 时进入 `formDataConverter`。
 - `selected_skills` 是右侧任务上下文助手的会话级聊天草稿字段，不参与 tender identity、URL 判型或 generate payload。当前只允许一个显式 capability（`rewrite`），持久化在 `chat-storage.conversationDrafts[conversationId]` 里，并在普通聊天消息发送后立即清空。
 - `agent run` 的思考过程卡与任务 `agent-step` 卡是两套链路：右侧任务上下文助手过程卡存为普通 AI 消息 `metadata.agentThinking`，固定五阶段 `理解需求 / 执行任务 / 调用工具 / 异常与重试 / 汇总结论`；`thinking_stage`、`tool_call`、`task_accepted`、`needs_input`、`done`、`error` 只能写结构化摘要、guard 结果和工具名，不得把原始 `reasoning_content`、完整工具参数或隐藏推理写进消息。
+- `run_started.runtime` 允许 `deepagents` 和旧 `fake`；前端 parser 不能只接受 `fake`，否则真实任务上下文助手启动事件会被丢弃。用户未显式选择 skill 时，若后续 `thinking_stage.selected_skill` 或 `done.selected_skill` 是 `rewrite`，前端要同步用户消息 kind 并清理临时 thinking 卡；`task_accepted` 后由任务卡接管进度。
+- 右侧聊天输入框 busy 时必须锁定上传/更多操作入口，并用 loading icon 表达不可上传；任务上下文助手和任务队列运行中不能让上传入口保持普通可点样式。
 - `TenderFormShared` 的“生成方式”控件位于高级设置，选项为“工作流”和“智能体”；提交 generate 时 `BaseTenderFormData.generation_mode` 进入 `formDataConverter`，未显式选择时 converter 也要兜底为 `workflow`。
 - `TenderFormShared` 的“批注生成”控件位于高级设置，选项为“开”和“关”；提交 generate 时 `BaseTenderFormData.comment_generation_mode` 进入 `formDataConverter`，未显式选择时 converter 兜底为 `on`。
 - rewrite 请求 payload 不包含 `generation_mode` 或 `comment_generation_mode`。如果聊天草稿中保留 `generation_mode: "agent"` 或 `comment_generation_mode: "off"`，`ChatPanel` 创建 rewrite 任务时也不能透传它。
@@ -184,8 +186,9 @@
 - 删除当前会话时，优先回退到同类型最新会话；同类型为空再回退到全局剩余会话。
 - 智能体过程卡最终态是会话历史消息，运行中正文快照是临时 stream。`agent_step` 会在 `chat-storage` 里保存为 `metadata.messageKind = "agent-step"` 的 AI 消息，刷新后随会话消息恢复；但 `is_complete=false` 的高频正文片段只存在 `chatStreamStore.streams[taskId].agentSteps`，由 `ChatPanel` 合并进当前渲染，不直接持久化到会话消息。
 - 任务上下文助手过程卡在 `task_accepted` 时必须先收敛为 completed，再由现有 `task-log` / `task-content` 任务卡继续展示队列与 Word COM 进度；缺条件追问和普通 `done` 也保留过程卡历史，但单独追加助手文字回复。
+- `POST /api/agent/runs/stream` 如果连接结束但前端未收到 `task_accepted`、`needs_input`、`done` 或 `error` 终态，当前任务上下文助手过程卡必须收敛为 `error`，输入框 busy 状态同时释放；不能把无终态流留下成永久 `generating` 卡片。
 - `agent-step` 消息不纳入旧 `taskMessageMap` 的 `task-log` / `task-content` / `task-download` 三卡分组；done 事件仍只负责生成下载入口卡。
-- 参数生成智能体过程卡优先消费 `agent_step.content_agent` 结构字段，并按固定 `metadata.agentStepKey = "content_agent"` 聚合为一张“参数生成智能体”卡。后端结构字段按确定性规则提供 `phase`、阶段 `rounds`、问题数、修复数、`highlights` 和 `final_result`；前端主视图只展示阶段摘要和问题项，初稿正文、审核原始 JSON、修复正文和最终正文默认放在折叠详情里。
+- 参数生成智能体过程卡优先消费 `agent_step.content_agent` 结构字段，并按固定 `metadata.agentStepKey = "content_agent"` 聚合为一张“参数生成智能体”卡。后端结构字段按确定性规则提供 `phase`、阶段 `rounds`、问题数、修复数、`highlights` 和 `final_result`；前端主视图只展示阶段摘要和每轮问题项，不把最终态 `highlights` 额外渲染成“最终仍需关注”汇总块；初稿正文、审核原始 JSON、修复正文和最终正文默认放在折叠详情里。
 - 旧版无 `content_agent` 结构字段的 generate 子 agent 事件继续按 `metadata.agentStepNode + metadata.agentStepRound` 文本 fallback 展示：`content_generate_agent`、`content_verify_agent`、`content_revise_agent` 各自保留对应原始 streaming 内容；只有相同 `node + round` 的 streaming 增量才 upsert 同一张旧卡。
 - `comment_agent` 过程卡复用 `agent_step` 机制，但主展示数据来自 `comment_agent` 结构字段；运行中 `is_complete=false` 的结构化快照只进入 `chatStreamStore` 临时流并覆盖展示，不写入持久化 conversation message；完成事件 `is_complete=true` 的结构化最终态才固化到 `chatStore` 的 `agent-step` 卡片。`content` 只作旧事件 fallback。`comment_supplement` 任务允许显示 `comment_agent` 过程卡；generate 只有在 agent 模式或已有 agent-step 过程卡时才接收 `comment_agent`，workflow generate 不显示该卡。
 - 智能体过程卡状态必须单调收敛：同一聚合 key 一旦进入 `completed` / `error` / `cancelled`，迟到的 `is_complete=false` stream 事件不得把卡片降回 `generating`；新的旧式 agent-step 卡片到达时，应把同一任务下仍在运行的其它旧式 agent-step 卡片收口为 `completed`。任务 `done` / `error` / `cancelled` 终态也必须兜底收口同 task 下仍为 `generating` 的 agent-step 卡片，避免前端长期显示“生成中”。

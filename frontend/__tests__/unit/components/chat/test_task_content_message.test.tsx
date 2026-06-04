@@ -191,6 +191,45 @@ describe('TaskContentMessage', () => {
     expect(draftDetails).not.toHaveAttribute('open');
   });
 
+  it('does not repeat final content_agent highlights as a separate attention block', () => {
+    render(
+      <TaskContentMessage
+        message={createMessage({
+          content: '最终正文',
+          metadata: {
+            messageKind: 'agent-step',
+            taskKind: 'generate',
+            agentStepType: 'final',
+            agentStepNode: 'content_agent',
+            agentStepRound: 3,
+            contentAgent: {
+              phase: 'final',
+              summary: '最终完成，修复 3 轮，最终正文约 4 字。',
+              rounds: [],
+              highlights: [
+                {
+                  evidence: '最终重复提示',
+                  fix_hint: '不再单独展示',
+                },
+              ],
+              final_result: {
+                summary: '最终完成，修复 3 轮，最终正文约 4 字。',
+                revision_rounds: 3,
+                final_chars: 4,
+                issue_count: 1,
+                content: '最终正文',
+              },
+            },
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByText('最终完成')).toBeInTheDocument();
+    expect(screen.queryByText('最终仍需关注')).not.toBeInTheDocument();
+    expect(screen.queryByText('最终重复提示')).not.toBeInTheDocument();
+  });
+
   it('uses the Chinese comment_agent process card title', () => {
     render(
       <TaskContentMessage

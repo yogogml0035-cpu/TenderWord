@@ -339,7 +339,7 @@ export interface CreateTaskData {
 export type CreateTaskResponse = ApiResponse<CreateTaskData>;
 
 export type AgentSkill = 'rewrite';
-export type AgentRunRuntime = 'fake';
+export type AgentRunRuntime = 'fake' | 'deepagents';
 export type AgentThinkingStageKey = 'understand' | 'guard' | 'tool' | 'summary';
 export type AgentThinkingStageStatus = 'in_progress' | 'completed';
 export type AgentThinkingGuardResult = 'passed' | 'needs_input';

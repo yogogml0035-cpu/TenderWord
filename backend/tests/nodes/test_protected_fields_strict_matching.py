@@ -308,6 +308,21 @@ def test_insert_prefix_before_keyword_resets_generated_prefix_font_only() -> Non
     _assert_clean_generated_format(doc.created_ranges[-1])
 
 
+def test_insert_prefix_before_keyword_replaces_existing_number_prefix() -> None:
+    doc = _FakeDoc([("3、付款方式：旧值", False)])
+    protected_fields = {PAYMENT_METHOD_MARKER: doc.Range(0, doc.Content.End)}
+
+    assert insert_prefix_before_keyword(
+        doc,
+        PAYMENT_METHOD_MARKER,
+        "2、",
+        protected_fields,
+    )
+
+    assert doc._records[0].text == "2、付款方式：旧值"
+    _assert_clean_generated_format(doc.created_ranges[-1])
+
+
 def test_normalize_protected_field_paragraphs_and_collect_refresh_use_canonical_markers() -> None:
     doc = _FakeDoc(
         [

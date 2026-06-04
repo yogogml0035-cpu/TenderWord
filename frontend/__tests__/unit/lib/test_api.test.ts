@@ -667,7 +667,7 @@ describe('API Client', () => {
             run_id: 'run-1',
             conversation_id: 'conv-1',
             model: 'deepseek',
-            runtime: 'fake',
+            runtime: 'deepagents',
             selected_skills: ['rewrite'],
           },
         }) + '\n',
@@ -696,7 +696,7 @@ describe('API Client', () => {
             run_id: 'run-1',
             conversation_id: 'conv-1',
             model: 'deepseek',
-            runtime: 'fake',
+            runtime: 'deepagents',
             selected_skills: ['rewrite'],
           },
         },
@@ -759,6 +759,110 @@ describe('API Client', () => {
             message: '请先上传要重写的 Word 文件。',
             selected_skill: 'rewrite',
             missing_requirements: ['uploaded_word_file'],
+          },
+        },
+      ]);
+    });
+
+    it('parses backend null optional fields in agent run events', async () => {
+      globalThis.fetch = mockFetchStream([
+        JSON.stringify({
+          event: 'thinking_stage',
+          data: {
+            run_id: 'run-null-optionals',
+            stage: 'understand',
+            label: '理解需求',
+            status: 'completed',
+            summary: '已接收用户消息并等待能力确认。',
+            selected_skill: null,
+            guard_result: null,
+            tool_name: null,
+          },
+        }) + '\n',
+        JSON.stringify({
+          event: 'thinking_stage',
+          data: {
+            run_id: 'run-null-optionals',
+            stage: 'guard',
+            label: '检查上下文',
+            status: 'completed',
+            summary: 'fake runtime 暂时只支持 rewrite 任务创建。',
+            selected_skill: null,
+            guard_result: 'needs_input',
+            tool_name: null,
+          },
+        }) + '\n',
+        JSON.stringify({
+          event: 'needs_input',
+          data: {
+            run_id: 'run-null-optionals',
+            message: '请说明这次要执行 rewrite。',
+            selected_skill: null,
+            missing_requirements: ['selected_skill'],
+          },
+        }) + '\n',
+        JSON.stringify({
+          event: 'done',
+          data: {
+            run_id: 'run-null-optionals',
+            message: '本轮无需创建任务。',
+            task_id: null,
+            selected_skill: null,
+          },
+        }) + '\n',
+      ]);
+
+      const events: AgentRunEvent[] = [];
+
+      await streamAgentRun(validAgentRunStreamRequest, {
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+
+      expect(events).toEqual([
+        {
+          event: 'thinking_stage',
+          data: {
+            run_id: 'run-null-optionals',
+            stage: 'understand',
+            label: '理解需求',
+            status: 'completed',
+            summary: '已接收用户消息并等待能力确认。',
+            selected_skill: undefined,
+            guard_result: undefined,
+            tool_name: undefined,
+          },
+        },
+        {
+          event: 'thinking_stage',
+          data: {
+            run_id: 'run-null-optionals',
+            stage: 'guard',
+            label: '检查上下文',
+            status: 'completed',
+            summary: 'fake runtime 暂时只支持 rewrite 任务创建。',
+            selected_skill: undefined,
+            guard_result: 'needs_input',
+            tool_name: undefined,
+          },
+        },
+        {
+          event: 'needs_input',
+          data: {
+            run_id: 'run-null-optionals',
+            message: '请说明这次要执行 rewrite。',
+            selected_skill: undefined,
+            missing_requirements: ['selected_skill'],
+          },
+        },
+        {
+          event: 'done',
+          data: {
+            run_id: 'run-null-optionals',
+            message: '本轮无需创建任务。',
+            task_id: undefined,
+            selected_skill: undefined,
           },
         },
       ]);

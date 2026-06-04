@@ -14,7 +14,7 @@ router = APIRouter(prefix="/agent/runs", tags=["Agent Runs"])
 @router.post(
     "/stream",
     summary="任务上下文助手流式入口",
-    description="返回 NDJSON 流，当前使用 fake runtime 输出 agent run 事件。",
+    description="返回 NDJSON 流，由任务上下文助手理解上下文并调度受控 skill。",
 )
 async def stream_agent_run(
     request: Request,

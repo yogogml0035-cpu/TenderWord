@@ -496,11 +496,26 @@ test.describe('Agent run chat panel', () => {
             event: 'thinking_stage',
             data: {
               run_id: 'run-needs-input',
+              stage: 'understand',
+              label: '理解需求',
+              status: 'completed',
+              summary: '已接收用户消息并等待能力确认。',
+              selected_skill: null,
+              guard_result: null,
+              tool_name: null,
+            },
+          },
+          {
+            event: 'thinking_stage',
+            data: {
+              run_id: 'run-needs-input',
               stage: 'guard',
               label: '检查上下文',
               status: 'completed',
               summary: 'fake runtime 暂时只支持 rewrite 任务创建。',
+              selected_skill: null,
               guard_result: 'needs_input',
+              tool_name: null,
             },
           },
           {
@@ -508,6 +523,7 @@ test.describe('Agent run chat panel', () => {
             data: {
               run_id: 'run-needs-input',
               message: '请说明这次要执行 rewrite。',
+              selected_skill: null,
               missing_requirements: ['selected_skill'],
             },
           },

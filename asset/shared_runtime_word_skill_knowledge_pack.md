@@ -35,7 +35,11 @@
 - generate 任务通过 `DocumentService.create_task()` 进入 `GRAPH_REGISTRY`，按 `GenerateRequest.form_type` 选择具体 graph。
 - `GET /api/generate/{task_id}` 必须通过 `backend.services.task_service` 查询任务状态；API 路由中的函数内延迟导入也要使用 `backend.*` 包绝对路径，避免在不同启动/测试入口下退化为 `ModuleNotFoundError`。
 - rewrite 走 `SkillGraph.for_skill(...)` 返回的 task graph，但图结构真源已经收敛到 `backend/graphs/task_skill_workflows.py`；`backend/skills/rewrite/SKILL.md` 只保留 DeepAgents guide 和后台正文改写指令，不再承担 task workflow 装配。
-- `POST /api/agent/runs/stream` 的 rewrite 分支当前通过 `backend/agents/task_context_assistant/tools.py` 中的 `create_rewrite_task_tool` 复用 `DocumentService.create_rewrite_task()`；guard 先检查上传 Word 文件链路，其次检查 `rewrite history`，缺条件时返回 `needs_input`，不能直接操作 Word COM。
+- `POST /api/agent/runs/stream` 默认由 `backend/services/agent_run_service.py` 构造 `TaskContextDeepAgentsRunner`，再调用 `backend/agents/task_context_assistant/factory.py#create_task_context_assistant()`；生产路径的语义选择属于 DeepAgents + rewrite skill，不应在 service 层用关键词 `_select_skill()` 判断。service 层只做客观不可执行条件 preflight、NDJSON 事件映射和审计落盘。
+- task-context assistant 创建 rewrite 任务只能通过 `backend/agents/task_context_assistant/tools.py` 中的 `create_rewrite_task_tool` 复用 `DocumentService.create_rewrite_task()`；guard 先检查上传 Word 文件链路，其次检查 `rewrite history`，缺条件时返回 `needs_input`，不能直接操作 Word COM。
+- `POST /api/agent/runs/stream` 必须先流出 `run_started` 和 `thinking_stage: understand completed`，再等待 `create_rewrite_task_tool` 创建 rewrite 任务；任务创建慢时前端过程卡应推进到上下文检查阶段，不能卡在“理解需求”。
+- agent run NDJSON 事件来自 Pydantic `model_dump()`，可选字段会以 `null` 出现；前端 parser 必须把 `selected_skill: null`、`guard_result: null`、`tool_name: null` 和 `task_id: null` 当作缺省值处理，不能静默丢弃后续 `needs_input` / `done` 终态。
+- 会话已有可改写文档时，用户直接输入带章节号、指标、条款等文档定位线索和“需要/增加/调整/★/▲”等编辑线索的要求，应由 task-context DeepAgents 根据上下文选择 rewrite；“生成内容太多换行 / 内容需要紧凑 / 排版格式调整”等已生成内容风格或排版修改也属于 rewrite 语义。不要强迫用户显式输入 `$rewrite` 或“改写/重写”。
 - 上传 Word 文件后的修改统一走 rewrite。上传文件 rewrite 必须有非空用户重写指令、上传文件路径、当前页面 `form_type`、完整锚点、`tender_lx` 和 `fund_source_lx`；`tender_data_snapshot` 只是可选快照，不能因为未获取招标数据而阻断上传文件 rewrite。缺任一关键上下文时只返回 `needs_input`，不能自动猜测文档类型或锚点。
 - 上传文件 rewrite 依赖 `rewrite_source="uploaded_file"` 在 `TaskSkillGraphState` 中穿过 LangGraph schema，再由 `select_resolve_branch()` 路由到 `extract_rewrite_context`；新增分支标记必须同步声明到 task skill state，避免初始 state 被过滤后误回落到 rewrite history。
 - 上传文件 rewrite 的 task graph 必须保持单次 Word 删除：`extract_rewrite_context -> rewrite_text -> delete_section -> update_word`。不要同时保留 `extract_rewrite_context -> delete_section` 和 `rewrite_text -> delete_section`，否则 `delete_section` 会执行两次并可能与 `update_word` 并发抢占同一 Word COM 文档。
@@ -131,6 +135,7 @@
 - 不得用 `wdLineBreak`、`\v` 或手动换行兜底正文段落，避免多段正文被压成一段。
 - `gngk_hw_cz` 首次生成当前走 same-page direct replace：先清空 `第四章  招标需求` 到 `第五章  评标方法与程序` 之间的正文，再在第四章标题下方同页正文区域插入 AI 生成内容；该路径不再依赖 `交付日期：`、`付款方式：` 等受保护字段。删除阶段必须走 `backend/helper/word_helper/delete_ops.py` 的锁感知删除，遇到内容控件 / 字段 / 局部锁定时跳过锁定表格或段落，而不是对整段 `Range.Delete()` 硬删。删除后如果只剩锁定段落边界或内容控件边界，起点控制符清理也必须跳过锁定控制符，再交给同页可编辑点扫描定位插入点。连续文本行应合并为一次 Word 写入，避免每行插入后游标贴回锁定边界导致后续段落反插。
 - 受保护字段后的正文写回顺序固定为：先复用现成可写段 -> 段内拆段 -> 向后扫描 -> fail-fast。
+- 受保护字段行允许一个编号前缀；AI 输出带新编号而模板字段段已有旧编号时，`insert_prefix_before_keyword()` 必须替换旧前缀而不是叠加，避免出现 `3、2、付款方式：...` 后被严格字段匹配判为可疑命中。
 - 判断下一段是否可写时，不得把 Heading / `OutlineLevel` 当成锁；真正阻止写入的是 range 锁、字段锁、SDT 锁和文档保护。
 - AI 输出中的显式空行属于正文语义；拆块阶段必须保留空字符串行，cleanup 默认不得无差别压平正文段。
 

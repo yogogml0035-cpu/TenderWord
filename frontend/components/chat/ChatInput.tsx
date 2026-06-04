@@ -448,6 +448,7 @@ export function ChatInput({
                   type="button"
                   onClick={() => setMenuOpen((current) => !current)}
                   disabled={controlsLocked}
+                  aria-label={loading ? '更多操作处理中' : '打开更多操作'}
                   aria-expanded={menuOpen}
                   aria-haspopup="menu"
                   data-testid="chat-plus-trigger"
@@ -458,7 +459,14 @@ export function ChatInput({
                       : 'hover:border-blue-200 hover:bg-blue-50/70 hover:text-blue-700'
                   )}
                 >
-                  <Plus className="h-4 w-4" />
+                  {loading ? (
+                    <Loader2
+                      data-testid="chat-plus-loading-icon"
+                      className="h-4 w-4 animate-spin"
+                    />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
                 </button>
 
                 {menuOpen && !controlsLocked ? (

@@ -219,6 +219,15 @@ describe('ChatInput', () => {
     expect(screen.queryByTestId('chat-plus-menu')).not.toBeInTheDocument();
   });
 
+  it('shows a loading icon on the plus trigger while the composer is busy', () => {
+    render(<ControlledChatInput loading actionMode="cancel" />);
+
+    expect(screen.getByTestId('chat-plus-trigger')).toBeDisabled();
+    expect(screen.getByTestId('chat-plus-trigger')).toHaveAccessibleName('更多操作处理中');
+    expect(screen.getByTestId('chat-plus-loading-icon')).toHaveClass('animate-spin');
+    expect(screen.queryByTestId('chat-plus-menu')).not.toBeInTheDocument();
+  });
+
   it('shows the slash skill picker and stores the selected skill separately', () => {
     render(<ControlledChatInput />);
 

@@ -1389,6 +1389,76 @@ describe('ChatPanel', () => {
     });
   });
 
+  it('keeps the composer loading while agent run is active and errors incomplete streams', async () => {
+    const deferred = createDeferred<void>();
+
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请帮我修改第三章',
+        },
+      },
+    }));
+
+    mockStreamAgentRun.mockImplementationOnce(async (_payload, options = {}) => {
+      await options.onEvent?.({
+        event: 'run_started',
+        data: {
+          run_id: 'run-incomplete',
+          conversation_id: 'conv-1',
+          model: 'deepseek',
+          runtime: 'fake',
+          selected_skills: [],
+        },
+      });
+      await deferred.promise;
+    });
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-input')).toHaveAttribute('data-loading', 'true');
+      const conversation = useChatStore.getState().conversations[0];
+      const thinkingMessage = conversation.messages.find((message) => message.metadata?.agentThinking);
+      expect(thinkingMessage).toMatchObject({
+        status: 'generating',
+        metadata: {
+          agentThinking: {
+            runId: 'run-incomplete',
+          },
+        },
+      });
+    });
+
+    deferred.resolve();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-input')).toHaveAttribute('data-loading', 'false');
+      const conversation = useChatStore.getState().conversations[0];
+      const thinkingMessage = conversation.messages.find((message) => message.metadata?.agentThinking);
+      expect(thinkingMessage).toMatchObject({
+        status: 'error',
+        error: '任务助手流未返回完成事件，请重试',
+        metadata: {
+          agentThinking: {
+            terminalState: 'error',
+          },
+        },
+      });
+    });
+  });
+
   it('clears the rewrite draft immediately after agent run starts and restores pending task tracking on acceptance', async () => {
     const deferred = createDeferred<void>();
 

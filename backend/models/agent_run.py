@@ -132,7 +132,10 @@ class AgentRunStartedEventData(BaseModel):
     run_id: str = Field(..., description="本次 agent run ID")
     conversation_id: str = Field(..., description="会话 ID")
     model: LLMModel = Field(..., description="模型提供方")
-    runtime: Literal["fake"] = Field(default="fake", description="当前运行时类型")
+    runtime: Literal["fake", "deepagents"] = Field(
+        default="deepagents",
+        description="当前运行时类型",
+    )
     selected_skills: List[AgentSkill] = Field(default_factory=list, description="显式 skill")
 
 

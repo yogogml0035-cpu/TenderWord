@@ -113,6 +113,8 @@ def match_protected_field_line(
         "source_marker": source_marker,
         "source_colon": source_colon,
         "normalized_line": normalized_line,
+        "prefix_start": match.start("prefix"),
+        "prefix_end": match.end("prefix"),
         "field_start": match.start("field"),
         "field_end": match.end("field"),
         "colon_index": match.start("source_colon"),
@@ -610,13 +612,22 @@ def insert_prefix_before_keyword(
             return False
         visible_text = _strip_paragraph_tail(para_text)
         field_start = int(matched["field_start"])
+        prefix_start = int(matched.get("prefix_start", field_start))
+        prefix_end = int(matched.get("prefix_end", field_start))
         before = visible_text[:field_start].replace("\r", "").replace("\a", "")
         prefix_clean = prefix.replace("\r", "").replace("\n", "")
+        existing_prefix = str(matched.get("prefix") or "")
         if before.endswith(prefix_clean):
             return True
-        insert_pos = int(para_rng.Start) + field_start
-        doc.Range(insert_pos, insert_pos).InsertBefore(prefix_clean)
-        prefix_rng = doc.Range(insert_pos, insert_pos + len(prefix_clean))
+        if existing_prefix:
+            replace_start = int(para_rng.Start) + prefix_start
+            replace_end = int(para_rng.Start) + prefix_end
+            doc.Range(replace_start, replace_end).Text = prefix_clean
+            prefix_rng = doc.Range(replace_start, replace_start + len(prefix_clean))
+        else:
+            insert_pos = int(para_rng.Start) + field_start
+            doc.Range(insert_pos, insert_pos).InsertBefore(prefix_clean)
+            prefix_rng = doc.Range(insert_pos, insert_pos + len(prefix_clean))
         reset_generated_text_font_format(
             prefix_rng,
             font_name=font_name,

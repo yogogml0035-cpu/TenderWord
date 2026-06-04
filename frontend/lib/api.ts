@@ -10,6 +10,7 @@ import type {
   AgentRunEvent,
   AgentRunStreamRequest,
   AgentSkill,
+  AgentThinkingGuardResult,
   TenderData,
   TenderLookupResponse,
   TenderTypeInfo,
@@ -194,6 +195,13 @@ function parseAgentSkill(value: unknown): AgentSkill | null {
   return value === 'rewrite' ? value : null;
 }
 
+function parseOptionalAgentSkill(value: unknown): AgentSkill | undefined | null {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return parseAgentSkill(value);
+}
+
 function parseAgentSkillList(value: unknown): AgentSkill[] | null {
   if (!Array.isArray(value)) {
     return null;
@@ -215,6 +223,13 @@ function parseStringList(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : null;
 }
 
+function parseOptionalAgentGuardResult(value: unknown): AgentThinkingGuardResult | undefined | null {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return value === 'passed' || value === 'needs_input' ? value : null;
+}
+
 function parseAgentRunEvent(payload: unknown): AgentRunEvent | null {
   if (
     !isRecord(payload) ||
@@ -234,7 +249,7 @@ function parseAgentRunEvent(payload: unknown): AgentRunEvent | null {
         (payload.data.model !== 'deepseek' &&
           payload.data.model !== 'qwen' &&
           payload.data.model !== 'doubao') ||
-        payload.data.runtime !== 'fake' ||
+        (payload.data.runtime !== 'fake' && payload.data.runtime !== 'deepagents') ||
         !selectedSkills
       ) {
         return null;
@@ -252,16 +267,8 @@ function parseAgentRunEvent(payload: unknown): AgentRunEvent | null {
       };
     }
     case 'thinking_stage': {
-      const selectedSkill =
-        payload.data.selected_skill === undefined
-          ? undefined
-          : parseAgentSkill(payload.data.selected_skill);
-      const guardResult =
-        payload.data.guard_result === undefined ||
-        payload.data.guard_result === 'passed' ||
-        payload.data.guard_result === 'needs_input'
-          ? payload.data.guard_result
-          : null;
+      const selectedSkill = parseOptionalAgentSkill(payload.data.selected_skill);
+      const guardResult = parseOptionalAgentGuardResult(payload.data.guard_result);
       if (
         typeof payload.data.run_id !== 'string' ||
         (payload.data.stage !== 'understand' &&
@@ -271,9 +278,11 @@ function parseAgentRunEvent(payload: unknown): AgentRunEvent | null {
         typeof payload.data.label !== 'string' ||
         (payload.data.status !== 'in_progress' && payload.data.status !== 'completed') ||
         typeof payload.data.summary !== 'string' ||
-        (payload.data.selected_skill !== undefined && !selectedSkill) ||
+        selectedSkill === null ||
         guardResult === null ||
-        (payload.data.tool_name !== undefined && typeof payload.data.tool_name !== 'string')
+        (payload.data.tool_name !== undefined &&
+          payload.data.tool_name !== null &&
+          typeof payload.data.tool_name !== 'string')
       ) {
         return null;
       }
@@ -288,7 +297,8 @@ function parseAgentRunEvent(payload: unknown): AgentRunEvent | null {
           summary: payload.data.summary,
           selected_skill: selectedSkill ?? undefined,
           guard_result: guardResult,
-          tool_name: payload.data.tool_name,
+          tool_name:
+            typeof payload.data.tool_name === 'string' ? payload.data.tool_name : undefined,
         },
       };
     }
@@ -325,8 +335,11 @@ function parseAgentRunEvent(payload: unknown): AgentRunEvent | null {
         !taskKind ||
         status === null ||
         (payload.data.queue_position !== undefined &&
+          payload.data.queue_position !== null &&
           typeof payload.data.queue_position !== 'number') ||
-        (payload.data.waiting_count !== undefined && typeof payload.data.waiting_count !== 'number')
+        (payload.data.waiting_count !== undefined &&
+          payload.data.waiting_count !== null &&
+          typeof payload.data.waiting_count !== 'number')
       ) {
         return null;
       }
@@ -348,15 +361,12 @@ function parseAgentRunEvent(payload: unknown): AgentRunEvent | null {
       };
     }
     case 'needs_input': {
-      const selectedSkill =
-        payload.data.selected_skill === undefined
-          ? undefined
-          : parseAgentSkill(payload.data.selected_skill);
+      const selectedSkill = parseOptionalAgentSkill(payload.data.selected_skill);
       const missingRequirements = parseStringList(payload.data.missing_requirements);
       if (
         typeof payload.data.run_id !== 'string' ||
         typeof payload.data.message !== 'string' ||
-        (payload.data.selected_skill !== undefined && !selectedSkill) ||
+        selectedSkill === null ||
         !missingRequirements
       ) {
         return null;
@@ -373,15 +383,14 @@ function parseAgentRunEvent(payload: unknown): AgentRunEvent | null {
       };
     }
     case 'done': {
-      const selectedSkill =
-        payload.data.selected_skill === undefined
-          ? undefined
-          : parseAgentSkill(payload.data.selected_skill);
+      const selectedSkill = parseOptionalAgentSkill(payload.data.selected_skill);
       if (
         typeof payload.data.run_id !== 'string' ||
         typeof payload.data.message !== 'string' ||
-        (payload.data.task_id !== undefined && typeof payload.data.task_id !== 'string') ||
-        (payload.data.selected_skill !== undefined && !selectedSkill)
+        (payload.data.task_id !== undefined &&
+          payload.data.task_id !== null &&
+          typeof payload.data.task_id !== 'string') ||
+        selectedSkill === null
       ) {
         return null;
       }
@@ -391,7 +400,7 @@ function parseAgentRunEvent(payload: unknown): AgentRunEvent | null {
         data: {
           run_id: payload.data.run_id,
           message: payload.data.message,
-          task_id: payload.data.task_id,
+          task_id: typeof payload.data.task_id === 'string' ? payload.data.task_id : undefined,
           selected_skill: selectedSkill ?? undefined,
         },
       };

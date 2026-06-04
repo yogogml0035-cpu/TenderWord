@@ -350,17 +350,6 @@ function ContentAgentProcessView({ contentAgent }: { contentAgent: SSEContentAge
         <ContentAgentRoundBlock key={`${round.phase}-${round.round}-${index}`} round={round} />
       ))}
 
-      {contentAgent.highlights.length > 0 && contentAgent.phase === 'final' && (
-        <section className="rounded border border-amber-200 bg-amber-50/70 p-3">
-          <h4 className="text-sm font-medium text-amber-800">最终仍需关注</h4>
-          <ul className="mt-2 space-y-2">
-            {contentAgent.highlights.map((finding, index) => (
-              <ContentAgentFindingItem key={`final-highlight-${index}`} finding={finding} />
-            ))}
-          </ul>
-        </section>
-      )}
-
       {finalResult && (
         <section className="rounded border border-gray-200 bg-white p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">

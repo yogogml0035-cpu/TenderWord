@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 
-from backend.agents.task_context_assistant import AgentRunAuditLogger
+from backend.agents.task_context_assistant import (
+    CREATE_REWRITE_TASK_TOOL,
+    AgentRunAuditLogger,
+)
 from backend.models import AgentRunStreamRequest, GenerateResponse, TaskKind, TaskStatus
+from backend.services import agent_run_service as agent_run_service_module
 from backend.services.agent_run_service import AgentRunService
 
 
@@ -29,6 +35,40 @@ TENDER_DATA_SNAPSHOT = {
     "fund_source_lx": 1,
 }
 
+
+@pytest.mark.asyncio
+async def test_stream_emits_understand_before_rewrite_task_creation_finishes(tmp_path) -> None:
+    async def _slow_create_rewrite_task(**_kwargs) -> GenerateResponse:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    service = AgentRunService(
+        run_id_factory=lambda: "run-slow-rewrite",
+        rewrite_task_executor=_slow_create_rewrite_task,
+        audit_logger=AgentRunAuditLogger(logs_dir=tmp_path),
+    )
+    payload = AgentRunStreamRequest.model_validate(
+        {
+            "conversation_id": "conv-slow-rewrite",
+            "message": "请改写第三包",
+            "model": "deepseek",
+            "selected_skills": ["rewrite"],
+            "context_snapshot": {
+                "rewrite_available": True,
+                "uploaded_files": [],
+            },
+        }
+    )
+
+    stream = service.stream(_ConnectedRequest(), payload)
+    first_event = json.loads(await stream.__anext__())
+    second_event = json.loads(await asyncio.wait_for(stream.__anext__(), timeout=0.1))
+    await stream.aclose()
+
+    assert first_event["event"] == "run_started"
+    assert second_event["event"] == "thinking_stage"
+    assert second_event["data"]["stage"] == "understand"
+    assert second_event["data"]["status"] == "completed"
 
 @pytest.mark.asyncio
 async def test_stream_emits_task_created_sequence_for_rewrite(tmp_path) -> None:
@@ -114,6 +154,100 @@ async def test_stream_emits_task_created_sequence_for_rewrite(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_stream_infers_rewrite_from_direct_document_requirement(tmp_path) -> None:
+    async def _create_rewrite_task(**kwargs) -> GenerateResponse:
+        assert kwargs["conversation_id"] == "conv-direct-rewrite"
+        assert kwargs["user_prompt"] == "3.1、SID ≥1100 mm前需要有★指标"
+        return GenerateResponse(
+            success=True,
+            task_id="rewrite-direct-task-1",
+            message="queued",
+            task_kind=TaskKind.REWRITE,
+            status=TaskStatus.QUEUED,
+            queue_position=0,
+            waiting_count=0,
+        )
+
+    service = AgentRunService(
+        run_id_factory=lambda: "run-direct-rewrite",
+        rewrite_task_executor=_create_rewrite_task,
+        audit_logger=AgentRunAuditLogger(logs_dir=tmp_path),
+    )
+    payload = AgentRunStreamRequest.model_validate(
+        {
+            "conversation_id": "conv-direct-rewrite",
+            "message": "3.1、SID ≥1100 mm前需要有★指标",
+            "model": "deepseek",
+            "selected_skills": [],
+            "context_snapshot": {
+                "rewrite_available": True,
+                "uploaded_files": [],
+            },
+        }
+    )
+
+    events = await _collect_events(service, payload)
+
+    assert [item["event"] for item in events] == [
+        "run_started",
+        "thinking_stage",
+        "thinking_stage",
+        "tool_call",
+        "task_accepted",
+        "done",
+    ]
+    assert events[2]["data"]["selected_skill"] == "rewrite"
+    assert events[4]["data"]["task_id"] == "rewrite-direct-task-1"
+
+
+@pytest.mark.asyncio
+async def test_stream_infers_rewrite_from_layout_requirement(tmp_path) -> None:
+    async def _create_rewrite_task(**kwargs) -> GenerateResponse:
+        assert kwargs["conversation_id"] == "conv-layout-rewrite"
+        assert kwargs["user_prompt"] == "生成内容太多换行，我需要生成的内容紧凑"
+        return GenerateResponse(
+            success=True,
+            task_id="rewrite-layout-task-1",
+            message="queued",
+            task_kind=TaskKind.REWRITE,
+            status=TaskStatus.QUEUED,
+            queue_position=0,
+            waiting_count=0,
+        )
+
+    service = AgentRunService(
+        run_id_factory=lambda: "run-layout-rewrite",
+        rewrite_task_executor=_create_rewrite_task,
+        audit_logger=AgentRunAuditLogger(logs_dir=tmp_path),
+    )
+    payload = AgentRunStreamRequest.model_validate(
+        {
+            "conversation_id": "conv-layout-rewrite",
+            "message": "生成内容太多换行，我需要生成的内容紧凑",
+            "model": "deepseek",
+            "selected_skills": [],
+            "context_snapshot": {
+                "rewrite_available": True,
+                "uploaded_files": [],
+            },
+        }
+    )
+
+    events = await _collect_events(service, payload)
+
+    assert [item["event"] for item in events] == [
+        "run_started",
+        "thinking_stage",
+        "thinking_stage",
+        "tool_call",
+        "task_accepted",
+        "done",
+    ]
+    assert events[2]["data"]["selected_skill"] == "rewrite"
+    assert events[4]["data"]["task_id"] == "rewrite-layout-task-1"
+
+
+@pytest.mark.asyncio
 async def test_stream_returns_needs_input_when_rewrite_context_missing(tmp_path) -> None:
     audit_logger = AgentRunAuditLogger(logs_dir=tmp_path)
     service = AgentRunService(run_id_factory=lambda: "run-2", audit_logger=audit_logger)
@@ -154,7 +288,7 @@ async def test_stream_returns_needs_input_when_rewrite_context_missing(tmp_path)
 @pytest.mark.asyncio
 async def test_stream_returns_error_terminal_when_rewrite_tool_raises(tmp_path) -> None:
     async def _raise(**_kwargs) -> GenerateResponse:
-        raise RuntimeError("Traceback (most recent call last): password=boom")
+        raise RuntimeError("Traceback (most recent call last): private marker")
 
     audit_logger = AgentRunAuditLogger(logs_dir=tmp_path)
     service = AgentRunService(
@@ -177,13 +311,13 @@ async def test_stream_returns_error_terminal_when_rewrite_tool_raises(tmp_path) 
 
     events = await _collect_events(service, payload)
 
-    assert [item["event"] for item in events] == ["run_started", "error"]
+    assert [item["event"] for item in events] == ["run_started", "thinking_stage", "error"]
     assert events[-1]["data"]["code"] == "AGENT_RUN_FAILED"
     assert events[-1]["data"]["run_id"] == "run-3"
 
     log_text = audit_logger.log_path_for_run("run-3").read_text(encoding="utf-8")
     assert "Traceback" not in log_text
-    assert "password" not in log_text.lower()
+    assert "private marker" not in log_text.lower()
     log_entries = [json.loads(line) for line in log_text.splitlines() if line.strip()]
     assert log_entries[-1]["summary"] == "agent run 执行失败，请稍后重试"
 
@@ -460,3 +594,96 @@ async def test_stream_accepts_uploaded_rewrite_without_tender_data_snapshot(tmp_
         "done",
     ]
     assert events[4]["data"]["task_id"] == "rewrite-upload-task-no-tender-data"
+
+@pytest.mark.asyncio
+async def test_default_stream_delegates_available_rewrite_context_to_deepagents(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        async def ainvoke(self, payload, config):
+            captured["payload"] = payload
+            captured["config"] = config
+            return {
+                "messages": [
+                    {
+                        "type": "tool",
+                        "name": CREATE_REWRITE_TASK_TOOL,
+                        "content": json.dumps(
+                            {
+                                "success": True,
+                                "task_id": "rewrite-deepagents-task-1",
+                                "message": "queued",
+                                "task_kind": "rewrite",
+                                "status": "queued",
+                                "queue_position": 0,
+                                "waiting_count": 0,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    }
+                ]
+            }
+
+    def _fake_create_task_context_assistant(**kwargs):
+        captured["model"] = kwargs["model"]
+        captured["tool_names"] = [tool.name for tool in kwargs["tools"]]
+        return SimpleNamespace(
+            agent=FakeAgent(),
+            cleanup=lambda: captured.setdefault("cleaned", True),
+        )
+
+    monkeypatch.setattr(
+        agent_run_service_module,
+        "create_generation_chat_model",
+        lambda provider: f"chat-model:{provider}",
+    )
+    monkeypatch.setattr(
+        agent_run_service_module,
+        "create_task_context_assistant",
+        _fake_create_task_context_assistant,
+    )
+
+    service = AgentRunService(
+        run_id_factory=lambda: "run-deepagents",
+        audit_logger=AgentRunAuditLogger(logs_dir=tmp_path),
+    )
+    payload = AgentRunStreamRequest.model_validate(
+        {
+            "conversation_id": "conv-deepagents",
+            "message": "生成内容太多换行，我需要生成的内容紧凑",
+            "model": "deepseek",
+            "selected_skills": [],
+            "context_snapshot": {
+                "rewrite_available": True,
+                "uploaded_files": [],
+            },
+        }
+    )
+
+    events = await _collect_events(service, payload)
+
+    assert captured["model"] == "chat-model:deepseek"
+    assert captured["tool_names"] == [
+        "create_rewrite_task_tool",
+        "read_current_conversation_summary_tool",
+        "read_current_task_public_summary_tool",
+    ]
+    agent_prompt = captured["payload"]["messages"][0]["content"]
+    assert "用户不需要显式输入" in agent_prompt
+    assert "生成内容太多换行，我需要生成的内容紧凑" in agent_prompt
+    assert captured["config"]["configurable"]["conversation_id"] == "conv-deepagents"
+    assert captured["cleaned"] is True
+    assert [item["event"] for item in events] == [
+        "run_started",
+        "thinking_stage",
+        "thinking_stage",
+        "tool_call",
+        "task_accepted",
+        "done",
+    ]
+    assert events[0]["data"]["runtime"] == "deepagents"
+    assert events[2]["data"]["selected_skill"] == "rewrite"
+    assert events[4]["data"]["task_id"] == "rewrite-deepagents-task-1"

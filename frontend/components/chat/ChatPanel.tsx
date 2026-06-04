@@ -533,6 +533,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
       let streamFinished = false;
       let taskAccepted = false;
+      let latestRunId: string | undefined;
 
       const syncUserChatKind = (chatKind: ChatMessageKind) => {
         if (!userMessageId || chatKind === 'normal' || chatKind === 'task-notice') {
@@ -547,6 +548,8 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
 
       try {
         const handleStreamEvent = (event: AgentRunEvent) => {
+          latestRunId = event.data.run_id;
+
           if (event.event === 'run_started') {
             suppressThinkingCardForSkill(event.data.selected_skills[0]);
             upsertThinkingMessage(event, 'generating');
@@ -664,6 +667,39 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         );
 
         if (!streamFinished && taskAccepted) {
+          streamFinished = true;
+        }
+
+        if (!streamFinished) {
+          const incompleteMessage = '任务助手流未返回完成事件，请重试';
+          const currentThinkingState = thinkingCardState as AgentThinkingCardState | null;
+          if (thinkingMessageId && currentThinkingState) {
+            const finalizedThinkingState =
+              applyAgentThinkingEvent(currentThinkingState, {
+                event: 'error',
+                data: {
+                  run_id: latestRunId || currentThinkingState.runId || 'unknown-run',
+                  code: 'AGENT_RUN_STREAM_INCOMPLETE',
+                  message: incompleteMessage,
+                },
+              }) || currentThinkingState;
+            thinkingCardState = finalizedThinkingState;
+            updateMessage(conversationId, thinkingMessageId, {
+              content: '',
+              status: 'error',
+              error: incompleteMessage,
+              metadata: {
+                agentThinking: finalizedThinkingState,
+              },
+            });
+          } else {
+            const ensuredAiMessageId = ensureAiMessage();
+            updateMessage(conversationId, ensuredAiMessageId, {
+              content: incompleteMessage,
+              status: 'error',
+              error: incompleteMessage,
+            });
+          }
           streamFinished = true;
         }
       } catch (error) {
