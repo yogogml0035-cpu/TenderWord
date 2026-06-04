@@ -59,7 +59,6 @@ node_modules-*/
 *.tsbuildinfo
 
 # 文档和测试目录
-docs/
 test_word/
 test_doc/
 用户使用手册.md
