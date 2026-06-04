@@ -1,6 +1,6 @@
 # TenderWord 智能体操作指南
 
-本文件只保存每次 AI 编码都需要遵守的仓库级规则。系统说明看 `ARCHITECTURE.md` 和 `coding_maps/SYSTEM_MAP.md`，接口边界看 `INTERFACES.md`，子项目实现事实看各自 `.planning/codebase/`，长期专题经验看 `asset/`。
+本文件只保存每次 AI 编码都必须遵守的仓库级规则；系统说明看 `ARCHITECTURE.md` 和 `coding_maps/SYSTEM_MAP.md`，接口边界看 `INTERFACES.md`，子项目事实看各自 `.planning/codebase/`，长期经验看 `asset/`。
 
 ## 1. 项目定位
 
@@ -8,13 +8,14 @@ TenderWord 是招标文档生成、修改、补充批注和模板复用系统。
 
 当前前端 UI 类型是 `xjcg`、`gngk`、`gjgk`；后端 `FormType` 是 `xjcg_tender`、`gngk_hw_zc_tender`、`gngk_hw_cz_tender`、`gngk_fw_zc_tender`、`gngk_fw_cz_tender`、`gjgk_tender`。`gngk` 在前端只是一种 UI 类型，提交时必须由共享 helper 按 `tender_lx + fund_lx + ifzgcg` 分派到后端 form type。
 
-## 2. 真源顺序
+前端包管理器是 npm，后端依赖以 `requirements.txt` 为准；完整 Word 生成验收必须回到 Windows Python + Word COM 环境。
+
+## 2. 真源与分层
 
 - 代码是真源；文档只做导航和稳定规则沉淀。
 - API、SSE、任务状态、共享类型，以后端 API/model 和前端类型/API client 为准。
 - `ARCHITECTURE.md`、`INTERFACES.md`、`coding_maps/SYSTEM_MAP.md` 是系统级地图，不覆盖代码真源。
-- 子项目 `.planning/codebase/` 是事实地图，只用于快速理解结构、风险和验证入口。
-- `asset/` 是长期知识包；README 只承担安装和启动导航。
+- 子项目 `.planning/codebase/` 是事实地图，只用于快速理解结构、风险和验证入口；`asset/` 是长期知识包。
 - `.env`、token、客户原文、私有路径和真实密钥不得进入文档、日志、测试夹具或最终回复。
 
 ## 3. 工作方式
@@ -58,6 +59,7 @@ TenderWord 是招标文档生成、修改、补充批注和模板复用系统。
 - 正文写回使用真实段落边界；显式空行属于正文语义，拆块和 cleanup 不得无差别压平。
 - `content_agent`、`comment_agent` 和 `agent_step` 是共享运行时契约；类型 graph 不复制智能体分支，过程事件不替代 `done`/`error` 终态。
 - 批注与样式写回摘要属于任务结果和 SSE `done` 契约，不得在 state、任务结果或前端下载卡中丢失。
+- Agent run 只做任务创建前置流；只有 `task_accepted` 才进入后台 task/SSE/下载链路，`needs_input` 不创建任务也不复制任务状态机。
 
 ## 7. 文档与知识回写
 

@@ -1,6 +1,6 @@
 # 前端风险事实地图
 
-**分析日期：** 2026-05-31
+**分析日期：** 2026-06-04
 
 **范围：** `frontend/` 当前技术债、脆弱点、安全边界和测试缺口。
 
@@ -13,18 +13,23 @@
 
 **gngk form type 共享 helper 不能被绕过：**
 - 文件：`frontend/lib/gngkFormType.ts`、`frontend/lib/formDataConverter.ts`、`frontend/components/chat/ChatPanel.tsx`
-- 风险：调用点私自分派会让 generate 和 edit 走不同后端 graph。
-- 安全修改：分派规则只改 `resolveGngkFormType()`，并同步覆盖生成转换器与 ChatPanel edit 测试。
+- 风险：调用点私自分派会让 generate 和上传文件 rewrite 走不同后端 graph。
+- 安全修改：分派规则只改 `resolveGngkFormType()`，并同步覆盖生成转换器与 ChatPanel 上传文件 rewrite 测试。
 
 **会话、URL 和 draft 优先级复杂：**
 - 文件：`frontend/app/tender/page.tsx`、`frontend/stores/chatStore.ts`、`frontend/components/forms/TenderFormShared.tsx`、`frontend/utils/tenderTypeMapper.ts`
 - 风险：直接改 URL 参数或反转初始化优先级会导致深链、草稿和会话身份错位。
 - 安全修改：保持 `draft > URL > default`，深链参数先写 draft，canonical URL 只走 mapper/store helper。
 
-**初次生成字段容易泄漏到 rewrite/edit：**
+**初次生成字段容易泄漏到 rewrite：**
 - 文件：`frontend/components/forms/TenderFormShared.tsx`、`frontend/lib/formDataConverter.ts`、`frontend/components/chat/ChatPanel.tsx`
-- 风险：`generation_mode` 或 `comment_generation_mode` 若被带入 rewrite/edit，会让修改链路误用初次生成分支。
-- 安全修改：生成转换器负责兜底默认值；ChatPanel 构造 rewrite/edit payload 时不得透传这些字段。
+- 风险：`generation_mode` 或 `comment_generation_mode` 若被带入 rewrite，会让修改链路误用初次生成分支。
+- 安全修改：生成转换器负责兜底默认值；ChatPanel 构造 agent run / rewrite 上下文时不得透传这些字段。
+
+**Agent run 只能作为任务创建前置流：**
+- 文件：`frontend/components/chat/ChatPanel.tsx`、`frontend/lib/api.ts`、`frontend/types/api.ts`
+- 风险：如果前端把 agent run 的 `run_started` / `thinking_stage` 当成后台任务状态，会和 task summary、SSE、取消和下载链路分叉。
+- 安全修改：只有 `task_accepted` 才调用 `startTask()`；`needs_input` 和非任务 `done` 只更新普通 AI 消息或思考卡。
 
 ## 已知脆弱区
 
@@ -40,7 +45,7 @@
 
 **补充批注动作只应出现在初次生成下载卡：**
 - 文件：`frontend/components/chat/MessageList.tsx`、`frontend/components/chat/TaskDownloadMessage.tsx`、`frontend/components/chat/ChatPanel.tsx`
-- 风险：如果 rewrite/edit/comment_supplement 下载卡也允许继续补充批注，会重复基于衍生文件创建任务，且后端 latest `rewrite_state` 校验可能拒绝或产生用户困惑。
+- 风险：如果 rewrite 或 comment_supplement 下载卡也允许继续补充批注，会重复基于衍生文件创建任务，且后端 latest `rewrite_state` 校验可能拒绝或产生用户困惑。
 - 安全修改：保持 UI 只在 generate 下载卡暴露动作；创建任务时只传会话 id、当前 output_file 和模型，后端负责最新文件校验。
 
 **模板候选安全边界在后端：**
@@ -77,17 +82,17 @@
 
 - 真实后端 + Word COM 生成链路无法由常规前端 Jest 覆盖。
 - 模板候选和 SSE 的复杂 UI 状态仍可补更多 mock E2E。
-- gngk 新类型或子类型分派变化时，需要同时覆盖 `gngkFormType`、converter、ChatPanel edit、URL、store 会话匹配。
+- gngk 新类型或子类型分派变化时，需要同时覆盖 `gngkFormType`、converter、ChatPanel 上传文件 rewrite、URL、store 会话匹配。
 - 智能体过程卡需要继续覆盖 named event、未完成快照缓存、完成态持久化、失败/取消不补普通 task-content 卡。
 
 ## 回归风险检查
 
 - 改 API：同步 `types/api.ts`、`lib/api.ts`、后端模型和测试。
-- 改 gngk 分派：同步 `gngkFormType`、generate converter 与 edit builder。
+- 改 gngk 分派：同步 `gngkFormType`、generate converter 与 ChatPanel 上传文件 rewrite 上下文。
 - 改 URL：同步 mapper、store、页面启动和 E2E。
 - 改任务 UI：同步 task group store、stream store、SSE hook、agent-step 持久化和消息组件测试。
 - 改模板候选：同步 API client、弹窗、表单回填和知识包。
 
 ---
 
-*前端风险审计：2026-05-31*
+*前端风险审计：2026-06-04*

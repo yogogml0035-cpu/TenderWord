@@ -1,6 +1,6 @@
 # 后端集成事实地图
 
-**分析日期：** 2026-06-01
+**分析日期：** 2026-06-04
 
 **范围：** `backend/` 对外部服务、浏览器客户端、文件系统、Word COM 和运行环境的集成边界。
 
@@ -10,14 +10,14 @@
 
 - 后端 API 前缀是 `/api`，router 注册在 `backend/main.py`。
 - 前端应只通过 `frontend/lib/api.ts` 调用后端。
-- 生成、edit、补充批注、任务、SSE、用户流式、上传、下载、招标详情、模板候选都在 `backend/api/` 下暴露。
+- 生成、agent run、补充批注、任务、SSE、会话心跳、上传、下载、招标详情、模板候选都在 `backend/api/` 下暴露。
 
 ### LLM Provider
 
 - LLM 流式调用集中在 `backend/util/common_util/llm_stream_utils.py`。
 - 当前模型枚举在 `backend/models/generate.py`：`deepseek`、`qwen`、`doubao`。
 - Provider 配置在 `backend/config/settings.py`，包括 key、base URL、模型名和 `LLM_STREAM_TIMEOUT_SECONDS`。
-- 生成、rewrite、edit、普通聊天和模板候选 AI 重排都应复用统一流式超时配置。
+- 生成、rewrite、agent run、补充批注和模板候选 AI 重排都应复用统一流式超时配置。
 - 初次生成的 `generation_mode=agent` 通过 `backend/agents/generation/` 调用 DeepAgents；模型配置仍复用 `settings.get_llm_config()` 和 OpenAI-compatible client 参数。
 - `comment_agent` 运行时位于 `backend/agents/comments/`，通过统一批注 prompt、LangChain agent 和工具门禁完成批注候选生成、锚点校验和写回前复核。
 - `content_agent` 工作区默认位于 `backend/prompts_log/content_agent_workspace/`，作为智能体输入、草稿、审核、修订和最终正文的本地审计边界。
@@ -30,13 +30,22 @@
 - `SSEManager.send_agent_step()` 会进入事件缓冲，断线重连时可随 `Last-Event-ID` 重放。
 - 前端必须在 `frontend/lib/sse.ts` 显式监听 `agent_step` named event，再由 `frontend/hooks/useChatSSE.ts` 映射为过程卡。
 
+### Agent Run 与上传文件 rewrite
+
+- 后端入口：`POST /api/agent/runs/stream`。
+- 流式格式：NDJSON，事件包括 `run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`needs_input`、`done`、`error`。
+- 请求模型：`AgentRunStreamRequest`，只接收受控 `context_snapshot`、`selected_skills` 和用户消息。
+- 当前支持的 skill 是 `rewrite`；普通聊天未确认独立后台任务能力。
+- 上传 Word 文件 rewrite 需要 `file_path`、`form_type`、完整 `insertion_config`、`tender_lx`、`fund_source_lx`，`tender_data_snapshot` 只是可选快照。
+- 任务创建仍复用 `DocumentService.create_rewrite_task()`，后续排队、SSE、取消和下载不在 agent run 中复制状态机。
+
 ### 补充批注任务
 
 - 后端入口：`POST /api/comment-supplement`。
 - 任务类型：`comment_supplement`，复用任务状态、心跳、SSE、下载和 `agent_step` 事件通道。
 - Service 边界：`DocumentService.create_comment_supplement_task()` 校验会话 latest `rewrite_state`、`polished_text` 和当前下载文件路径，拒绝缺失或过期来源。
 - Graph 边界：`CommentSupplementGraph` 只处理当前文档副本的补充批注，不重新生成正文；`comment_agent` 运行时来自 `backend/agents/comments/`，成功后更新会话 latest `rewrite_state.prepared_doc_path`。
-- 前端触发来自初次生成下载卡，rewrite/edit/comment_supplement 下载卡不应再次显示补充批注动作。
+- 前端触发来自初次生成下载卡，rewrite 和 comment_supplement 下载卡不应再次显示补充批注动作。
 
 ### 初次生成文件与批注开关
 
@@ -118,4 +127,4 @@
 
 ---
 
-*后端集成分析：2026-06-01*
+*后端集成分析：2026-06-04*

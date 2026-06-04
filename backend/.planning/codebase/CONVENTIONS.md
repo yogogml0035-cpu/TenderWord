@@ -1,6 +1,6 @@
 # 后端编码约定事实地图
 
-**分析日期：** 2026-06-01
+**分析日期：** 2026-06-04
 
 **范围：** `backend/` 源码和测试约定。
 
@@ -30,7 +30,7 @@
 ## 错误处理
 
 - API 输入用 Pydantic 模型和 validator 表达。
-- API 错误返回应带稳定 code/message，便于前端 `ApiError` 展示与排障。
+- API 错误返回应带稳定 code/message，便于前端 `ApiError` 展示与排障；agent run 的业务缺条件应优先返回 `needs_input` 事件。
 - 任务执行失败必须标记任务失败并发出 SSE `error` 或终态事件。
 - Word 契约错误、受保护字段缺失、direct-replace 范围非法应 fail-fast。
 - 不在用户可见 `progress_log` 中写异常堆栈或内部排障细节。
@@ -40,7 +40,7 @@
 - `progress_log`：用户可理解的节点进度、状态、简短失败原因。
 - `execution_log`：排障细节、异常栈、关键参数摘要。
 - `prompt_log`：prompt 记录。
-- `skill_audit_log`：rewrite/edit task skill 审计。
+- `skill_audit_log`：rewrite task skill 审计。
 - SSE 事件桥接由 `backend/util/log_util/sse_log_handler.py` 负责。
 
 ## Graph 与节点约定
@@ -75,13 +75,15 @@
 ## API 与模型约定
 
 - `backend/models/` 是后端 API 和运行态模型真源。
-- `GenerateRequest.form_type` 变化必须同步前端类型、`gngkFormType`、转换器、ChatPanel edit 调用点和测试。
+- `GenerateRequest.form_type` 变化必须同步前端类型、`gngkFormType`、转换器、ChatPanel 上传文件 rewrite 调用点和测试。
 - SSE 事件类型变化必须同步后端模型、发送方、前端 union 类型、解析和测试。
-- `generation_style` 是 generate-only 字段，不进入 rewrite/edit 请求模型、skill state 或 prompt surface。
-- `generation_mode` 是 generate-only 字段，不进入 rewrite/edit 请求模型、skill state 或 prompt surface。
-- `comment_generation_mode` 是 generate-only 字段，不进入 rewrite/edit 请求模型、skill state 或 prompt surface；`off` 只跳过初次生成批注分支。
+- `generation_style` 是 generate-only 字段，不进入 rewrite 请求模型、skill state 或 prompt surface。
+- `generation_mode` 是 generate-only 字段，不进入 rewrite 请求模型、skill state 或 prompt surface。
+- `comment_generation_mode` 是 generate-only 字段，不进入 rewrite 请求模型、skill state 或 prompt surface；`off` 只跳过初次生成批注分支。
 - 生成文件输入只接受 `template` 与 `tender_params`，service 装配为 `template_path` 与 `tender_param_paths` 后再交给节点。
 - `agent_step` 是智能体生成的用户态过程事件，不替代 `done` / `error` 终态；新增或调整时必须同步后端模型、SSE manager、前端 named event、类型和 store 测试。
+- `AgentRunStreamRequest.context_snapshot` 是受控最小上下文，不能在 agent run 中读取前端未提交的本地状态或外部文件路径。
+- 上传文件 rewrite 只能由 agent run tool 创建后台 rewrite task，不新增独立 edit task kind 或 `/api/edit` 兼容入口。
 
 ## 测试约定
 
@@ -93,4 +95,4 @@
 
 ---
 
-*后端编码约定分析：2026-06-01*
+*后端编码约定分析：2026-06-04*

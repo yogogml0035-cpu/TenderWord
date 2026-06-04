@@ -1,6 +1,6 @@
 # 前端结构事实地图
 
-**分析日期：** 2026-05-31
+**分析日期：** 2026-06-04
 
 **范围：** `frontend/` 源码、测试和前端配置。
 
@@ -51,7 +51,7 @@ frontend/
 - `frontend/app/tender/page.tsx`：工作台、URL 接入、会话启动、招标详情预取、会话心跳。
 - `frontend/components/chat/TenderTypeSidebar.tsx`：类型分组、会话选择/创建/重命名/删除。
 - `frontend/components/chat/FormPanel.tsx`：表单挂载、生成任务创建、任务状态 overlay、SSE hook 绑定。
-- `frontend/components/chat/ChatPanel.tsx`：普通聊天、rewrite、edit、补充批注、上传 edit 文件、取消、下载，并避免智能体过程卡被旧 `aiText` 运行态覆盖。
+- `frontend/components/chat/ChatPanel.tsx`：agent run、rewrite、补充批注、上传 rewrite 文件、取消、下载，并避免智能体过程卡被旧 `aiText` 运行态覆盖。
 - `frontend/components/chat/TaskDownloadMessage.tsx`：下载入口和初次生成下载卡上的补充批注动作。
 
 ### 表单
@@ -105,7 +105,7 @@ frontend/
 - 新页面：`frontend/app/`。
 - 新工作台组件：`frontend/components/chat/`。
 - 新表单控件：`frontend/components/forms/`，共享小控件放 `frontend/components/forms/shared/`。
-- 新 API helper：`frontend/lib/api.ts`，类型同步放 `frontend/types/api.ts`。
+- 新 API helper：`frontend/lib/api.ts`，类型同步放 `frontend/types/api.ts`；NDJSON agent run 继续走 `streamAgentRun()`。
 - 新 URL / 类型映射：`frontend/utils/tenderTypeMapper.ts`。
 - 新会话或任务状态：优先在 `frontend/stores/chatStore.ts` 或相关专门 store。
 - 新 SSE 行为：`frontend/lib/sse.ts` 或 `frontend/hooks/useChatSSE.ts`，并补类型、hook、store 和必要 E2E 测试。
@@ -118,4 +118,4 @@ frontend/
 
 ---
 
-*前端结构分析：2026-05-31*
+*前端结构分析：2026-06-04*

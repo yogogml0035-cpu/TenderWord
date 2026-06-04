@@ -1,6 +1,6 @@
 # 后端技术栈事实地图
 
-**分析日期：** 2026-05-31
+**分析日期：** 2026-06-04
 
 **范围：** `backend/`、后端依赖、后端启动/验证相关根脚本。
 
@@ -9,7 +9,7 @@
 - **Python 3.10+**：FastAPI、LangGraph、任务队列、Word COM 自动化和 pytest 测试。
 - **PowerShell**：Windows 启动入口 `scripts/start-dev.ps1`，负责虚拟环境、端口和 uvicorn 启动检查。
 - **Bash**：WSL 启动入口 `scripts/start-dev-wsl.sh`，前端在 WSL 运行，后端委托 Windows PowerShell。
-- **Markdown**：`backend/skills/rewrite/SKILL.md` 与 `backend/skills/edit/SKILL.md` 是 task skill 声明。
+- **Markdown**：`backend/skills/rewrite/SKILL.md` 是 task skill 声明。
 
 完整后端生成能力必须运行在 Windows Python 上，因为 Word COM 依赖 pywin32 与本机 Office COM 注册。WSL 可以承担无 COM 的后端单测，但不能替代真实 Word 生成验收。
 
@@ -28,7 +28,7 @@
 | Uvicorn | ASGI 本地服务 | `backend/main.py`, `scripts/start-dev.ps1` |
 | Pydantic v2 | 请求/响应模型、枚举、字段校验 | `backend/models/` |
 | Pydantic Settings | `.env` 配置加载 | `backend/config/settings.py` |
-| LangGraph | 生成、rewrite/edit、用户路由工作流 | `backend/graphs/` |
+| LangGraph | 生成、rewrite 和补充批注工作流 | `backend/graphs/` |
 | DeepAgents | `generation_mode=agent` 的内容生成主/子智能体运行时 | `backend/agents/generation/` |
 | LangChain agents | `comment_agent` 批注校验/写回工具运行时 | `backend/agents/comments/` |
 | pywin32 | Word COM 自动化 | `backend/util/word_util/` |
@@ -45,7 +45,7 @@
 - `python-dotenv`：环境变量辅助。
 - `pywin32`：Windows 上的 Word COM。
 - `structlog`：依赖中声明；当前主要日志实现仍以 stdlib logging 和自有 log util 为主。
-- `requests`：代码中用于招标详情和模板候选 HTTP 调用；如果后续清理依赖，应确认它是否需要补入依赖清单或替换为已声明 client。
+- `requests`：代码中用于招标详情和模板候选 HTTP 调用，但当前未显式列入 `requirements.txt`；调整依赖时需要补齐或替换为已声明 client。
 
 ## 配置
 
@@ -100,4 +100,4 @@ TMPDIR=/tmp TMP=/tmp TEMP=/tmp .venv-linux/bin/python -m pytest tests -v
 
 ---
 
-*后端技术栈分析：2026-05-31*
+*后端技术栈分析：2026-06-04*

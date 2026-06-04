@@ -1,6 +1,6 @@
 # 后端测试事实地图
 
-**分析日期：** 2026-06-01
+**分析日期：** 2026-06-04
 
 **范围：** `backend/tests/` 与后端验证命令。
 
@@ -34,7 +34,7 @@ backend/tests/
 
 ## 关键测试覆盖
 
-- API：`backend/tests/api/test_generate_api.py`、`backend/tests/api/test_tender_api.py`。
+- API：`backend/tests/api/test_generate_api.py`、`backend/tests/api/test_agent_run_api.py`、`backend/tests/api/test_tender_api.py`。
 - 类型配置：`backend/tests/config/test_tender_config_protected_fields.py`。
 - graph 路由：`backend/tests/graphs/test_gngk_tender_graph.py`、`backend/tests/graphs/test_gjgk_tender_graph.py`。
 - generation mode：`backend/tests/graphs/test_generation_mode_branching.py`、`test_generation_mode_workflow.py` 和各类型 `test_*_generation_mode_agent.py`。
@@ -43,7 +43,8 @@ backend/tests/
 - Word helper：`backend/tests/helper/test_content_ops.py`、`test_delete_ops.py`、`test_paragraph_boundary_ops.py`、`test_inline_style_ops.py`。
 - 节点：`backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`、`test_gngk_fw_zc_update_word.py`、`test_common_update_word_split.py`、`test_comment_writeback.py`。
 - prompt：`backend/tests/prompts/test_generate_prompt_routing.py`、`test_comment_prompt_reference_contract.py`。
-- service：`backend/tests/services/test_document_service_initial_state.py`、`test_document_service_task_result.py`、`test_user_routing_service.py`。
+- service：`backend/tests/services/test_document_service_initial_state.py`、`test_document_service_task_result.py`、`test_agent_run_service.py`。
+- 任务上下文助手：`backend/tests/agents/test_task_context_assistant_factory.py`、`test_task_context_assistant_tools.py`、`test_task_context_assistant_logging.py`。
 - agent_step SSE：`backend/tests/models/test_sse_agent_step.py`、`backend/tests/services/test_sse_manager_agent_step.py`、`backend/tests/services/test_document_service_agent_step.py`。
 - content_verify_agent 无效审核项过滤：`backend/tests/agents/test_generation_content_agent.py` 覆盖“实质一致 / 无问题 / 无需修改” finding 折叠为 `[]`。
 - 补充批注任务：`backend/tests/api/test_comment_supplement_api.py`、`backend/tests/graphs/test_comment_supplement_graph.py`、`backend/tests/services/test_document_service_comment_supplement.py`、`backend/tests/nodes/test_comment_agent_writeback_node.py`。
@@ -107,8 +108,9 @@ git diff --check
 - prompt：`backend/tests/prompts/` 与调用该 prompt 的节点/service 测试。
 - content_agent / agent_step：`backend/tests/agents/`、`backend/tests/nodes/test_content_agent_generate.py`、`backend/tests/services/test_sse_manager_agent_step.py`、`backend/tests/services/test_document_service_agent_step.py`。
 - comment_supplement：补充批注 API、graph、service 和 `comment_agent` 写回节点测试。
+- agent run / 上传文件 rewrite：`backend/tests/api/test_agent_run_api.py`、`backend/tests/services/test_agent_run_service.py`、`backend/tests/agents/test_task_context_assistant_tools.py`、`backend/tests/progress/test_uploaded_rewrite_progress_tracking.py`。
 - 任务/SSE：`backend/tests/services/`、`backend/tests/progress/`、相关 API 测试。
 
 ---
 
-*后端测试分析：2026-06-01*
+*后端测试分析：2026-06-04*

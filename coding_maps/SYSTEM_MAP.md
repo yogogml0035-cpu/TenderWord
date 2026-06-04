@@ -1,6 +1,6 @@
 # TenderWord 系统地图
 
-**生成日期：** 2026-06-02
+**生成日期：** 2026-06-04
 
 本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它不替代代码真源、不替代根级 `AGENTS.md` 的执行红线，也不替代 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 的子系统事实文档。
 
@@ -10,8 +10,8 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 
 | 子项目 | 职责 | 事实文档 |
 | --- | --- | --- |
-| `backend/` | FastAPI API、任务队列、SSE、LangGraph、补充批注图、Prompt Layer、DeepAgents content_agent、LangChain comment_agent、Word COM、模板候选代理、上传与下载。 | `backend/.planning/codebase/` |
-| `frontend/` | Next.js 工作台、招标类型表单、会话与 URL 身份、任务 SSE / agent-step 展示、补充批注动作、模板候选弹窗、上传下载交互。 | `frontend/.planning/codebase/` |
+| `backend/` | FastAPI API、任务队列、SSE、LangGraph、补充批注图、任务上下文助手 agent run、Prompt Layer、DeepAgents content_agent、LangChain comment_agent、Word COM、模板候选代理、上传与下载。 | `backend/.planning/codebase/` |
+| `frontend/` | Next.js 工作台、招标类型表单、会话与 URL 身份、agent run 上下文、任务 SSE / agent-step 展示、补充批注动作、模板候选弹窗、上传下载交互。 | `frontend/.planning/codebase/` |
 
 长期业务规则和跨主题回归风险沉淀在 `asset/`，当前索引是 `asset/README.md`。首次安装和启动入口保留在 `README.md`。
 
@@ -44,7 +44,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - 后端 `backend/api/agent.py` 返回 NDJSON agent run 事件，编排真源是 `backend/services/agent_run_service.py`；这里负责显式 `selected_skills`、自然语言兜底、guard、`needs_input`、`task_accepted` 和 JSONL 审计日志。
 - task-context assistant 运行时与 tool 真源在 `backend/agents/task_context_assistant/`：它只暴露受控 rewrite skill、受控上下文读取工具，以及复用 `DocumentService.create_rewrite_task()` 的 `create_rewrite_task_tool`。
 - rewrite 真正进入队列后，仍走既有 task runtime：声明和 guide 在 `backend/skills/rewrite/`，执行图在 `backend/graphs/skill_graph.py` 与 `backend/graphs/task_skill_workflows.py`，后续 SSE、取消、下载和结果卡继续复用同一任务主链路。
-- 上传 Word 文件后的修改统一走 rewrite，并由 `context_snapshot.rewrite_context` 提供当前页面 `form_type`、锚点、`tender_lx`、`fund_source_lx` 和招标数据快照；`/api/edit`、edit skill、edit task kind 和 `create_edit_task_tool` 已删除。
+- 上传 Word 文件后的修改统一走 rewrite，并由 `context_snapshot.rewrite_context` 提供当前页面 `form_type`、锚点、`tender_lx`、`fund_source_lx` 和可选招标数据快照；`/api/edit`、edit skill 和 edit task kind 已删除。
 
 ### 补充批注任务
 
@@ -70,6 +70,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 | 招标类型身份 | `frontend/types/index.ts`, `frontend/utils/tenderTypeMapper.ts`, `frontend/lib/gngkFormType.ts`, `frontend/lib/formDataConverter.ts` | `backend/models/generate.py`, `backend/config/tender_config.py`, `backend/services/document_service.py` | 新增或修改类型必须同步前端 UI 类型、后端 `form_type`、URL、graph/state/node、anchor 和测试。 |
 | 会话和 URL | `frontend/stores/chatStore.ts`, `frontend/utils/tenderTypeMapper.ts` | `backend/api/conversations.py`, `backend/services/conversation_service.py` | 地址栏、会话身份、任务恢复和后端心跳需保持一致。 |
 | 任务与 SSE | `frontend/hooks/useChatSSE.ts`, `frontend/lib/sse.ts`, `frontend/stores/*` | `backend/api/stream.py`, `backend/core/sse_manager.py`, `backend/task/task_queue_manager.py` | 新增 SSE 事件必须同步后端模型、前端 named event、类型、解析和测试。 |
+| Agent run / rewrite | `frontend/components/chat/ChatPanel.tsx`, `frontend/lib/api.ts` | `backend/api/agent.py`, `backend/services/agent_run_service.py`, `backend/agents/task_context_assistant/` | `task_accepted` 后交给既有 task / SSE 链路；`needs_input` 不创建后台任务。 |
 | Word 运行时 | 无前端直接入口 | `backend/graphs/`, `backend/nodes/`, `backend/helper/word_helper/`, `backend/util/word_util/` | 前端不得触碰 COM；后端新增 graph/node/tool 不得绕过队列、锁、取消检查和进度包装。 |
 | Prompt / LLM / 智能体 | 无前端直接入口 | `backend/prompts/`, `backend/agents/generation/`, `backend/agents/comments/`, `backend/util/common_util/llm_stream_utils.py` | prompt 渲染、智能体协议、超时、解析和结构校验要集中维护。 |
 | 模板候选 | `frontend/components/forms/TemplateCandidateDialog.tsx`, `frontend/lib/api.ts` | `backend/api/template_candidates.py` | 前端不得直接调用外部候选接口或外部文件 URL。 |
@@ -97,6 +98,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 再按任务读取：
 
 - 任务与队列：`backend/task/task_queue_manager.py`、`backend/services/document_service.py`
+- 任务上下文助手：`backend/api/agent.py`、`backend/services/agent_run_service.py`、`backend/agents/task_context_assistant/`
 - SSE：`backend/core/sse_manager.py`、`backend/api/stream.py`
 - 补充批注：`backend/api/comment_supplement.py`、`backend/graphs/comment_supplement_graph.py`、`backend/nodes/common_word_nodes/comment_supplement.py`、`backend/agents/comments/`
 - Prompt / skill / 智能体：`backend/prompts/`、`backend/skills/`、`backend/agents/generation/`、`backend/agents/comments/`
@@ -119,6 +121,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - URL 映射：`frontend/utils/tenderTypeMapper.ts`
 - 表单：`frontend/components/forms/TenderFormShared.tsx`
 - 聊天任务：`frontend/components/chat/ChatPanel.tsx`、`frontend/components/chat/FormPanel.tsx`
+- Agent run：`frontend/lib/api.ts`、`frontend/types/api.ts`、`frontend/components/chat/ChatPanel.tsx`
 - 智能体过程卡：`frontend/hooks/useChatSSE.ts`、`frontend/stores/chatStore.ts`、`frontend/stores/chatStreamStore.ts`、`frontend/components/chat/TaskContentMessage.tsx`
 - 补充批注动作：`frontend/components/chat/TaskDownloadMessage.tsx`、`frontend/components/chat/MessageList.tsx`、`frontend/components/chat/ChatPanel.tsx`
 
@@ -170,6 +173,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - `comment_generation_mode` 是否只影响初次生成批注分支，且没有进入 rewrite 请求模型或 skill state。
 - 新增或修改 SSE 事件是否同步后端事件模型、前端事件 union、`frontend/lib/sse.ts` named event、`useChatSSE` 和测试。
 - 新增或修改任务类型是否同步 `TaskKind`、任务状态、SSE `done` payload、下载卡和会话结果语义。
+- Agent run 是否只在 `task_accepted` 后启动后台任务，且没有复制 task/SSE/下载状态机。
 - Word COM 相关改动是否仍然经过任务队列、graph 锁、取消检查和进度包装。
 - Prompt、LLM 流式、`content_agent` 或 `comment_agent` 改动是否复用 `LLM_STREAM_TIMEOUT_SECONDS`，并保留 Prompt Layer 与智能体协议边界。
 - `content_verify_agent` 是否只输出真实需修复 findings，并把“无问题 / 无需修改”的无效审核项折叠为 `[]`。

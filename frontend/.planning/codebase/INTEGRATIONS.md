@@ -1,6 +1,6 @@
 # 前端集成事实地图
 
-**分析日期：** 2026-05-31
+**分析日期：** 2026-06-04
 
 **范围：** `frontend/` 对后端 API、浏览器运行时、存储、测试工具和本地启动环境的集成边界。
 
@@ -15,13 +15,12 @@
 关键 helper 包括：
 
 - `createGenerateTask()`
-- `createEditTask()`
 - `createCommentSupplementTask()`
 - `getTaskStatus()`
 - `getTaskList()`
 - `cancelTask()`
 - `sendTaskHeartbeat()`
-- `streamUserMessage()`
+- `streamAgentRun()`
 - `uploadFile()` / `uploadFiles()`
 - `downloadFile()` / `getDownloadUrl()`
 - `fetchTemplateCandidates()`
@@ -36,7 +35,7 @@
 - `frontend/hooks/useChatSSE.ts` 把后端 SSE 事件映射到 `chatStreamStore` 与 `chatStore`。
 - `agent_step` 是 named SSE event，必须由 `frontend/lib/sse.ts` 显式注册 `addEventListener` 后才能到达 `useChatSSE`。
 - `comment_supplement` 任务的 `comment_agent` 过程卡也走 `agent_step`；完成态才持久化为会话消息。
-- 用户流式聊天/rewrite 通过 `streamUserMessage()` 解析 NDJSON。
+- 任务上下文助手通过 `streamAgentRun()` 解析 `/api/agent/runs/stream` 的 NDJSON 事件；后台任务只在 `task_accepted` 后进入任务/SSE 链路。
 
 ## 浏览器存储
 
@@ -50,7 +49,7 @@
 - 浏览器不直接访问本地文件系统。
 - 文件上传通过 `FormData` 发往后端 upload API。
 - 初次生成只使用模板文件和技术参数文件；模板候选选择成功后只回填模板文件槽位。
-- edit 上传使用独立 `edit_source` 文件类型，不复用初次生成上传槽位。
+- 上传文件修改使用独立 `rewrite_source` 文件类型，不复用初次生成上传槽位。
 - 下载通过后端 download API 或模板候选代理下载 URL。
 - 模板候选外部文件 URL 不应在前端直接请求。
 - 初次生成下载卡可以触发补充批注任务；该任务必须通过项目内 `POST /api/comment-supplement` 创建，不能直接在前端修改文档。
@@ -90,12 +89,12 @@
 ## 集成风险
 
 - API shape 变化必须同步 `frontend/types/api.ts`、`frontend/lib/api.ts`、后端模型和测试。
-- `generation_mode` 和 `comment_generation_mode` 都是初次生成字段，不能透传到 rewrite/edit。
+- `generation_mode` 和 `comment_generation_mode` 都是初次生成字段，不能透传到 rewrite。
 - SSE 事件变化必须同步事件类型、底层 named event 注册、解析、store 映射和测试。
-- gngk form type 分派必须集中在 `frontend/lib/gngkFormType.ts`，`formDataConverter.ts` 与 `ChatPanel.tsx` 只能调用共享 helper。
+- gngk form type 分派必须集中在 `frontend/lib/gngkFormType.ts`，`formDataConverter.ts` 与 `ChatPanel.tsx` 的上传文件 rewrite 上下文只能调用共享 helper。
 - URL 参数变化必须同步 `tenderTypeMapper.ts`、store、页面启动和 E2E。
 - 模板候选改动不能绕过后端代理。
 
 ---
 
-*前端集成分析：2026-05-31*
+*前端集成分析：2026-06-04*

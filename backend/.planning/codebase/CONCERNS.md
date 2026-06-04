@@ -1,6 +1,6 @@
 # 后端风险事实地图
 
-**分析日期：** 2026-06-01
+**分析日期：** 2026-06-04
 
 **范围：** `backend/` 当前技术债、脆弱点、安全边界和测试缺口。
 
@@ -29,7 +29,12 @@
 **补充批注依赖 latest 会话快照：**
 - 文件：`backend/api/comment_supplement.py`、`backend/services/document_service.py`、`backend/graphs/comment_supplement_graph.py`
 - 风险：如果 source file 不是 latest `rewrite_state.prepared_doc_path`，或会话缺少 `polished_text`，补充批注会基于过期正文写回。
-- 安全修改：创建任务前继续校验 latest `rewrite_state`、当前文件存在且路径匹配；成功后必须把新副本写回 latest `rewrite_state`，避免后续 rewrite/edit 回退到旧文件。
+- 安全修改：创建任务前继续校验 latest `rewrite_state`、当前文件存在且路径匹配；成功后必须把新副本写回 latest `rewrite_state`，避免后续 rewrite 回退到旧文件。
+
+**Agent run 是任务创建前置流，不是第二套任务状态机：**
+- 文件：`backend/api/agent.py`、`backend/services/agent_run_service.py`、`backend/agents/task_context_assistant/`
+- 风险：如果在 agent run 内复制排队、SSE、下载或取消状态，会和 `TaskQueueManager` 的真实任务生命周期分叉。
+- 安全修改：agent run 只输出 `needs_input` 或 `task_accepted`；后台任务创建后立刻交回既有 task / SSE 链路。
 
 ## 已知脆弱区
 
@@ -64,10 +69,10 @@
 - 风险：模型把“无问题 / 无需修改”写成 finding 时，如果不折叠为 `[]`，会误触发修订轮次、污染过程卡 highlights，并让用户误以为存在真实问题。
 - 安全修改：审核提示词和解析层都要保留无效审核项过滤；修改审核 JSON 解析或 repair 逻辑时同步覆盖 `backend/tests/agents/test_generation_content_agent.py`。
 
-**generation mode 不得影响 rewrite/edit：**
+**generation mode 不得影响 rewrite：**
 - 文件：`backend/models/generate.py`、`backend/services/document_service.py`、`backend/states/base_state.py`
-- 风险：把 `generation_mode` 混入 rewrite/edit 会让显式修改链路误触初次生成智能体分支。
-- 安全修改：`generation_mode` 只进入 generate request 和 generate initial state；rewrite/edit 请求模型、skill state 和 prompt surface 不接收该字段。
+- 风险：把 `generation_mode` 混入 rewrite 会让显式修改链路误触初次生成智能体分支。
+- 安全修改：`generation_mode` 只进入 generate request 和 generate initial state；rewrite 请求模型、skill state 和 prompt surface 不接收该字段。
 
 ## 安全关注
 
@@ -99,7 +104,7 @@
 
 ## 回归风险检查
 
-- 改 `FormType` 或 graph registry：同步前端 union、`gngkFormType`、converter、ChatPanel edit 调用点、graph 测试。
+- 改 `FormType` 或 graph registry：同步前端 union、`gngkFormType`、converter、ChatPanel 上传文件 rewrite 调用点、graph 测试。
 - 改 SSE event：同步后端模型、发送方、前端类型、`useChatSSE` 和测试。
 - 改 Word helper：同步相关节点测试和 `asset/shared_runtime_word_skill_knowledge_pack.md`。
 - 改 `generation_mode`、`content_agent` 或 `agent_step`：同步 generation mode graph 测试、agent 运行时测试、SSE manager 测试、前端事件解析测试和相关知识包。
@@ -108,4 +113,4 @@
 
 ---
 
-*后端风险审计：2026-06-01*
+*后端风险审计：2026-06-04*

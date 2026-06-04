@@ -1,6 +1,6 @@
 # 前端编码约定事实地图
 
-**分析日期：** 2026-05-31
+**分析日期：** 2026-06-04
 
 **范围：** `frontend/` 源码、类型、测试和 UI 状态约定。
 
@@ -45,9 +45,9 @@
 - 后端 form type union 在 `frontend/types/api.ts`。
 - `frontend/lib/gngkFormType.ts` 是 `gngk` 后端 form type 分派真源。
 - `frontend/lib/formDataConverter.ts` 负责生成任务转换，并调用 `resolveGngkFormType()`；缺省 `generation_mode` 要归一为 `workflow`。
-- 生成任务只提交模板文件和技术参数文件：`files.template`、`files.tender_params` 转为 `file_paths.template`、`file_paths.tender_params`；edit 上传使用独立 `edit_source`。
-- `frontend/components/chat/ChatPanel.tsx` 负责 edit 任务构造，并调用 `resolveGngkFormType()`。
-- 修改 `gngk` 的 `tender_lx + fund_lx + ifzgcg` 分派时，只改共享 helper，并补生成与 edit 测试。
+- 生成任务只提交模板文件和技术参数文件：`files.template`、`files.tender_params` 转为 `file_paths.template`、`file_paths.tender_params`；上传文件 rewrite 使用独立 `rewrite_source`。
+- `frontend/components/chat/ChatPanel.tsx` 负责构造 agent run 上下文和上传文件 rewrite 上下文，并调用 `resolveGngkFormType()`。
+- 修改 `gngk` 的 `tender_lx + fund_lx + ifzgcg` 分派时，只改共享 helper，并补生成与上传文件 rewrite 测试。
 - 默认锚点在 `frontend/components/forms/tenderFormConfig.ts`；后端最终锚点配置在 `backend/config/tender_config.py`。
 
 ## SSE 与任务约定
@@ -81,4 +81,4 @@
 
 ---
 
-*前端编码约定分析：2026-05-31*
+*前端编码约定分析：2026-06-04*

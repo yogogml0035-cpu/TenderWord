@@ -1,7 +1,7 @@
-<!-- refreshed: 2026-06-01 -->
+<!-- refreshed: 2026-06-04 -->
 # 后端架构事实地图
 
-**分析日期：** 2026-06-01
+**分析日期：** 2026-06-04
 
 **范围：** 仅覆盖 `backend/`，并在启动、验证和 Windows/WSL 运行边界上参考根级 `AGENTS.md`、`README.md` 与 `scripts/`。
 
@@ -12,8 +12,9 @@ FastAPI /api
   -> API 路由
   -> service 编排
   -> 任务队列 + SSE
-  -> LangGraph 生成 / rewrite / edit / 补充批注 / 用户路由
+  -> LangGraph 生成 / rewrite / 补充批注
   -> Prompt Layer + LLM provider / DeepAgents content_agent / LangChain comment_agent
+  -> task-context assistant agent run
   -> Word helper + Word COM utility
   -> 上传目录中的产物与下载接口
 ```
@@ -24,19 +25,19 @@ FastAPI /api
 
 | 层 | 职责 | 关键路径 |
 | --- | --- | --- |
-| API 层 | 暴露 `/api` 下的生成、编辑、补充批注、任务、SSE、上传下载、招标详情和模板候选接口 | `backend/api/` |
+| API 层 | 暴露 `/api` 下的生成、任务上下文助手、补充批注、任务、SSE、上传下载、招标详情、会话心跳和模板候选接口 | `backend/api/` |
 | 模型层 | 定义 Pydantic 请求、响应、任务、SSE 和模板候选模型 | `backend/models/` |
-| Service 层 | 任务创建、graph 选择、会话快照、用户路由、模板候选 AI 重排 | `backend/services/` |
+| Service 层 | 任务创建、graph 选择、会话快照、agent run 事件、模板候选 AI 重排 | `backend/services/` |
 | 任务层 | 队列、串行化、取消、心跳、进度、任务状态快照 | `backend/task/task_queue_manager.py` |
 | SSE 层 | 事件缓存、客户端连接、重放、日志桥接 | `backend/core/sse_manager.py`, `backend/api/stream.py`, `backend/util/log_util/sse_log_handler.py` |
-| Graph 层 | 标准生成图、补充批注图、rewrite/edit skill 图、用户路由图 | `backend/graphs/` |
+| Graph 层 | 标准生成图、补充批注图和 rewrite skill 图 | `backend/graphs/` |
 | State 层 | 公共 graph state 与类型专属 state | `backend/states/` |
 | Node 层 | Word 准备、抽参、删除、替换、生成、批注、写回等 graph 节点 | `backend/nodes/` |
 | Word 业务 helper | 受保护字段、正文边界、插入、cleanup、样式回填、范围工具 | `backend/helper/word_helper/` |
 | 技术 utility | Word COM 生命周期、上传存储、HTTP、LLM 流式、日志 | `backend/util/` |
 | 内容智能体 | 初次生成 `generation_mode=agent` 的 DeepAgents 主/子智能体、工作区和步骤事件 | `backend/agents/generation/` |
 | 批注智能体 | `comment_agent` 批注候选生成、锚点校验、工具门禁、审计工作区和写回统计 | `backend/agents/comments/` |
-| Prompt / Skill | prompt 渲染、prompt-bound 解析、rewrite/edit task skill 声明 | `backend/prompts/`, `backend/skills/` |
+| Prompt / Skill | prompt 渲染、prompt-bound 解析、rewrite task skill 声明 | `backend/prompts/`, `backend/skills/` |
 | 配置 | 环境配置、招标类型锚点、字号、content mode、profile、family | `backend/config/settings.py`, `backend/config/tender_config.py` |
 
 ## 关键运行链路
@@ -76,14 +77,16 @@ FastAPI /api
 - `backend/agents/comments/tools.py` 提供批注引用校验和边界内写回工具；真正 Word 写入仍由当前 graph 节点线程完成，不由工具绕过 Word COM 边界。
 - `backend/agents/comments/workspace.py` 写入批注智能体审计日志，日志只记录排障所需结构化信息，不进入用户态进度。
 
-### 普通聊天、rewrite、edit 与补充批注
+### 任务上下文助手、rewrite 与补充批注
 
-- 普通聊天和 rewrite 判路走 `POST /api/user/stream`，返回 NDJSON。
-- 用户路由由 `backend/services/user_routing_service.py`、`backend/graphs/user_graph.py` 与 `backend/prompts/routing_prompt.py` 负责。
-- rewrite/edit 是 task skill runtime，声明在 `backend/skills/rewrite/` 与 `backend/skills/edit/`，执行图由 `backend/graphs/skill_graph.py` 构造。
-- edit 是显式入口，只走 `POST /api/edit`，不并回 user stream 的模型判路链路。
+- 右侧聊天走 `POST /api/agent/runs/stream`，返回 NDJSON agent run 事件。
+- Agent run 的编排真源是 `backend/services/agent_run_service.py` 和 `backend/agents/task_context_assistant/`。
+- 当前 agent run 暴露的后台任务能力只有 rewrite；缺少会话文档、上传文件上下文或必要锚点时返回 `needs_input`，不会创建任务。
+- rewrite 是 task skill runtime，声明在 `backend/skills/rewrite/`，执行图由 `backend/graphs/skill_graph.py` 构造。
+- 上传 Word 文件后的修改同样走 rewrite：agent run 通过受控上下文把 `file_path`、`form_type`、锚点、`tender_lx` 和 `fund_source_lx` 交给 `DocumentService.create_rewrite_task()`。
+- `/api/edit`、edit task kind、edit skill 和旧用户路由入口当前不存在；旧调用表现为 404，不作为兼容链路维护。
 - 补充批注是独立任务入口，只走 `POST /api/comment-supplement`；`DocumentService.create_comment_supplement_task()` 校验 latest `rewrite_state` 和当前下载文件后，提交 `CommentSupplementGraph`。
-- `CommentSupplementGraph` 的节点顺序是 `prepare_comment_supplement -> comment_agent -> finalize_comment_supplement`，`comment_agent` 运行时来自 `backend/agents/comments/`；成功后会把新的 `prepared_doc_path` 写回会话 latest `rewrite_state`，后续 rewrite/edit 应继续基于该副本。
+- `CommentSupplementGraph` 的节点顺序是 `prepare_comment_supplement -> comment_agent -> finalize_comment_supplement`，`comment_agent` 运行时来自 `backend/agents/comments/`；成功后会把新的 `prepared_doc_path` 写回会话 latest `rewrite_state`，后续 rewrite 应继续基于该副本。
 
 ### 模板候选
 
@@ -99,7 +102,7 @@ FastAPI /api
 
 ## 核心抽象
 
-- `GenerateRequest` / `EditTaskRequest`：生成和显式 edit 的 API 输入契约，位于 `backend/models/generate.py`。
+- `GenerateRequest` / `AgentRunStreamRequest`：初次生成与任务上下文助手的 API 输入契约，位于 `backend/models/generate.py` 和 `backend/models/agent_run.py`。
 - `GenerationMode`：初次生成方式契约，`workflow` 是默认旧路径，`agent` 只影响初次 generate 的生成节点选择。
 - `CommentGenerationMode`：初次生成批注开关，`on` 是默认路径，`off` 只影响 generate 的 AI 批注分支。
 - `FormType` -> `GRAPH_REGISTRY`：`xjcg_tender`、四个 `gngk_*_tender` 和 `gjgk_tender` 到 graph class 的延迟注册，位于 `backend/services/document_service.py`。
@@ -110,7 +113,7 @@ FastAPI /api
 - `comment_agent`：批注生成/校验/写回增强运行时，可服务 agent generate 和独立补充批注任务，但不能替代任务终态。
 - `TaskQueueManager`：长任务队列、串行化、心跳和进度真源。
 - `SSEManager`：任务事件缓存、跨线程发送和重连重放。
-- `TaskSkillWorkflow`：rewrite/edit skill 从 `SKILL.md` 与 `scripts/workflow.py` 声明可执行节点序列。
+- `TaskSkillWorkflow`：rewrite skill 从 `SKILL.md` 与 runtime 脚本声明可执行节点序列。
 - Prompt Layer：`backend/prompts/` 只负责 prompt 渲染与机器契约相关解析。
 - `TenderAnchorConfig`：锚点、字号、content start/update mode 和受保护字段 profile 的配置真源。
 
@@ -121,7 +124,7 @@ FastAPI /api
 - Word 业务逻辑优先下沉到 `backend/helper/word_helper/`；`backend/util/word_util/` 只放 COM 生命周期和底层工具。
 - 后端跨包导入统一使用 `backend.*`；旧的短 import 只能作为历史兼容，不应复制。
 - 任务、SSE 和会话快照是进程内存态；上传和生成文件是本地文件态。
-- Prompt、LLM 超时、DeepAgents content_agent、LangChain comment_agent、rewrite/edit skill 契约应集中维护，不在 service/node 里散落大段 prompt。
+- Prompt、LLM 超时、DeepAgents content_agent、LangChain comment_agent、task-context assistant 和 rewrite skill 契约应集中维护，不在 service/node 里散落大段 prompt。
 
 ## 反模式
 
@@ -150,4 +153,4 @@ FastAPI /api
 
 ---
 
-*后端架构分析：2026-06-01*
+*后端架构分析：2026-06-04*

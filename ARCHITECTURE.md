@@ -1,6 +1,6 @@
 # TenderWord 架构地图
 
-**生成日期：** 2026-06-02
+**生成日期：** 2026-06-04
 
 本文件是根级系统架构地图，描述 TenderWord 的系统边界、子系统职责和推荐理解路径。实现细节仍以代码为准；子系统内部事实以 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 为准。
 
@@ -165,7 +165,7 @@ backend/prompts/ 与 backend/skills/
 
 ### 任务上下文助手 / Rewrite
 
-`POST /api/agent/runs/stream` 是右侧聊天唯一流式入口。它返回 NDJSON agent run 事件，由任务上下文助手结合 `selected_skills`、受控 `context_snapshot` 和确定性 guard，决定是返回 `needs_input` 追问，还是通过受控 tool 创建 rewrite task。上传 Word 文件后的修改也统一归入 rewrite：必须有用户重写指令、当前页面 `form_type`、完整锚点、标的类型、资金性质和招标数据快照；缺条件时只返回 `needs_input`。`task_accepted` 后，agent run 即结束；后续排队、Word COM 执行、SSE、取消和下载继续沿用现有任务主链路。
+`POST /api/agent/runs/stream` 是右侧聊天唯一流式入口。它返回 NDJSON agent run 事件，由任务上下文助手结合 `selected_skills`、受控 `context_snapshot` 和确定性 guard，决定是返回 `needs_input` 追问，还是通过受控 tool 创建 rewrite task。上传 Word 文件后的修改也统一归入 rewrite：必须有用户重写指令、当前页面 `form_type`、完整锚点、标的类型和资金性质；招标数据快照只是可选上下文。缺条件时只返回 `needs_input`。`task_accepted` 后，agent run 即结束；后续排队、Word COM 执行、SSE、取消和下载继续沿用现有任务主链路。
 
 关键入口：
 - `frontend/components/chat/ChatPanel.tsx`

@@ -1,6 +1,6 @@
 # TenderWord 接口边界
 
-**生成日期：** 2026-06-02
+**生成日期：** 2026-06-04
 
 本文件记录 TenderWord 当前已确认的系统级接口边界。具体模型和行为以 `backend/api/`、`backend/models/`、`frontend/types/api.ts` 和 `frontend/lib/api.ts` 为准。
 

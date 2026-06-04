@@ -1,7 +1,7 @@
-<!-- refreshed: 2026-05-31 -->
+<!-- refreshed: 2026-06-04 -->
 # 前端架构事实地图
 
-**分析日期：** 2026-05-31
+**分析日期：** 2026-06-04
 
 **范围：** `frontend/`，并在启动、验证和 API 边界上参考根级 `AGENTS.md`、`README.md` 与 `scripts/`。
 
@@ -16,7 +16,7 @@ Next.js App Router
   -> FastAPI /api
 ```
 
-前端是 TenderWord 的浏览器工作台。它负责招标类型选择、URL 深链、会话和草稿、文件上传、模板候选弹窗、生成任务创建、智能体生成方式选择、普通聊天、rewrite/edit/补充批注任务创建、SSE 进度与智能体过程卡展示和下载入口。
+前端是 TenderWord 的浏览器工作台。它负责招标类型选择、URL 深链、会话和草稿、文件上传、模板候选弹窗、生成任务创建、智能体生成方式选择、agent run 任务上下文助手、rewrite/补充批注任务创建、SSE 进度与智能体过程卡展示和下载入口。
 
 ## 主要层次
 
@@ -53,20 +53,20 @@ Next.js App Router
 8. SSE `log`、`llm`、`progress`、`agent_step`、`done`、`error` 进入 `chatStreamStore` 和任务消息；`agent_step` 完成事件持久化为 `agent-step` 过程卡，运行中快照留在临时 stream。
 9. 任务完成后 `TaskDownloadMessage` 展示下载入口，下载仍经 `frontend/lib/api.ts`。
 
-### 普通聊天、rewrite 与 edit
+### Agent run、rewrite 与上传文件修改
 
-- 普通聊天和 rewrite 使用 `streamUserMessage()` 调用 `/api/user/stream` 并解析 NDJSON。
-- `route: reply` 追加普通 AI 消息；`route: rewrite` 接收 `task_accepted` 后进入任务/SSE 链路。
-- edit 模式由 `ChatPanel` 上传待改 Word 文件、构造 `EditTaskRequest` 并调用 `createEditTask()`。
-- edit 的 `form_type` 在 `ChatPanel` 中按当前页面类型和 draft 调用 `resolveGngkFormType()`，必须与生成链路共用 `frontend/lib/gngkFormType.ts`。
-- `chat_input` 在消息受理时立即清空；中断恢复才使用 `pending_rewrite_prompt` / `pending_edit_prompt`。
+- 右侧聊天使用 `streamAgentRun()` 调用 `/api/agent/runs/stream` 并解析 NDJSON agent run 事件。
+- 当前可创建后台任务的 skill 是 `rewrite`；agent run 返回 `needs_input` 时只追加普通 AI 提示，不进入任务/SSE 链路。
+- 上传待改 Word 文件使用 `uploadFile(file, 'rewrite_source')`，文件写入会话 draft 的 `rewrite_file`，并自动选择 rewrite skill。
+- 上传文件 rewrite 的 `form_type` 在 `ChatPanel` 中按当前页面类型和 draft 调用 `resolveGngkFormType()`，必须与生成链路共用 `frontend/lib/gngkFormType.ts`。
+- `chat_input` 在消息受理时立即清空；中断恢复使用 `pending_rewrite_prompt` / `pending_rewrite_task_id`。
 
 ### 补充批注
 
 - 初次生成完成后的下载卡可触发补充批注，入口在 `TaskDownloadMessage` 经 `MessageList` 回调到 `ChatPanel`。
 - `ChatPanel` 调用 `createCommentSupplementTask()`，只提交当前会话 id、当前下载文件路径和模型。
 - `comment_supplement` 任务复用任务状态、SSE 和下载消息；`comment_agent` 过程卡通过 `agent_step` 展示。
-- rewrite、edit 和补充批注任务自己的下载卡不显示再次补充批注动作，避免重复基于衍生副本创建任务。
+- rewrite 和补充批注任务自己的下载卡不显示再次补充批注动作，避免重复基于衍生副本创建任务。
 
 ### 模板候选
 
@@ -78,10 +78,10 @@ Next.js App Router
 ## 核心抽象
 
 - `TenderType`：前端 UI 类型，仅有 `xjcg`、`gngk`、`gjgk`。
-- `GenerateRequest` / `EditTaskRequest`：前端镜像后端任务创建 payload，位于 `frontend/types/api.ts`。
+- `GenerateRequest` / `AgentRunStreamRequest`：前端镜像后端生成任务和 agent run payload，位于 `frontend/types/api.ts`。
 - `ConversationFormDraft`：每个会话的表单、文件、锚点、`generation_mode`、聊天输入和 pending 恢复状态。
 - `TaskMessageGroupIds`：一个 task id 对应 log/content/download 三类任务消息；智能体 `agent-step` 过程卡不纳入该三卡分组。
-- `TaskKind`：任务类型包含 `generate`、`rewrite`、`edit`、`comment_supplement`；补充批注复用任务消息组和独立 `agent-step` 过程卡。
+- `TaskKind`：任务类型包含 `generate`、`rewrite`、`comment_supplement`；补充批注复用任务消息组和独立 `agent-step` 过程卡。
 - `chatStreamStore`：运行中任务的 transient logs、AI 文本、agent step 快照、进度、当前节点和 `lastEventId`。
 - `buildCanonicalSearchParams()`：会话身份到浏览器 URL 的唯一构造入口。
 - `tenderFormRegistry`：TenderType 到显示名、表单组件和 generate converter 的注册表。
@@ -94,15 +94,15 @@ Next.js App Router
 - 会话、草稿和任务恢复语义继续使用 `sessionStorage`。
 - 从 `sessionStorage` 恢复 running task 前必须先查任务状态，404 / `TASK_NOT_FOUND` 收敛为本地中断态。
 - 新增 SSE 事件类型必须同步前端 `types/api.ts`、`frontend/lib/sse.ts` named event、`useChatSSE` 和测试。
-- 类型 identity 或 `form_type` 分派变化必须同步 `gngkFormType.ts`、`formDataConverter.ts`、`ChatPanel.tsx`、`tenderTypeMapper.ts`、注册表、store 和测试。
+- 类型 identity 或 `form_type` 分派变化必须同步 `gngkFormType.ts`、`formDataConverter.ts`、`ChatPanel.tsx` 的上传文件 rewrite 上下文、`tenderTypeMapper.ts`、注册表、store 和测试。
 
 ## 反模式
 
 - 在组件中直接调用后端 URL 或外部模板候选 URL。
 - 手工 patch 单个 query 参数导致 canonical URL 与会话身份漂移。
-- 绕过 `gngkFormType.ts`，只在表单转换器或只在 `ChatPanel` 修改 gngk form type 分派。
+- 绕过 `gngkFormType.ts`，只在表单转换器或只在 `ChatPanel` 上传文件 rewrite 上下文里修改 gngk form type 分派。
 - 直接 append 任务消息，绕过 `chatStore` 的 task group 方法。
-- 把 pending rewrite/edit prompt 当成正常发送后的延迟清空机制。
+- 把 pending rewrite prompt 当成正常发送后的延迟清空机制。
 - 让用户态 SSE UI 展示候选打分、淘汰阈值等排障细节。
 - 把智能体运行中的高频 `agent_step` 快照直接写入持久化会话消息，导致 sessionStorage 与渲染压力放大。
 
@@ -123,4 +123,4 @@ Next.js App Router
 
 ---
 
-*前端架构分析：2026-05-31*
+*前端架构分析：2026-06-04*
