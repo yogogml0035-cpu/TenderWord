@@ -522,8 +522,6 @@ class DocumentService:
                 missing_fields.append("tender_lx")
             if fund_source_lx is None:
                 missing_fields.append("fund_source_lx")
-            if tender_data_snapshot is None:
-                missing_fields.append("tender_data_snapshot")
             if missing_fields:
                 return GenerateResponse(
                     success=False,

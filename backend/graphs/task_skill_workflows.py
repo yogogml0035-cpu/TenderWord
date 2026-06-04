@@ -39,7 +39,6 @@ _TASK_SKILL_WORKFLOWS = {
         ),
         edges=(
             ("get_rewrite_comments", "delete_section"),
-            ("extract_rewrite_context", "delete_section"),
             ("extract_rewrite_context", "rewrite_text"),
         ),
         waiting_edges=(

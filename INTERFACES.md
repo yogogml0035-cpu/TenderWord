@@ -100,7 +100,7 @@
 
 同步要求：
 - `/api/edit`、edit skill、edit task kind 和 `create_edit_task_tool` 已删除；旧调用表现为 404，不做历史会话迁移。
-- 上传 Word 文件 rewrite 必须带非空用户重写指令、当前页面 `form_type`、完整锚点、`tender_lx`、`fund_source_lx` 和 `tender_data_snapshot`；缺条件时返回 `needs_input`，不自动猜测文档类型或锚点。
+- 上传 Word 文件 rewrite 必须带非空用户重写指令、当前页面 `form_type`、完整锚点、`tender_lx` 和 `fund_source_lx`；`tender_data_snapshot` 只是可选快照，不能因为未获取招标数据而阻断上传文件 rewrite。缺必需条件时返回 `needs_input`，不自动猜测文档类型或锚点。
 - 上传文件链路优先于会话 rewrite history；rewrite 完成后前端用 SSE `done.output_file` 更新输入框文件卡，后续 rewrite 继续修改最新输出文件。用户删除文件卡后清空上传链路，后续 rewrite 回到会话生成 / 重写历史。
 
 ### 补充批注任务

@@ -396,9 +396,32 @@ async def test_stream_returns_needs_input_when_uploaded_rewrite_form_context_mis
     assert events[-1]["data"]["missing_requirements"] == ["form_type"]
 
 @pytest.mark.asyncio
-async def test_stream_returns_needs_input_when_uploaded_rewrite_tender_data_missing(tmp_path) -> None:
+async def test_stream_accepts_uploaded_rewrite_without_tender_data_snapshot(tmp_path) -> None:
+    async def _create_rewrite_task(**kwargs) -> GenerateResponse:
+        assert kwargs["conversation_id"] == "conv-rewrite-upload-5"
+        assert kwargs["file_path"] == "D:/UploadFiles/source.docx"
+        assert getattr(kwargs["form_type"], "value", kwargs["form_type"]) == "xjcg_tender"
+        assert kwargs["insertion_config"].before_text == "第三章 采购需求"
+        assert kwargs["insertion_config"].after_text == "第四章 响应文件有关格式"
+        assert kwargs["tender_lx"] == 0
+        assert kwargs["fund_source_lx"] == 1
+        assert kwargs["tender_data_snapshot"] is None
+        return GenerateResponse(
+            success=True,
+            task_id="rewrite-upload-task-no-tender-data",
+            message="queued",
+            task_kind=TaskKind.REWRITE,
+            status=TaskStatus.QUEUED,
+            queue_position=1,
+            waiting_count=0,
+        )
+
     audit_logger = AgentRunAuditLogger(logs_dir=tmp_path)
-    service = AgentRunService(run_id_factory=lambda: "run-rewrite-upload-5", audit_logger=audit_logger)
+    service = AgentRunService(
+        run_id_factory=lambda: "run-rewrite-upload-5",
+        rewrite_task_executor=_create_rewrite_task,
+        audit_logger=audit_logger,
+    )
     payload = AgentRunStreamRequest.model_validate(
         {
             "conversation_id": "conv-rewrite-upload-5",
@@ -432,7 +455,8 @@ async def test_stream_returns_needs_input_when_uploaded_rewrite_tender_data_miss
         "run_started",
         "thinking_stage",
         "thinking_stage",
-        "needs_input",
+        "tool_call",
+        "task_accepted",
+        "done",
     ]
-    assert events[-1]["data"]["message"] == "请先补全当前页面的招标数据。"
-    assert events[-1]["data"]["missing_requirements"] == ["tender_data_snapshot"]
+    assert events[4]["data"]["task_id"] == "rewrite-upload-task-no-tender-data"

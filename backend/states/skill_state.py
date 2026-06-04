@@ -21,6 +21,7 @@ class TaskSkillGraphState(TenderGraphStateBase, total=False):
     rewrite_user_prompt: str
     edit_user_prompt: str
     rewrite_base_text: str
+    rewrite_source: str
     source_section_text: str
     rewrite_target_index: int
     rewrite_history_messages: List[RewriteHistoryMessage]

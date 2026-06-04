@@ -8,6 +8,7 @@ import pytest
 from deepagents import CompiledSubAgent
 
 from backend.agents.generation import (
+    AgentStepPayload,
     CONTENT_AGENT_SYSTEM_PROMPT,
     GenerationAgentProtocolError,
     GenerationAgentToolCallUnsupportedError,
@@ -360,6 +361,7 @@ def test_content_verify_agent_reads_current_text_from_config(monkeypatch) -> Non
         {
             "configurable": {
                 "generation_agent_context": {
+                    "generation_style": "param",
                     "current_text": "config draft text",
                     "project_info": "config project info",
                     "template_reference_text": "config origin params",
@@ -374,18 +376,22 @@ def test_content_verify_agent_reads_current_text_from_config(monkeypatch) -> Non
     assert calls[0]["model_provider"] == "qwen"
     user_prompt = str(calls[0]["user_prompt"])
     system_prompt = str(calls[0]["system_prompt"])
+    assert "【生成风格】\nparam" in user_prompt
     assert "【项目基础信息】\nconfig project info" in user_prompt
-    assert "【参考内容（只作模板，不作事实真源）】\nconfig origin params" in user_prompt
+    assert "【参考内容（格式真源；旧事实不得继承）】\nconfig origin params" in user_prompt
     assert "【技术参数（原材料，事实真源）】\nconfig tender params" in user_prompt
     assert "【待审核正文】\nconfig draft text" in user_prompt
     assert "如果比对结论是“实质一致、无问题、无需修改”，必须输出 []" in user_prompt
-    assert "参考内容】只作章节/编号/表格/语气模板" in user_prompt
+    assert "template 和 param 都必须校验基础模板格式一致" in user_prompt
+    assert "param 模式下，参数章节是否符合参数优先生成提示词" in user_prompt
     assert "★、▲ 指标" in user_prompt
     assert "多个包件/标段/采购包/独立设备组" in user_prompt
     assert "只能输出严格合法的 JSON 数组本身" in system_prompt
     assert "Few-shots" in system_prompt
     assert "禁止输出“第 1 轮审核”" in system_prompt
     assert "不要用技术参数中的设备标题覆盖项目基础信息" in system_prompt
+    assert "所有生成风格下，待审核正文都必须继承参考内容的基础非事实格式" in system_prompt
+    assert "param 生成风格下，参数章节内部必须按参数优先生成提示词审核" in system_prompt
     assert "禁止输出 evidence 写“两者一致/无问题”且 fix_hint 写“无需修改”" in system_prompt
 
 
@@ -690,6 +696,50 @@ def test_content_runner_creates_workspace_and_reads_final_file(
     ]
     assert events[2].content_agent["rounds"][2]["fix_count"] == 1
     assert events[-1].content_agent["final_result"]["content"] == "final text"
+
+
+def test_content_agent_tracker_preserves_completed_audit_after_late_empty_update() -> None:
+    tracker = content_agent_module.ContentAgentProcessTracker()
+    finding = {"evidence": "缺少 ★ 指标", "fix_hint": "补充 ★ 符号"}
+
+    tracker.build_step(
+        AgentStepPayload(
+            step_type="stream",
+            round=1,
+            node="content_verify_agent",
+            content=json.dumps([finding], ensure_ascii=False),
+            is_complete=True,
+        )
+    )
+    tracker.build_step(
+        AgentStepPayload(
+            step_type="stream",
+            round=1,
+            node="content_revise_agent",
+            content="已补充 ★ 符号",
+            is_complete=True,
+        )
+    )
+    late_update = tracker.build_step(
+        AgentStepPayload(
+            step_type="stream",
+            round=1,
+            node="content_verify_agent",
+            content="",
+            is_complete=False,
+        )
+    )
+
+    assert late_update is not None
+    audit_round = late_update.rounds[0]
+    revision_round = late_update.rounds[1]
+    assert audit_round.phase == "audit"
+    assert audit_round.issue_count == 1
+    assert audit_round.summary == "第 1 轮审核发现 1 个问题。"
+    assert audit_round.findings[0].evidence == "缺少 ★ 指标"
+    assert revision_round.phase == "revision"
+    assert revision_round.fix_count == 1
+    assert revision_round.findings[0].evidence == "缺少 ★ 指标"
 
 
 def test_content_runner_writes_complete_generation_context() -> None:

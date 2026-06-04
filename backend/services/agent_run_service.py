@@ -371,13 +371,6 @@ class AgentRunService:
                 "missing_requirements": missing_draft_fields,
             }
 
-        if rewrite_context.tender_data_snapshot is None:
-            return {
-                "summary": "当前页面缺少招标数据快照。",
-                "message": "请先补全当前页面的招标数据。",
-                "missing_requirements": ["tender_data_snapshot"],
-            }
-
         return None
 
     def _build_task_created_plan(
