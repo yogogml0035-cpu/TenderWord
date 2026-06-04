@@ -11,6 +11,7 @@
 - 后端 API 前缀是 `/api`，router 注册在 `backend/main.py`。
 - 前端应只通过 `frontend/lib/api.ts` 调用后端。
 - 生成、agent run、补充批注、任务、SSE、会话心跳、上传、下载、招标详情、模板候选都在 `backend/api/` 下暴露。
+- 根级健康检查端点是 `/health`、`/health/ready` 和 `/health/live`，不走 `/api` 前缀；当前 readiness 只表达应用就绪检查，不代表 Word COM 真实闭环可用。
 
 ### LLM Provider
 
@@ -105,6 +106,7 @@
 - 当前源文档未确认稳定 CI workflow。
 - 代码真源中的本地运行入口是 `backend/main.py`、`scripts/start-dev.ps1` 和 `scripts/start-dev-wsl.sh`。
 - 后端完整验收需要 Windows + Word COM；CI/WSL 更适合跑无 COM 单元测试。
+- 健康检查可以用于进程存活或本地代理探测，但不能替代 `scripts/diagnose_word.py` 或真实 Word COM 生成验收。
 
 ## 环境配置
 

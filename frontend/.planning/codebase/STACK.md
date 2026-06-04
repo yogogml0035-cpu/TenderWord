@@ -54,7 +54,8 @@ npm run test:e2e       # Playwright
 - Jest 配置：`frontend/jest.config.ts`。
 - Playwright 配置：`frontend/playwright.config.ts`，baseURL 为 `http://localhost:8502`。
 - 环境示例：`frontend/.env.local.example`。
-- `.npmrc` 固定 npm registry。
+- `.nvmrc` 固定 Node 20；`.npmrc` 固定 npm registry 并开启 `engine-strict=true`。
+- `frontend/next.config.ts` 会从 `NEXT_PUBLIC_API_URL` 推导开发期允许来源，并把 `/api/:path*` rewrite 到后端 API base URL。
 
 ## 前端入口
 
@@ -71,6 +72,7 @@ npm run test:e2e       # Playwright
 - WSL 中运行前端时，必须使用 Linux `node` / `npm`。
 - Windows 启动前端时，`frontend/node_modules` 应由 Windows npm 安装或由启动脚本修复。
 - 测试前若在 WSL，优先设置 `TMPDIR=/tmp TMP=/tmp TEMP=/tmp`，避免继承 Windows 临时目录导致 Jest/Playwright 缓存失败。
+- 若通过局域网 IP 或非 localhost 访问 dev server，先确认 `NEXT_PUBLIC_API_URL` 能被 `next.config.ts` 解析为允许来源，否则 HMR 或 dev-only 资源可能被拦截。
 
 ---
 

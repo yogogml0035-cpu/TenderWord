@@ -46,7 +46,7 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 
 `backend/` 是 FastAPI + LangGraph + Word COM 后端。它负责：
 
-- `/api` 前缀下的生成、重写、补充批注、任务、SSE、任务上下文助手 agent run、会话心跳、上传下载和模板候选接口。
+- `/api` 前缀下的生成、重写、补充批注、任务、SSE、任务上下文助手 agent run、会话心跳、上传下载和模板候选接口，以及根级健康检查端点。
 - `DocumentService` 任务创建、graph 选择、初始 state 构造、任务提交和结果 payload。
 - `TaskQueueManager` 串行化文档任务、跟踪进度、取消、心跳和清理。
 - `SSEManager` 事件缓冲、客户端管理和重连重放。
@@ -102,6 +102,7 @@ frontend/types/ 与 frontend/utils/
 核心原则：
 
 - 组件不直接写裸 `fetch`，后端调用统一进 `frontend/lib/api.ts`。
+- API base URL、Next rewrite 和开发期 allowed origin 必须一起看，避免局域网访问或 HMR 与后端代理脱节。
 - URL canonical 化统一走 `frontend/utils/tenderTypeMapper.ts` 和 store helpers。
 - `gngk` 后端 `form_type` 分派统一走 `frontend/lib/gngkFormType.ts`。
 - 会话语义继续使用 `sessionStorage`。

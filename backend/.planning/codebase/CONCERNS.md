@@ -11,10 +11,15 @@
 - 风险：同一模块中存在重复导入和部分重复实现痕迹，排查锁、超时或取消时容易读错分支。
 - 安全修改：重构前先补锁/取消/进度行为测试；不要在功能需求中顺手整理。
 
-**部分依赖声明与代码使用需要复核：**
+**HTTP 客户端依赖要保持声明同步：**
 - 文件：`backend/requirements.txt`、`backend/util/common_util/fetch_tender_data.py`、`backend/util/common_util/template_candidates.py`
-- 风险：代码中使用 `requests`，但依赖清单当前未显式列出。
-- 安全修改：如要调整依赖，先确认 Windows 启动脚本和现有环境是否隐式安装，再统一修依赖与 README。
+- 风险：招标详情和模板候选链路依赖 `requests`；后续若替换或新增 HTTP client，依赖清单、启动说明和测试环境需要同步，否则新环境安装后会运行失败。
+- 安全修改：HTTP client 变化时同步 `requirements.txt`、相关工具模块和 mock 测试，不依赖开发机上已有的隐式安装。
+
+**健康检查不覆盖 Word COM 能力：**
+- 文件：`backend/main.py`、`backend/scripts/diagnose_word.py`
+- 风险：`/health/ready` 当前只返回轻量应用就绪信息，不能证明本机 Word/WPS COM、pywin32 注册和上传目录真实可写闭环都正常。
+- 安全修改：发布或排查 Word 生成问题时，健康检查只能作为进程探测；真实文档闭环仍要跑 Word COM 诊断或实际生成任务。
 
 **进程内存态限制明显：**
 - 文件：`backend/task/task_queue_manager.py`、`backend/core/sse_manager.py`、`backend/services/conversation_service.py`

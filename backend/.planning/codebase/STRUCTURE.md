@@ -70,6 +70,7 @@ backend/
 - `backend/api/tasks.py`：任务查询、取消、心跳。
 - `backend/api/stream.py`：任务 SSE。
 - `backend/api/template_candidates.py`：模板候选代理、下载、选择。
+- `backend/main.py`：根级 `/health`、`/health/ready`、`/health/live` 与根路径信息端点；这些端点不挂 `/api` 前缀。
 - `backend/services/document_service.py`：生成、rewrite、补充批注的任务创建和 graph 执行编排。
 - `backend/services/agent_run_service.py`：任务上下文助手事件流、rewrite guard、`needs_input` 和 `task_accepted` 收敛。
 - `backend/services/template_candidate_ranking_service.py`：候选同优先级 AI 重排。

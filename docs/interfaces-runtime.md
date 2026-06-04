@@ -7,6 +7,7 @@
 - API、SSE、任务状态、共享类型，以后端 API/model 和前端类型/API client 为准。
 - `ARCHITECTURE.md`、`INTERFACES.md`、`coding_maps/SYSTEM_MAP.md` 是系统级地图，不覆盖代码真源。
 - 子项目 `.planning/codebase/` 是事实地图，只用于快速理解结构、风险和验证入口；`asset/` 是长期知识包。
+- 后端 `/api` router 与根级 `/health*` 端点同在应用入口注册，但健康检查不代表 Word COM 真实生成能力。
 
 ## 生成契约
 
@@ -48,3 +49,4 @@
 - 外部招标详情接口细节不应泄露到前端组件。
 - 模板候选外部列表请求、下载代理、落盘和文件名清洗统一由后端处理。
 - 外部模板下载链接必须继续受后端白名单约束。
+- 前端 API base URL、Next rewrite 和开发期 allowed origin 是同一条本地联调链路，不能只改其中一处。

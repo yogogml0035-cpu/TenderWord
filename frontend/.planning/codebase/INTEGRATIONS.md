@@ -9,6 +9,7 @@
 - 前端后端调用统一经由 `frontend/lib/api.ts`。
 - API base URL 由 `frontend/lib/apiBaseUrl.ts` 解析。
 - Next dev rewrites 在 `frontend/next.config.ts` 中把 `/api/:path*` 代理到后端。
+- `frontend/next.config.ts` 还会根据 `NEXT_PUBLIC_API_URL` 和本地地址生成 `allowedDevOrigins`，用于 LAN / IP 访问开发服务时加载 HMR 与 dev-only 资源。
 - JSON 请求走 `request<T>()` / `api.get/post/put/delete`。
 - 上传、下载、NDJSON、SSE URL 使用 `frontend/lib/api.ts` 的专用 helper。
 
@@ -84,6 +85,7 @@
 
 - `.env.local` 用于前端本地环境，示例为 `frontend/.env.local.example`。
 - `NEXT_PUBLIC_API_URL` 可配置后端地址；若缺省，base URL resolver 会按当前浏览器位置推导。
+- 修改 `NEXT_PUBLIC_API_URL` 时要同时考虑 API client base URL、Next rewrite 目标和开发期 allowed origin。
 - 文档不得记录私有 URL、token 或客户样例内容。
 
 ## 集成风险

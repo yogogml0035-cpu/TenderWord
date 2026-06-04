@@ -9,10 +9,11 @@
 ### API 前缀与前端调用入口
 
 - 后端真实 API 前缀是 `/api`，FastAPI router 注册在 `backend/main.py`。
+- 根级健康检查端点是 `/health`、`/health/ready` 和 `/health/live`，不挂 `/api` 前缀；它们只表达应用进程状态，不代表 Word COM 真实闭环已经通过。
 - 前端所有后端调用统一经由 `frontend/lib/api.ts`。
 - JSON 请求走 `request<T>()` / `api.get/post/put/delete` 封装。
 - 流式、上传和下载使用 `frontend/lib/api.ts` 内的专用 helper。
-- 前端基础 URL 由 `frontend/lib/apiBaseUrl.ts` 解析，Next rewrites 在 `frontend/next.config.ts`。
+- 前端基础 URL 由 `frontend/lib/apiBaseUrl.ts` 解析，Next rewrites 在 `frontend/next.config.ts`；修改 `NEXT_PUBLIC_API_URL` 相关逻辑时，需要同时检查 API client、Next rewrite 目标和开发期 allowed origin。
 
 ### 生成任务
 

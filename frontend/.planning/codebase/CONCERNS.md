@@ -58,6 +58,11 @@
 - 风险：Next/Tailwind/sharp/lightningcss 等原生依赖在 Windows 与 WSL 间复用可能失败。
 - 安全修改：WSL 用 Linux npm；Windows 启动用 Windows npm 安装的 node_modules。
 
+**开发期 API 地址同时影响代理和资源来源：**
+- 文件：`frontend/lib/apiBaseUrl.ts`、`frontend/next.config.ts`
+- 风险：只改浏览器端 API base URL，而忽略 Next rewrite 或 `allowedDevOrigins`，会导致接口代理、HMR 或局域网访问表现不一致。
+- 安全修改：修改 `NEXT_PUBLIC_API_URL` 相关逻辑时，同步检查 API client、Next rewrite、allowed dev origins 和 Playwright/dev server 配置。
+
 ## 安全关注
 
 - 不在前端文档或 console 中输出 token、私有 URL、客户原文。

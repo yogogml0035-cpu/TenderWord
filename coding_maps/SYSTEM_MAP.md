@@ -37,6 +37,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - SSE 后端入口是 `backend/api/stream.py`，事件缓冲和重放在 `backend/core/sse_manager.py`，进度日志桥接在 `backend/util/log_util/sse_log_handler.py`。
 - 前端 SSE runtime 是 `frontend/lib/sse.ts`，任务事件到 UI 的映射是 `frontend/hooks/useChatSSE.ts`；`agent_step` 必须在 runtime 层注册 named event。
 - 下载由 `backend/api/download.py` 和上传存储 helper 保护，前端使用 `downloadFile()` / `getDownloadUrl()`。
+- 根级 `/health*` 端点只适合作为后端进程探测；Word COM 真实生成能力仍要用 Windows 环境诊断或实际任务验证。
 
 ### 任务上下文助手与 rewrite
 
@@ -67,6 +68,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 | 边界 | 前端入口 | 后端入口 | 同步要求 |
 | --- | --- | --- | --- |
 | API client | `frontend/lib/api.ts` | `backend/api/` | API 形状变化时同步 `frontend/types/api.ts`、后端 `backend/models/` 和测试。 |
+| 本地 API 代理 | `frontend/lib/apiBaseUrl.ts`, `frontend/next.config.ts` | `backend/main.py` | `NEXT_PUBLIC_API_URL` 会影响 API base URL、Next rewrite 和开发期 allowed origin，修改时需一起验证。 |
 | 招标类型身份 | `frontend/types/index.ts`, `frontend/utils/tenderTypeMapper.ts`, `frontend/lib/gngkFormType.ts`, `frontend/lib/formDataConverter.ts` | `backend/models/generate.py`, `backend/config/tender_config.py`, `backend/services/document_service.py` | 新增或修改类型必须同步前端 UI 类型、后端 `form_type`、URL、graph/state/node、anchor 和测试。 |
 | 会话和 URL | `frontend/stores/chatStore.ts`, `frontend/utils/tenderTypeMapper.ts` | `backend/api/conversations.py`, `backend/services/conversation_service.py` | 地址栏、会话身份、任务恢复和后端心跳需保持一致。 |
 | 任务与 SSE | `frontend/hooks/useChatSSE.ts`, `frontend/lib/sse.ts`, `frontend/stores/*` | `backend/api/stream.py`, `backend/core/sse_manager.py`, `backend/task/task_queue_manager.py` | 新增 SSE 事件必须同步后端模型、前端 named event、类型、解析和测试。 |

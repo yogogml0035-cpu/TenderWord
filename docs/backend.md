@@ -7,6 +7,7 @@
 - 后端是 FastAPI + LangGraph + Word COM 执行端。
 - API、任务队列、SSE、任务上下文助手、生成 graph、rewrite skill、补充批注 graph、Prompt Layer、LLM/智能体调用、模板候选代理、上传下载和 Word 文件写回都在后端边界内。
 - 完整生成能力依赖 Windows Python、pywin32 和本机 Word/WPS COM；WSL 只能作为无 COM 替代验证环境。
+- 根级健康检查端点只用于应用进程探测，不替代 Word COM 诊断或真实生成验收。
 
 ## 分层约定
 
@@ -46,4 +47,5 @@
 
 - 后端改动至少运行 `python -m pytest tests -v`。
 - Word COM 真实闭环需要 Windows + Word COM；WSL 只能作为无 COM 替代验证。
+- 健康检查通过只能说明应用可响应；排查 Word 能力时仍需运行 Word 诊断脚本或实际生成任务。
 - 新增测试文件必须以 `test_` 开头，并放入既有测试归档层级。

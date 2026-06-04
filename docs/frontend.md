@@ -6,12 +6,13 @@
 
 - 前端是 Next.js 16 + React 19 工作台。
 - 前端负责招标类型选择、URL 深链、会话与草稿、文件上传、模板候选弹窗、生成任务创建、智能体生成方式选择、agent run、rewrite/补充批注任务创建、SSE 进度与下载入口。
-- 包管理器是 npm；`frontend/package.json` 声明 Node.js `>=20.9.0`。
+- 包管理器是 npm；`frontend/package.json` 声明 Node.js `>=20.9.0`，`.nvmrc` 固定 Node 20，`.npmrc` 开启 engine strict。
 
 ## 请求与接口
 
 - 前端所有后端请求统一走 `frontend/lib/api.ts`；组件不写裸 `fetch`。
 - JSON、上传、下载、NDJSON 和 SSE URL 都由 API client 或专用 helper 提供。
+- `NEXT_PUBLIC_API_URL` 会同时影响 API client、Next rewrite 目标和开发期 allowed origin；修改时要一起验证。
 - 前端不直接访问外部模板候选 URL，不直接访问本地文件系统或云存储。
 - API shape 变化必须同步 `frontend/types/api.ts`、API client、后端模型和相关测试。
 

@@ -40,12 +40,12 @@
 - `fastapi`、`uvicorn[standard]`、`pydantic`、`pydantic-settings`：API 与配置基础。
 - `langgraph`、`langchain-core`、`langchain-deepseek`、`langchain-openai`：graph、DeepAgents 和 LLM 相关工作流基础。
 - `deepagents`：内容生成智能体运行时。
-- `openai`、`volcengine-python-sdk[ark]`、`httpx`、`aiohttp`：LLM 与 HTTP 调用。
+- `openai`、`volcengine-python-sdk[ark]`、`httpx`、`aiohttp`、`requests`：LLM 与 HTTP 调用。
 - `python-multipart`：文件上传。
 - `python-dotenv`：环境变量辅助。
 - `pywin32`：Windows 上的 Word COM。
 - `structlog`：依赖中声明；当前主要日志实现仍以 stdlib logging 和自有 log util 为主。
-- `requests`：代码中用于招标详情和模板候选 HTTP 调用，但当前未显式列入 `requirements.txt`；调整依赖时需要补齐或替换为已声明 client。
+- `requests`：招标详情和模板候选 HTTP 调用；依赖已显式列入 `requirements.txt`。
 
 ## 配置
 
