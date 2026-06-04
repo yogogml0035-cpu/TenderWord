@@ -1,15 +1,14 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import {
   cancelTask,
   createCommentSupplementTask,
-  createEditTask,
-  streamUserMessage,
+  streamAgentRun,
   uploadFile,
 } from '@/lib/api';
 import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
-import type { UserStreamEvent } from '@/types/api';
+import type { AgentRunEvent, AgentSkill } from '@/types/api';
 import type { Message } from '@/types/chat';
 
 jest.mock('@/lib/api', () => {
@@ -18,9 +17,8 @@ jest.mock('@/lib/api', () => {
     ...actual,
     cancelTask: jest.fn(),
     createCommentSupplementTask: jest.fn(),
-    createEditTask: jest.fn(),
     downloadFile: jest.fn(),
-    streamUserMessage: jest.fn(),
+    streamAgentRun: jest.fn(),
     uploadFile: jest.fn(),
   };
 });
@@ -83,30 +81,32 @@ jest.mock('@/components/chat/ChatInput', () => ({
     loading,
     placeholder,
     selectedModel,
-    inputMode,
-    editFile,
+    rewriteFile,
+    selectedSkills,
     sendDisabled,
     noticeMessage,
     onModelChange,
     onCancel,
     onSend,
-    onEditFileSelect,
-    onEditFileRemove,
+    onRewriteFileSelect,
+    onRewriteFileRemove,
+    onSelectedSkillsChange,
   }: {
     value?: string;
     disabled?: boolean;
     loading?: boolean;
     placeholder?: string;
     selectedModel?: string;
-    inputMode?: 'normal' | 'edit';
-    editFile?: { original_name?: string } | null;
+    rewriteFile?: { original_name?: string } | null;
+    selectedSkills?: AgentSkill[];
     sendDisabled?: boolean;
     noticeMessage?: string | null;
     onModelChange?: (model: string) => void;
     onCancel?: () => void;
     onSend?: (message: string) => boolean | void | Promise<boolean | void>;
-    onEditFileSelect?: (file: File) => void | Promise<void>;
-    onEditFileRemove?: () => void;
+    onRewriteFileSelect?: (file: File) => void | Promise<void>;
+    onRewriteFileRemove?: () => void;
+    onSelectedSkillsChange?: (skills: AgentSkill[]) => void;
   }) => (
     <div
       data-testid="chat-input"
@@ -114,10 +114,10 @@ jest.mock('@/components/chat/ChatInput', () => ({
       data-loading={loading ? 'true' : 'false'}
       data-placeholder={placeholder || ''}
       data-model={selectedModel || ''}
-      data-input-mode={inputMode || 'normal'}
       data-send-disabled={sendDisabled ? 'true' : 'false'}
       data-notice={noticeMessage || ''}
-      data-edit-file={editFile?.original_name || ''}
+      data-rewrite-file={rewriteFile?.original_name || ''}
+      data-selected-skills={selectedSkills?.join(',') || ''}
     >
       <button type="button" data-testid="change-model-button" onClick={() => onModelChange?.('qwen')}>
         change model
@@ -134,30 +134,43 @@ jest.mock('@/components/chat/ChatInput', () => ({
       </button>
       <button
         type="button"
-        data-testid="select-edit-file-button"
+        data-testid="select-rewrite-file-button"
         onClick={() =>
-          onEditFileSelect?.(
-            new File(['content'], 'edit.docx', {
+          onRewriteFileSelect?.(
+            new File(['content'], 'rewrite.docx', {
               type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             })
           )
         }
       >
-        select edit file
+        select rewrite file
       </button>
-      <button type="button" data-testid="remove-edit-file-button" onClick={() => onEditFileRemove?.()}>
-        remove edit file
+      <button type="button" data-testid="remove-rewrite-file-button" onClick={() => onRewriteFileRemove?.()}>
+        remove rewrite file
+      </button>
+      <button
+        type="button"
+        data-testid="select-rewrite-skill-button"
+        onClick={() => onSelectedSkillsChange?.(['rewrite'])}
+      >
+        select rewrite skill
+      </button>
+      <button
+        type="button"
+        data-testid="clear-selected-skills-button"
+        onClick={() => onSelectedSkillsChange?.([])}
+      >
+        clear selected skills
       </button>
     </div>
   ),
 }));
 
-const mockStreamUserMessage = streamUserMessage as jest.MockedFunction<typeof streamUserMessage>;
+const mockStreamAgentRun = streamAgentRun as jest.MockedFunction<typeof streamAgentRun>;
 const mockCancelTask = cancelTask as jest.MockedFunction<typeof cancelTask>;
 const mockCreateCommentSupplementTask = createCommentSupplementTask as jest.MockedFunction<
   typeof createCommentSupplementTask
 >;
-const mockCreateEditTask = createEditTask as jest.MockedFunction<typeof createEditTask>;
 const mockUploadFile = uploadFile as jest.MockedFunction<typeof uploadFile>;
 
 function createDeferred<T>() {
@@ -171,8 +184,8 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
-function mockUserStream(events: UserStreamEvent[], terminalError?: unknown) {
-  mockStreamUserMessage.mockImplementationOnce(async (_payload, options = {}) => {
+function mockAgentRunStream(events: AgentRunEvent[], terminalError?: unknown) {
+  mockStreamAgentRun.mockImplementationOnce(async (_payload, options = {}) => {
     for (const event of events) {
       await options.onEvent?.(event);
     }
@@ -186,10 +199,9 @@ describe('ChatPanel', () => {
   beforeEach(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
-    mockStreamUserMessage.mockReset();
+    mockStreamAgentRun.mockReset();
     mockCancelTask.mockReset();
     mockCreateCommentSupplementTask.mockReset();
-    mockCreateEditTask.mockReset();
     mockUploadFile.mockReset();
     mockCancelTask.mockResolvedValue({
       success: true,
@@ -198,9 +210,9 @@ describe('ChatPanel', () => {
       was_running: true,
     });
     mockUploadFile.mockResolvedValue({
-      file_path: 'D:/UploadFiles/edit.docx',
-      file_name: 'edit.docx',
-      original_name: 'edit.docx',
+      file_path: 'D:/UploadFiles/rewrite.docx',
+      file_name: 'rewrite.docx',
+      original_name: 'rewrite.docx',
       size: 128,
       upload_time: new Date().toISOString(),
     });
@@ -337,7 +349,46 @@ describe('ChatPanel', () => {
     expect(screen.getByTestId('chat-input')).toHaveAttribute('data-placeholder', '回复生成中，请稍候...');
   });
 
-  it('uploads a file and switches the draft into edit mode', async () => {
+  it('sends selected_skills through agent run and clears the draft selection after send', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请帮我改写这一段内容',
+        },
+      },
+    }));
+
+    mockAgentRunStream([]);
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('select-rewrite-skill-button'));
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-selected-skills', 'rewrite');
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockStreamAgentRun.mock.calls[0]?.[0]).toMatchObject({
+      conversation_id: 'conv-1',
+      message: '请帮我改写这一段内容',
+      selected_skills: ['rewrite'],
+    });
+    expect(useChatStore.getState().getConversationDraft('conv-1')?.selected_skills).toBeUndefined();
+  });
+
+  it('uploads a file and switches the draft into rewrite file chain', async () => {
     useChatStore.setState((state) => ({
       ...state,
       conversations: [
@@ -352,18 +403,18 @@ describe('ChatPanel', () => {
 
     render(<ChatPanel />);
 
-    fireEvent.click(screen.getByTestId('select-edit-file-button'));
+    fireEvent.click(screen.getByTestId('select-rewrite-file-button'));
 
     await waitFor(() => {
       expect(mockUploadFile).toHaveBeenCalledTimes(1);
-      expect(mockUploadFile).toHaveBeenCalledWith(expect.any(File), 'edit_source');
+      expect(mockUploadFile).toHaveBeenCalledWith(expect.any(File), 'rewrite_source');
       const draft = useChatStore.getState().getConversationDraft('conv-1');
-      expect(draft?.input_mode).toBe('edit');
-      expect(draft?.edit_file?.original_name).toBe('edit.docx');
+      expect(draft?.rewrite_file?.original_name).toBe('rewrite.docx');
+      expect(draft?.selected_skills).toEqual(['rewrite']);
     });
   });
 
-  it('blocks edit send when required context is incomplete', () => {
+  it('routes incomplete rewrite context through agent run and shows the follow-up message', async () => {
     useChatStore.setState((state) => ({
       ...state,
       conversations: [
@@ -377,12 +428,12 @@ describe('ChatPanel', () => {
       conversationDrafts: {
         'conv-1': {
           chat_input: '请补充质保条款',
-          input_mode: 'edit',
-          edit_file: {
+
+          rewrite_file: {
             id: 'file-1',
-            file_path: 'D:/UploadFiles/edit.docx',
-            file_name: 'edit.docx',
-            original_name: 'edit.docx',
+            file_path: 'D:/UploadFiles/rewrite.docx',
+            file_name: 'rewrite.docx',
+            original_name: 'rewrite.docx',
             size: 128,
             upload_time: new Date().toISOString(),
           },
@@ -392,6 +443,18 @@ describe('ChatPanel', () => {
       },
     }));
 
+    mockAgentRunStream([
+      {
+        event: 'needs_input',
+        data: {
+          run_id: 'run-rewrite-needs-anchor',
+          message: '请先补全当前页面的插入锚点',
+          selected_skill: 'rewrite',
+          missing_requirements: ['rewrite_context.insertion_config'],
+        },
+      },
+    ]);
+
     render(<ChatPanel />);
 
     expect(screen.getByTestId('chat-input')).toHaveAttribute('data-send-disabled', 'false');
@@ -399,20 +462,47 @@ describe('ChatPanel', () => {
 
     fireEvent.click(screen.getByTestId('send-current-input-button'));
 
-    expect(mockCreateEditTask).not.toHaveBeenCalled();
-    expect(screen.getByTestId('chat-input')).toHaveAttribute(
-      'data-notice',
-      '请先补全当前页面的插入锚点'
-    );
+    await waitFor(() => {
+      expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockStreamAgentRun.mock.calls[0]?.[0]).toMatchObject({
+      conversation_id: 'conv-1',
+      message: '请补充质保条款',
+      selected_skills: ['rewrite'],
+      context_snapshot: {
+        rewrite_available: false,
+        uploaded_files: [
+          {
+            file_path: 'D:/UploadFiles/rewrite.docx',
+            file_name: 'rewrite.docx',
+          },
+        ],
+        rewrite_context: {
+          form_type: 'xjcg_tender',
+          tender_lx: 0,
+          fund_source_lx: 1,
+        },
+      },
+    });
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-notice', '');
+    const conversation = useChatStore.getState().conversations[0];
+    expect(conversation.currentTaskId).toBeUndefined();
+    expect(conversation.messages.find((message) => message.content === '请先补全当前页面的插入锚点')).toMatchObject({
+      type: 'ai',
+      content: '请先补全当前页面的插入锚点',
+      status: 'completed',
+    });
   });
 
-  it('creates an edit task directly without using the user stream route', async () => {
+  it('keeps uploaded rewrite context when rewrite is explicitly selected', async () => {
     useChatStore.setState((state) => ({
       ...state,
       conversations: [
         {
           ...state.conversations[0],
           currentTaskId: undefined,
+          tenderType: 'xjcg',
         },
       ],
       activeTaskIds: [],
@@ -420,14 +510,13 @@ describe('ChatPanel', () => {
       conversationDrafts: {
         'conv-1': {
           chat_input: '请把交付日期改成合同签订后 30 天内',
-          input_mode: 'edit',
-          generation_mode: 'agent',
-          comment_generation_mode: 'off',
-          edit_file: {
+
+          selected_skills: ['rewrite'],
+          rewrite_file: {
             id: 'file-1',
-            file_path: 'D:/UploadFiles/edit.docx',
-            file_name: 'edit.docx',
-            original_name: 'edit.docx',
+            file_path: 'D:/UploadFiles/rewrite.docx',
+            file_name: 'rewrite.docx',
+            original_name: 'rewrite.docx',
             size: 128,
             upload_time: new Date().toISOString(),
           },
@@ -457,62 +546,204 @@ describe('ChatPanel', () => {
         },
       },
     }));
-    mockCreateEditTask.mockResolvedValue({
-      task_id: 'task-edit',
-      task_kind: 'edit',
-      status: 'queued',
-      queue_position: 0,
-      waiting_count: 0,
-    });
+
+    mockAgentRunStream([]);
 
     render(<ChatPanel />);
 
     fireEvent.click(screen.getByTestId('send-current-input-button'));
 
     await waitFor(() => {
-      expect(mockCreateEditTask).toHaveBeenCalledTimes(1);
-      expect(mockStreamUserMessage).not.toHaveBeenCalled();
+      expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockStreamAgentRun.mock.calls[0]?.[0]).toMatchObject({
+      conversation_id: 'conv-1',
+      message: '请把交付日期改成合同签订后 30 天内',
+      selected_skills: ['rewrite'],
+      context_snapshot: {
+        rewrite_available: false,
+        uploaded_files: [
+          {
+            file_path: 'D:/UploadFiles/rewrite.docx',
+            file_name: 'rewrite.docx',
+          },
+        ],
+        rewrite_context: {
+          form_type: 'xjcg_tender',
+          insertion_config: {
+            before_text: '第三章 采购需求',
+            after_text: '第四章 响应文件有关格式',
+          },
+          tender_lx: 0,
+          fund_source_lx: 1,
+          tender_data_snapshot: expect.objectContaining({
+            project_name: '示例项目',
+            fund_source_lx: 1,
+          }),
+        },
+      },
+    });
+  });
+
+  it('routes uploaded file rewrite requests through agent run and tracks the accepted rewrite task', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请把交付日期改成合同签订后 30 天内',
+
+          generation_mode: 'agent',
+          comment_generation_mode: 'off',
+          rewrite_file: {
+            id: 'file-1',
+            file_path: 'D:/UploadFiles/rewrite.docx',
+            file_name: 'rewrite.docx',
+            original_name: 'rewrite.docx',
+            size: 128,
+            upload_time: new Date().toISOString(),
+          },
+          tender_lx: 0,
+          fund_lx: 1,
+          insertion_config: {
+            before_text: '第三章 采购需求',
+            after_text: '第四章 响应文件有关格式',
+          },
+          tender_data: {
+            project_name: '示例项目',
+            project_number: 'ZBGG-2026-001',
+            project_content: '原始内容',
+            bzj_rule: '',
+            buyer_name: '示例单位',
+            project_zbr_xbr: '',
+            zbr_xbr_tel: '',
+            zbr_pinyin: '',
+            shell_start_date: '',
+            shell_end_date: '',
+            submit_date: '',
+            platform: '',
+            service_fee: '',
+            tender_lx: 0,
+            fund_source_lx: 1,
+          },
+        },
+      },
+    }));
+
+    mockAgentRunStream([
+      {
+        event: 'run_started',
+        data: {
+          run_id: 'run-rewrite-implicit',
+          conversation_id: 'conv-1',
+          model: 'deepseek',
+          runtime: 'fake',
+          selected_skills: ['rewrite'],
+        },
+      },
+      {
+        event: 'thinking_stage',
+        data: {
+          run_id: 'run-rewrite-implicit',
+          stage: 'guard',
+          label: '检查上下文',
+          status: 'completed',
+          summary: '检测到当前会话已有上传文件和完整 rewrite 上下文。',
+          selected_skill: 'rewrite',
+          guard_result: 'passed',
+        },
+      },
+      {
+        event: 'task_accepted',
+        data: {
+          run_id: 'run-rewrite-implicit',
+          task_id: 'task-rewrite',
+          task_kind: 'rewrite',
+          status: 'queued',
+          queue_position: 0,
+          waiting_count: 0,
+        },
+      },
+      {
+        event: 'done',
+        data: {
+          run_id: 'run-rewrite-implicit',
+          message: '已为你创建 rewrite 任务。',
+          task_id: 'task-rewrite',
+          selected_skill: 'rewrite',
+        },
+      },
+    ]);
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
       const conversation = useChatStore.getState().conversations[0];
       const draft = useChatStore.getState().getConversationDraft('conv-1');
-      expect(conversation.currentTaskId).toBe('task-edit');
-      expect(draft?.pending_edit_task_id).toBe('task-edit');
+      const taskGroup = useChatStore.getState().findTaskMessageGroup('task-rewrite');
+      const thinkingMessage = conversation.messages.find((message) => message.metadata?.agentThinking);
+      expect(conversation.currentTaskId).toBe('task-rewrite');
+      expect(draft?.pending_rewrite_task_id).toBe('task-rewrite');
       expect(conversation.messages[0]).toMatchObject({
         type: 'user',
         metadata: {
-          chatKind: 'edit',
+          chatKind: 'rewrite',
         },
       });
-      expect(conversation.messages[1]).toMatchObject({
-        type: 'ai',
-        content: '正在创建文件修改任务',
+      expect(thinkingMessage).toBeUndefined();
+      expect(taskGroup?.logMessage).toMatchObject({
+        taskId: 'task-rewrite',
+        status: 'generating',
         metadata: {
-          chatKind: 'edit',
+          messageKind: 'task-log',
+          taskKind: 'rewrite',
         },
       });
+      expect(taskGroup?.contentMessage).toBeUndefined();
     });
 
-    const editPayload = mockCreateEditTask.mock.calls[0]?.[0];
-    expect(editPayload).toEqual({
+    const rewritePayload = mockStreamAgentRun.mock.calls[0]?.[0];
+    expect(rewritePayload).toEqual({
       conversation_id: 'conv-1',
-      form_type: 'xjcg_tender',
       model: 'deepseek',
-      edit_prompt: '请把交付日期改成合同签订后 30 天内',
-      file_path: 'D:/UploadFiles/edit.docx',
-      insertion_config: {
-        before_text: '第三章 采购需求',
-        after_text: '第四章 响应文件有关格式',
+      message: '请把交付日期改成合同签订后 30 天内',
+      selected_skills: ['rewrite'],
+      context_snapshot: {
+        rewrite_available: false,
+        uploaded_files: [
+          {
+            file_path: 'D:/UploadFiles/rewrite.docx',
+            file_name: 'rewrite.docx',
+          },
+        ],
+        rewrite_context: {
+          form_type: 'xjcg_tender',
+          insertion_config: {
+            before_text: '第三章 采购需求',
+            after_text: '第四章 响应文件有关格式',
+          },
+          tender_lx: 0,
+          fund_source_lx: 1,
+          tender_data_snapshot: expect.objectContaining({
+            project_name: '示例项目',
+          }),
+        },
       },
-      tender_lx: 0,
-      fund_source_lx: 1,
-      tender_data_snapshot: expect.objectContaining({
-        project_name: '示例项目',
-      }),
     });
-    expect(editPayload).not.toHaveProperty('generation_mode');
-    expect(editPayload).not.toHaveProperty('comment_generation_mode');
   });
 
-  it('routes gngk goods fiscal edit with ifzgcg=2 to the self-funded goods graph', async () => {
+  it('sends the mapped gngk rewrite form type through agent run context', async () => {
     useChatStore.setState((state) => ({
       ...state,
       conversations: [
@@ -528,12 +759,12 @@ describe('ChatPanel', () => {
       conversationDrafts: {
         'conv-1': {
           chat_input: '请补充技术要求',
-          input_mode: 'edit',
-          edit_file: {
+
+          rewrite_file: {
             id: 'file-1',
-            file_path: 'D:/UploadFiles/edit.docx',
-            file_name: 'edit.docx',
-            original_name: 'edit.docx',
+            file_path: 'D:/UploadFiles/rewrite.docx',
+            file_name: 'rewrite.docx',
+            original_name: 'rewrite.docx',
             size: 128,
             upload_time: new Date().toISOString(),
           },
@@ -564,37 +795,42 @@ describe('ChatPanel', () => {
         },
       },
     }));
-    mockCreateEditTask.mockResolvedValue({
-      task_id: 'task-edit',
-      task_kind: 'edit',
-      status: 'queued',
-      queue_position: 0,
-      waiting_count: 0,
-    });
+    mockAgentRunStream([]);
 
     render(<ChatPanel />);
 
     fireEvent.click(screen.getByTestId('send-current-input-button'));
 
     await waitFor(() => {
-      expect(mockCreateEditTask).toHaveBeenCalledTimes(1);
+      expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
     });
 
-    expect(mockCreateEditTask).toHaveBeenCalledWith(
+    expect(mockStreamAgentRun.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         conversation_id: 'conv-1',
-        form_type: 'gngk_hw_zc_tender',
-        tender_lx: 0,
-        fund_source_lx: 1,
-        tender_data_snapshot: expect.objectContaining({
-          ifzgcg: 2,
-          fund_source_lx: 1,
+        message: '请补充技术要求',
+        selected_skills: ['rewrite'],
+        context_snapshot: expect.objectContaining({
+          uploaded_files: [
+            expect.objectContaining({
+              file_path: 'D:/UploadFiles/rewrite.docx',
+            }),
+          ],
+          rewrite_context: expect.objectContaining({
+            form_type: 'gngk_hw_zc_tender',
+            tender_lx: 0,
+            fund_source_lx: 1,
+            tender_data_snapshot: expect.objectContaining({
+              ifzgcg: 2,
+              fund_source_lx: 1,
+            }),
+          }),
         }),
       })
     );
   });
 
-  it('keeps the latest edit output as the default file for the next edit', async () => {
+  it('keeps the latest rewrite output as the default file for the next upload rewrite', async () => {
     useChatStore.setState((state) => ({
       ...state,
       conversations: [
@@ -606,15 +842,15 @@ describe('ChatPanel', () => {
               id: 'msg-download',
               conversationId: 'conv-1',
               type: 'ai',
-              content: 'latest-edit.docx',
+              content: 'latest-rewrite.docx',
               timestamp: Date.now(),
               status: 'completed',
-              taskId: 'task-edit-finished',
+              taskId: 'task-rewrite-finished',
               metadata: {
                 messageKind: 'task-download',
-                taskKind: 'edit',
-                outputFile: 'D:/UploadFiles/latest-edit.docx',
-                fileName: 'latest-edit.docx',
+                taskKind: 'rewrite',
+                outputFile: 'D:/UploadFiles/latest-rewrite.docx',
+                fileName: 'latest-rewrite.docx',
               },
             },
           ],
@@ -622,28 +858,28 @@ describe('ChatPanel', () => {
       ],
       activeTaskIds: [],
       taskMessageMap: {
-        'task-edit-finished': {
+        'task-rewrite-finished': {
           downloadMessageId: 'msg-download',
         },
       },
       taskSummaries: {
-        'task-edit-finished': {
-          task_id: 'task-edit-finished',
-          task_kind: 'edit',
+        'task-rewrite-finished': {
+          task_id: 'task-rewrite-finished',
+          task_kind: 'rewrite',
           status: 'completed',
           updated_at: Date.now(),
         },
       },
       conversationDrafts: {
         'conv-1': {
-          input_mode: 'edit',
-          pending_edit_prompt: '请继续修改',
-          pending_edit_task_id: 'task-edit-finished',
-          edit_file: {
+
+          pending_rewrite_prompt: '请继续修改',
+          pending_rewrite_task_id: 'task-rewrite-finished',
+          rewrite_file: {
             id: 'old-file',
-            file_path: 'D:/UploadFiles/old-edit.docx',
-            file_name: 'old-edit.docx',
-            original_name: 'old-edit.docx',
+            file_path: 'D:/UploadFiles/old-rewrite.docx',
+            file_name: 'old-rewrite.docx',
+            original_name: 'old-rewrite.docx',
             size: 256,
             upload_time: new Date().toISOString(),
           },
@@ -655,10 +891,9 @@ describe('ChatPanel', () => {
 
     await waitFor(() => {
       const draft = useChatStore.getState().getConversationDraft('conv-1');
-      expect(draft?.pending_edit_task_id).toBeUndefined();
-      expect(draft?.input_mode).toBe('edit');
-      expect(draft?.edit_file?.file_path).toBe('D:/UploadFiles/latest-edit.docx');
-      expect(draft?.edit_file?.original_name).toBe('latest-edit.docx');
+      expect(draft?.pending_rewrite_task_id).toBeUndefined();
+      expect(draft?.rewrite_file?.file_path).toBe('D:/UploadFiles/latest-rewrite.docx');
+      expect(draft?.rewrite_file?.original_name).toBe('latest-rewrite.docx');
     });
   });
 
@@ -771,9 +1006,14 @@ describe('ChatPanel', () => {
       taskSummaries: {},
     }));
 
-    mockUserStream([
-      { event: 'route', data: { route: 'reply' } },
-      { event: 'done', data: { content: '重试成功内容' } },
+    mockAgentRunStream([
+      {
+        event: 'done',
+        data: {
+          run_id: 'run-1',
+          message: '重试成功内容',
+        },
+      },
     ]);
 
     render(<ChatPanel />);
@@ -788,34 +1028,92 @@ describe('ChatPanel', () => {
       expect(conversation.messages[0].content).toBe('重试成功内容');
     });
 
-    expect(mockStreamUserMessage).toHaveBeenCalledTimes(1);
+    expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
   });
 
-  it('auto routes rewrite-like input in normal mode to rewrite task flow', async () => {
+  it('creates rewrite task cards from agent run task_accepted events', async () => {
     useChatStore.setState((state) => ({
       ...state,
       conversations: [
         {
           ...state.conversations[0],
           currentTaskId: undefined,
+          messages: [
+            {
+              id: 'msg-download',
+              conversationId: 'conv-1',
+              type: 'ai',
+              content: 'output.docx',
+              timestamp: Date.now(),
+              status: 'completed',
+              taskId: 'task-generate-finished',
+              metadata: {
+                messageKind: 'task-download',
+                taskKind: 'generate',
+                outputFile: 'D:/UploadFiles/output.docx',
+                fileName: 'output.docx',
+              },
+            },
+          ],
         },
       ],
       activeTaskIds: [],
       taskSummaries: {},
       conversationDrafts: {
         'conv-1': {
-          chat_input: '请帮我修改这一段内容',
-          generation_mode: 'agent',
-          comment_generation_mode: 'off',
+          chat_input: '请帮我改写这一段内容',
         },
       },
     }));
 
-    mockUserStream([
-      { event: 'route', data: { route: 'rewrite' } },
+    mockAgentRunStream([
+      {
+        event: 'run_started',
+        data: {
+          run_id: 'run-1',
+          conversation_id: 'conv-1',
+          model: 'deepseek',
+          runtime: 'fake',
+          selected_skills: [],
+        },
+      },
+      {
+        event: 'thinking_stage',
+        data: {
+          run_id: 'run-1',
+          stage: 'understand',
+          label: '理解需求',
+          status: 'completed',
+          summary: '已识别为 rewrite 请求',
+          selected_skill: 'rewrite',
+        },
+      },
+      {
+        event: 'thinking_stage',
+        data: {
+          run_id: 'run-1',
+          stage: 'guard',
+          label: '检查上下文',
+          status: 'completed',
+          summary: '检测到当前会话已有可改写文档。',
+          selected_skill: 'rewrite',
+          guard_result: 'passed',
+        },
+      },
+      {
+        event: 'tool_call',
+        data: {
+          run_id: 'run-1',
+          tool_name: 'create_rewrite_task_tool',
+          status: 'completed',
+          summary: 'fake runtime 已调用 create_rewrite_task_tool。',
+          task_kind: 'rewrite',
+        },
+      },
       {
         event: 'task_accepted',
         data: {
+          run_id: 'run-1',
           task_id: 'task-rewrite',
           task_kind: 'rewrite',
           status: 'queued',
@@ -832,30 +1130,176 @@ describe('ChatPanel', () => {
     await waitFor(() => {
       const conversation = useChatStore.getState().conversations[0];
       const draft = useChatStore.getState().getConversationDraft('conv-1');
+      const taskGroup = useChatStore.getState().findTaskMessageGroup('task-rewrite');
+      const thinkingMessage = conversation.messages.find((message) => message.metadata?.agentThinking);
       expect(conversation.currentTaskId).toBe('task-rewrite');
       expect(draft?.pending_rewrite_task_id).toBe('task-rewrite');
-      expect(conversation.messages).toHaveLength(2);
-      expect(conversation.messages[0].metadata?.chatKind).toBe('rewrite');
+      expect(conversation.messages).toHaveLength(3);
       expect(conversation.messages[1]).toMatchObject({
-        type: 'ai',
-        content: '正在创建修改重写任务',
-        status: 'completed',
+        type: 'user',
         metadata: {
           chatKind: 'rewrite',
         },
       });
+      expect(thinkingMessage).toBeUndefined();
+      expect(taskGroup?.logMessage).toMatchObject({
+        taskId: 'task-rewrite',
+        status: 'generating',
+        metadata: {
+          messageKind: 'task-log',
+          taskKind: 'rewrite',
+        },
+      });
+      expect(taskGroup?.contentMessage).toBeUndefined();
     });
 
-    expect(mockStreamUserMessage).toHaveBeenCalledTimes(1);
-    expect(mockStreamUserMessage.mock.calls[0]?.[0]).toMatchObject({
+    expect(mockStreamAgentRun).toHaveBeenCalledTimes(1);
+    expect(mockStreamAgentRun.mock.calls[0]?.[0]).toMatchObject({
       conversation_id: 'conv-1',
+      message: '请帮我改写这一段内容',
       model: 'deepseek',
-      messages: [{ role: 'user', content: '请帮我修改这一段内容' }],
+      selected_skills: [],
+      context_snapshot: {
+        rewrite_available: true,
+        uploaded_files: [],
+      },
     });
-    expect(mockStreamUserMessage.mock.calls[0]?.[0]).not.toHaveProperty('generation_mode');
-    expect(mockStreamUserMessage.mock.calls[0]?.[0]).not.toHaveProperty(
-      'comment_generation_mode'
-    );
+    expect(mockStreamAgentRun.mock.calls[0]?.[0]).not.toHaveProperty('generation_mode');
+    expect(mockStreamAgentRun.mock.calls[0]?.[0]).not.toHaveProperty('comment_generation_mode');
+  });
+
+  it('keeps fake agent run task cards visible without tracking them as active tasks', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+          messages: [
+            {
+              id: 'msg-download',
+              conversationId: 'conv-1',
+              type: 'ai',
+              content: 'output.docx',
+              timestamp: Date.now(),
+              status: 'completed',
+              taskId: 'task-generate-finished',
+              metadata: {
+                messageKind: 'task-download',
+                taskKind: 'generate',
+                outputFile: 'D:/UploadFiles/output.docx',
+                fileName: 'output.docx',
+              },
+            },
+          ],
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请帮我改写这一段内容',
+        },
+      },
+    }));
+
+    mockAgentRunStream([
+      {
+        event: 'run_started',
+        data: {
+          run_id: 'run-1',
+          conversation_id: 'conv-1',
+          model: 'deepseek',
+          runtime: 'fake',
+          selected_skills: [],
+        },
+      },
+      {
+        event: 'thinking_stage',
+        data: {
+          run_id: 'run-1',
+          stage: 'understand',
+          label: '理解需求',
+          status: 'completed',
+          summary: '已识别为 rewrite 请求',
+          selected_skill: 'rewrite',
+        },
+      },
+      {
+        event: 'thinking_stage',
+        data: {
+          run_id: 'run-1',
+          stage: 'guard',
+          label: '检查上下文',
+          status: 'completed',
+          summary: '检测到当前会话已有可改写文档。',
+          selected_skill: 'rewrite',
+          guard_result: 'passed',
+        },
+      },
+      {
+        event: 'task_accepted',
+        data: {
+          run_id: 'run-1',
+          task_id: 'fake-rewrite-task-1',
+          task_kind: 'rewrite',
+          status: 'queued',
+          queue_position: 0,
+          waiting_count: 0,
+        },
+      },
+    ]);
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      const state = useChatStore.getState();
+      const conversation = state.conversations[0];
+      const taskGroup = state.findTaskMessageGroup('fake-rewrite-task-1');
+      const thinkingMessage = conversation.messages.find((message) => message.metadata?.agentThinking);
+      expect(conversation.currentTaskId).toBeUndefined();
+      expect(state.activeTaskIds).toEqual([]);
+      expect(state.getTaskSummary('fake-rewrite-task-1')).toBeNull();
+      expect(thinkingMessage).toBeUndefined();
+      expect(taskGroup?.logMessage).toMatchObject({
+        taskId: 'fake-rewrite-task-1',
+        status: 'generating',
+      });
+      expect(taskGroup?.contentMessage).toBeUndefined();
+      expect(state.getConversationDraft('conv-1')?.pending_rewrite_task_id).toBeUndefined();
+    });
+
+    act(() => {
+      useChatStore.getState().updateConversationDraft('conv-1', {
+        chat_input: '你好',
+      });
+    });
+
+    mockAgentRunStream([
+      {
+        event: 'needs_input',
+        data: {
+          run_id: 'run-2',
+          message: '请说明这次要执行 rewrite。',
+          missing_requirements: ['selected_skill'],
+        },
+      },
+    ]);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      const conversation = useChatStore.getState().conversations[0];
+      expect(conversation.messages[conversation.messages.length - 1]).toMatchObject({
+        type: 'ai',
+        content: '请说明这次要执行 rewrite。',
+        status: 'completed',
+      });
+    });
+
+    expect(mockStreamAgentRun).toHaveBeenCalledTimes(2);
   });
 
   it('keeps ordinary chat on the streaming path without creating a task', async () => {
@@ -876,9 +1320,14 @@ describe('ChatPanel', () => {
       },
     }));
 
-    mockUserStream([
-      { event: 'route', data: { route: 'reply' } },
-      { event: 'done', data: { content: '你好，请问有什么可以帮你？' } },
+    mockAgentRunStream([
+      {
+        event: 'done',
+        data: {
+          run_id: 'run-1',
+          message: '你好，请问有什么可以帮你？',
+        },
+      },
     ]);
 
     render(<ChatPanel />);
@@ -914,17 +1363,22 @@ describe('ChatPanel', () => {
       },
     }));
 
-    mockStreamUserMessage.mockImplementationOnce(async (_payload, options = {}) => {
-      await options.onEvent?.({ event: 'route', data: { route: 'reply' } });
+    mockStreamAgentRun.mockImplementationOnce(async (_payload, options = {}) => {
       await deferred.promise;
-      await options.onEvent?.({ event: 'done', data: { content: '你好，请问有什么可以帮你？' } });
+      await options.onEvent?.({
+        event: 'done',
+        data: {
+          run_id: 'run-1',
+          message: '你好，请问有什么可以帮你？',
+        },
+      });
     });
 
     render(<ChatPanel />);
 
     fireEvent.click(screen.getByTestId('send-current-input-button'));
 
-    await waitFor(() => expect(mockStreamUserMessage).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockStreamAgentRun).toHaveBeenCalledTimes(1));
     expect(useChatStore.getState().getConversationDraft('conv-1')?.chat_input).toBe('');
 
     deferred.resolve();
@@ -935,8 +1389,78 @@ describe('ChatPanel', () => {
     });
   });
 
-  it('clears the edit draft immediately after task creation starts', async () => {
-    const deferred = createDeferred<Awaited<ReturnType<typeof createEditTask>>>();
+  it('keeps the composer loading while agent run is active and errors incomplete streams', async () => {
+    const deferred = createDeferred<void>();
+
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请帮我修改第三章',
+        },
+      },
+    }));
+
+    mockStreamAgentRun.mockImplementationOnce(async (_payload, options = {}) => {
+      await options.onEvent?.({
+        event: 'run_started',
+        data: {
+          run_id: 'run-incomplete',
+          conversation_id: 'conv-1',
+          model: 'deepseek',
+          runtime: 'fake',
+          selected_skills: [],
+        },
+      });
+      await deferred.promise;
+    });
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-input')).toHaveAttribute('data-loading', 'true');
+      const conversation = useChatStore.getState().conversations[0];
+      const thinkingMessage = conversation.messages.find((message) => message.metadata?.agentThinking);
+      expect(thinkingMessage).toMatchObject({
+        status: 'generating',
+        metadata: {
+          agentThinking: {
+            runId: 'run-incomplete',
+          },
+        },
+      });
+    });
+
+    deferred.resolve();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-input')).toHaveAttribute('data-loading', 'false');
+      const conversation = useChatStore.getState().conversations[0];
+      const thinkingMessage = conversation.messages.find((message) => message.metadata?.agentThinking);
+      expect(thinkingMessage).toMatchObject({
+        status: 'error',
+        error: '任务助手流未返回完成事件，请重试',
+        metadata: {
+          agentThinking: {
+            terminalState: 'error',
+          },
+        },
+      });
+    });
+  });
+
+  it('clears the rewrite draft immediately after agent run starts and restores pending task tracking on acceptance', async () => {
+    const deferred = createDeferred<void>();
 
     useChatStore.setState((state) => ({
       ...state,
@@ -951,12 +1475,12 @@ describe('ChatPanel', () => {
       conversationDrafts: {
         'conv-1': {
           chat_input: '请把交付日期改成合同签订后 30 天内',
-          input_mode: 'edit',
-          edit_file: {
+
+          rewrite_file: {
             id: 'file-1',
-            file_path: 'D:/UploadFiles/edit.docx',
-            file_name: 'edit.docx',
-            original_name: 'edit.docx',
+            file_path: 'D:/UploadFiles/rewrite.docx',
+            file_name: 'rewrite.docx',
+            original_name: 'rewrite.docx',
             size: 128,
             upload_time: new Date().toISOString(),
           },
@@ -987,128 +1511,37 @@ describe('ChatPanel', () => {
       },
     }));
 
-    mockCreateEditTask.mockImplementationOnce(() => deferred.promise);
+    mockStreamAgentRun.mockImplementationOnce(async (_payload, options = {}) => {
+      await deferred.promise;
+      await options.onEvent?.({
+        event: 'task_accepted',
+        data: {
+          run_id: 'run-rewrite-deferred',
+          task_id: 'task-rewrite',
+          task_kind: 'rewrite',
+          status: 'queued',
+          queue_position: 0,
+          waiting_count: 0,
+        },
+      });
+    });
 
     render(<ChatPanel />);
 
     fireEvent.click(screen.getByTestId('send-current-input-button'));
 
-    await waitFor(() => expect(mockCreateEditTask).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockStreamAgentRun).toHaveBeenCalledTimes(1));
     expect(useChatStore.getState().getConversationDraft('conv-1')?.chat_input).toBe('');
 
-    deferred.resolve({
-      task_id: 'task-edit',
-      task_kind: 'edit',
-      status: 'queued',
-      queue_position: 0,
-      waiting_count: 0,
-    });
+    deferred.resolve();
 
     await waitFor(() => {
       const draft = useChatStore.getState().getConversationDraft('conv-1');
-      expect(draft?.pending_edit_task_id).toBe('task-edit');
+      expect(draft?.pending_rewrite_task_id).toBe('task-rewrite');
     });
   });
 
-  it('excludes task-notice ai bubbles from normal chat context', async () => {
-    useChatStore.setState((state) => ({
-      ...state,
-      conversations: [
-        {
-          ...state.conversations[0],
-          currentTaskId: undefined,
-          messages: [
-            {
-              id: 'msg-task-notice',
-              conversationId: 'conv-1',
-              type: 'ai',
-              content: '正在创建生成招标文件任务',
-              timestamp: Date.now(),
-              status: 'completed',
-              metadata: {
-                chatKind: 'task-notice',
-              },
-            },
-          ],
-        },
-      ],
-      activeTaskIds: [],
-      taskSummaries: {},
-      conversationDrafts: {
-        'conv-1': {
-          chat_input: '继续帮我解释一下',
-        },
-      },
-    }));
-
-    mockUserStream([
-      { event: 'route', data: { route: 'reply' } },
-      { event: 'done', data: { content: '好的，我继续说明。' } },
-    ]);
-
-    render(<ChatPanel />);
-
-    fireEvent.click(screen.getByTestId('send-current-input-button'));
-
-    await waitFor(() => {
-      expect(mockStreamUserMessage).toHaveBeenCalledTimes(1);
-    });
-
-    expect(mockStreamUserMessage.mock.calls[0]?.[0].messages).toEqual([
-      { role: 'user', content: '继续帮我解释一下' },
-    ]);
-  });
-
-  it('excludes empty completed ai bubbles from the next user stream context', async () => {
-    useChatStore.setState((state) => ({
-      ...state,
-      conversations: [
-        {
-          ...state.conversations[0],
-          currentTaskId: undefined,
-          messages: [
-            {
-              id: 'msg-ai-empty',
-              conversationId: 'conv-1',
-              type: 'ai',
-              content: '',
-              timestamp: Date.now(),
-              status: 'completed',
-              metadata: {
-                chatKind: 'normal',
-              },
-            },
-          ],
-        },
-      ],
-      activeTaskIds: [],
-      taskSummaries: {},
-      conversationDrafts: {
-        'conv-1': {
-          chat_input: '继续修改第二包技术参数',
-        },
-      },
-    }));
-
-    mockUserStream([
-      { event: 'route', data: { route: 'reply' } },
-      { event: 'done', data: { content: '好的，我继续处理。' } },
-    ]);
-
-    render(<ChatPanel />);
-
-    fireEvent.click(screen.getByTestId('send-current-input-button'));
-
-    await waitFor(() => {
-      expect(mockStreamUserMessage).toHaveBeenCalledTimes(1);
-    });
-
-    expect(mockStreamUserMessage.mock.calls[0]?.[0].messages).toEqual([
-      { role: 'user', content: '继续修改第二包技术参数' },
-    ]);
-  });
-
-  it('removes the rewrite placeholder bubble when the rewrite stream fails before task acceptance', async () => {
+  it('shows needs_input follow-up messages without creating a task card', async () => {
     useChatStore.setState((state) => ({
       ...state,
       conversations: [
@@ -1121,17 +1554,39 @@ describe('ChatPanel', () => {
       taskSummaries: {},
       conversationDrafts: {
         'conv-1': {
-          chat_input: '请帮我修改这一段内容',
+          chat_input: '你好',
         },
       },
     }));
 
-    mockUserStream([
-      { event: 'route', data: { route: 'rewrite' } },
+    mockAgentRunStream([
       {
-        event: 'error',
+        event: 'run_started',
         data: {
-          message: '修改任务创建失败',
+          run_id: 'run-1',
+          conversation_id: 'conv-1',
+          model: 'deepseek',
+          runtime: 'fake',
+          selected_skills: [],
+        },
+      },
+      {
+        event: 'thinking_stage',
+        data: {
+          run_id: 'run-1',
+          stage: 'guard',
+          label: '检查上下文',
+          status: 'completed',
+          summary: 'fake runtime 暂时只支持 rewrite 任务创建。',
+          guard_result: 'needs_input',
+        },
+      },
+      {
+        event: 'needs_input',
+        data: {
+          run_id: 'run-1',
+          message: '请说明这次要执行 rewrite。',
+          missing_requirements: ['selected_skill'],
         },
       },
     ]);
@@ -1143,19 +1598,94 @@ describe('ChatPanel', () => {
     await waitFor(() => {
       const conversation = useChatStore.getState().conversations[0];
       expect(conversation.currentTaskId).toBeUndefined();
-      expect(conversation.messages).toHaveLength(2);
-      expect(conversation.messages[0]).toMatchObject({
-        type: 'user',
+      expect(conversation.messages).toHaveLength(3);
+      expect(conversation.messages.find((message) => message.metadata?.agentThinking)).toMatchObject({
+        status: 'completed',
         metadata: {
-          chatKind: 'rewrite',
+          agentThinking: expect.objectContaining({
+            terminalState: 'needs_input',
+          }),
         },
       });
       expect(conversation.messages[1]).toMatchObject({
-        type: 'system',
-        content: '修改任务创建失败',
+        type: 'ai',
+        status: 'completed',
+        metadata: {
+          agentThinking: expect.objectContaining({
+            terminalState: 'needs_input',
+          }),
+        },
+      });
+      expect(conversation.messages[2]).toMatchObject({
+        type: 'ai',
+        content: '请说明这次要执行 rewrite。',
         status: 'completed',
       });
-      expect(conversation.messages.find((message) => message.content === '正在创建修改重写任务')).toBeUndefined();
+    });
+  });
+
+  it('shows explicit error messages when the agent run returns an error terminal', async () => {
+    useChatStore.setState((state) => ({
+      ...state,
+      conversations: [
+        {
+          ...state.conversations[0],
+          currentTaskId: undefined,
+        },
+      ],
+      activeTaskIds: [],
+      taskSummaries: {},
+      conversationDrafts: {
+        'conv-1': {
+          chat_input: '请帮我改写这一段内容',
+        },
+      },
+    }));
+
+    mockAgentRunStream([
+      {
+        event: 'run_started',
+        data: {
+          run_id: 'run-1',
+          conversation_id: 'conv-1',
+          model: 'deepseek',
+          runtime: 'fake',
+          selected_skills: [],
+        },
+      },
+      {
+        event: 'error',
+        data: {
+          run_id: 'run-1',
+          code: 'AGENT_RUN_FAILED',
+          message: 'agent run 执行失败，请稍后重试',
+        },
+      },
+    ]);
+
+    render(<ChatPanel />);
+
+    fireEvent.click(screen.getByTestId('send-current-input-button'));
+
+    await waitFor(() => {
+      const conversation = useChatStore.getState().conversations[0];
+      expect(conversation.currentTaskId).toBeUndefined();
+      expect(conversation.messages).toHaveLength(3);
+      expect(conversation.messages[1]).toMatchObject({
+        type: 'ai',
+        status: 'error',
+        metadata: {
+          agentThinking: expect.objectContaining({
+            terminalState: 'error',
+          }),
+        },
+      });
+      expect(conversation.messages[2]).toMatchObject({
+        type: 'ai',
+        content: 'agent run 执行失败，请稍后重试',
+        status: 'error',
+      });
+      expect(screen.getByTestId('chat-input')).toHaveAttribute('data-loading', 'false');
     });
   });
 
@@ -1177,13 +1707,9 @@ describe('ChatPanel', () => {
       },
     }));
 
-    mockStreamUserMessage.mockImplementationOnce(
+    mockStreamAgentRun.mockImplementationOnce(
       async (_payload, options = {}) =>
         new Promise<void>((_resolve, reject) => {
-          void (async () => {
-            await options.onEvent?.({ event: 'route', data: { route: 'reply' } });
-            await options.onEvent?.({ event: 'chunk', data: { content: '正在生成中' } });
-          })();
           options.signal?.addEventListener(
             'abort',
             () => reject(new DOMException('Aborted', 'AbortError')),
@@ -1197,22 +1723,18 @@ describe('ChatPanel', () => {
     fireEvent.click(screen.getByTestId('send-current-input-button'));
 
     await waitFor(() => {
-      const conversation = useChatStore.getState().conversations[0];
-      expect(conversation.messages[1]).toMatchObject({
-        type: 'ai',
-        status: 'generating',
-        content: '正在生成中',
-      });
+      expect(screen.getByTestId('chat-input')).toHaveAttribute('data-loading', 'true');
     });
 
     fireEvent.click(screen.getByTestId('cancel-chat-button'));
 
     await waitFor(() => {
       const conversation = useChatStore.getState().conversations[0];
-      expect(conversation.messages[1]).toMatchObject({
-        type: 'ai',
-        status: 'cancelled',
-        content: '正在生成中',
+      expect(screen.getByTestId('chat-input')).toHaveAttribute('data-loading', 'false');
+      expect(conversation.messages).toHaveLength(1);
+      expect(conversation.messages[0]).toMatchObject({
+        type: 'user',
+        content: '帮我写一段说明',
       });
     });
   });

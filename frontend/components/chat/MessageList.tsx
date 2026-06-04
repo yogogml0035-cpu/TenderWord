@@ -2,10 +2,11 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { User, Bot, Info, Loader2, RefreshCw, Copy, Check } from 'lucide-react';
-import type { Message } from '@/types/chat';
+import type { ChatMessageKind, Message } from '@/types/chat';
 import { TaskLogMessage } from './TaskLogMessage';
 import { TaskContentMessage } from './TaskContentMessage';
 import { TaskDownloadMessage } from './TaskDownloadMessage';
+import { AgentThinkingMessage } from './AgentThinkingMessage';
 
 interface MessageListProps {
   messages: Message[];
@@ -103,6 +104,35 @@ async function copyPlainText(text: string) {
   textarea.select();
   document.execCommand('copy');
   document.body.removeChild(textarea);
+}
+
+type UserCapability = Extract<ChatMessageKind, 'rewrite'>;
+
+const USER_CAPABILITY_PREFIX_PATTERNS: Record<UserCapability, RegExp> = {
+  rewrite: /^\s*(?:\[\s*\$?rewrite\s*\]|[$/]rewrite)(?=\s|$)\s*/i,
+};
+
+function getUserCapability(chatKind: ChatMessageKind | undefined): UserCapability | null {
+  if (chatKind === 'rewrite') {
+    return chatKind;
+  }
+  return null;
+}
+
+function normalizeUserMessageContent(content: string, capability: UserCapability | null): string {
+  if (!capability) {
+    return content;
+  }
+
+  return content.replace(USER_CAPABILITY_PREFIX_PATTERNS[capability], '');
+}
+
+function getUserMessageCopyText(content: string, capability: UserCapability | null): string {
+  if (!capability) {
+    return content;
+  }
+
+  return content ? `$${capability} ${content}` : `$${capability}`;
 }
 
 export function MessageList({
@@ -236,6 +266,13 @@ function MessageItem({
   const [copied, setCopied] = useState(false);
   const [showUserActions, setShowUserActions] = useState(false);
   const copyResetTimerRef = useRef<number | null>(null);
+  const userCapability = message.type === 'user' ? getUserCapability(message.metadata?.chatKind) : null;
+  const userContent =
+    message.type === 'user' && typeof message.content === 'string'
+      ? normalizeUserMessageContent(message.content, userCapability)
+      : '';
+  const userCopyText =
+    message.type === 'user' ? getUserMessageCopyText(userContent, userCapability) : '';
 
   useEffect(() => {
     return () => {
@@ -246,11 +283,11 @@ function MessageItem({
   }, []);
 
   const handleCopyUserMessage = useCallback(() => {
-    if (interactionDisabled || message.type !== 'user' || typeof message.content !== 'string') {
+    if (interactionDisabled || message.type !== 'user' || !userCopyText) {
       return;
     }
 
-    void copyPlainText(message.content)
+    void copyPlainText(userCopyText)
       .then(() => {
         setCopied(true);
         if (copyResetTimerRef.current !== null) {
@@ -264,10 +301,11 @@ function MessageItem({
       .catch(() => {
         setCopied(false);
       });
-  }, [interactionDisabled, message.content, message.type]);
+  }, [interactionDisabled, message.type, userCopyText]);
 
   if (message.type === 'ai') {
     const messageKind = message.metadata?.messageKind;
+    const hasAgentThinkingCard = !!message.metadata?.agentThinking;
 
     return (
       <div className="animate-fade-in-up flex gap-3">
@@ -298,7 +336,8 @@ function MessageItem({
               onCommentSupplement={onCommentSupplement}
             />
           )}
-          {!messageKind && (
+          {hasAgentThinkingCard && <AgentThinkingMessage message={message} />}
+          {!messageKind && !hasAgentThinkingCard && (
             <div className="rounded border border-gray-200 bg-white px-4 py-3 shadow-sm">
               <SimpleMarkdown content={typeof message.content === 'string' ? message.content : '...'} />
 
@@ -333,8 +372,6 @@ function MessageItem({
   }
 
   if (message.type === 'user') {
-    const userContent = typeof message.content === 'string' ? message.content : '';
-
     return (
       <div className="animate-fade-in-up flex items-start justify-end gap-3">
         <div
@@ -353,6 +390,14 @@ function MessageItem({
             data-testid="user-message-bubble"
             className="w-fit max-w-full rounded-2xl rounded-tr-sm bg-blue-500 px-4 py-2.5 text-white shadow-sm"
           >
+            {userCapability ? (
+              <div
+                data-testid={`user-message-capability-chip-${userCapability}`}
+                className="mb-2 inline-flex rounded-full border border-white/20 bg-white/12 px-2.5 py-1 text-[11px] font-semibold tracking-[0.12em] text-blue-50"
+              >
+                {userCapability}
+              </div>
+            ) : null}
             <p data-testid="user-message-text" className="whitespace-pre-wrap break-words text-sm leading-6">
               {userContent || '...'}
             </p>
@@ -384,7 +429,7 @@ function MessageItem({
                 aria-label="复制用户消息"
                 title="复制用户消息"
                 onClick={handleCopyUserMessage}
-                disabled={!userContent || interactionDisabled}
+                disabled={!userCopyText || interactionDisabled}
                 tabIndex={showUserActions ? 0 : -1}
                 className="inline-flex h-7 w-7 items-center justify-center transition-colors duration-200 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
               >

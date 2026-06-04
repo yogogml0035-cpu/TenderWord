@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.nodes.skills_nodes import edit_nodes
+from backend.nodes.skills_nodes import rewrite_nodes
 
 
 class _FakeDoc:
@@ -15,12 +15,15 @@ class _FakeInspector:
         return {"range_start": range_start, "range_end": range_end}
 
 
-def test_resolve_edit_target_enables_verbose_style_flags(tmp_path: Path) -> None:
+def test_resolve_uploaded_rewrite_target_enables_verbose_style_flags(tmp_path: Path) -> None:
     doc_path = tmp_path / "origin.docx"
     doc_path.write_bytes(b"origin")
 
-    result = edit_nodes.resolve_edit_target(
+    result = rewrite_nodes.resolve_rewrite_target(
         {
+            "conversation_id": "conv-1",
+            "rewrite_user_prompt": "请修改正文",
+            "rewrite_source": "uploaded_file",
             "source_document_path": str(doc_path),
         },
         config=None,
@@ -32,29 +35,29 @@ def test_resolve_edit_target_enables_verbose_style_flags(tmp_path: Path) -> None
     assert result["prepared_doc_path"] != str(doc_path)
 
 
-def test_extract_edit_context_injects_inline_style_fragments(monkeypatch, tmp_path: Path) -> None:
-    doc_path = tmp_path / "edit-source.docx"
+def test_extract_uploaded_rewrite_context_injects_inline_style_fragments(monkeypatch, tmp_path: Path) -> None:
+    doc_path = tmp_path / "rewrite-source.docx"
     doc_path.write_bytes(b"docx")
     progress_messages: list[str] = []
 
     monkeypatch.setattr(
-        edit_nodes,
+        rewrite_nodes,
         "create_word_application",
         lambda **kwargs: ("word", False),
     )
     monkeypatch.setattr(
-        edit_nodes,
+        rewrite_nodes,
         "open_document_with_retry",
         lambda **kwargs: _FakeDoc(),
     )
-    monkeypatch.setattr(edit_nodes, "unprotect_document", lambda *args, **kwargs: False)
+    monkeypatch.setattr(rewrite_nodes, "unprotect_document", lambda *args, **kwargs: False)
     monkeypatch.setattr(
-        edit_nodes,
+        rewrite_nodes,
         "find_anchor_range",
         lambda **kwargs: ({"start": 10, "end": 20}, {"start": 90, "end": 100}),
     )
     monkeypatch.setattr(
-        edit_nodes,
+        rewrite_nodes,
         "resolve_anchor_content_range",
         lambda **kwargs: {
             "range_start": 20,
@@ -63,15 +66,15 @@ def test_extract_edit_context_injects_inline_style_fragments(monkeypatch, tmp_pa
             "end_page": 4,
         },
     )
-    monkeypatch.setattr(edit_nodes, "extract_content_with_tables", lambda rng: "原始正文")
-    monkeypatch.setattr(edit_nodes, "WordDocumentInspector", lambda **kwargs: _FakeInspector())
+    monkeypatch.setattr(rewrite_nodes, "extract_content_with_tables", lambda rng: "原始正文")
+    monkeypatch.setattr(rewrite_nodes, "WordDocumentInspector", lambda **kwargs: _FakeInspector())
     monkeypatch.setattr(
-        edit_nodes,
+        rewrite_nodes,
         "result_to_polished_comments",
         lambda result: [{"reference_text": "原始正文", "comment_text": "保留批注"}],
     )
     monkeypatch.setattr(
-        edit_nodes,
+        rewrite_nodes,
         "extract_inline_style_fragments",
         lambda **kwargs: [
             {
@@ -88,16 +91,16 @@ def test_extract_edit_context_injects_inline_style_fragments(monkeypatch, tmp_pa
             }
         ],
     )
-    monkeypatch.setattr(edit_nodes, "close_word_application", lambda **kwargs: None)
+    monkeypatch.setattr(rewrite_nodes, "close_word_application", lambda **kwargs: None)
     monkeypatch.setattr(
-        edit_nodes.progress_log,
+        rewrite_nodes.progress_log,
         "info",
         lambda message, *args: progress_messages.append(
             message % args if args else str(message)
         ),
     )
 
-    result = edit_nodes.extract_edit_context(
+    result = rewrite_nodes.extract_rewrite_context(
         {
             "prepared_doc_path": str(doc_path),
             "tender_type": "xjcg",
@@ -129,7 +132,7 @@ def test_extract_edit_context_injects_inline_style_fragments(monkeypatch, tmp_pa
     ]
     assert result["verbose_style_progress_logs"] is True
     assert result["suppress_comment_progress_logs"] is True
-    assert any("已提取编辑正文、批注和样式: comments=1, styles=1, pages=2-4" in msg for msg in progress_messages)
+    assert any("已提取重写正文、批注和样式: comments=1, styles=1, pages=2-4" in msg for msg in progress_messages)
     assert any(
         "样式提取[1/1]" in msg and "样式=加粗" in msg and '源文本="红字"' in msg
         for msg in progress_messages

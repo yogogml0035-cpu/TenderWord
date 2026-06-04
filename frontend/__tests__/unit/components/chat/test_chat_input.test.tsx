@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { useState } from 'react';
 import type { ConversationDraftFile } from '@/stores/chatStore';
+import type { AgentSkill } from '@/types/api';
 
 function ControlledChatInput({
   onSend = jest.fn(),
@@ -21,31 +22,37 @@ function ControlledChatInput({
   noticeMessage?: string | null;
 }) {
   const [value, setValue] = useState('');
+  const [selectedSkills, setSelectedSkills] = useState<AgentSkill[]>([]);
 
   return (
-    <ChatInput
-      value={value}
-      onValueChange={setValue}
-      onSend={onSend}
-      selectedModel={selectedModel}
-      onModelChange={onModelChange}
-      loading={loading}
-      actionMode={actionMode}
-      disabled={disabled}
-      noticeMessage={noticeMessage}
-    />
+    <>
+      <ChatInput
+        value={value}
+        onValueChange={setValue}
+        onSend={onSend}
+        selectedModel={selectedModel}
+        onModelChange={onModelChange}
+        loading={loading}
+        actionMode={actionMode}
+        disabled={disabled}
+        noticeMessage={noticeMessage}
+        selectedSkills={selectedSkills}
+        onSelectedSkillsChange={setSelectedSkills}
+      />
+      <div data-testid="selected-skills-debug">{selectedSkills.join(',')}</div>
+    </>
   );
 }
 
-function ControlledEditChatInput({
-  onEditFileSelect = jest.fn(),
-  initialEditFile = null,
+function ControlledRewriteFileChatInput({
+  onRewriteFileSelect = jest.fn(),
+  initialRewriteFile = null,
 }: {
-  onEditFileSelect?: (file: File) => void | Promise<void>;
-  initialEditFile?: ConversationDraftFile | null;
+  onRewriteFileSelect?: (file: File) => void | Promise<void>;
+  initialRewriteFile?: ConversationDraftFile | null;
 }) {
   const [value, setValue] = useState('');
-  const [editFile, setEditFile] = useState<ConversationDraftFile | null>(initialEditFile);
+  const [rewriteFile, setRewriteFile] = useState<ConversationDraftFile | null>(initialRewriteFile);
 
   return (
     <ChatInput
@@ -54,12 +61,11 @@ function ControlledEditChatInput({
       onSend={jest.fn()}
       selectedModel="deepseek"
       onModelChange={jest.fn()}
-      inputMode={editFile ? 'edit' : 'normal'}
-      editFile={editFile}
-      onEditFileSelect={async (file) => {
-        await onEditFileSelect(file);
-        setEditFile({
-          id: 'edit-file-1',
+      rewriteFile={rewriteFile}
+      onRewriteFileSelect={async (file: File) => {
+        await onRewriteFileSelect(file);
+        setRewriteFile({
+          id: 'rewrite-file-1',
           file_path: '/tmp/test.docx',
           file_name: 'test.docx',
           original_name: file.name,
@@ -67,7 +73,7 @@ function ControlledEditChatInput({
           upload_time: new Date().toISOString(),
         });
       }}
-      onEditFileRemove={() => setEditFile(null)}
+      onRewriteFileRemove={() => setRewriteFile(null)}
     />
   );
 }
@@ -213,10 +219,50 @@ describe('ChatInput', () => {
     expect(screen.queryByTestId('chat-plus-menu')).not.toBeInTheDocument();
   });
 
-  it('rejects non-word files in edit mode entry', () => {
+  it('shows a loading icon on the plus trigger while the composer is busy', () => {
+    render(<ControlledChatInput loading actionMode="cancel" />);
+
+    expect(screen.getByTestId('chat-plus-trigger')).toBeDisabled();
+    expect(screen.getByTestId('chat-plus-trigger')).toHaveAccessibleName('更多操作处理中');
+    expect(screen.getByTestId('chat-plus-loading-icon')).toHaveClass('animate-spin');
+    expect(screen.queryByTestId('chat-plus-menu')).not.toBeInTheDocument();
+  });
+
+  it('shows the slash skill picker and stores the selected skill separately', () => {
     render(<ControlledChatInput />);
 
-    fireEvent.change(screen.getByTestId('chat-edit-file-input'), {
+    const textarea = screen.getByRole('textbox');
+
+    fireEvent.change(textarea, { target: { value: '/' } });
+    expect(screen.getByTestId('chat-skill-picker')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-skill-picker')).toHaveClass('bottom-full');
+    expect(screen.getByTestId('chat-skill-option-rewrite')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-skill-option-edit')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('chat-skill-option-rewrite'));
+
+    expect(screen.getByTestId('chat-selected-skill-rewrite')).toBeInTheDocument();
+    expect(screen.getByTestId('selected-skills-debug')).toHaveTextContent('rewrite');
+    expect(textarea).toHaveValue('');
+  });
+
+  it('parses $skill prefixes into selected_skills and removes the prefix from the textarea', () => {
+    render(<ControlledChatInput />);
+
+    const textarea = screen.getByRole('textbox');
+
+    fireEvent.change(textarea, { target: { value: '$rewrite 改写第三包' } });
+
+    expect(screen.getByTestId('selected-skills-debug')).toHaveTextContent('rewrite');
+    expect(screen.getByTestId('chat-selected-skill-rewrite')).toBeInTheDocument();
+    expect(textarea).toHaveValue('改写第三包');
+    expect(screen.queryByTestId('chat-skill-picker')).not.toBeInTheDocument();
+  });
+
+  it('rejects non-word files in uploaded rewrite entry', () => {
+    render(<ControlledChatInput />);
+
+    fireEvent.change(screen.getByTestId('chat-rewrite-file-input'), {
       target: {
         files: [new File(['x'], 'invalid.pdf', { type: 'application/pdf' })],
       },
@@ -225,11 +271,11 @@ describe('ChatInput', () => {
     expect(screen.getByTestId('chat-input-notice')).toHaveTextContent('仅支持上传 .doc 或 .docx 文件');
   });
 
-  it('shows, removes, and replaces the selected edit file card', async () => {
-    const handleEditFileSelect = jest.fn();
-    render(<ControlledEditChatInput onEditFileSelect={handleEditFileSelect} />);
+  it('shows, removes, and replaces the selected rewrite file card', async () => {
+    const handleRewriteFileSelect = jest.fn();
+    render(<ControlledRewriteFileChatInput onRewriteFileSelect={handleRewriteFileSelect} />);
 
-    fireEvent.change(screen.getByTestId('chat-edit-file-input'), {
+    fireEvent.change(screen.getByTestId('chat-rewrite-file-input'), {
       target: {
         files: [
           new File(['hello'], 'first.docx', {
@@ -239,19 +285,20 @@ describe('ChatInput', () => {
       },
     });
 
-    expect(handleEditFileSelect).toHaveBeenCalledTimes(1);
-    expect(await screen.findByTestId('chat-edit-file-card')).toHaveTextContent('first.docx');
+    expect(handleRewriteFileSelect).toHaveBeenCalledTimes(1);
+    expect(await screen.findByTestId('chat-rewrite-file-card')).toHaveTextContent('first.docx');
+    expect(screen.getByTestId('chat-rewrite-file-card')).toHaveTextContent('上传文件重写');
 
-    fireEvent.click(screen.getByTestId('chat-edit-file-remove'));
-    expect(screen.queryByTestId('chat-edit-file-card')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('chat-rewrite-file-remove'));
+    expect(screen.queryByTestId('chat-rewrite-file-card')).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByTestId('chat-edit-file-input'), {
+    fireEvent.change(screen.getByTestId('chat-rewrite-file-input'), {
       target: {
         files: [new File(['world'], 'second.doc', { type: 'application/msword' })],
       },
     });
 
-    expect(handleEditFileSelect).toHaveBeenCalledTimes(2);
-    expect(await screen.findByTestId('chat-edit-file-card')).toHaveTextContent('second.doc');
+    expect(handleRewriteFileSelect).toHaveBeenCalledTimes(2);
+    expect(await screen.findByTestId('chat-rewrite-file-card')).toHaveTextContent('second.doc');
   });
 });

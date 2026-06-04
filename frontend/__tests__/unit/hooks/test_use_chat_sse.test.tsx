@@ -53,23 +53,6 @@ function createRewriteRunningTaskStatus() {
   };
 }
 
-function createEditRunningTaskStatus() {
-  return {
-    task_id: 'task-1',
-    task_kind: 'edit' as const,
-    status: 'running' as const,
-    created_at: new Date().toISOString(),
-    progress: {
-      completed_nodes: ['resolve_edit_target', 'extract_edit_context'],
-      running_nodes: ['edit_text'],
-      current_node: 'edit_text',
-      completed_count: 2,
-      total_nodes: 5,
-      progress_percent: 40,
-    },
-  };
-}
-
 function createCommentSupplementRunningTaskStatus() {
   return {
     task_id: 'task-1',
@@ -1868,7 +1851,7 @@ describe('useChatSSE', () => {
     expect(useChatTaskSessionStore.getState().sessions['task-1']).toBeUndefined();
   });
 
-  it('treats rewrite_text as the AI content trigger for rewrite tasks', async () => {
+  it('uses rewrite agent-step cards instead of task-content for rewrite tasks', async () => {
     useChatStore.setState((state) => ({
       ...state,
       taskSummaries: {
@@ -1923,8 +1906,57 @@ describe('useChatSSE', () => {
         },
       });
       latestOptions?.onMessage?.({
-        event: 'done',
+        event: 'agent_step',
         id: '3',
+        data: {
+          timestamp: new Date().toISOString(),
+          task_id: 'task-1',
+          task_kind: 'rewrite',
+          step_type: 'final',
+          round: 1,
+          node: 'rewrite_agent',
+          is_complete: true,
+          content: '最终完成，修复 0 轮，最终正文约 6 字。',
+          findings: [],
+          content_agent: {
+            phase: 'final',
+            summary: '最终完成，修复 0 轮，最终正文约 6 字。',
+            rounds: [
+              {
+                round: 1,
+                phase: 'draft',
+                label: '重写正文',
+                summary: '重写正文完成，约 6 字。',
+                issue_count: 0,
+                fix_count: 0,
+                content: '修改后的内容',
+                findings: [],
+              },
+              {
+                round: 1,
+                phase: 'audit',
+                label: '重写审核',
+                summary: '第 1 轮审核通过。',
+                issue_count: 0,
+                fix_count: 0,
+                content: '[]',
+                findings: [],
+              },
+            ],
+            highlights: [],
+            final_result: {
+              summary: '最终完成，修复 0 轮，最终正文约 6 字。',
+              revision_rounds: 0,
+              final_chars: 6,
+              issue_count: 0,
+              content: '修改后的内容',
+            },
+          },
+        },
+      });
+      latestOptions?.onMessage?.({
+        event: 'done',
+        id: '4',
         data: {
           timestamp: new Date().toISOString(),
           task_id: 'task-1',
@@ -1938,195 +1970,17 @@ describe('useChatSSE', () => {
     });
 
     const group = getTaskGroup();
-    expect(group?.contentMessage?.status).toBe('completed');
-    expect(group?.contentMessage?.content).toBe('修改后的内容');
-    expect(group?.contentMessage?.metadata?.taskKind).toBe('rewrite');
+    const conversation = useChatStore.getState().getCurrentConversation();
+    const agentMessages = conversation?.messages.filter(
+      (message) => message.metadata?.messageKind === 'agent-step'
+    );
+    expect(group?.contentMessage).toBeUndefined();
+    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages?.[0].content).toBe('修改后的内容');
+    expect(agentMessages?.[0].metadata?.taskKind).toBe('rewrite');
+    expect(agentMessages?.[0].metadata?.agentStepNode).toBe('content_agent');
+    expect(agentMessages?.[0].metadata?.contentAgent?.phase).toBe('final');
     expect(group?.downloadMessage?.metadata?.taskKind).toBe('rewrite');
   });
 
-  it('treats edit_text as the AI content trigger for edit tasks', async () => {
-    useChatStore.setState((state) => ({
-      ...state,
-      taskSummaries: {
-        'task-1': {
-          task_id: 'task-1',
-          task_kind: 'edit',
-          status: 'running',
-          updated_at: Date.now(),
-        },
-      },
-    }));
-    mockGetTaskStatus.mockResolvedValue(createEditRunningTaskStatus());
-
-    renderHook(() =>
-      useChatSSE({
-        taskId: 'task-1',
-        conversationId: 'conv-1',
-      })
-    );
-
-    await waitFor(() => {
-      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
-    });
-
-    act(() => {
-      latestOptions?.onMessage?.({
-        event: 'progress',
-        id: '1',
-        data: {
-          timestamp: new Date().toISOString(),
-          task_id: 'task-1',
-          task_kind: 'edit',
-          status: 'running',
-          progress_text: '2/5',
-          current_node: 'edit_text',
-          completed_count: 2,
-          total_nodes: 5,
-          progress_percent: 40,
-          current_node_display: 'AI生成修改正文',
-        },
-      });
-      latestOptions?.onMessage?.({
-        event: 'llm',
-        id: '2',
-        data: {
-          timestamp: new Date().toISOString(),
-          task_id: 'task-1',
-          node: 'edit_text',
-          content: '更新后的正文',
-          content_mode: 'snapshot',
-          is_complete: true,
-        },
-      });
-      latestOptions?.onMessage?.({
-        event: 'done',
-        id: '3',
-        data: {
-          timestamp: new Date().toISOString(),
-          task_id: 'task-1',
-          task_kind: 'edit',
-          success: true,
-          message: '文档修改完成',
-          output_file: 'D:/UploadFiles/output-edit.docx',
-          processing_time: 2.6,
-        },
-      });
-    });
-
-    const group = getTaskGroup();
-    expect(group?.contentMessage?.status).toBe('completed');
-    expect(group?.contentMessage?.content).toBe('更新后的正文');
-    expect(group?.contentMessage?.metadata?.taskKind).toBe('edit');
-    expect(group?.downloadMessage?.metadata?.taskKind).toBe('edit');
-  });
-
-  it('keeps the final multiline edit snapshot through completion logs and done', async () => {
-    useChatStore.setState((state) => ({
-      ...state,
-      taskSummaries: {
-        'task-1': {
-          task_id: 'task-1',
-          task_kind: 'edit',
-          status: 'running',
-          updated_at: Date.now(),
-        },
-      },
-    }));
-    mockGetTaskStatus.mockResolvedValue(createEditRunningTaskStatus());
-
-    renderHook(() =>
-      useChatSSE({
-        taskId: 'task-1',
-        conversationId: 'conv-1',
-      })
-    );
-
-    await waitFor(() => {
-      expect(latestOptions?.endpoint).toBe('/api/stream/task-1');
-    });
-
-    act(() => {
-      latestOptions?.onMessage?.({
-        event: 'progress',
-        id: '1',
-        data: {
-          timestamp: new Date().toISOString(),
-          task_id: 'task-1',
-          task_kind: 'edit',
-          status: 'running',
-          progress_text: '2/5',
-          current_node: 'edit_text',
-          completed_count: 2,
-          total_nodes: 5,
-          progress_percent: 40,
-          current_node_display: 'AI生成修改正文',
-        },
-      });
-      latestOptions?.onMessage?.({
-        event: 'llm',
-        id: '2',
-        data: {
-          timestamp: new Date().toISOString(),
-          task_id: 'task-1',
-          node: 'edit_text',
-          content: '单行草稿',
-          content_mode: 'snapshot',
-          is_complete: false,
-        },
-      });
-      latestOptions?.onMessage?.({
-        event: 'log',
-        id: '3',
-        data: {
-          timestamp: new Date().toISOString(),
-          task_id: 'task-1',
-          level: 'INFO',
-          message: '[edit_text] AI生成修改正文 完成 (4/5)',
-          node: 'edit_text',
-        },
-      });
-    });
-
-    expect(getTaskGroup()?.contentMessage?.status).toBe('generating');
-
-    act(() => {
-      latestOptions?.onMessage?.({
-        event: 'llm',
-        id: '4',
-        data: {
-          timestamp: new Date().toISOString(),
-          task_id: 'task-1',
-          node: 'edit_text',
-          content: '第一段\r\n第二段\r第三段',
-          content_mode: 'snapshot',
-          is_complete: true,
-        },
-      });
-    });
-
-    expect(useChatStreamStore.getState().streams['task-1']?.aiText).toBe('第一段\n第二段\n第三段');
-    expect(getTaskGroup()?.contentMessage?.status).toBe('completed');
-    expect(getTaskGroup()?.contentMessage?.content).toBe('第一段\n第二段\n第三段');
-
-    act(() => {
-      latestOptions?.onMessage?.({
-        event: 'done',
-        id: '5',
-        data: {
-          timestamp: new Date().toISOString(),
-          task_id: 'task-1',
-          task_kind: 'edit',
-          success: true,
-          message: '文档修改完成',
-          output_file: 'D:/UploadFiles/output-edit.docx',
-          processing_time: 2.6,
-        },
-      });
-    });
-
-    const group = getTaskGroup();
-    expect(group?.contentMessage?.status).toBe('completed');
-    expect(group?.contentMessage?.content).toBe('第一段\n第二段\n第三段');
-    expect(useChatStreamStore.getState().streams['task-1']).toBeUndefined();
-  });
 });

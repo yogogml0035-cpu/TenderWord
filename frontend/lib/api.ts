@@ -7,6 +7,10 @@
  */
 
 import type {
+  AgentRunEvent,
+  AgentRunStreamRequest,
+  AgentSkill,
+  AgentThinkingGuardResult,
   TenderData,
   TenderLookupResponse,
   TenderTypeInfo,
@@ -21,15 +25,12 @@ import type {
   CancelTaskData,
   CommentSupplementTaskRequest,
   CreateTaskData,
-  EditTaskRequest,
   GenerateRequest,
   ConversationHeartbeatData,
   ApiSuccessResponse,
   FileType,
   TaskKind,
   TaskStatus,
-  UserStreamEvent,
-  UserStreamRequest,
 } from '@/types/api';
 import type { Conversation } from '@/types/chat';
 import { resolveApiBaseUrl } from '@/lib/apiBaseUrl';
@@ -172,74 +173,252 @@ function createStreamRequestConfig(
   } satisfies RequestInit;
 }
 
-function parseUserStreamEvent(payload: unknown): UserStreamEvent | null {
-  if (!isRecord(payload) || typeof payload.event !== 'string' || !('data' in payload) || !isRecord(payload.data)) {
+function parseTaskKind(value: unknown): TaskKind | null {
+  return value === 'generate' ||
+    value === 'rewrite' ||
+    value === 'comment_supplement'
+    ? value
+    : null;
+}
+
+function parseTaskStatus(value: unknown): TaskStatus | null {
+  return value === 'queued' ||
+    value === 'running' ||
+    value === 'completed' ||
+    value === 'failed' ||
+    value === 'cancelled'
+    ? value
+    : null;
+}
+
+function parseAgentSkill(value: unknown): AgentSkill | null {
+  return value === 'rewrite' ? value : null;
+}
+
+function parseOptionalAgentSkill(value: unknown): AgentSkill | undefined | null {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return parseAgentSkill(value);
+}
+
+function parseAgentSkillList(value: unknown): AgentSkill[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const parsedSkills: AgentSkill[] = [];
+  for (const item of value) {
+    const parsedSkill = parseAgentSkill(item);
+    if (!parsedSkill) {
+      return null;
+    }
+    parsedSkills.push(parsedSkill);
+  }
+
+  return parsedSkills;
+}
+
+function parseStringList(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : null;
+}
+
+function parseOptionalAgentGuardResult(value: unknown): AgentThinkingGuardResult | undefined | null {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return value === 'passed' || value === 'needs_input' ? value : null;
+}
+
+function parseAgentRunEvent(payload: unknown): AgentRunEvent | null {
+  if (
+    !isRecord(payload) ||
+    typeof payload.event !== 'string' ||
+    !('data' in payload) ||
+    !isRecord(payload.data)
+  ) {
     return null;
   }
 
   switch (payload.event) {
-    case 'route': {
-      const route = payload.data.route;
-      if (route !== 'reply' && route !== 'rewrite') {
-        return null;
-      }
-      return {
-        event: 'route',
-        data: { route },
-      };
-    }
-    case 'task_accepted': {
-      const taskKind = payload.data.task_kind;
-      const taskId = payload.data.task_id;
+    case 'run_started': {
+      const selectedSkills = parseAgentSkillList(payload.data.selected_skills);
       if (
-        taskKind !== 'generate' &&
-        taskKind !== 'rewrite' &&
-        taskKind !== 'edit' &&
-        taskKind !== 'comment_supplement'
+        typeof payload.data.run_id !== 'string' ||
+        typeof payload.data.conversation_id !== 'string' ||
+        (payload.data.model !== 'deepseek' &&
+          payload.data.model !== 'qwen' &&
+          payload.data.model !== 'doubao') ||
+        (payload.data.runtime !== 'fake' && payload.data.runtime !== 'deepagents') ||
+        !selectedSkills
       ) {
         return null;
       }
-      if (typeof taskId !== 'string' || !taskId) {
+
+      return {
+        event: 'run_started',
+        data: {
+          run_id: payload.data.run_id,
+          conversation_id: payload.data.conversation_id,
+          model: payload.data.model,
+          runtime: payload.data.runtime,
+          selected_skills: selectedSkills,
+        },
+      };
+    }
+    case 'thinking_stage': {
+      const selectedSkill = parseOptionalAgentSkill(payload.data.selected_skill);
+      const guardResult = parseOptionalAgentGuardResult(payload.data.guard_result);
+      if (
+        typeof payload.data.run_id !== 'string' ||
+        (payload.data.stage !== 'understand' &&
+          payload.data.stage !== 'guard' &&
+          payload.data.stage !== 'tool' &&
+          payload.data.stage !== 'summary') ||
+        typeof payload.data.label !== 'string' ||
+        (payload.data.status !== 'in_progress' && payload.data.status !== 'completed') ||
+        typeof payload.data.summary !== 'string' ||
+        selectedSkill === null ||
+        guardResult === null ||
+        (payload.data.tool_name !== undefined &&
+          payload.data.tool_name !== null &&
+          typeof payload.data.tool_name !== 'string')
+      ) {
         return null;
       }
 
-      const status = payload.data.status;
-      const taskStatus =
-        status === 'queued' ||
-        status === 'running' ||
-        status === 'completed' ||
-        status === 'failed' ||
-        status === 'cancelled'
-          ? status
-          : undefined;
+      return {
+        event: 'thinking_stage',
+        data: {
+          run_id: payload.data.run_id,
+          stage: payload.data.stage,
+          label: payload.data.label,
+          status: payload.data.status,
+          summary: payload.data.summary,
+          selected_skill: selectedSkill ?? undefined,
+          guard_result: guardResult,
+          tool_name:
+            typeof payload.data.tool_name === 'string' ? payload.data.tool_name : undefined,
+        },
+      };
+    }
+    case 'tool_call': {
+      const taskKind = parseTaskKind(payload.data.task_kind);
+      if (
+        typeof payload.data.run_id !== 'string' ||
+        typeof payload.data.tool_name !== 'string' ||
+        payload.data.status !== 'completed' ||
+        typeof payload.data.summary !== 'string' ||
+        !taskKind
+      ) {
+        return null;
+      }
+
+      return {
+        event: 'tool_call',
+        data: {
+          run_id: payload.data.run_id,
+          tool_name: payload.data.tool_name,
+          status: payload.data.status,
+          summary: payload.data.summary,
+          task_kind: taskKind,
+        },
+      };
+    }
+    case 'task_accepted': {
+      const taskKind = parseTaskKind(payload.data.task_kind);
+      const status =
+        payload.data.status === undefined ? undefined : parseTaskStatus(payload.data.status);
+      if (
+        typeof payload.data.run_id !== 'string' ||
+        typeof payload.data.task_id !== 'string' ||
+        !taskKind ||
+        status === null ||
+        (payload.data.queue_position !== undefined &&
+          payload.data.queue_position !== null &&
+          typeof payload.data.queue_position !== 'number') ||
+        (payload.data.waiting_count !== undefined &&
+          payload.data.waiting_count !== null &&
+          typeof payload.data.waiting_count !== 'number')
+      ) {
+        return null;
+      }
 
       return {
         event: 'task_accepted',
         data: {
-          task_id: taskId,
-          task_kind: taskKind as TaskKind,
-          status: taskStatus as TaskStatus | undefined,
+          run_id: payload.data.run_id,
+          task_id: payload.data.task_id,
+          task_kind: taskKind,
+          status,
           queue_position:
-            typeof payload.data.queue_position === 'number' ? payload.data.queue_position : undefined,
+            typeof payload.data.queue_position === 'number'
+              ? payload.data.queue_position
+              : undefined,
           waiting_count:
             typeof payload.data.waiting_count === 'number' ? payload.data.waiting_count : undefined,
         },
       };
     }
-    case 'chunk':
-    case 'done':
+    case 'needs_input': {
+      const selectedSkill = parseOptionalAgentSkill(payload.data.selected_skill);
+      const missingRequirements = parseStringList(payload.data.missing_requirements);
+      if (
+        typeof payload.data.run_id !== 'string' ||
+        typeof payload.data.message !== 'string' ||
+        selectedSkill === null ||
+        !missingRequirements
+      ) {
+        return null;
+      }
+
       return {
-        event: payload.event,
+        event: 'needs_input',
         data: {
-          content: typeof payload.data.content === 'string' ? payload.data.content : '',
+          run_id: payload.data.run_id,
+          message: payload.data.message,
+          selected_skill: selectedSkill ?? undefined,
+          missing_requirements: missingRequirements,
         },
       };
+    }
+    case 'done': {
+      const selectedSkill = parseOptionalAgentSkill(payload.data.selected_skill);
+      if (
+        typeof payload.data.run_id !== 'string' ||
+        typeof payload.data.message !== 'string' ||
+        (payload.data.task_id !== undefined &&
+          payload.data.task_id !== null &&
+          typeof payload.data.task_id !== 'string') ||
+        selectedSkill === null
+      ) {
+        return null;
+      }
+
+      return {
+        event: 'done',
+        data: {
+          run_id: payload.data.run_id,
+          message: payload.data.message,
+          task_id: typeof payload.data.task_id === 'string' ? payload.data.task_id : undefined,
+          selected_skill: selectedSkill ?? undefined,
+        },
+      };
+    }
     case 'error':
+      if (
+        typeof payload.data.run_id !== 'string' ||
+        typeof payload.data.code !== 'string' ||
+        typeof payload.data.message !== 'string'
+      ) {
+        return null;
+      }
       return {
         event: 'error',
         data: {
-          code: typeof payload.data.code === 'string' ? payload.data.code : undefined,
-          message: typeof payload.data.message === 'string' ? payload.data.message : '',
+          run_id: payload.data.run_id,
+          code: payload.data.code,
+          message: payload.data.message,
         },
       };
     default:
@@ -408,25 +587,25 @@ export async function streamNdjson<TEvent>({
   }
 }
 
-export async function streamUserMessage(
-  payload: UserStreamRequest,
+export async function streamAgentRun(
+  payload: AgentRunStreamRequest,
   options: {
     signal?: AbortSignal;
-    onEvent?: (event: UserStreamEvent) => void | Promise<void>;
+    onEvent?: (event: AgentRunEvent) => void | Promise<void>;
   } = {}
 ): Promise<void> {
-  return streamNdjson<UserStreamEvent>({
-    endpoint: '/api/user/stream',
+  return streamNdjson<AgentRunEvent>({
+    endpoint: '/api/agent/runs/stream',
     method: 'POST',
     body: payload,
     signal: options.signal,
     onEvent: options.onEvent,
-    parseEvent: parseUserStreamEvent,
-    defaultErrorMessage: '聊天请求失败',
-    defaultErrorCode: 'CHAT_STREAM_ERROR',
-    protocolErrorMessage: '聊天流协议错误',
-    protocolErrorCode: 'CHAT_STREAM_PROTOCOL_ERROR',
-    noBodyMessage: '聊天流不可用',
+    parseEvent: parseAgentRunEvent,
+    defaultErrorMessage: '任务助手请求失败',
+    defaultErrorCode: 'AGENT_RUN_STREAM_ERROR',
+    protocolErrorMessage: '任务助手流协议错误',
+    protocolErrorCode: 'AGENT_RUN_STREAM_PROTOCOL_ERROR',
+    noBodyMessage: '任务助手流不可用',
   });
 }
 
@@ -628,13 +807,6 @@ export async function uploadFiles(
 
 export async function createGenerateTask(params: GenerateRequest): Promise<CreateTaskData> {
   return request<CreateTaskData>('/api/generate', {
-    method: 'POST',
-    body: JSON.stringify(params),
-  });
-}
-
-export async function createEditTask(params: EditTaskRequest): Promise<CreateTaskData> {
-  return request<CreateTaskData>('/api/edit', {
     method: 'POST',
     body: JSON.stringify(params),
   });

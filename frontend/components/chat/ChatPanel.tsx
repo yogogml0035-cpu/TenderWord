@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
 import { useHydrated } from '@/hooks/useHydrated';
@@ -11,60 +11,135 @@ import {
   ApiError,
   cancelTask,
   createCommentSupplementTask,
-  createEditTask,
   downloadFile,
-  streamUserMessage,
+  streamAgentRun,
   uploadFile,
 } from '@/lib/api';
-import type { EditTaskRequest, UserStreamEvent, UserStreamMessage } from '@/types/api';
-import type { Message } from '@/types/chat';
+import type {
+  AgentRunContextSnapshot,
+  AgentRunEvent,
+  AgentSkill,
+} from '@/types/api';
+import type { AgentThinkingCardState, ChatMessageKind, Message } from '@/types/chat';
 import type { ModelType } from '@/components/forms/ModelSelector';
 import type { ConversationDraftFile, ConversationFormDraft } from '@/stores/chatStore';
 import { tenderTypeDisplayNameMap } from './tenderFormRegistry';
 import { resolveGngkFormType } from '@/lib/gngkFormType';
+import {
+  applyAgentThinkingEvent,
+  finalizeCancelledAgentThinkingState,
+} from '@/lib/agentThinking';
 
 interface ChatPanelProps {
   className?: string;
 }
 
-const missingInsertionAnchorMessage = '请先补全当前页面的插入锚点';
+type RewriteFormType = NonNullable<AgentRunContextSnapshot['rewrite_context']>['form_type'];
 
-function collectNormalChatContext(messages: Message[]): UserStreamMessage[] {
-  const candidates: Array<{ message: Message; content: string }> = [];
-
-  for (const message of messages) {
-    if (message.metadata?.messageKind) {
-      continue;
-    }
-    if (message.metadata?.chatKind && message.metadata.chatKind !== 'normal') {
-      continue;
-    }
-    if (message.type !== 'user' && (message.type !== 'ai' || message.status !== 'completed')) {
-      continue;
-    }
-
-    const content = typeof message.content === 'string' ? message.content.trim() : '';
-    if (!content) {
-      continue;
-    }
-
-    candidates.push({ message, content });
-  }
-
-  return candidates.slice(-6).map<UserStreamMessage>(({ message, content }) => ({
-    role: message.type === 'user' ? 'user' : 'assistant',
-    content,
-  }));
+function isSyntheticAgentRunTaskId(taskId: string): boolean {
+  return taskId.startsWith('fake-');
 }
 
-function collectUserRouteContext(messages: Message[], latestPrompt: string): UserStreamMessage[] {
-  const history = collectNormalChatContext(messages).slice(-5);
-  return [...history, { role: 'user' as const, content: latestPrompt }];
+function hasRewriteContext(messages: Message[]): boolean {
+  for (const message of messages) {
+    if (message.metadata?.messageKind !== 'task-download') {
+      continue;
+    }
+    if (message.status !== 'completed') {
+      continue;
+    }
+    if (typeof message.metadata?.outputFile !== 'string' || !message.metadata.outputFile.trim()) {
+      continue;
+    }
+    return true;
+  }
+
+  return false;
 }
 
 function getConversationMessagesById(conversationId: string): Message[] {
   const state = useChatStore.getState();
   return state.conversations.find((item) => item.id === conversationId)?.messages || [];
+}
+
+function isAgentSkill(value: unknown): value is AgentSkill {
+  return value === 'rewrite';
+}
+
+function normalizeSelectedSkills(skills: AgentSkill[] | undefined | null): AgentSkill[] {
+  if (!Array.isArray(skills)) {
+    return [];
+  }
+  return skills.filter(isAgentSkill).slice(0, 1);
+}
+
+function getSelectedSkillChatKind(skills: AgentSkill[]): ChatMessageKind {
+  const selectedSkill = skills[0];
+  if (selectedSkill === 'rewrite') {
+    return selectedSkill;
+  }
+  return 'normal';
+}
+
+function buildAgentRunRewriteContext(
+  tenderType: 'xjcg' | 'gngk' | 'gjgk',
+  draft: ConversationFormDraft | null,
+  selectedSkills: AgentSkill[]
+): AgentRunContextSnapshot['rewrite_context'] {
+  const shouldIncludeRewriteContext =
+    selectedSkills.includes('rewrite') || !!draft?.rewrite_file;
+  if (!shouldIncludeRewriteContext) {
+    return undefined;
+  }
+
+  const rewriteContext: NonNullable<AgentRunContextSnapshot['rewrite_context']> = {};
+  const formType = resolveRewriteFormType(tenderType, draft);
+  if (formType) {
+    rewriteContext.form_type = formType;
+  }
+
+  if (draft?.insertion_config) {
+    rewriteContext.insertion_config = {
+      before_text: draft.insertion_config.before_text,
+      after_text: draft.insertion_config.after_text,
+    };
+  }
+
+  if (draft?.tender_lx === 0 || draft?.tender_lx === 1 || draft?.tender_lx === 2) {
+    rewriteContext.tender_lx = draft.tender_lx;
+  }
+
+  if (draft?.fund_lx === 0 || draft?.fund_lx === 1) {
+    rewriteContext.fund_source_lx = draft.fund_lx;
+  }
+
+  if (draft?.tender_data) {
+    rewriteContext.tender_data_snapshot = draft.tender_data;
+  }
+
+  return rewriteContext;
+}
+
+function buildAgentRunContextSnapshot(
+  messages: Message[],
+  tenderType: 'xjcg' | 'gngk' | 'gjgk',
+  draft: ConversationFormDraft | null,
+  selectedSkills: AgentSkill[]
+): AgentRunContextSnapshot {
+  const rewriteContext = buildAgentRunRewriteContext(tenderType, draft, selectedSkills);
+
+  return {
+    rewrite_available: hasRewriteContext(messages),
+    uploaded_files: draft?.rewrite_file
+      ? [
+          {
+            file_path: draft.rewrite_file.file_path,
+            file_name: draft.rewrite_file.original_name || draft.rewrite_file.file_name,
+          },
+        ]
+      : [],
+    ...(rewriteContext ? { rewrite_context: rewriteContext } : {}),
+  };
 }
 
 function toConversationDraftFile(uploadedFile: {
@@ -75,7 +150,7 @@ function toConversationDraftFile(uploadedFile: {
   upload_time?: string;
 }): ConversationDraftFile {
   return {
-    id: `edit-${Date.now()}`,
+    id: `rewrite-${Date.now()}`,
     file_path: uploadedFile.file_path,
     file_name: uploadedFile.file_name,
     original_name: uploadedFile.original_name,
@@ -84,10 +159,10 @@ function toConversationDraftFile(uploadedFile: {
   };
 }
 
-function resolveEditFormType(
+function resolveRewriteFormType(
   tenderType: 'xjcg' | 'gngk' | 'gjgk',
   draft: ConversationFormDraft | null
-): EditTaskRequest['form_type'] | null {
+): RewriteFormType | null {
   const tenderLx = draft?.tender_lx;
   const fundSourceLx = draft?.fund_lx;
 
@@ -110,75 +185,6 @@ function resolveEditFormType(
   });
 }
 
-function getEditContextMessage(
-  tenderType: 'xjcg' | 'gngk' | 'gjgk',
-  draft: ConversationFormDraft | null
-): string | null {
-  if (!draft?.edit_file) {
-    return '请先上传一个 Word 文档';
-  }
-
-  if (draft.tender_lx !== 0 && draft.tender_lx !== 1 && draft.tender_lx !== 2) {
-    return '请先补全当前页面的货物/工程/服务类型';
-  }
-
-  if (draft.fund_lx !== 0 && draft.fund_lx !== 1) {
-    return '请先补全当前页面的资金性质';
-  }
-
-  const insertionConfig = draft.insertion_config;
-  if (
-    !insertionConfig ||
-    !insertionConfig.before_text?.trim() ||
-    !insertionConfig.after_text?.trim()
-  ) {
-    return missingInsertionAnchorMessage;
-  }
-
-  if (!resolveEditFormType(tenderType, draft)) {
-    return '当前页面缺少可识别的 edit 上下文';
-  }
-
-  return null;
-}
-
-function buildEditTaskRequest(
-  conversationId: string,
-  tenderType: 'xjcg' | 'gngk' | 'gjgk',
-  draft: ConversationFormDraft | null,
-  model: ModelType,
-  prompt: string
-): { request?: EditTaskRequest; error?: string } {
-  const normalizedPrompt = prompt.trim();
-  if (!normalizedPrompt) {
-    return { error: '请输入修改要求' };
-  }
-
-  const contextMessage = getEditContextMessage(tenderType, draft);
-  if (contextMessage) {
-    return { error: contextMessage };
-  }
-
-  const formType = resolveEditFormType(tenderType, draft);
-  if (!formType || !draft?.edit_file || draft.tender_lx === undefined || draft.fund_lx === undefined) {
-    return { error: '当前页面缺少可识别的 edit 上下文' };
-  }
-
-  return {
-    request: {
-      conversation_id: conversationId,
-      form_type: formType,
-      model,
-      edit_prompt: normalizedPrompt,
-      file_path: draft.edit_file.file_path,
-      insertion_config: draft.insertion_config,
-      tender_lx: draft.tender_lx,
-      fund_source_lx: draft.fund_lx,
-      tender_data_snapshot: draft.tender_data || undefined,
-    },
-  };
-}
-
 export function ChatPanel({ className = '' }: ChatPanelProps) {
   const mounted = useHydrated();
   const {
@@ -190,13 +196,16 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     deleteMessage,
     findTaskMessageGroup,
     startTask,
+    ensureTaskLogMessage,
+    ensureTaskContentMessage,
+    detachTaskTracking,
     taskSummaries,
   } =
     useChatStore();
   const streams = useChatStreamStore((state) => state.streams);
   const normalChatAbortRef = useRef<Record<string, AbortController>>({});
   const [composerNotice, setComposerNotice] = useState<string | null>(null);
-  const [isUploadingEditFile, setIsUploadingEditFile] = useState(false);
+  const [isUploadingRewriteFile, setIsUploadingRewriteFile] = useState(false);
   const [activeNormalConversations, setActiveNormalConversations] = useState<Record<string, boolean>>(
     {}
   );
@@ -215,10 +224,13 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     isCurrentTaskQueued && (!waitingCount || Number.isNaN(Number(waitingCount)) || waitingCount <= 0);
   const selectedModel: ModelType = conversationDraft?.model || 'deepseek';
   const inputValue = conversationDraft?.chat_input || '';
-  const inputMode = conversationDraft?.input_mode || 'normal';
-  const editFile = conversationDraft?.edit_file || null;
-  const currentEditFileSize = conversationDraft?.edit_file?.size || 0;
-  const isEditMode = inputMode === 'edit' || !!editFile;
+  const rewriteFile = conversationDraft?.rewrite_file || null;
+  const selectedSkills: AgentSkill[] = useMemo(
+    () => (rewriteFile ? ['rewrite'] : normalizeSelectedSkills(conversationDraft?.selected_skills)),
+    [conversationDraft?.selected_skills, rewriteFile]
+  );
+  const currentRewriteFileSize = conversationDraft?.rewrite_file?.size || 0;
+  const isRewriteFileMode = !!rewriteFile;
   const messages = conversation?.messages || [];
   const mergedMessages: Message[] = messages.map((message) => {
     if (!message.taskId) {
@@ -292,20 +304,14 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   const isNormalStreamActive = !!(conversation && activeNormalConversations[conversation.id]);
   const isTaskBusy = isCurrentTaskQueued || isCurrentTaskRunning;
   const isBusy = isTaskBusy || isNormalStreamActive;
-  const isComposerBusy = isBusy || isUploadingEditFile;
+  const isComposerBusy = isBusy || isUploadingRewriteFile;
   const isRewriteQueueStage =
     !!conversation &&
     currentTaskStatus === 'queued' &&
     typeof waitingCount === 'number' &&
     waitingCount > 0 &&
     conversationDraft?.pending_rewrite_task_id === currentTaskId;
-  const isEditQueueStage =
-    !!conversation &&
-    currentTaskStatus === 'queued' &&
-    typeof waitingCount === 'number' &&
-    waitingCount > 0 &&
-    conversationDraft?.pending_edit_task_id === currentTaskId;
-  const isTaskQueueStage = isRewriteQueueStage || isEditQueueStage;
+  const isTaskQueueStage = isRewriteQueueStage;
 
   const updateInputValue = useCallback(
     (nextValue: string) => {
@@ -329,19 +335,19 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
     });
   }, []);
 
-  const handleEditFileSelect = useCallback(
+  const handleRewriteFileSelect = useCallback(
     async (file: File) => {
       if (!conversation || isBusy) {
         return;
       }
 
       setComposerNotice(null);
-      setIsUploadingEditFile(true);
+      setIsUploadingRewriteFile(true);
       try {
-        const uploadedFile = await uploadFile(file, 'edit_source');
+        const uploadedFile = await uploadFile(file, 'rewrite_source');
         updateConversationDraft(conversation.id, {
-          input_mode: 'edit',
-          edit_file: toConversationDraftFile({
+          selected_skills: ['rewrite'],
+          rewrite_file: toConversationDraftFile({
             file_path: uploadedFile.file_path,
             file_name: uploadedFile.file_name,
             original_name: uploadedFile.original_name,
@@ -352,30 +358,46 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       } catch (error) {
         setComposerNotice(error instanceof ApiError ? error.message : '文件上传失败，请重试');
       } finally {
-        setIsUploadingEditFile(false);
+        setIsUploadingRewriteFile(false);
       }
     },
     [conversation, isBusy, updateConversationDraft]
   );
 
-  const handleEditFileRemove = useCallback(() => {
+  const handleRewriteFileRemove = useCallback(() => {
     if (!conversation || isBusy) {
       return;
     }
     setComposerNotice(null);
     updateConversationDraft(conversation.id, {
-      input_mode: 'normal',
-      edit_file: undefined,
+      rewrite_file: undefined,
+      selected_skills: undefined,
     });
   }, [conversation, isBusy, updateConversationDraft]);
 
-  const sendUserMessage = useCallback(
+  const updateSelectedSkills = useCallback(
+    (nextSkills: AgentSkill[]) => {
+      if (!conversation) {
+        return;
+      }
+      if (composerNotice) {
+        setComposerNotice(null);
+      }
+      updateConversationDraft(conversation.id, {
+        selected_skills: nextSkills.length > 0 ? nextSkills : undefined,
+      });
+    },
+    [composerNotice, conversation, updateConversationDraft]
+  );
+
+  const sendAgentRunMessage = useCallback(
     async (
       prompt: string,
       options: {
         appendUserMessage?: boolean;
         modelOverride?: ModelType;
         reuseAiMessageId?: string;
+        selectedSkillsOverride?: AgentSkill[];
       } = {}
     ) => {
       if (!conversation) {
@@ -392,8 +414,20 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       const appendUserMessage = options.appendUserMessage ?? true;
       const modelForRequest = options.modelOverride || selectedModel;
       const existingMessages = getConversationMessagesById(conversationId);
+      const draftForRequest = useChatStore.getState().getConversationDraft(conversationId);
+      const selectedSkillsForRequest = normalizeSelectedSkills(
+        options.selectedSkillsOverride ??
+          (draftForRequest?.rewrite_file ? ['rewrite'] : draftForRequest?.selected_skills)
+      );
+      const selectedSkillChatKind = getSelectedSkillChatKind(selectedSkillsForRequest);
+      const contextSnapshot = buildAgentRunContextSnapshot(
+        existingMessages,
+        conversation.tenderType,
+        draftForRequest,
+        selectedSkillsForRequest
+      );
       const baseAiMetadata = {
-        chatKind: 'normal' as const,
+        chatKind: selectedSkillChatKind,
         chatPrompt: prompt,
         chatModel: modelForRequest,
       };
@@ -405,13 +439,29 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           content: prompt,
           status: 'sent',
           metadata: {
-            chatKind: 'normal',
+            chatKind: selectedSkillChatKind,
           },
         });
       }
 
       let aiMessageId = options.reuseAiMessageId;
       let aiMessagePrepared = false;
+      let thinkingMessageId: string | undefined;
+      let thinkingCardState: AgentThinkingCardState | null = null;
+      let shouldRenderThinkingCard = selectedSkillsForRequest.length === 0;
+      const clearThinkingMessage = () => {
+        if (thinkingMessageId) {
+          deleteMessage(conversationId, thinkingMessageId);
+          thinkingMessageId = undefined;
+        }
+        thinkingCardState = null;
+      };
+      const suppressThinkingCardForSkill = (skill?: AgentSkill) => {
+        if (skill === 'rewrite') {
+          shouldRenderThinkingCard = false;
+          clearThinkingMessage();
+        }
+      };
       const ensureAiMessage = (): string => {
         if (aiMessagePrepared && aiMessageId) {
           return aiMessageId;
@@ -435,112 +485,153 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         aiMessagePrepared = true;
         return aiMessageId;
       };
-      const contextMessages = appendUserMessage
-        ? collectUserRouteContext(existingMessages, prompt)
-        : collectNormalChatContext(getConversationMessagesById(conversationId));
+      const upsertThinkingMessage = (
+        event: AgentRunEvent,
+        status: Message['status'] = 'generating'
+      ) => {
+        if (!shouldRenderThinkingCard) {
+          return;
+        }
+        const nextThinkingState = applyAgentThinkingEvent(thinkingCardState, event);
+        if (!nextThinkingState) {
+          return;
+        }
+
+        thinkingCardState = nextThinkingState;
+        const errorMessage =
+          status === 'error'
+            ? nextThinkingState.stages.find((stage) => stage.key === 'retry')?.summary ||
+              '任务助手请求失败'
+            : undefined;
+
+        if (!thinkingMessageId) {
+          thinkingMessageId = addMessage(conversationId, {
+            type: 'ai',
+            content: '',
+            status,
+            ...(errorMessage ? { error: errorMessage } : {}),
+            metadata: {
+              agentThinking: nextThinkingState,
+            },
+          });
+          return;
+        }
+
+        updateMessage(conversationId, thinkingMessageId, {
+          content: '',
+          status,
+          error: errorMessage,
+          metadata: {
+            agentThinking: nextThinkingState,
+          },
+        });
+      };
 
       const controller = new AbortController();
       normalChatAbortRef.current[conversationId] = controller;
       setNormalChatActive(conversationId, true);
 
-      let accumulatedText = '';
       let streamFinished = false;
-      let activeRoute: 'reply' | 'rewrite' | null = null;
-      let rewritePlaceholderMessageId: string | undefined;
-      let rewriteTaskAccepted = false;
+      let taskAccepted = false;
+      let latestRunId: string | undefined;
 
-      const cleanupRewritePlaceholder = () => {
-        if (!rewritePlaceholderMessageId || rewriteTaskAccepted) {
+      const syncUserChatKind = (chatKind: ChatMessageKind) => {
+        if (!userMessageId || chatKind === 'normal' || chatKind === 'task-notice') {
           return;
         }
-        deleteMessage(conversationId, rewritePlaceholderMessageId);
-        rewritePlaceholderMessageId = undefined;
+        updateMessage(conversationId, userMessageId, {
+          metadata: {
+            chatKind,
+          },
+        });
       };
 
       try {
-        const handleStreamEvent = (event: UserStreamEvent) => {
-          if (event.event === 'route') {
-            activeRoute = event.data.route;
-            if (event.data.route === 'rewrite' && userMessageId) {
-              updateMessage(conversationId, userMessageId, {
-                metadata: {
-                  chatKind: 'rewrite',
-                },
-              });
-            }
-            if (event.data.route === 'rewrite' && !rewritePlaceholderMessageId) {
-              rewritePlaceholderMessageId = addMessage(conversationId, {
-                type: 'ai',
-                content: '正在创建修改重写任务',
-                status: 'completed',
-                metadata: {
-                  chatKind: 'rewrite',
-                },
-              });
-            }
+        const handleStreamEvent = (event: AgentRunEvent) => {
+          latestRunId = event.data.run_id;
+
+          if (event.event === 'run_started') {
+            suppressThinkingCardForSkill(event.data.selected_skills[0]);
+            upsertThinkingMessage(event, 'generating');
             return;
           }
 
           if (event.event === 'task_accepted') {
-            rewriteTaskAccepted = true;
-            if (userMessageId) {
-              updateMessage(conversationId, userMessageId, {
-                metadata: {
-                  chatKind: 'rewrite',
-                },
-              });
-            }
+            taskAccepted = true;
+            const isSyntheticTask = isSyntheticAgentRunTaskId(event.data.task_id);
+            const acceptedChatKind: ChatMessageKind =
+              event.data.task_kind === 'rewrite' ? 'rewrite' : 'normal';
+            syncUserChatKind(acceptedChatKind);
+            shouldRenderThinkingCard = false;
+            clearThinkingMessage();
             startTask(
-              conversation.id,
+              conversationId,
               event.data.task_id,
               {
                 task_kind: event.data.task_kind,
                 status: event.data.status || 'queued',
                 queue_position: event.data.queue_position,
                 waiting_count: event.data.waiting_count,
-              },
-              rewritePlaceholderMessageId
-                ? { logMessageId: rewritePlaceholderMessageId }
-                : undefined
+              }
             );
-            updateConversationDraft(conversation.id, {
-              chat_input: '',
-              pending_rewrite_prompt: prompt,
-              pending_rewrite_task_id: event.data.task_id,
+            ensureTaskLogMessage(event.data.task_id, { status: 'generating' });
+            if (event.data.task_kind !== 'rewrite') {
+              ensureTaskContentMessage(event.data.task_id, { status: 'generating' });
+            }
+            if (!isSyntheticTask && event.data.task_kind === 'rewrite') {
+              updateConversationDraft(conversationId, {
+                chat_input: '',
+                pending_rewrite_prompt: prompt,
+                pending_rewrite_task_id: event.data.task_id,
+              });
+            }
+            if (isSyntheticTask) {
+              detachTaskTracking(event.data.task_id);
+            }
+            return;
+          }
+
+          if (event.event === 'thinking_stage') {
+            suppressThinkingCardForSkill(event.data.selected_skill);
+            if (event.data.selected_skill === 'rewrite') {
+              syncUserChatKind('rewrite');
+            }
+            upsertThinkingMessage(event, 'generating');
+            return;
+          }
+
+          if (event.event === 'tool_call') {
+            upsertThinkingMessage(event, 'generating');
+            return;
+          }
+
+          if (event.event === 'needs_input') {
+            if (event.data.selected_skill === 'rewrite') {
+              syncUserChatKind('rewrite');
+            }
+            upsertThinkingMessage(event, 'completed');
+            const ensuredAiMessageId = ensureAiMessage();
+            updateMessage(conversationId, ensuredAiMessageId, {
+              content: event.data.message,
+              status: 'completed',
+              error: undefined,
             });
             streamFinished = true;
             return;
           }
 
-          if (event.event === 'chunk') {
-            if (!activeRoute) {
-              activeRoute = 'reply';
-            }
-            if (activeRoute === 'rewrite') {
-              return;
-            }
-            const ensuredAiMessageId = ensureAiMessage();
-            accumulatedText += event.data.content || '';
-            updateMessage(conversationId, ensuredAiMessageId, {
-              content: accumulatedText,
-              status: 'generating',
-            });
-            return;
-          }
-
           if (event.event === 'done') {
-            if (!activeRoute) {
-              activeRoute = 'reply';
-            }
-            if (activeRoute === 'rewrite') {
+            if (taskAccepted) {
               streamFinished = true;
               return;
             }
+            if (event.data.selected_skill === 'rewrite') {
+              syncUserChatKind('rewrite');
+            }
+            upsertThinkingMessage(event, 'completed');
             const ensuredAiMessageId = ensureAiMessage();
-            const finalText = event.data.content || accumulatedText;
-            accumulatedText = finalText;
             updateMessage(conversationId, ensuredAiMessageId, {
-              content: finalText,
+              content: event.data.message,
               status: 'completed',
               error: undefined,
             });
@@ -549,35 +640,25 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           }
 
           if (event.event === 'error') {
-            if (activeRoute === 'rewrite') {
-              cleanupRewritePlaceholder();
-            }
-            const errorMessage = event.data.message || '聊天失败';
-            const shouldBindToReplyBubble = activeRoute !== 'rewrite' || !!options.reuseAiMessageId;
-            if (shouldBindToReplyBubble) {
-              const ensuredAiMessageId = ensureAiMessage();
-              updateMessage(conversationId, ensuredAiMessageId, {
-                content: accumulatedText,
-                status: 'error',
-                error: errorMessage,
-              });
-            }
-            if (activeRoute === 'rewrite' || !aiMessagePrepared) {
-              addMessage(conversationId, {
-                type: 'system',
-                content: errorMessage,
-                status: 'completed',
-              });
-            }
+            upsertThinkingMessage(event, 'error');
+            const errorMessage = event.data.message || '任务助手请求失败';
+            const ensuredAiMessageId = ensureAiMessage();
+            updateMessage(conversationId, ensuredAiMessageId, {
+              content: errorMessage,
+              status: 'error',
+              error: errorMessage,
+            });
             streamFinished = true;
           }
         };
 
-        await streamUserMessage(
+        await streamAgentRun(
           {
             conversation_id: conversationId,
+            message: prompt,
             model: modelForRequest,
-            messages: contextMessages,
+            selected_skills: selectedSkillsForRequest,
+            context_snapshot: contextSnapshot,
           },
           {
             signal: controller.signal,
@@ -585,52 +666,75 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           }
         );
 
+        if (!streamFinished && taskAccepted) {
+          streamFinished = true;
+        }
+
         if (!streamFinished) {
-          if (activeRoute !== 'rewrite' && aiMessagePrepared && aiMessageId) {
-            updateMessage(conversationId, aiMessageId, {
-              content: accumulatedText,
-              status: 'completed',
-              error: undefined,
+          const incompleteMessage = '任务助手流未返回完成事件，请重试';
+          const currentThinkingState = thinkingCardState as AgentThinkingCardState | null;
+          if (thinkingMessageId && currentThinkingState) {
+            const finalizedThinkingState =
+              applyAgentThinkingEvent(currentThinkingState, {
+                event: 'error',
+                data: {
+                  run_id: latestRunId || currentThinkingState.runId || 'unknown-run',
+                  code: 'AGENT_RUN_STREAM_INCOMPLETE',
+                  message: incompleteMessage,
+                },
+              }) || currentThinkingState;
+            thinkingCardState = finalizedThinkingState;
+            updateMessage(conversationId, thinkingMessageId, {
+              content: '',
+              status: 'error',
+              error: incompleteMessage,
+              metadata: {
+                agentThinking: finalizedThinkingState,
+              },
+            });
+          } else {
+            const ensuredAiMessageId = ensureAiMessage();
+            updateMessage(conversationId, ensuredAiMessageId, {
+              content: incompleteMessage,
+              status: 'error',
+              error: incompleteMessage,
             });
           }
+          streamFinished = true;
         }
       } catch (error) {
-        if (activeRoute === 'rewrite') {
-          cleanupRewritePlaceholder();
-        }
         const isAbort =
           error instanceof DOMException
             ? error.name === 'AbortError'
             : error instanceof Error && error.name === 'AbortError';
 
         if (isAbort) {
+          if (thinkingMessageId && thinkingCardState) {
+            thinkingCardState = finalizeCancelledAgentThinkingState(thinkingCardState);
+            updateMessage(conversationId, thinkingMessageId, {
+              content: '',
+              status: 'cancelled',
+              metadata: {
+                agentThinking: thinkingCardState,
+              },
+            });
+          }
           if (aiMessagePrepared && aiMessageId) {
             updateMessage(conversationId, aiMessageId, {
-              content: accumulatedText,
+              content: '',
               status: 'cancelled',
             });
           }
-        } else {
-          const message = error instanceof ApiError ? error.message : '聊天失败，请稍后重试';
-          if (aiMessagePrepared && aiMessageId) {
-            updateMessage(conversationId, aiMessageId, {
-              content: accumulatedText,
-              status: 'error',
-              error: message,
-            });
-          }
-          if (!aiMessagePrepared) {
-            addMessage(conversationId, {
-              type: 'system',
-              content: message,
-              status: 'completed',
-            });
-          }
+        } else if (!taskAccepted) {
+          const message = error instanceof ApiError ? error.message : '任务助手请求失败，请稍后重试';
+          const ensuredAiMessageId = ensureAiMessage();
+          updateMessage(conversationId, ensuredAiMessageId, {
+            content: message,
+            status: 'error',
+            error: message,
+          });
         }
       } finally {
-        if (activeRoute === 'rewrite') {
-          cleanupRewritePlaceholder();
-        }
         delete normalChatAbortRef.current[conversationId];
         setNormalChatActive(conversationId, false);
       }
@@ -639,6 +743,9 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       addMessage,
       conversation,
       deleteMessage,
+      ensureTaskContentMessage,
+      ensureTaskLogMessage,
+      detachTaskTracking,
       isTaskBusy,
       selectedModel,
       setNormalChatActive,
@@ -654,89 +761,25 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         return false;
       }
 
-      if (isEditMode) {
-        const { request, error } = buildEditTaskRequest(
-          conversation.id,
-          conversation.tenderType,
-          conversationDraft,
-          selectedModel,
-          content
-        );
-        if (!request) {
-          setComposerNotice(error || '当前页面缺少可识别的 edit 上下文');
-          return false;
-        }
+      const selectedSkillsForRequest: AgentSkill[] =
+        selectedSkills.length > 0 ? selectedSkills : isRewriteFileMode ? ['rewrite'] : [];
 
-        addMessage(conversation.id, {
-          type: 'user',
-          content,
-          status: 'sent',
-          metadata: {
-            chatKind: 'edit',
-          },
-        });
-        const placeholderMessageId = addMessage(conversation.id, {
-          type: 'ai',
-          content: '正在创建文件修改任务',
-          status: 'completed',
-          metadata: {
-            chatKind: 'edit',
-          },
-        });
-
-        setComposerNotice(null);
-        updateConversationDraft(conversation.id, { chat_input: '' });
-
-        void (async () => {
-          try {
-            const result = await createEditTask(request);
-            startTask(
-              conversation.id,
-              result.task_id,
-              {
-                task_kind: result.task_kind,
-                status: result.status || 'queued',
-                queue_position: result.queue_position,
-                waiting_count: result.waiting_count,
-              },
-              { logMessageId: placeholderMessageId }
-            );
-            updateConversationDraft(conversation.id, {
-              pending_edit_prompt: content,
-              pending_edit_task_id: result.task_id,
-            });
-          } catch (error) {
-            deleteMessage(conversation.id, placeholderMessageId);
-            const message =
-              error instanceof ApiError ? error.message : '创建文件修改任务失败，请稍后重试';
-            setComposerNotice(message);
-            addMessage(conversation.id, {
-              type: 'system',
-              content: message,
-              status: 'completed',
-            });
-          }
-        })();
-
-        return true;
-      }
-
-      void sendUserMessage(content, {
+      void sendAgentRunMessage(content, {
         appendUserMessage: true,
+        selectedSkillsOverride: selectedSkillsForRequest,
       });
-      updateConversationDraft(conversation.id, { chat_input: '' });
+      updateConversationDraft(conversation.id, {
+        chat_input: '',
+        selected_skills: undefined,
+      });
       return true;
     },
     [
-      addMessage,
       conversation,
-      conversationDraft,
-      deleteMessage,
-      isEditMode,
+      isRewriteFileMode,
       isBusy,
-      selectedModel,
-      sendUserMessage,
-      startTask,
+      selectedSkills,
+      sendAgentRunMessage,
       updateConversationDraft,
     ]
   );
@@ -766,17 +809,22 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         message.metadata?.chatModel === 'doubao'
           ? message.metadata.chatModel
           : selectedModel;
+      const retrySelectedSkills =
+        message.metadata?.chatKind === 'rewrite'
+          ? [message.metadata.chatKind]
+          : [];
 
       if (retryPrompt) {
-        void sendUserMessage(retryPrompt, {
+        void sendAgentRunMessage(retryPrompt, {
           appendUserMessage: false,
           modelOverride: retryModel,
           reuseAiMessageId: message.id,
+          selectedSkillsOverride: retrySelectedSkills,
         });
         return;
       }
     },
-    [conversation, isBusy, selectedModel, sendUserMessage]
+    [conversation, isBusy, selectedModel, sendAgentRunMessage]
   );
 
   const handleDownload = async (filePath: string, fileName?: string) => {
@@ -876,23 +924,14 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
           pending_rewrite_prompt: undefined,
           pending_rewrite_task_id: undefined,
         });
-      } else if (isEditQueueStage) {
-        const refillPrompt = conversationDraft?.pending_edit_prompt || '';
-        updateConversationDraft(conversation.id, {
-          chat_input: refillPrompt,
-          pending_edit_prompt: undefined,
-          pending_edit_task_id: undefined,
-        });
       }
     } catch {
       // noop
     }
   }, [
     conversation,
-    conversationDraft?.pending_edit_prompt,
     conversationDraft?.pending_rewrite_prompt,
     currentTaskId,
-    isEditQueueStage,
     isNormalStreamActive,
     isRewriteQueueStage,
     updateConversationDraft,
@@ -910,55 +949,10 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
   );
 
   useEffect(() => {
-    if (composerNotice !== missingInsertionAnchorMessage || !conversation) {
-      return;
-    }
-
-    if (!isEditMode) {
-      setComposerNotice(null);
-      return;
-    }
-
-    if (!getEditContextMessage(conversation.tenderType, conversationDraft)) {
-      setComposerNotice(null);
-    }
-  }, [composerNotice, conversation, conversationDraft, isEditMode]);
-
-  useEffect(() => {
     if (!conversation) {
       return;
     }
     const pendingTaskId = conversationDraft?.pending_rewrite_task_id;
-    if (!pendingTaskId) {
-      return;
-    }
-
-    const pendingSummary = taskSummaries[pendingTaskId];
-    const pendingStatus = pendingSummary?.status;
-    const stillActive =
-      conversation.currentTaskId === pendingTaskId ||
-      pendingStatus === 'queued' ||
-      pendingStatus === 'running';
-    if (stillActive) {
-      return;
-    }
-
-    updateConversationDraft(conversation.id, {
-      pending_rewrite_task_id: undefined,
-      pending_rewrite_prompt: undefined,
-    });
-  }, [
-    conversation,
-    conversationDraft?.pending_rewrite_task_id,
-    taskSummaries,
-    updateConversationDraft,
-  ]);
-
-  useEffect(() => {
-    if (!conversation) {
-      return;
-    }
-    const pendingTaskId = conversationDraft?.pending_edit_task_id;
     if (!pendingTaskId) {
       return;
     }
@@ -988,36 +982,39 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
       taskGroup?.logMessage?.status;
 
     if (terminalStatus === 'completed' && latestOutputFile) {
-      updateConversationDraft(conversation.id, {
-        pending_edit_task_id: undefined,
-        pending_edit_prompt: undefined,
-        input_mode: 'edit',
-        edit_file: {
-          id: `edit-result-${pendingTaskId}`,
+      const updates: Partial<ConversationFormDraft> = {
+        pending_rewrite_task_id: undefined,
+        pending_rewrite_prompt: undefined,
+      };
+      if (conversationDraft?.rewrite_file) {
+        updates.rewrite_file = {
+          id: `rewrite-result-${pendingTaskId}`,
           file_path: latestOutputFile,
           file_name: latestOutputFileName,
           original_name: latestOutputFileName,
-          size: currentEditFileSize,
+          size: currentRewriteFileSize,
           upload_time: new Date().toISOString(),
-        },
-      });
+        };
+      }
+      updateConversationDraft(conversation.id, updates);
       return;
     }
 
     updateConversationDraft(conversation.id, {
       chat_input:
         conversationDraft?.chat_input ||
-        conversationDraft?.pending_edit_prompt ||
+        conversationDraft?.pending_rewrite_prompt ||
         '',
-      pending_edit_task_id: undefined,
-      pending_edit_prompt: undefined,
+      pending_rewrite_task_id: undefined,
+      pending_rewrite_prompt: undefined,
     });
   }, [
     conversation,
     conversationDraft?.chat_input,
-    conversationDraft?.pending_edit_prompt,
-    conversationDraft?.pending_edit_task_id,
-    currentEditFileSize,
+    conversationDraft?.pending_rewrite_prompt,
+    conversationDraft?.pending_rewrite_task_id,
+    conversationDraft?.rewrite_file,
+    currentRewriteFileSize,
     findTaskMessageGroup,
     taskSummaries,
     updateConversationDraft,
@@ -1136,7 +1133,7 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
                 排队等待
               </div>
               <h3 className="text-xl font-semibold tracking-tight text-slate-900">
-                {isEditQueueStage ? '文件修改任务排队中' : '修改任务排队中'}
+                修改任务排队中
               </h3>
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 前方等待 {waitingCount} 个任务（含当前执行任务），轮到后将自动进入日志流。
@@ -1168,16 +1165,17 @@ export function ChatPanel({ className = '' }: ChatPanelProps) {
         onModelChange={handleModelChange}
         actionMode={isBusy ? 'cancel' : 'send'}
         loading={isComposerBusy}
-        inputMode={isEditMode ? 'edit' : 'normal'}
-        editFile={editFile}
-        onEditFileSelect={handleEditFileSelect}
-        onEditFileRemove={handleEditFileRemove}
+        rewriteFile={rewriteFile}
+        onRewriteFileSelect={handleRewriteFileSelect}
+        onRewriteFileRemove={handleRewriteFileRemove}
+        selectedSkills={selectedSkills}
+        onSelectedSkillsChange={updateSelectedSkills}
         noticeMessage={composerNotice}
         placeholder={
           isBusy
             ? '回复生成中，请稍候...'
-            : isEditMode
-              ? '输入修改要求，系统将只修改当前锚点区正文...'
+            : isRewriteFileMode
+              ? '输入重写要求，系统将重写当前锚点区正文...'
               : '输入文字并发送即可对话...'
         }
       />

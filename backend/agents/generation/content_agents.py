@@ -414,6 +414,20 @@ def _content_agent_round_summary(
     return "参数生成智能体处理中。"
 
 
+def _content_agent_processing_summary(*, phase: str, round_index: int) -> str:
+    if phase == "draft":
+        return "初稿生成中。"
+    if phase == "audit":
+        return (
+            "第 1 轮审核中。"
+            if round_index == 1
+            else f"第 {round_index} 轮修复复核中。"
+        )
+    if phase == "revision":
+        return f"第 {round_index} 轮修复中。"
+    return "参数生成智能体处理中。"
+
+
 def _content_agent_final_summary(
     *,
     final_chars: int,
@@ -435,6 +449,7 @@ class ContentAgentProcessTracker:
 
     def __init__(self) -> None:
         self._rounds: dict[tuple[str, int], ContentAgentRoundData] = {}
+        self._completed_rounds: set[tuple[str, int]] = set()
 
     def _ordered_rounds(self) -> list[ContentAgentRoundData]:
         return sorted(
@@ -459,6 +474,8 @@ class ContentAgentProcessTracker:
             return None
 
         round_index = max(1, int(payload.round or 1))
+        round_key = (phase, round_index)
+        existing_round = self._rounds.get(round_key)
         findings = self._findings_for_payload(payload)
         if phase == "revision" and not findings:
             previous_audit = self._rounds.get(("audit", round_index))
@@ -470,6 +487,25 @@ class ContentAgentProcessTracker:
         issue_count = len(findings)
         fix_count = issue_count if phase == "revision" else 0
         content = payload.content if isinstance(payload.content, str) else None
+        if not payload.is_complete:
+            if round_key in self._completed_rounds or (not content and not findings):
+                return ContentAgentStepData(
+                    phase=phase,
+                    summary=(
+                        existing_round.summary
+                        if existing_round is not None
+                        else _content_agent_processing_summary(
+                            phase=phase,
+                            round_index=round_index,
+                        )
+                    ),
+                    rounds=self._ordered_rounds(),
+                    highlights=(
+                        existing_round.findings
+                        if existing_round is not None and phase in {"audit", "revision"}
+                        else []
+                    ),
+                )
         summary = _content_agent_round_summary(
             phase=phase,
             round_index=round_index,
@@ -488,7 +524,9 @@ class ContentAgentProcessTracker:
             content=content,
             findings=findings,
         )
-        self._rounds[(phase, round_index)] = round_data
+        self._rounds[round_key] = round_data
+        if payload.is_complete:
+            self._completed_rounds.add(round_key)
 
         return ContentAgentStepData(
             phase=phase,

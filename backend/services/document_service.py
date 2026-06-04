@@ -20,15 +20,17 @@ from backend.models import (
     AgentStepEventData,
     CommentSupplementRequest,
     DoneEventData,
-    EditTaskRequest,
     ErrorEventData,
+    FormType,
     GenerateRequest,
     GenerateResponse,
+    InsertionConfig,
     LLMEventData,
     LogEventData,
     ProgressEventData,
     SSEEvent,
     SSEEventType,
+    TenderData,
 )
 from backend.helper.word_helper.inline_style_ops import (
     build_style_writeback_summary_payload,
@@ -40,7 +42,7 @@ from backend.services.conversation_service import get_conversation_service
 from backend.task.task_queue_manager import get_task_queue
 from backend.util.log_util.execution_log import log_generate_task_success
 from backend.util.log_util.progress_log import progress_log
-from backend.util.log_util.skill_audit_log import create_edit_audit_log
+from backend.util.log_util.skill_audit_log import create_rewrite_audit_log
 from backend.util.log_util.sse_log_handler import task_log_context
 from backend.util.common_util.tender_number import normalize_gjgk_project_number
 from backend.config.tender_config import get_default_anchor_texts
@@ -99,7 +101,6 @@ REWRITE_DEFAULT_ANCHORS = {
 TASK_KIND_TO_LLM_NODE = {
     "generate": "generate_polished_text",
     "rewrite": "rewrite_text",
-    "edit": "edit_text",
     "comment_supplement": "comment_agent",
 }
 
@@ -187,19 +188,16 @@ class _LLMSnapshotRelay:
 GRAPH_REGISTRY: Dict[str, type] = {}
 TASK_SKILL_GRAPH_CLASSES: Dict[str, type] = {}
 REWRITE_SKILL_ID = "rewrite"
-EDIT_SKILL_ID = "edit"
 REWRITE_SKILL_GRAPH_CLASS: Optional[type] = None
-EDIT_SKILL_GRAPH_CLASS: Optional[type] = None
 COMMENT_SUPPLEMENT_GRAPH_CLASS: Optional[type] = None
 
 
 def _init_graph_registry():
     """初始化 Graph 注册表（延迟加载）."""
-    global GRAPH_REGISTRY, TASK_SKILL_GRAPH_CLASSES, REWRITE_SKILL_GRAPH_CLASS, EDIT_SKILL_GRAPH_CLASS, COMMENT_SUPPLEMENT_GRAPH_CLASS
+    global GRAPH_REGISTRY, TASK_SKILL_GRAPH_CLASSES, REWRITE_SKILL_GRAPH_CLASS, COMMENT_SUPPLEMENT_GRAPH_CLASS
     if (
         GRAPH_REGISTRY
         and REWRITE_SKILL_GRAPH_CLASS is not None
-        and EDIT_SKILL_GRAPH_CLASS is not None
         and COMMENT_SUPPLEMENT_GRAPH_CLASS is not None
     ):
         return
@@ -223,9 +221,7 @@ def _init_graph_registry():
         GRAPH_REGISTRY["gngk_fw_cz_tender"] = GngkFwCzTenderGraph
         GRAPH_REGISTRY["gjgk_tender"] = GjgkTenderGraph
         TASK_SKILL_GRAPH_CLASSES[REWRITE_SKILL_ID] = SkillGraph.for_skill(REWRITE_SKILL_ID)
-        TASK_SKILL_GRAPH_CLASSES[EDIT_SKILL_ID] = SkillGraph.for_skill(EDIT_SKILL_ID)
         REWRITE_SKILL_GRAPH_CLASS = TASK_SKILL_GRAPH_CLASSES[REWRITE_SKILL_ID]
-        EDIT_SKILL_GRAPH_CLASS = TASK_SKILL_GRAPH_CLASSES[EDIT_SKILL_ID]
         COMMENT_SUPPLEMENT_GRAPH_CLASS = CommentSupplementGraph
         logger.info("Graph 注册表初始化完成")
     except ImportError as e:
@@ -474,10 +470,17 @@ class DocumentService:
         user_prompt: str,
         model_provider: str,
         rewrite_log_path: Optional[str] = None,
+        file_path: Optional[str] = None,
+        form_type: Optional[FormType] = None,
+        insertion_config: Optional[InsertionConfig] = None,
+        tender_lx: Optional[int] = None,
+        fund_source_lx: Optional[int] = None,
+        tender_data_snapshot: Optional[TenderData] = None,
     ) -> GenerateResponse:
         """创建 rewrite 任务（复用文档任务队列 + SSE 三卡片链路）。"""
         normalized_conversation_id = str(conversation_id or "").strip()
         normalized_prompt = str(user_prompt or "").strip()
+        normalized_file_path = str(file_path or "").strip()
 
         task_id, callback = self._allocate_task_callback_pair()
         if not normalized_conversation_id:
@@ -496,25 +499,6 @@ class DocumentService:
                 error="REQ_MISSING_FIELD",
             )
 
-        if not self._conversation_service.has_rewrite_history(normalized_conversation_id):
-            return GenerateResponse(
-                success=False,
-                task_id=task_id,
-                message="当前会话没有可用文档，请先完成一次生成",
-                error="REWRITE_NO_DOCUMENT",
-            )
-
-        latest_rewrite_state = self._conversation_service.get_latest_rewrite_state(
-            normalized_conversation_id
-        )
-        if not latest_rewrite_state:
-            return GenerateResponse(
-                success=False,
-                task_id=task_id,
-                message="当前会话没有可用文档，请先完成一次生成",
-                error="REWRITE_NO_DOCUMENT",
-            )
-
         if not REWRITE_SKILL_GRAPH_CLASS:
             return GenerateResponse(
                 success=False,
@@ -523,13 +507,77 @@ class DocumentService:
                 error="REWRITE_TARGET_NOT_RESOLVED",
             )
 
-        rewrite_initial_state = self._build_skill_graph_initial_state(
-            task_id=task_id,
-            skill_id=REWRITE_SKILL_ID,
-            conversation_id=normalized_conversation_id,
-            user_prompt=normalized_prompt,
-            latest_rewrite_state=latest_rewrite_state,
-        )
+        if normalized_file_path:
+            missing_fields: list[str] = []
+            if form_type is None:
+                missing_fields.append("form_type")
+            if insertion_config is None:
+                missing_fields.append("insertion_config")
+            else:
+                before_text = str(insertion_config.before_text or "").strip()
+                after_text = str(insertion_config.after_text or "").strip()
+                if not before_text or not after_text:
+                    missing_fields.append("insertion_config")
+            if tender_lx is None:
+                missing_fields.append("tender_lx")
+            if fund_source_lx is None:
+                missing_fields.append("fund_source_lx")
+            if missing_fields:
+                return GenerateResponse(
+                    success=False,
+                    task_id=task_id,
+                    message="上传文件重写缺少当前页面上下文",
+                    error="REQ_MISSING_FIELD",
+                )
+
+            rewrite_initial_state = self._build_uploaded_rewrite_initial_state(
+                task_id=task_id,
+                conversation_id=normalized_conversation_id,
+                user_prompt=normalized_prompt,
+                file_path=normalized_file_path,
+                form_type=form_type,
+                insertion_config=insertion_config,
+                tender_lx=int(tender_lx),
+                fund_source_lx=int(fund_source_lx),
+                tender_data_snapshot=tender_data_snapshot,
+            )
+        else:
+            if not self._conversation_service.has_rewrite_history(normalized_conversation_id):
+                return GenerateResponse(
+                    success=False,
+                    task_id=task_id,
+                    message="当前会话没有可用文档，请先完成一次生成",
+                    error="REWRITE_NO_DOCUMENT",
+                )
+
+            latest_rewrite_state = self._conversation_service.get_latest_rewrite_state(
+                normalized_conversation_id
+            )
+            if not latest_rewrite_state:
+                return GenerateResponse(
+                    success=False,
+                    task_id=task_id,
+                    message="当前会话没有可用文档，请先完成一次生成",
+                    error="REWRITE_NO_DOCUMENT",
+                )
+
+            rewrite_initial_state = self._build_skill_graph_initial_state(
+                task_id=task_id,
+                skill_id=REWRITE_SKILL_ID,
+                conversation_id=normalized_conversation_id,
+                user_prompt=normalized_prompt,
+                latest_rewrite_state=latest_rewrite_state,
+            )
+
+        task_audit_log_path = str(rewrite_log_path or "").strip() or None
+        if task_audit_log_path is None and normalized_file_path:
+            try:
+                task_audit_log_path = create_rewrite_audit_log(task_id)
+            except Exception:
+                logger.exception(
+                    "创建 rewrite audit 日志文件失败: task_id=%s",
+                    task_id,
+                )
 
         return self._submit_graph_task(
             task_id=task_id,
@@ -540,85 +588,9 @@ class DocumentService:
             task_kind="rewrite",
             conversation_id=normalized_conversation_id,
             task_user_prompt=normalized_prompt,
-            task_audit_log_path=str(rewrite_log_path or "").strip() or None,
-            rewrite_log_path=str(rewrite_log_path or "").strip() or None,
-            llm_node_name=TASK_KIND_TO_LLM_NODE["rewrite"],
-        )
-
-    async def create_edit_task(self, request: EditTaskRequest) -> GenerateResponse:
-        """创建显式 edit 任务（复用文档任务队列 + SSE 三卡片链路）。"""
-        task_id, callback = self._allocate_task_callback_pair()
-
-        normalized_conversation_id = str(request.conversation_id or "").strip()
-        normalized_prompt = str(request.edit_prompt or "").strip()
-        normalized_file_path = str(request.file_path or "").strip()
-        latest_rewrite_state = None
-
-        if not normalized_conversation_id:
-            return GenerateResponse(
-                success=False,
-                task_id=task_id,
-                message="conversation_id 不能为空",
-                error="REQ_MISSING_FIELD",
-            )
-
-        if not normalized_prompt:
-            return GenerateResponse(
-                success=False,
-                task_id=task_id,
-                message="修改要求不能为空",
-                error="REQ_MISSING_FIELD",
-            )
-
-        if not normalized_file_path:
-            latest_rewrite_state = self._conversation_service.get_latest_rewrite_state(
-                normalized_conversation_id
-            )
-            normalized_file_path = str(
-                (latest_rewrite_state or {}).get("prepared_doc_path") or ""
-            ).strip()
-
-        if not normalized_file_path:
-            return GenerateResponse(
-                success=False,
-                task_id=task_id,
-                message="当前会话没有可用文档，请先上传文件或先完成一次生成/修改",
-                error="REWRITE_NO_DOCUMENT",
-            )
-
-        if not EDIT_SKILL_GRAPH_CLASS:
-            return GenerateResponse(
-                success=False,
-                task_id=task_id,
-                message="Edit Skill Graph 未初始化",
-                error="EDIT_TARGET_NOT_RESOLVED",
-            )
-
-        task_audit_log_path: Optional[str] = None
-        try:
-            task_audit_log_path = create_edit_audit_log(task_id)
-        except Exception:
-            logger.exception(
-                "创建 edit audit 日志文件失败: task_id=%s",
-                task_id,
-            )
-
-        edit_initial_state = self._build_edit_graph_initial_state(
-            request=request.model_copy(update={"file_path": normalized_file_path}),
-            task_id=task_id,
-        )
-
-        return self._submit_graph_task(
-            task_id=task_id,
-            graph_class=EDIT_SKILL_GRAPH_CLASS,
-            initial_state=edit_initial_state,
-            callback=callback,
-            model_provider=request.model.value,
-            task_kind="edit",
-            conversation_id=normalized_conversation_id,
-            task_user_prompt=normalized_prompt,
             task_audit_log_path=task_audit_log_path,
-            llm_node_name=TASK_KIND_TO_LLM_NODE["edit"],
+            rewrite_log_path=task_audit_log_path,
+            llm_node_name=TASK_KIND_TO_LLM_NODE["rewrite"],
         )
 
     async def create_comment_supplement_task(
@@ -818,22 +790,28 @@ class DocumentService:
             ).strip()
         return initial_state
 
-    def _build_edit_graph_initial_state(
+    def _build_uploaded_rewrite_initial_state(
         self,
         *,
-        request: EditTaskRequest,
         task_id: str,
+        conversation_id: str,
+        user_prompt: str,
+        file_path: str,
+        form_type: FormType,
+        insertion_config: InsertionConfig,
+        tender_lx: int,
+        fund_source_lx: int,
+        tender_data_snapshot: Optional[TenderData],
     ) -> Dict[str, Any]:
-        tender_type = request.form_type.value.replace("_tender", "")
-        tender_data = request.tender_data_snapshot
-        conversation_id = str(request.conversation_id).strip()
+        tender_type = form_type.value.replace("_tender", "")
+        tender_data = tender_data_snapshot
+        normalized_conversation_id = str(conversation_id).strip()
         project_number = str(getattr(tender_data, "project_number", "") or "").strip()
         if tender_type == "gjgk":
             project_number = normalize_gjgk_project_number(project_number)
 
         insertion_before_text = None
         insertion_after_text = None
-        insertion_config = getattr(request, "insertion_config", None)
         if insertion_config:
             insertion_before_text = getattr(insertion_config, "before_text", None)
             insertion_after_text = getattr(insertion_config, "after_text", None)
@@ -846,9 +824,9 @@ class DocumentService:
 
         state: Dict[str, Any] = {
             "task_id": task_id,
-            "skill_id": EDIT_SKILL_ID,
-            "conversation_id": conversation_id,
-            "user_session_id": conversation_id,
+            "skill_id": REWRITE_SKILL_ID,
+            "conversation_id": normalized_conversation_id,
+            "user_session_id": normalized_conversation_id,
             "tender_type": tender_type,
             "project_name": str(getattr(tender_data, "project_name", "") or "").strip(),
             "project_number": project_number,
@@ -864,10 +842,12 @@ class DocumentService:
             "submit_date": str(getattr(tender_data, "submit_date", "") or "").strip(),
             "platform": str(getattr(tender_data, "platform", "") or "").strip(),
             "service_fee": str(getattr(tender_data, "service_fee", "") or "").strip(),
-            "tender_lx": int(request.tender_lx),
-            "fund_source_lx": str(request.fund_source_lx),
-            "edit_user_prompt": str(request.edit_prompt).strip(),
-            "source_document_path": str(request.file_path).strip(),
+            "tender_lx": int(tender_lx),
+            "fund_source_lx": str(fund_source_lx),
+            "rewrite_user_prompt": str(user_prompt).strip(),
+            "source_document_path": str(file_path).strip(),
+            "rewrite_source": "uploaded_file",
+            "rewrite_mode": True,
             "insertion_before_text": str(insertion_before_text),
             "insertion_after_text": str(insertion_after_text),
         }
@@ -1041,13 +1021,11 @@ class DocumentService:
         task_label = {
             "generate": "文档生成任务",
             "rewrite": "修改任务",
-            "edit": "文档修改任务",
             "comment_supplement": "补充批注任务",
         }.get(task_kind, "文档任务")
         success_message = {
             "generate": "文档生成完成",
             "rewrite": "修改任务完成",
-            "edit": "文档修改完成",
             "comment_supplement": "补充批注完成",
         }.get(task_kind, "任务完成")
         callback.push_log(f"开始执行{task_label}: {task_id}")
@@ -1105,13 +1083,6 @@ class DocumentService:
                         )
                         if task_kind == "rewrite":
                             self._conversation_service.append_rewrite_success(
-                                conversation_id=conversation_id,
-                                user_prompt=str(task_user_prompt or ""),
-                                rewrite_state=rewrite_state,
-                                model=model_provider,
-                            )
-                        elif task_kind == "edit":
-                            self._conversation_service.append_edit_success(
                                 conversation_id=conversation_id,
                                 user_prompt=str(task_user_prompt or ""),
                                 rewrite_state=rewrite_state,
@@ -1257,7 +1228,7 @@ class DocumentService:
             except Exception:
                 pass
 
-            if task_kind in {"rewrite", "edit", "comment_supplement"}:
+            if task_kind in {"rewrite", "comment_supplement"}:
                 self._cleanup_temporary_output(rewrite_cleanup_holder.get("path"))
 
             # 更新任务队列状态

@@ -207,47 +207,6 @@ class GenerateRequest(BaseModel):
     }
 
 
-class EditTaskRequest(BaseModel):
-    """显式 edit 文档修改请求模型。"""
-
-    conversation_id: str = Field(..., min_length=1, description="会话ID")
-    form_type: FormType = Field(..., description="表单类型")
-    model: LLMModel = Field(default=LLMModel.DEEPSEEK, description="使用的 LLM 模型")
-    edit_prompt: str = Field(..., min_length=1, description="用户修改指令")
-    file_path: Optional[str] = Field(default=None, description="待修改 Word 文档路径")
-    insertion_config: Optional[InsertionConfig] = Field(
-        default=None, description="插入锚点配置（可选）"
-    )
-    tender_lx: int = Field(..., description="标的类型编码（0=货物, 1=工程, 2=服务）")
-    fund_source_lx: int = Field(..., description="资金性质编码（0=自筹, 1=财政）")
-    tender_data_snapshot: Optional[TenderData] = Field(
-        default=None,
-        description="当前页面招标数据快照（可选透传，用于保留会话上下文）",
-    )
-
-    @field_validator("conversation_id", "edit_prompt")
-    @classmethod
-    def _validate_non_empty_text(cls, value: str) -> str:
-        normalized = str(value or "").strip()
-        if not normalized:
-            raise ValueError("字段不能为空")
-        return normalized
-
-    @field_validator("fund_source_lx")
-    @classmethod
-    def _validate_binary_flag(cls, value: int) -> int:
-        if value not in (0, 1):
-            raise ValueError("字段必须是 0 或 1")
-        return int(value)
-
-    @field_validator("tender_lx")
-    @classmethod
-    def _validate_tender_lx(cls, value: int) -> int:
-        if value not in (0, 1, 2):
-            raise ValueError("tender_lx 必须是 0、1 或 2")
-        return int(value)
-
-
 class CommentSupplementRequest(BaseModel):
     """补充批注文档任务请求模型。"""
 

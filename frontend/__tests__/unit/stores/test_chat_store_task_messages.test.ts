@@ -1139,7 +1139,7 @@ describe('chatStore task message grouping', () => {
     expect(group?.logMessage?.metadata?.taskKind).toBe('rewrite');
   });
 
-  it('interrupts active tasks on backend restart while preserving streamed logs and ai text', () => {
+  it('interrupts active rewrite tasks on backend restart without creating task-content cards', () => {
     act(() => {
       useChatStore.getState().startTask('conv-1', 'task-1', {
         task_kind: 'rewrite',
@@ -1174,10 +1174,7 @@ describe('chatStore task message grouping', () => {
     expect(conversation?.currentTaskId).toBeUndefined();
     expect(useChatStore.getState().activeTaskIds).toHaveLength(0);
     expect(group?.logMessage?.status).toBe('error');
-    expect(group?.contentMessage?.status).toBe('error');
-    expect(group?.contentMessage?.content).toBe('已生成的修改内容');
-    expect(group?.contentMessage?.error).toBe('服务已重启，任务已中断，可重试');
-    expect(group?.contentMessage?.metadata?.localTaskReason).toBe('backend_restart');
+    expect(group?.contentMessage).toBeUndefined();
     expect(group?.logMessage?.metadata?.logs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ message: '正在修改' }),

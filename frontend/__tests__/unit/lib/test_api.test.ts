@@ -2,7 +2,6 @@ import {
   ApiError,
   cancelTask,
   createCommentSupplementTask,
-  createEditTask,
   createGenerateTask,
   downloadFile,
   fetchTemplateCandidates,
@@ -12,16 +11,16 @@ import {
   getTaskStatus,
   selectTemplateCandidate,
   sendTaskHeartbeat,
+  streamAgentRun,
   streamNdjson,
-  streamUserMessage,
   uploadFile,
 } from '@/lib/api';
 import type {
+  AgentRunEvent,
+  AgentRunStreamRequest,
   CommentSupplementTaskRequest,
-  EditTaskRequest,
   GenerateRequest,
   TemplateCandidateSelectRequest,
-  UserStreamEvent,
 } from '@/types/api';
 
 type FetchMock = jest.MockedFunction<typeof fetch>;
@@ -115,25 +114,21 @@ const validTemplateSelectRequest: TemplateCandidateSelectRequest = {
   },
 };
 
-const validEditTaskRequest: EditTaskRequest = {
-  conversation_id: 'conv-1',
-  form_type: 'xjcg_tender',
-  model: 'deepseek',
-  edit_prompt: '请把交付日期改成合同签订后 30 天内',
-  file_path: 'D:/UploadFiles/edit.docx',
-  insertion_config: {
-    before_text: '第三章 采购需求',
-    after_text: '第四章 响应文件有关格式',
-  },
-  tender_lx: 0,
-  fund_source_lx: 1,
-  tender_data_snapshot: validGenerateRequest.tender_data,
-};
-
 const validCommentSupplementTaskRequest: CommentSupplementTaskRequest = {
   conversation_id: 'conv-1',
   source_file: 'D:/UploadFiles/output.docx',
   model: 'deepseek',
+};
+
+const validAgentRunStreamRequest: AgentRunStreamRequest = {
+  conversation_id: 'conv-1',
+  message: '请改写第三包',
+  model: 'deepseek',
+  selected_skills: ['rewrite'],
+  context_snapshot: {
+    rewrite_available: true,
+    uploaded_files: [],
+  },
 };
 
 describe('API Client', () => {
@@ -203,44 +198,6 @@ describe('API Client', () => {
         code: 'NETWORK_ERROR',
         status: 0,
       });
-    });
-  });
-
-  describe('createEditTask', () => {
-    it('should return task info on success', async () => {
-      globalThis.fetch = mockFetchJson({
-        success: true,
-        task_id: 'edit-task-123',
-        task_kind: 'edit',
-        status: 'queued',
-        queue_position: 0,
-        waiting_count: 0,
-      });
-
-      const result = await createEditTask(validEditTaskRequest);
-      expect(result.task_id).toBe('edit-task-123');
-      expect(result.task_kind).toBe('edit');
-      expect(result.status).toBe('queued');
-    });
-
-    it('should send correct request body', async () => {
-      const fetchSpy = jest.fn().mockResolvedValue({
-        ok: true,
-        status: 202,
-        json: async () => ({
-          success: true,
-          task_id: 'edit-task-123',
-          task_kind: 'edit',
-          status: 'queued',
-        }),
-      } as unknown as Response) as unknown as FetchMock;
-      globalThis.fetch = fetchSpy;
-
-      await createEditTask(validEditTaskRequest);
-
-      const [, init] = fetchSpy.mock.calls[0];
-      const body = (init as RequestInit).body as string;
-      expect(JSON.parse(body)).toEqual(validEditTaskRequest);
     });
   });
 
@@ -701,60 +658,310 @@ describe('API Client', () => {
     });
   });
 
-  describe('streamUserMessage', () => {
-    it('parses reply-route events and ignores unknown events', async () => {
+  describe('streamAgentRun', () => {
+    it('parses ordinary assistant replies and ignores unknown events', async () => {
       globalThis.fetch = mockFetchStream([
-        JSON.stringify({ event: 'route', data: { route: 'reply' } }) + '\n',
+        JSON.stringify({
+          event: 'run_started',
+          data: {
+            run_id: 'run-1',
+            conversation_id: 'conv-1',
+            model: 'deepseek',
+            runtime: 'deepagents',
+            selected_skills: ['rewrite'],
+          },
+        }) + '\n',
+        JSON.stringify({
+          event: 'done',
+          data: {
+            run_id: 'run-1',
+            message: '你好，我可以继续帮你完善任务上下文。',
+          },
+        }) + '\n',
         JSON.stringify({ event: 'mystery', data: { ignored: true } }) + '\n',
-        JSON.stringify({ event: 'done', data: { content: '你好' } }) + '\n',
       ]);
 
-      const events: UserStreamEvent[] = [];
+      const events: AgentRunEvent[] = [];
 
-      await streamUserMessage(
-        {
-          conversation_id: 'conv-1',
-          model: 'deepseek',
-          messages: [{ role: 'user', content: '你好' }],
+      await streamAgentRun(validAgentRunStreamRequest, {
+        onEvent: (event) => {
+          events.push(event);
         },
-        {
-          onEvent: (event) => {
-            events.push(event);
-          },
-        }
-      );
+      });
 
       expect(events).toEqual([
-        { event: 'route', data: { route: 'reply' } },
-        { event: 'done', data: { content: '你好' } },
+        {
+          event: 'run_started',
+          data: {
+            run_id: 'run-1',
+            conversation_id: 'conv-1',
+            model: 'deepseek',
+            runtime: 'deepagents',
+            selected_skills: ['rewrite'],
+          },
+        },
+        {
+          event: 'done',
+          data: {
+            run_id: 'run-1',
+            message: '你好，我可以继续帮你完善任务上下文。',
+          },
+        },
       ]);
+    });
+
+    it('parses needs_input follow-up events', async () => {
+      globalThis.fetch = mockFetchStream([
+        JSON.stringify({
+          event: 'run_started',
+          data: {
+            run_id: 'run-need-input',
+            conversation_id: 'conv-1',
+            model: 'deepseek',
+            runtime: 'fake',
+            selected_skills: ['rewrite'],
+          },
+        }) + '\n',
+        JSON.stringify({
+          event: 'needs_input',
+          data: {
+            run_id: 'run-need-input',
+            message: '请先上传要重写的 Word 文件。',
+            selected_skill: 'rewrite',
+            missing_requirements: ['uploaded_word_file'],
+          },
+        }) + '\n',
+      ]);
+
+      const events: AgentRunEvent[] = [];
+
+      await streamAgentRun(validAgentRunStreamRequest, {
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+
+      expect(events).toEqual([
+        {
+          event: 'run_started',
+          data: {
+            run_id: 'run-need-input',
+            conversation_id: 'conv-1',
+            model: 'deepseek',
+            runtime: 'fake',
+            selected_skills: ['rewrite'],
+          },
+        },
+        {
+          event: 'needs_input',
+          data: {
+            run_id: 'run-need-input',
+            message: '请先上传要重写的 Word 文件。',
+            selected_skill: 'rewrite',
+            missing_requirements: ['uploaded_word_file'],
+          },
+        },
+      ]);
+    });
+
+    it('parses backend null optional fields in agent run events', async () => {
+      globalThis.fetch = mockFetchStream([
+        JSON.stringify({
+          event: 'thinking_stage',
+          data: {
+            run_id: 'run-null-optionals',
+            stage: 'understand',
+            label: '理解需求',
+            status: 'completed',
+            summary: '已接收用户消息并等待能力确认。',
+            selected_skill: null,
+            guard_result: null,
+            tool_name: null,
+          },
+        }) + '\n',
+        JSON.stringify({
+          event: 'thinking_stage',
+          data: {
+            run_id: 'run-null-optionals',
+            stage: 'guard',
+            label: '检查上下文',
+            status: 'completed',
+            summary: 'fake runtime 暂时只支持 rewrite 任务创建。',
+            selected_skill: null,
+            guard_result: 'needs_input',
+            tool_name: null,
+          },
+        }) + '\n',
+        JSON.stringify({
+          event: 'needs_input',
+          data: {
+            run_id: 'run-null-optionals',
+            message: '请说明这次要执行 rewrite。',
+            selected_skill: null,
+            missing_requirements: ['selected_skill'],
+          },
+        }) + '\n',
+        JSON.stringify({
+          event: 'done',
+          data: {
+            run_id: 'run-null-optionals',
+            message: '本轮无需创建任务。',
+            task_id: null,
+            selected_skill: null,
+          },
+        }) + '\n',
+      ]);
+
+      const events: AgentRunEvent[] = [];
+
+      await streamAgentRun(validAgentRunStreamRequest, {
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+
+      expect(events).toEqual([
+        {
+          event: 'thinking_stage',
+          data: {
+            run_id: 'run-null-optionals',
+            stage: 'understand',
+            label: '理解需求',
+            status: 'completed',
+            summary: '已接收用户消息并等待能力确认。',
+            selected_skill: undefined,
+            guard_result: undefined,
+            tool_name: undefined,
+          },
+        },
+        {
+          event: 'thinking_stage',
+          data: {
+            run_id: 'run-null-optionals',
+            stage: 'guard',
+            label: '检查上下文',
+            status: 'completed',
+            summary: 'fake runtime 暂时只支持 rewrite 任务创建。',
+            selected_skill: undefined,
+            guard_result: 'needs_input',
+            tool_name: undefined,
+          },
+        },
+        {
+          event: 'needs_input',
+          data: {
+            run_id: 'run-null-optionals',
+            message: '请说明这次要执行 rewrite。',
+            selected_skill: undefined,
+            missing_requirements: ['selected_skill'],
+          },
+        },
+        {
+          event: 'done',
+          data: {
+            run_id: 'run-null-optionals',
+            message: '本轮无需创建任务。',
+            task_id: undefined,
+            selected_skill: undefined,
+          },
+        },
+      ]);
+    });
+
+    it('parses task_accepted and error terminal events', async () => {
+      globalThis.fetch = mockFetchStream([
+        JSON.stringify({
+          event: 'task_accepted',
+          data: {
+            run_id: 'run-1',
+            task_id: 'task-1',
+            task_kind: 'rewrite',
+            status: 'queued',
+            queue_position: 0,
+            waiting_count: 0,
+          },
+        }) + '\n',
+        JSON.stringify({
+          event: 'error',
+          data: {
+            run_id: 'run-1',
+            code: 'AGENT_RUN_FAILED',
+            message: 'agent run 执行失败，请稍后重试',
+          },
+        }) + '\n',
+      ]);
+
+      const events: AgentRunEvent[] = [];
+
+      await streamAgentRun(validAgentRunStreamRequest, {
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+
+      expect(events).toEqual([
+        {
+          event: 'task_accepted',
+          data: {
+            run_id: 'run-1',
+            task_id: 'task-1',
+            task_kind: 'rewrite',
+            status: 'queued',
+            queue_position: 0,
+            waiting_count: 0,
+          },
+        },
+        {
+          event: 'error',
+          data: {
+            run_id: 'run-1',
+            code: 'AGENT_RUN_FAILED',
+            message: 'agent run 执行失败，请稍后重试',
+          },
+        },
+      ]);
+    });
+
+    it('throws ApiError on malformed NDJSON lines', async () => {
+      globalThis.fetch = mockFetchStream([
+        JSON.stringify({
+          event: 'run_started',
+          data: {
+            run_id: 'run-1',
+            conversation_id: 'conv-1',
+            model: 'deepseek',
+            runtime: 'fake',
+            selected_skills: ['rewrite'],
+          },
+        }) + '\n',
+        'not-json\n',
+      ]);
+
+      await expect(streamAgentRun(validAgentRunStreamRequest)).rejects.toMatchObject({
+        name: 'ApiError',
+        code: 'AGENT_RUN_STREAM_PROTOCOL_ERROR',
+      });
     });
 
     it('converts HTTP error payloads into ApiError', async () => {
       globalThis.fetch = mockFetchStream([], {
         ok: false,
-        status: 400,
+        status: 422,
         json: {
           detail: {
             success: false,
             error: {
-              code: 'REQ_MISSING_FIELD',
-              message: 'messages 不能为空',
+              code: 'REQ_INVALID_AGENT_CONTEXT',
+              message: 'context_snapshot 非法',
             },
           },
         },
       });
 
-      await expect(
-        streamUserMessage({
-          conversation_id: 'conv-1',
-          model: 'deepseek',
-          messages: [{ role: 'user', content: '你好' }],
-        })
-      ).rejects.toMatchObject({
+      await expect(streamAgentRun(validAgentRunStreamRequest)).rejects.toMatchObject({
         name: 'ApiError',
-        code: 'REQ_MISSING_FIELD',
-        status: 400,
+        code: 'REQ_INVALID_AGENT_CONTEXT',
+        status: 422,
       });
     });
   });
@@ -777,12 +984,12 @@ describe('API Client', () => {
       const file = new File(['test'], 'test.docx', {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
-      const result = await uploadFile(file, 'edit_source');
+      const result = await uploadFile(file, 'rewrite_source');
       expect(result.file_path).toBe('/uploads/test.docx');
 
       const [, init] = fetchSpy.mock.calls[0];
       const body = (init as RequestInit).body as FormData;
-      expect(body.get('file_type')).toBe('edit_source');
+      expect(body.get('file_type')).toBe('rewrite_source');
     });
 
     it('should handle flat upload response without data wrapper', async () => {
@@ -799,7 +1006,7 @@ describe('API Client', () => {
       const file = new File(['test'], 'flat-test.docx', {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
-      const result = await uploadFile(file, 'edit_source');
+      const result = await uploadFile(file, 'rewrite_source');
       expect(result.file_path).toBe('/uploads/flat-test.docx');
     });
   });

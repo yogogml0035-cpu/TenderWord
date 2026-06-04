@@ -75,6 +75,39 @@ describe('TaskContentMessage', () => {
     expect(screen.queryByText('content_agent round-2')).not.toBeInTheDocument();
   });
 
+  it('uses the rewrite agent title for structured rewrite process cards', () => {
+    render(
+      <TaskContentMessage
+        message={createMessage({
+          metadata: {
+            messageKind: 'agent-step',
+            taskKind: 'rewrite',
+            agentStepType: 'final',
+            agentStepNode: 'rewrite_agent',
+            agentStepRound: 2,
+            contentAgent: {
+              phase: 'final',
+              summary: '最终完成，修复 1 轮，最终正文约 4 字。',
+              rounds: [],
+              highlights: [],
+              final_result: {
+                summary: '最终完成，修复 1 轮，最终正文约 4 字。',
+                revision_rounds: 1,
+                final_chars: 4,
+                issue_count: 0,
+                content: '最终正文',
+              },
+            },
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByText('重写智能体')).toBeInTheDocument();
+    expect(screen.queryByText('参数生成智能体')).not.toBeInTheDocument();
+    expect(screen.queryByText('AI 修改内容')).not.toBeInTheDocument();
+  });
+
   it('renders structured content_agent stages and collapsed raw outputs', () => {
     render(
       <TaskContentMessage
@@ -156,6 +189,45 @@ describe('TaskContentMessage', () => {
     expect(screen.getAllByText('最终完成，修复 1 轮，最终正文约 4 字。').length).toBeGreaterThan(0);
     const draftDetails = screen.getByText('查看初稿正文').closest('details');
     expect(draftDetails).not.toHaveAttribute('open');
+  });
+
+  it('does not repeat final content_agent highlights as a separate attention block', () => {
+    render(
+      <TaskContentMessage
+        message={createMessage({
+          content: '最终正文',
+          metadata: {
+            messageKind: 'agent-step',
+            taskKind: 'generate',
+            agentStepType: 'final',
+            agentStepNode: 'content_agent',
+            agentStepRound: 3,
+            contentAgent: {
+              phase: 'final',
+              summary: '最终完成，修复 3 轮，最终正文约 4 字。',
+              rounds: [],
+              highlights: [
+                {
+                  evidence: '最终重复提示',
+                  fix_hint: '不再单独展示',
+                },
+              ],
+              final_result: {
+                summary: '最终完成，修复 3 轮，最终正文约 4 字。',
+                revision_rounds: 3,
+                final_chars: 4,
+                issue_count: 1,
+                content: '最终正文',
+              },
+            },
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByText('最终完成')).toBeInTheDocument();
+    expect(screen.queryByText('最终仍需关注')).not.toBeInTheDocument();
+    expect(screen.queryByText('最终重复提示')).not.toBeInTheDocument();
   });
 
   it('uses the Chinese comment_agent process card title', () => {

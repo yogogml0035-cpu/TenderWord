@@ -32,7 +32,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'npm run dev',
+    command: 'npm run dev -- --webpack',
     url: 'http://localhost:8502',
     reuseExistingServer: !process.env.CI,
   },

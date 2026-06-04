@@ -90,6 +90,9 @@ function getContentTitle(message: Message) {
     const node = message.metadata.agentStepNode;
     if (typeof node === 'string' && node.trim()) {
       if (message.metadata.contentAgent || node.trim() === 'content_agent') {
+        if (message.metadata.taskKind === 'rewrite') {
+          return '重写智能体';
+        }
         return '参数生成智能体';
       }
       if (node.trim() === 'comment_agent') {
@@ -104,7 +107,7 @@ function getContentTitle(message: Message) {
     return '智能体过程';
   }
 
-  if (message.metadata?.taskKind === 'rewrite' || message.metadata?.taskKind === 'edit') {
+  if (message.metadata?.taskKind === 'rewrite') {
     return 'AI 修改内容';
   }
 
@@ -346,17 +349,6 @@ function ContentAgentProcessView({ contentAgent }: { contentAgent: SSEContentAge
       {contentAgent.rounds.map((round, index) => (
         <ContentAgentRoundBlock key={`${round.phase}-${round.round}-${index}`} round={round} />
       ))}
-
-      {contentAgent.highlights.length > 0 && contentAgent.phase === 'final' && (
-        <section className="rounded border border-amber-200 bg-amber-50/70 p-3">
-          <h4 className="text-sm font-medium text-amber-800">最终仍需关注</h4>
-          <ul className="mt-2 space-y-2">
-            {contentAgent.highlights.map((finding, index) => (
-              <ContentAgentFindingItem key={`final-highlight-${index}`} finding={finding} />
-            ))}
-          </ul>
-        </section>
-      )}
 
       {finalResult && (
         <section className="rounded border border-gray-200 bg-white p-3">

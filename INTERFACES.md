@@ -1,6 +1,6 @@
 # TenderWord 接口边界
 
-**生成日期：** 2026-06-01
+**生成日期：** 2026-06-02
 
 本文件记录 TenderWord 当前已确认的系统级接口边界。具体模型和行为以 `backend/api/`、`backend/models/`、`frontend/types/api.ts` 和 `frontend/lib/api.ts` 为准。
 
@@ -29,10 +29,10 @@
 同步要求：
 - `GenerateRequest.file_paths` 当前只接受 `template` 与 `tender_params`；生成节点只消费 `template_path` 与 `tender_param_paths`，不要重新引入旧文件槽位。
 - `GenerateRequest.form_type` 变化必须同步 `frontend/types/api.ts`、`frontend/lib/formDataConverter.ts` 和 `backend/models/generate.py`；`gngk` 分派变化还必须同步 `frontend/lib/gngkFormType.ts`。
-- `generation_mode` 是 generate-only 字段，默认 `workflow`；`agent` 只影响初次生成节点选择，不进入 rewrite / edit 请求模型、skill state 或 prompt surface。
-- `comment_generation_mode` 是 generate-only 字段，默认 `on`；`off` 时 workflow 与 agent 生成都跳过 AI 批注生成，不进入 rewrite / edit 链路。
+- `generation_mode` 是 generate-only 字段，默认 `workflow`；`agent` 只影响初次生成节点选择，不进入 rewrite 请求模型、skill state 或 prompt surface。
+- `comment_generation_mode` 是 generate-only 字段，默认 `on`；`off` 时 workflow 与 agent 生成都跳过 AI 批注生成，不进入 rewrite 链路。
 - `content_verify_agent` 的审核结果只保留真实需修复 findings；无问题 / 无需修改会折叠为 `[]`，前端过程卡不应把这类空审核项当成真实问题展示。
-- `gngk` 的后端分派依赖 `tender_lx + fund_lx + ifzgcg`，共享真源是 `frontend/lib/gngkFormType.ts`；generate 由 `formDataConverter.ts` 调用该 helper，edit 由 `ChatPanel.tsx` 调用该 helper，不能绕开 helper 单独改调用点。
+- `gngk` 的后端分派依赖 `tender_lx + fund_lx + ifzgcg`，共享真源是 `frontend/lib/gngkFormType.ts`；generate 由 `formDataConverter.ts` 调用该 helper，上传文件 rewrite 由 `ChatPanel.tsx` 调用该 helper，不能绕开 helper 单独改调用点。
 
 ### 任务状态、取消与心跳
 
@@ -70,36 +70,38 @@
 - `agent_step` 是智能体生成过程事件，允许断线重放和前端过程卡展示，但不替代 `done` / `error` 终态。
 - `comment_supplement` 任务复用同一 SSE 通道，`comment_agent` 过程卡仍通过 `agent_step` 展示。
 
-### 用户流式、聊天与 Rewrite
+### Agent Run、聊天与任务创建
 
 | 项 | 当前边界 |
 | --- | --- |
 | 前端调用方 | `frontend/components/chat/ChatPanel.tsx` |
-| API client | `frontend/lib/api.ts` 中的 `streamUserMessage()` / `streamNdjson()` |
-| 后端路由 | `backend/api/user.py` 中的 `POST /api/user/stream` |
-| 路由 service | `backend/services/user_routing_service.py` |
-| 路由 graph | `backend/graphs/user_graph.py` |
-| Skill runtime | `backend/graphs/skill_graph.py`, `backend/skills/rewrite/` |
+| API client | `frontend/lib/api.ts` 中的 `streamAgentRun()` / `streamNdjson()` |
+| 后端路由 | `backend/api/agent.py` 中的 `POST /api/agent/runs/stream` |
+| 路由 service | `backend/services/agent_run_service.py` |
+| Agent / tool runtime | `backend/agents/task_context_assistant/` |
+| 后续 task runtime | `backend/graphs/skill_graph.py`, `backend/graphs/task_skill_workflows.py`, `backend/skills/rewrite/` |
 
 同步要求：
 - NDJSON event shape 变化必须同步 `frontend/types/api.ts` 和 `ChatPanel`。
-- rewrite 可创建任务，但 edit 不应重新并入 `/api/user/stream` 的模型判路链路。
-- `generation_style` 和 `generation_mode` 是 generate-only 字段，不得透传进 rewrite / edit 请求模型、skill state 或 prompt surface。
+- `selected_skills`、`context_snapshot.uploaded_files` 和 `context_snapshot.rewrite_context` 变化必须同步 `backend/models/agent_run.py`、`frontend/types/api.ts`、`frontend/stores/chatStore.ts` 和 `ChatPanel`。
+- `task_accepted` 只负责把 agent run 收敛为“已创建任务”；后续排队、SSE、取消、下载和结果卡仍沿用既有 task / stream 契约，不能在 agent run 自己复制第二套任务状态机。
+- `generation_style` 和 `generation_mode` 是 generate-only 字段，不得透传进 rewrite 请求模型、skill state 或 prompt surface。
 
-### Edit 任务
+### Rewrite 任务
 
 | 项 | 当前边界 |
 | --- | --- |
-| 前端调用方 | `frontend/components/chat/ChatPanel.tsx` |
+| 前端调用方 | 当前右侧聊天通过 `frontend/components/chat/ChatPanel.tsx` 走 `streamAgentRun()`；显式 `$rewrite` / `/rewrite` 和上传 Word 文件都归入 rewrite |
 | 上传 helper | `frontend/lib/api.ts` 中的 `uploadFile()` |
-| API client | `frontend/lib/api.ts` 中的 `createEditTask()` |
-| 后端路由 | `backend/api/edit.py` 中的 `POST /api/edit` |
-| 后端 service | `DocumentService.create_edit_task()` |
-| Skill runtime | `backend/skills/edit/`, `backend/graphs/skill_graph.py` |
+| API client | `frontend/lib/api.ts` 中的 `streamAgentRun()`；后台任务由 agent run tool 创建 |
+| 后端路由 | `backend/api/agent.py` 中的 `POST /api/agent/runs/stream` |
+| 后端 service | `AgentRunService`, `DocumentService.create_rewrite_task()` |
+| Skill runtime | `backend/skills/rewrite/`, `backend/graphs/skill_graph.py` |
 
 同步要求：
-- Edit 是显式入口，只走 `POST /api/edit`。
-- edit request / response 变化必须同步 `frontend/types/api.ts`、`frontend/lib/api.ts` 和后端模型。
+- `/api/edit`、edit skill、edit task kind 和 `create_edit_task_tool` 已删除；旧调用表现为 404，不做历史会话迁移。
+- 上传 Word 文件 rewrite 必须带非空用户重写指令、当前页面 `form_type`、完整锚点、`tender_lx` 和 `fund_source_lx`；`tender_data_snapshot` 只是可选快照，不能因为未获取招标数据而阻断上传文件 rewrite。缺必需条件时返回 `needs_input`，不自动猜测文档类型或锚点。
+- 上传文件链路优先于会话 rewrite history；rewrite 完成后前端用 SSE `done.output_file` 更新输入框文件卡，后续 rewrite 继续修改最新输出文件。用户删除文件卡后清空上传链路，后续 rewrite 回到会话生成 / 重写历史。
 
 ### 补充批注任务
 
@@ -113,9 +115,9 @@
 | 共享节点 / 运行时 | `backend/nodes/common_word_nodes/comment_supplement.py`, `backend/nodes/common_word_nodes/comment_agent.py`, `backend/agents/comments/` |
 
 同步要求：
-- 补充批注只从初次生成下载卡触发；rewrite、edit 和 comment_supplement 下载卡不应再显示补充批注动作。
+- 补充批注只从初次生成下载卡触发；rewrite 和 comment_supplement 下载卡不应再显示补充批注动作。
 - 请求只携带当前会话、当前下载文件路径和模型；后端负责校验 latest `rewrite_state`、`polished_text` 和 source file 是否仍是当前最新文档。
-- 成功后必须更新会话 latest `rewrite_state.prepared_doc_path`，让后续 rewrite/edit 基于补充批注后的副本。
+- 成功后必须更新会话 latest `rewrite_state.prepared_doc_path`，让后续 rewrite 基于补充批注后的副本。
 - `TaskKind`、任务状态、SSE `done` payload、下载消息和 `agent_step` 过程卡变化必须同步前后端类型与测试。
 
 ### 招标详情查询
@@ -138,7 +140,7 @@
 | 项 | 当前边界 |
 | --- | --- |
 | 上传 client | `frontend/lib/api.ts` 中的 `uploadFile()`, `uploadFiles()` |
-| 上传 UI | `frontend/components/forms/FileUploader.tsx`, `ChatPanel` 中的 edit upload |
+| 上传 UI | `frontend/components/forms/FileUploader.tsx`, `ChatPanel` 中的上传文件 rewrite |
 | 上传路由 | `backend/api/upload.py` |
 | 下载 client | `frontend/lib/api.ts` 中的 `downloadFile()`, `getDownloadUrl()` |
 | 下载路由 | `backend/api/download.py` |
@@ -243,6 +245,6 @@ Word COM 只存在于后端：
 
 - 接口返回异常：先看 `frontend/lib/api.ts` 的 `ApiError` 包装，再看对应 `backend/api/` route 和 `backend/models/`。
 - SSE 卡住：先区分任务是否还存在、队列是否运行、后端是否发出 `error` / `done`，再看 `backend/core/sse_manager.py` 和 `frontend/hooks/useChatSSE.ts`；`agent_step` 不显示时还要检查 `frontend/lib/sse.ts` 是否监听 named event，补充批注还要确认任务类型是 `comment_supplement` 且过程卡来自 `comment_agent`。
-- `gngk` 类型不对：同时检查 URL 参数、draft、`gngkFormType`、`formDataConverter`、`ChatPanel` edit 调用点、后端 `FormType` 和 `GRAPH_REGISTRY`。
+- `gngk` 类型不对：同时检查 URL 参数、draft、`gngkFormType`、`formDataConverter`、`ChatPanel` 上传文件 rewrite 调用点、后端 `FormType` 和 `GRAPH_REGISTRY`。
 - 模板候选不可选：检查 `year`、blocked reason、后端归一化、AI row_index 重排和前端选择按钮状态。
 - Word 写回异常：先看任务队列、graph 锁、protected fields、paragraph boundary helper，再看类型专属 node。

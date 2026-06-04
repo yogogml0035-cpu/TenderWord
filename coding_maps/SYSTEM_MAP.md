@@ -1,6 +1,6 @@
 # TenderWord 系统地图
 
-**生成日期：** 2026-06-01
+**生成日期：** 2026-06-02
 
 本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它不替代代码真源、不替代根级 `AGENTS.md` 的执行红线，也不替代 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 的子系统事实文档。
 
@@ -38,12 +38,13 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - 前端 SSE runtime 是 `frontend/lib/sse.ts`，任务事件到 UI 的映射是 `frontend/hooks/useChatSSE.ts`；`agent_step` 必须在 runtime 层注册 named event。
 - 下载由 `backend/api/download.py` 和上传存储 helper 保护，前端使用 `downloadFile()` / `getDownloadUrl()`。
 
-### 普通聊天、rewrite 与 edit
+### 任务上下文助手与 rewrite
 
-- 普通聊天和 rewrite 从 `frontend/components/chat/ChatPanel.tsx` 发起，通过 `frontend/lib/api.ts` 调用 `POST /api/user/stream`。
-- 后端 `backend/api/user.py` 返回 NDJSON，路由和 prompt 逻辑收敛在 `backend/services/user_routing_service.py`、`backend/graphs/user_graph.py` 和 `backend/prompts/`。
-- rewrite / edit 是 task skill runtime，声明和 workflow 在 `backend/skills/rewrite/`、`backend/skills/edit/`，执行图在 `backend/graphs/skill_graph.py`。
-- edit 只走 `POST /api/edit`，前端入口在 `ChatPanel.tsx`，后端入口在 `backend/api/edit.py`。
+- 右侧聊天统一从 `frontend/components/chat/ChatPanel.tsx` 发起，通过 `frontend/lib/api.ts` 调用 `POST /api/agent/runs/stream`。
+- 后端 `backend/api/agent.py` 返回 NDJSON agent run 事件，编排真源是 `backend/services/agent_run_service.py`；这里负责显式 `selected_skills`、自然语言兜底、guard、`needs_input`、`task_accepted` 和 JSONL 审计日志。
+- task-context assistant 运行时与 tool 真源在 `backend/agents/task_context_assistant/`：它只暴露受控 rewrite skill、受控上下文读取工具，以及复用 `DocumentService.create_rewrite_task()` 的 `create_rewrite_task_tool`。
+- rewrite 真正进入队列后，仍走既有 task runtime：声明和 guide 在 `backend/skills/rewrite/`，执行图在 `backend/graphs/skill_graph.py` 与 `backend/graphs/task_skill_workflows.py`，后续 SSE、取消、下载和结果卡继续复用同一任务主链路。
+- 上传 Word 文件后的修改统一走 rewrite，并由 `context_snapshot.rewrite_context` 提供当前页面 `form_type`、锚点、`tender_lx`、`fund_source_lx` 和招标数据快照；`/api/edit`、edit skill、edit task kind 和 `create_edit_task_tool` 已删除。
 
 ### 补充批注任务
 
@@ -51,7 +52,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - `frontend/lib/api.ts` 调用 `POST /api/comment-supplement` 创建 `comment_supplement` 任务。
 - 后端 `DocumentService` 校验当前会话 latest `rewrite_state`、`polished_text` 和 source file 后，提交 `CommentSupplementGraph`。
 - `CommentSupplementGraph` 复制当前文档副本，调用 `backend/agents/comments/` 的 `comment_agent` 生成/校验/写回补充批注，完成后更新会话 latest `rewrite_state.prepared_doc_path` 并通过同一 SSE / 下载链路返回结果。
-- rewrite、edit 和 comment_supplement 下载卡不应再次显示补充批注动作。
+- rewrite 和 comment_supplement 下载卡不应再次显示补充批注动作。
 
 ### 模板候选
 
@@ -166,7 +167,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - API 形状变化是否同步后端模型、前端类型、API client 和测试。
 - `gngk` 的 `tender_lx + fund_lx + ifzgcg` 分派是否集中在 `frontend/lib/gngkFormType.ts`，且 `formDataConverter.ts` 与 `ChatPanel.tsx` 是否都调用该 helper。
 - 生成文件契约是否仍是 `template + tender_params`，后端初始 state 是否只装配 `template_path + tender_param_paths`。
-- `comment_generation_mode` 是否只影响初次生成批注分支，且没有进入 rewrite/edit 请求模型或 skill state。
+- `comment_generation_mode` 是否只影响初次生成批注分支，且没有进入 rewrite 请求模型或 skill state。
 - 新增或修改 SSE 事件是否同步后端事件模型、前端事件 union、`frontend/lib/sse.ts` named event、`useChatSSE` 和测试。
 - 新增或修改任务类型是否同步 `TaskKind`、任务状态、SSE `done` payload、下载卡和会话结果语义。
 - Word COM 相关改动是否仍然经过任务队列、graph 锁、取消检查和进度包装。

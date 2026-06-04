@@ -228,7 +228,7 @@ export function NewChatPopup({
     }
   }, [contextMenu.visible, closeContextMenu]);
 
-  // Focus input when entering edit mode
+  // Focus input when entering rename mode
   useEffect(() => {
     if (editing.conversationId && editingInputRef.current) {
       editingInputRef.current.focus();

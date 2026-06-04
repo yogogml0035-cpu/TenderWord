@@ -1,4 +1,4 @@
-"""Unified prompt builders, contracts, and routing literals."""
+"""Unified prompt builders and contracts."""
 
 from backend.prompts.comment_prompt import (
     COMMENT_PROMPT_REGISTRY,
@@ -25,16 +25,10 @@ from backend.prompts.generate_prompt import (
     normalize_generation_style,
     render_generate_prompt,
 )
-from backend.prompts.routing_prompt import (
+from backend.prompts.rewrite_target_selection_prompt import (
     JUDGE_TARGET_SYSTEM_PROMPT,
-    REPLY_ROUTE_LITERAL,
-    REWRITE_ROUTE_LITERAL,
-    ROUTE_OR_REPLY_SYSTEM_PROMPT,
-    ROUTE_OR_REPLY_SYSTEM_PROMPT_TEMPLATE,
-    build_route_or_reply_system_prompt,
     build_rewrite_target_selection_bundle,
     parse_rewrite_target_selection,
-    render_route_or_reply_prompt,
 )
 from backend.prompts.skill_prompt import render_task_skill_prompt
 from backend.prompts.template_candidate_ranking_prompt import (
@@ -55,8 +49,6 @@ from backend.prompts.types import (
     TemplateCandidateRankingPromptInput,
     RewriteTargetSelectionBundle,
     RewriteTargetSelectionPromptInput,
-    RouteHistoryMessage,
-    RouteOrReplyPromptInput,
 )
 
 __all__ = [
@@ -73,10 +65,6 @@ __all__ = [
     "PARAM_POLISH_USER_PROMPT",
     "POLISH_SYSTEM_PROMPT",
     "POLISH_USER_PROMPT",
-    "REPLY_ROUTE_LITERAL",
-    "REWRITE_ROUTE_LITERAL",
-    "ROUTE_OR_REPLY_SYSTEM_PROMPT",
-    "ROUTE_OR_REPLY_SYSTEM_PROMPT_TEMPLATE",
     "RenderedPrompt",
     "RewriteAssistantCandidate",
     "RewriteHistoryMessage",
@@ -90,9 +78,6 @@ __all__ = [
     "TemplateCandidateRankingPromptInput",
     "RewriteTargetSelectionBundle",
     "RewriteTargetSelectionPromptInput",
-    "RouteHistoryMessage",
-    "RouteOrReplyPromptInput",
-    "build_route_or_reply_system_prompt",
     "build_rewrite_target_selection_bundle",
     "normalize_generation_style",
     "parse_rewrite_target_selection",
@@ -102,6 +87,5 @@ __all__ = [
     "render_generate_prompt",
     "render_task_skill_prompt",
     "render_template_candidate_ranking_prompt",
-    "render_route_or_reply_prompt",
     "parse_template_candidate_ranking_output",
 ]

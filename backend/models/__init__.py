@@ -28,7 +28,6 @@ from .task import (
 from .generate import (
     CommentGenerationMode,
     CommentSupplementRequest,
-    EditTaskRequest,
     FileRequirement,
     FormRequirementsResponse,
     FormType,
@@ -38,7 +37,22 @@ from .generate import (
     GenerateRequest,
     GenerateResponse,
     GenerateResult,
+    InsertionConfig,
     LLMModel,
+)
+from .agent_run import (
+    AgentRunRewriteContextSnapshot,
+    AgentNeedsInputEventData,
+    AgentRunContextSnapshot,
+    AgentRunDoneEventData,
+    AgentRunErrorEventData,
+    AgentRunStartedEventData,
+    AgentRunStreamRequest,
+    AgentRunUploadedFile,
+    AgentSkill,
+    AgentTaskAcceptedEventData,
+    AgentThinkingStageEventData,
+    AgentToolCallEventData,
 )
 
 # 文件上传模型
@@ -121,17 +135,29 @@ __all__ = [
     # 生成相关
     "LLMModel",
     "FormType",
+    "InsertionConfig",
     "CommentGenerationMode",
     "GenerationMode",
     "GenerationStyle",
     "CommentSupplementRequest",
-    "EditTaskRequest",
     "GenerateFilePaths",
     "GenerateRequest",
     "GenerateResponse",
     "GenerateResult",
     "FileRequirement",
     "FormRequirementsResponse",
+    "AgentSkill",
+    "AgentRunUploadedFile",
+    "AgentRunRewriteContextSnapshot",
+    "AgentRunContextSnapshot",
+    "AgentRunStreamRequest",
+    "AgentRunStartedEventData",
+    "AgentThinkingStageEventData",
+    "AgentToolCallEventData",
+    "AgentTaskAcceptedEventData",
+    "AgentNeedsInputEventData",
+    "AgentRunDoneEventData",
+    "AgentRunErrorEventData",
     
     # 文件上传
     "UploadedFileInfo",

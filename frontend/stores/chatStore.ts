@@ -14,6 +14,7 @@ import type {
   TaskStatus,
   TenderData,
   TenderTypeInfo,
+  AgentSkill,
 } from '@/types/api';
 import type { TenderFetchState } from '@/lib/tenderFetch';
 import { useChatStreamStore } from '@/stores/chatStreamStore';
@@ -97,8 +98,7 @@ export interface ConversationFormDraft {
     2?: GenerationStyle;
   };
   style_writeback_mode?: StyleWritebackMode;
-  input_mode?: 'normal' | 'edit';
-  edit_file?: ConversationDraftFile | null;
+  rewrite_file?: ConversationDraftFile | null;
   insertion_config?: {
     before_text: string;
     after_text: string;
@@ -139,10 +139,9 @@ export interface ConversationFormDraft {
   };
   manual_insertion_config_scope_keys?: string[];
   chat_input?: string;
+  selected_skills?: AgentSkill[];
   pending_rewrite_prompt?: string;
   pending_rewrite_task_id?: string;
-  pending_edit_prompt?: string;
-  pending_edit_task_id?: string;
   files?: {
     template?: ConversationDraftFile;
     tender_params: ConversationDraftFile[];
@@ -203,6 +202,19 @@ function normalizeDraftFile(file: ConversationDraftFile | undefined): Conversati
   };
 }
 
+function isAgentSkill(value: unknown): value is AgentSkill {
+  return value === 'rewrite';
+}
+
+function normalizeDraftSelectedSkills(skills: AgentSkill[] | undefined): AgentSkill[] | undefined {
+  if (!Array.isArray(skills)) {
+    return undefined;
+  }
+
+  const normalized = skills.filter(isAgentSkill).slice(0, 1);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function mergeConversationDraft(
   base: ConversationFormDraft,
   updates: Partial<ConversationFormDraft>
@@ -212,8 +224,12 @@ function mergeConversationDraft(
     ...updates,
   };
 
-  if (Object.prototype.hasOwnProperty.call(updates, 'edit_file')) {
-    nextDraft.edit_file = normalizeDraftFile(updates.edit_file || undefined) || undefined;
+  if (Object.prototype.hasOwnProperty.call(updates, 'rewrite_file')) {
+    nextDraft.rewrite_file = normalizeDraftFile(updates.rewrite_file || undefined) || undefined;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updates, 'selected_skills')) {
+    nextDraft.selected_skills = normalizeDraftSelectedSkills(updates.selected_skills);
   }
 
   if (updates.insertion_config) {
@@ -276,6 +292,8 @@ function mergeConversationDraft(
         .filter((file): file is ConversationDraftFile => !!file),
     };
   }
+
+  nextDraft.selected_skills = normalizeDraftSelectedSkills(nextDraft.selected_skills);
 
   return nextDraft;
 }
@@ -692,7 +710,7 @@ function hasAgentStepMessages(messages: Message[], taskId: string): boolean {
 }
 
 function isAgentProcessTaskKind(taskKind?: TaskKind): boolean {
-  return taskKind === 'generate' || taskKind === 'comment_supplement';
+  return taskKind === 'generate' || taskKind === 'rewrite' || taskKind === 'comment_supplement';
 }
 
 function shouldUseAgentProcessCards(
@@ -712,6 +730,9 @@ function shouldUseAgentProcessCards(
     return true;
   }
   if (summary?.current_node === 'content_agent' || summary?.current_node === 'comment_agent') {
+    return true;
+  }
+  if (summary?.task_kind === 'rewrite') {
     return true;
   }
   if (summary?.task_kind === 'comment_supplement') {
@@ -937,6 +958,7 @@ interface ChatStore {
   interruptTaskForBackendRestart: (taskId: string) => void;
   handleBackendRestart: () => void;
   discardStaleTask: (taskId: string) => void;
+  detachTaskTracking: (taskId: string) => void;
   upsertTaskSummary: (
     taskId: string,
     summary: Omit<TaskSummarySnapshot, 'task_id' | 'updated_at'>
@@ -2095,11 +2117,9 @@ export const useChatStore = create<ChatStore>()(
                   chat_input:
                     typeof draft.chat_input === 'string' && draft.chat_input.length > 0
                       ? draft.chat_input
-                      : draft.pending_rewrite_prompt || draft.pending_edit_prompt,
+                      : draft.pending_rewrite_prompt,
                   pending_rewrite_prompt: undefined,
                   pending_rewrite_task_id: undefined,
-                  pending_edit_prompt: undefined,
-                  pending_edit_task_id: undefined,
                 }),
               ])
             ),
@@ -2141,6 +2161,19 @@ export const useChatStore = create<ChatStore>()(
             ),
           }));
         },
+
+        detachTaskTracking: (taskId) =>
+          set((state) => ({
+            conversations: state.conversations.map((conv) =>
+              conv.currentTaskId === taskId
+                ? { ...conv, currentTaskId: undefined, updatedAt: Date.now() }
+                : conv
+            ),
+            activeTaskIds: state.activeTaskIds.filter((id) => id !== taskId),
+            taskSummaries: Object.fromEntries(
+              Object.entries(state.taskSummaries).filter(([id]) => id !== taskId)
+            ),
+          })),
 
         upsertTaskSummary: (taskId, summary) =>
           set((state) => ({

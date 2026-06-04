@@ -9,7 +9,6 @@ from .xjcg_tender_state import XjcgTenderGraphState
 from .gngk_tender_state import GngkTenderGraphState
 from .gjgk_tender_state import GjgkTenderGraphState
 from .skill_state import TaskSkillGraphState
-from .user_state import UserGraphState
 
 __all__ = [
     "BaseState",
@@ -19,5 +18,4 @@ __all__ = [
     "GngkTenderGraphState",
     "GjgkTenderGraphState",
     "TaskSkillGraphState",
-    "UserGraphState",
 ]

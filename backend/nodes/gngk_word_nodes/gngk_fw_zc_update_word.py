@@ -34,8 +34,8 @@ from backend.helper.word_helper.protected_fields import (
     refresh_profile_protected_fields,
     normalize_protected_field_paragraphs,
     refind_protected_paragraph,
-    insert_prefix_before_keyword,
-    update_protected_field,
+    insert_prefix_before_keyword as helper_insert_prefix_before_keyword,
+    update_protected_field as helper_update_protected_field,
 )
 from backend.helper.word_helper.range_utils import (
     is_range_locked,
@@ -55,7 +55,6 @@ from backend.helper.word_helper.text_parsing import (
     split_text_by_keywords,
 )
 from backend.helper.word_helper.content_ops import (
-    reset_generated_text_font_format,
     insert_content_with_formatting as helper_insert_content_with_formatting,
     insert_table_with_formatting as helper_insert_table_with_formatting,
     ensure_following_body_paragraph_insert_pos,
@@ -809,88 +808,26 @@ def gngk_fw_zc_update_word(
                             insertion_log_parts.append(f"    {label} 插入项出错: {error}")
 
                 def insert_prefix_before_keyword(keyword: str, prefix: str) -> bool:
-                    if not prefix or not prefix.strip():
-                        return True
-                    if keyword not in protected_fields:
-                        return False
-                    try:
-                        para_rng = protected_fields[keyword]
-                        para_text = para_rng.Text
-                        keyword_index = para_text.find(keyword)
-                        if keyword_index < 0:
-                            return False
-                        before_keyword = (
-                            para_text[:keyword_index].replace("\r", "").replace("\a", "")
-                        )
-                        prefix_clean = prefix.replace("\r", "").replace("\n", "")
-                        if before_keyword.endswith(prefix_clean):
-                            return True
-                        insert_pos = para_rng.Start + keyword_index
-                        doc.Range(insert_pos, insert_pos).InsertBefore(prefix_clean)
-                        prefix_rng = doc.Range(insert_pos, insert_pos + len(prefix_clean))
-                        reset_generated_text_font_format(
-                            prefix_rng,
-                            font_name=insert_font_name,
-                            font_size=insert_font_size,
-                            log_parts=insertion_log_parts,
-                        )
-                        return True
-                    except Exception as error:
-                        insertion_log_parts.append(
-                            f"  警告: 插入前缀失败 '{keyword}': {error}"
-                        )
-                        return False
+                    return helper_insert_prefix_before_keyword(
+                        doc,
+                        keyword,
+                        prefix,
+                        protected_fields,
+                        font_name=insert_font_name,
+                        font_size=insert_font_size,
+                        log_parts=insertion_log_parts,
+                    )
 
                 def update_protected_field(keyword: str, new_value: Optional[str]) -> bool:
-                    if keyword not in protected_fields:
-                        return False
-                    if new_value is None:
-                        return True
-
-                    try:
-                        para_rng = protected_fields[keyword]
-                        para_text = para_rng.Text
-                        keyword_index = para_text.find(keyword)
-                        if keyword_index < 0:
-                            return False
-
-                        colon_pos = para_text.find("：", keyword_index + len(keyword))
-                        if colon_pos < 0:
-                            colon_pos = para_text.find(":", keyword_index + len(keyword))
-
-                        if colon_pos >= 0:
-                            value_start = para_rng.Start + colon_pos + 1
-                        else:
-                            value_start = para_rng.Start + keyword_index + len(keyword)
-
-                        trim = 0
-                        while para_text.endswith("\r") or para_text.endswith("\a"):
-                            para_text = para_text[:-1]
-                            trim += 1
-                        value_end = para_rng.End - trim
-                        if value_end < value_start:
-                            value_end = value_start
-
-                        value_rng = doc.Range(value_start, value_end)
-                        new_value_clean = new_value.replace("\r", "").replace("\n", "")
-                        value_rng.Text = new_value_clean
-                        formatted_value_rng = doc.Range(
-                            value_start,
-                            value_start + len(new_value_clean),
-                        )
-                        reset_generated_text_font_format(
-                            formatted_value_rng,
-                            font_name=insert_font_name,
-                            font_size=insert_font_size,
-                            log_parts=insertion_log_parts,
-                        )
-                        insertion_log_parts.append(
-                            f"  已更新受保护字段 '{keyword}': {new_value_clean[:50]}..."
-                        )
-                        return True
-                    except Exception as error:
-                        insertion_log_parts.append(f"  警告: 无法更新 '{keyword}': {error}")
-                        return False
+                    return helper_update_protected_field(
+                        doc,
+                        keyword,
+                        new_value,
+                        protected_fields,
+                        font_name=insert_font_name,
+                        font_size=insert_font_size,
+                        log_parts=insertion_log_parts,
+                    )
 
                 insert_rng = selection.Range
                 insert_rng.Collapse(wdCollapseStart)

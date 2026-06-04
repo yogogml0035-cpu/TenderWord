@@ -9,7 +9,7 @@
 // ============================================
 
 export type TaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-export type TaskKind = 'generate' | 'rewrite' | 'edit' | 'comment_supplement';
+export type TaskKind = 'generate' | 'rewrite' | 'comment_supplement';
 
 // ============================================
 // Tender Data Types
@@ -117,7 +117,7 @@ export interface UploadedFile {
   upload_time?: string;
 }
 
-export type FileType = 'template' | 'edit_source' | 'params' | 'qualification';
+export type FileType = 'template' | 'rewrite_source' | 'params' | 'qualification';
 
 // ============================================
 // Generate Task Types
@@ -155,18 +155,6 @@ export interface GenerateRequest {
   style_writeback_mode: StyleWritebackMode;
   conversation_id?: string;
   model: 'deepseek' | 'qwen' | 'doubao';
-}
-
-export interface EditTaskRequest {
-  conversation_id: string;
-  form_type: GenerateRequest['form_type'];
-  model: 'deepseek' | 'qwen' | 'doubao';
-  edit_prompt: string;
-  file_path?: string;
-  insertion_config?: InsertionConfig;
-  tender_lx: 0 | 1 | 2;
-  fund_source_lx: 0 | 1;
-  tender_data_snapshot?: TenderData;
 }
 
 export interface CommentSupplementTaskRequest {
@@ -350,65 +338,138 @@ export interface CreateTaskData {
 
 export type CreateTaskResponse = ApiResponse<CreateTaskData>;
 
-export interface UserStreamMessage {
-  role: 'user' | 'assistant';
-  content: string;
+export type AgentSkill = 'rewrite';
+export type AgentRunRuntime = 'fake' | 'deepagents';
+export type AgentThinkingStageKey = 'understand' | 'guard' | 'tool' | 'summary';
+export type AgentThinkingStageStatus = 'in_progress' | 'completed';
+export type AgentThinkingGuardResult = 'passed' | 'needs_input';
+
+export interface AgentRunUploadedFile {
+  file_path: string;
+  file_name?: string | null;
 }
 
-export interface UserStreamRequest {
+export interface AgentRunRewriteContextSnapshot {
+  form_type?: GenerateRequest['form_type'];
+  insertion_config?: InsertionConfig;
+  tender_lx?: 0 | 1 | 2;
+  fund_source_lx?: 0 | 1;
+  tender_data_snapshot?: TenderData;
+}
+
+export interface AgentRunContextSnapshot {
+  rewrite_available: boolean;
+  uploaded_files: AgentRunUploadedFile[];
+  rewrite_context?: AgentRunRewriteContextSnapshot;
+}
+
+export interface AgentRunStreamRequest {
   conversation_id: string;
-  model: 'deepseek' | 'qwen' | 'doubao';
-  messages: UserStreamMessage[];
+  message: string;
+  model: GenerateRequest['model'];
+  selected_skills: AgentSkill[];
+  context_snapshot: AgentRunContextSnapshot;
 }
 
-export interface UserStreamChunkEvent {
-  event: 'chunk';
-  data: {
-    content: string;
-  };
+export interface AgentRunStartedEventData {
+  run_id: string;
+  conversation_id: string;
+  model: GenerateRequest['model'];
+  runtime: AgentRunRuntime;
+  selected_skills: AgentSkill[];
 }
 
-export interface UserStreamDoneEvent {
-  event: 'done';
-  data: {
-    content: string;
-  };
+export interface AgentThinkingStage {
+  run_id: string;
+  stage: AgentThinkingStageKey;
+  label: string;
+  status: AgentThinkingStageStatus;
+  summary: string;
+  selected_skill?: AgentSkill;
+  guard_result?: AgentThinkingGuardResult;
+  tool_name?: string;
 }
 
-export interface UserStreamErrorEvent {
-  event: 'error';
-  data: {
-    code?: string;
-    message: string;
-  };
+export interface AgentToolCallEventData {
+  run_id: string;
+  tool_name: string;
+  status: 'completed';
+  summary: string;
+  task_kind: TaskKind;
 }
 
-export type UserStreamRoute = 'reply' | 'rewrite';
-
-export interface UserStreamRouteEvent {
-  event: 'route';
-  data: {
-    route: UserStreamRoute;
-  };
+export interface AgentTaskAcceptedPayload {
+  run_id: string;
+  task_id: string;
+  task_kind: TaskKind;
+  status?: TaskStatus;
+  queue_position?: number;
+  waiting_count?: number;
 }
 
-export interface UserStreamTaskAcceptedEvent {
+export interface AgentNeedsInputEventData {
+  run_id: string;
+  message: string;
+  selected_skill?: AgentSkill;
+  missing_requirements: string[];
+}
+
+export interface AgentRunDoneEventData {
+  run_id: string;
+  message: string;
+  task_id?: string;
+  selected_skill?: AgentSkill;
+}
+
+export interface AgentRunErrorEventData {
+  run_id: string;
+  code: string;
+  message: string;
+}
+
+export interface AgentRunStartedEvent {
+  event: 'run_started';
+  data: AgentRunStartedEventData;
+}
+
+export interface AgentThinkingStageEvent {
+  event: 'thinking_stage';
+  data: AgentThinkingStage;
+}
+
+export interface AgentToolCallEvent {
+  event: 'tool_call';
+  data: AgentToolCallEventData;
+}
+
+export interface AgentTaskAcceptedEvent {
   event: 'task_accepted';
-  data: {
-    task_id: string;
-    task_kind: TaskKind;
-    status?: TaskStatus;
-    queue_position?: number;
-    waiting_count?: number;
-  };
+  data: AgentTaskAcceptedPayload;
 }
 
-export type UserStreamEvent =
-  | UserStreamRouteEvent
-  | UserStreamTaskAcceptedEvent
-  | UserStreamChunkEvent
-  | UserStreamDoneEvent
-  | UserStreamErrorEvent;
+export interface AgentNeedsInputEvent {
+  event: 'needs_input';
+  data: AgentNeedsInputEventData;
+}
+
+export interface AgentRunDoneEvent {
+  event: 'done';
+  data: AgentRunDoneEventData;
+}
+
+export interface AgentRunErrorEvent {
+  event: 'error';
+  data: AgentRunErrorEventData;
+}
+
+export type AgentRunEvent =
+  | AgentRunStartedEvent
+  | AgentThinkingStageEvent
+  | AgentToolCallEvent
+  | AgentTaskAcceptedEvent
+  | AgentNeedsInputEvent
+  | AgentRunDoneEvent
+  | AgentRunErrorEvent;
 
 export interface ConversationHeartbeatData {
   conversation_id: string;
@@ -628,7 +689,6 @@ export const ErrorCodes = {
 
   // Rewrite / User Stream
   REWRITE_TARGET_NOT_RESOLVED: 'REWRITE_TARGET_NOT_RESOLVED',
-  EDIT_TARGET_NOT_RESOLVED: 'EDIT_TARGET_NOT_RESOLVED',
   CONVERSATION_INSTANCE_RESET: 'CONVERSATION_INSTANCE_RESET',
 } as const;
 
@@ -642,11 +702,11 @@ export const NodeDisplayNames: Record<string, string> = {
   prepare_template: '复制原始模板文件',
   extract_tender_params: '提取原始采购需求',
   delete_tender_param: '删除原始采购需求',
-  resolve_edit_target: '准备编辑副本',
-  extract_edit_context: '提取修改上下文',
+  resolve_rewrite_target: '准备重写副本',
+  extract_rewrite_context: '提取重写上下文',
   get_replacements: '获取原始项目信息',
   replace_content: '替换最新项目信息',
   generate_polished_text: 'AI生成采购需求',
-  edit_text: 'AI生成修改正文',
+  rewrite_text: 'AI生成重写正文',
   update_word: '生成招标文件',
 };

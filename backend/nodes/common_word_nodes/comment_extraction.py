@@ -1,4 +1,4 @@
-"""Shared Word comment extraction helpers for rewrite and edit flows."""
+"""Shared Word comment extraction helpers for rewrite flows."""
 
 from __future__ import annotations
 

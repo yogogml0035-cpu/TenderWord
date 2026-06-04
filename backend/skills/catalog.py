@@ -1,25 +1,23 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
-from backend.skills.types import SkillDefinition, SkillExecutorBinding
-
-
-_SUPPORTED_FRONTMATTER_FIELDS = frozenset(
-    {
-        "name",
-        "description",
-        "executor_kind",
-        "dispatch_key",
-        "route_literal",
-        "workflow_entry",
-    }
-)
+_REQUIRED_FRONTMATTER_FIELDS = frozenset({"name", "description"})
 _FRONTMATTER_PATTERN = re.compile(
     r"\A---\s*\r?\n(?P<frontmatter>.*?)\r?\n---\s*\r?\n?(?P<body>.*)\Z",
     re.DOTALL,
 )
+
+
+@dataclass(frozen=True)
+class SkillGuide:
+    name: str
+    description: str
+    instruction: str
+    source_path: str
 
 
 def _default_skills_root() -> Path:
@@ -40,7 +38,7 @@ def _parse_frontmatter_block(frontmatter_text: str, source_path: Path) -> dict[s
         key, raw_value = raw_line.split(":", 1)
         normalized_key = key.strip()
         normalized_value = raw_value.strip()
-        if normalized_key not in _SUPPORTED_FRONTMATTER_FIELDS:
+        if normalized_key not in _REQUIRED_FRONTMATTER_FIELDS:
             raise ValueError(
                 f"Skill frontmatter 字段不受支持: {source_path} field={normalized_key!r}"
             )
@@ -54,15 +52,22 @@ def _parse_frontmatter_block(frontmatter_text: str, source_path: Path) -> dict[s
             )
         values[normalized_key] = normalized_value
 
-    missing_fields = sorted(_SUPPORTED_FRONTMATTER_FIELDS - set(values))
+    missing_fields = sorted(_REQUIRED_FRONTMATTER_FIELDS - set(values))
     if missing_fields:
         raise ValueError(
-            f"Skill frontmatter 缺少字段: {source_path} missing={', '.join(missing_fields)}"
+            "Skill frontmatter 缺少字段: "
+            f"{source_path} missing={', '.join(missing_fields)}"
         )
     return values
 
 
-def _parse_skill_definition(skill_file: Path) -> SkillDefinition:
+@lru_cache(maxsize=None)
+def get_skill_guide(skill_id: str, *, skills_root: Path | None = None) -> SkillGuide:
+    root = Path(skills_root) if skills_root is not None else _default_skills_root()
+    skill_file = root / str(skill_id).strip() / "SKILL.md"
+    if not skill_file.is_file():
+        raise FileNotFoundError(f"Skill 文件不存在: {skill_file}")
+
     content = skill_file.read_text(encoding="utf-8")
     matched = _FRONTMATTER_PATTERN.match(content)
     if matched is None:
@@ -73,43 +78,9 @@ def _parse_skill_definition(skill_file: Path) -> SkillDefinition:
     if not instruction:
         raise ValueError(f"Skill instruction 不能为空: {skill_file}")
 
-    return SkillDefinition(
+    return SkillGuide(
         name=metadata["name"],
         description=metadata["description"],
         instruction=instruction,
         source_path=str(skill_file.resolve()),
-        executor_binding=SkillExecutorBinding(
-            skill_id=metadata["name"],
-            executor_kind=metadata["executor_kind"],
-            dispatch_key=metadata["dispatch_key"],
-            route_literal=metadata["route_literal"],
-        ),
-        workflow_entry=metadata["workflow_entry"],
     )
-
-
-def load_skill_definitions(skills_root: Path | None = None) -> tuple[SkillDefinition, ...]:
-    root = Path(skills_root) if skills_root is not None else _default_skills_root()
-    if not root.exists():
-        raise FileNotFoundError(f"Skill 根目录不存在: {root}")
-
-    definitions: list[SkillDefinition] = []
-    seen_names: dict[str, Path] = {}
-
-    for directory in sorted(path for path in root.iterdir() if path.is_dir()):
-        skill_file = directory / "SKILL.md"
-        if not skill_file.is_file():
-            continue
-
-        definition = _parse_skill_definition(skill_file)
-        previous_path = seen_names.get(definition.name)
-        if previous_path is not None:
-            raise ValueError(
-                "Skill name 必须全局唯一: "
-                f"name={definition.name!r}, first={previous_path}, second={skill_file}"
-            )
-        seen_names[definition.name] = skill_file
-        definitions.append(definition)
-
-    definitions.sort(key=lambda item: item.name)
-    return tuple(definitions)

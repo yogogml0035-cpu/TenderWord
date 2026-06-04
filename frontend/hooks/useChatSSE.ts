@@ -47,9 +47,6 @@ function getAIContentTriggerNode(taskKind: TaskKind): string {
   if (taskKind === 'rewrite') {
     return 'rewrite_text';
   }
-  if (taskKind === 'edit') {
-    return 'edit_text';
-  }
   return 'generate_polished_text';
 }
 
@@ -57,7 +54,6 @@ function resolveTaskKind(taskId: string, eventTaskKind?: unknown): TaskKind {
   if (
     eventTaskKind === 'rewrite' ||
     eventTaskKind === 'generate' ||
-    eventTaskKind === 'edit' ||
     eventTaskKind === 'comment_supplement'
   ) {
     return eventTaskKind;
@@ -128,6 +124,9 @@ function shouldUseAgentStepCards(
   if (hasAgentStepCard(taskId)) {
     return true;
   }
+  if (taskKind === 'rewrite') {
+    return true;
+  }
   if (taskKind === 'comment_supplement') {
     return true;
   }
@@ -148,6 +147,9 @@ function shouldAcceptAgentStep(
   taskKind: TaskKind,
   node: string
 ): boolean {
+  if (taskKind === 'rewrite') {
+    return true;
+  }
   if (taskKind === 'comment_supplement') {
     return node === 'comment_agent';
   }
@@ -388,9 +390,6 @@ export function useChatSSE({
                 break;
               }
               const stream = useChatStreamStore.getState().streams[taskId];
-              if (taskKind === 'edit' && !stream?.aiComplete) {
-                break;
-              }
               const aiText = getCanonicalAIText(stream);
               markTaskContentReady(taskId, aiText);
             }

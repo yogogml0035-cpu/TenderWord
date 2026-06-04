@@ -1,14 +1,62 @@
 'use client';
 
-import React, { useRef, useCallback, useEffect, useState } from 'react';
+import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowUp, FileText, Loader2, Plus, Square, X } from 'lucide-react';
 import { cn, formatFileSize } from '@/lib/utils';
 import type { ModelType } from '@/components/forms/ModelSelector';
 import type { ConversationDraftFile } from '@/stores/chatStore';
+import type { AgentSkill } from '@/types/api';
 import { ChatModelPicker } from './ChatModelPicker';
 
 const MIN_TEXTAREA_HEIGHT = 44;
 const MAX_TEXTAREA_HEIGHT = 180;
+const AGENT_SKILL_OPTIONS: Array<{
+  skill: AgentSkill;
+  title: string;
+  description: string;
+}> = [
+  {
+    skill: 'rewrite',
+    title: 'rewrite',
+    description: '基于当前生成文档或上传 Word 文件重写内容',
+  },
+];
+
+function isAgentSkill(value: unknown): value is AgentSkill {
+  return value === 'rewrite';
+}
+
+function normalizeSelectedSkills(skills: AgentSkill[] | undefined): AgentSkill[] {
+  if (!Array.isArray(skills)) {
+    return [];
+  }
+  return skills.filter(isAgentSkill).slice(0, 1);
+}
+
+function parseExplicitSkillPrefix(rawValue: string): { skill: AgentSkill; nextValue: string } | null {
+  const match = rawValue.match(/^\s*([$\/])(rewrite)(?=\s|$)\s*/i);
+  if (!match) {
+    return null;
+  }
+
+  const skill = match[2]?.toLowerCase();
+  if (!isAgentSkill(skill)) {
+    return null;
+  }
+
+  return {
+    skill,
+    nextValue: rawValue.slice(match[0].length),
+  };
+}
+
+function getSlashSkillQuery(rawValue: string): string | null {
+  const match = rawValue.match(/^\s*\/([^\s]*)$/);
+  if (!match) {
+    return null;
+  }
+  return match[1]?.toLowerCase() || '';
+}
 
 interface ChatInputProps {
   value: string;
@@ -21,10 +69,11 @@ interface ChatInputProps {
   disabled?: boolean;
   placeholder?: string;
   loading?: boolean;
-  inputMode?: 'normal' | 'edit';
-  editFile?: ConversationDraftFile | null;
-  onEditFileSelect?: (file: File) => void | Promise<void>;
-  onEditFileRemove?: () => void;
+  rewriteFile?: ConversationDraftFile | null;
+  onRewriteFileSelect?: (file: File) => void | Promise<void>;
+  onRewriteFileRemove?: () => void;
+  selectedSkills?: AgentSkill[];
+  onSelectedSkillsChange?: (skills: AgentSkill[]) => void;
   sendDisabled?: boolean;
   noticeMessage?: string | null;
 }
@@ -53,25 +102,40 @@ export function ChatInput({
   disabled = false,
   placeholder = '输入文字并发送即可对话...',
   loading = false,
-  inputMode = 'normal',
-  editFile = null,
-  onEditFileSelect,
-  onEditFileRemove,
+  rewriteFile = null,
+  onRewriteFileSelect,
+  onRewriteFileRemove,
+  selectedSkills,
+  onSelectedSkillsChange,
   sendDisabled = false,
   noticeMessage,
 }: ChatInputProps) {
   const internalTextareaRef = useRef<HTMLTextAreaElement>(null);
   const menuContainerRef = useRef<HTMLDivElement>(null);
-  const hiddenEditInputRef = useRef<HTMLInputElement>(null);
+  const skillPickerContainerRef = useRef<HTMLDivElement>(null);
+  const hiddenRewriteInputRef = useRef<HTMLInputElement>(null);
   const isCancelAction = actionMode === 'cancel';
   const inputDisabled = disabled;
   const controlsLocked = disabled || loading;
   const sendLocked = disabled || loading || isCancelAction || sendDisabled;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [skillPickerQuery, setSkillPickerQuery] = useState<string | null>(null);
   const [localNotice, setLocalNotice] = useState<string | null>(null);
 
   const composerNotice = noticeMessage || localNotice;
-  const isEditMode = inputMode === 'edit';
+  const isRewriteFileMode = !!rewriteFile;
+  const normalizedSelectedSkills = useMemo(
+    () => normalizeSelectedSkills(selectedSkills),
+    [selectedSkills]
+  );
+  const selectedSkill = normalizedSelectedSkills[0] || null;
+  const filteredSkillOptions = useMemo(() => {
+    if (skillPickerQuery === null || skillPickerQuery === '') {
+      return AGENT_SKILL_OPTIONS;
+    }
+    return AGENT_SKILL_OPTIONS.filter((option) => option.skill.includes(skillPickerQuery));
+  }, [skillPickerQuery]);
+  const skillPickerOpen = !controlsLocked && skillPickerQuery !== null;
 
   const syncTextareaHeight = useCallback((textarea: HTMLTextAreaElement | null) => {
     if (!textarea) {
@@ -104,19 +168,25 @@ export function ChatInput({
   }, [syncTextareaHeight, value]);
 
   useEffect(() => {
-    if (!menuOpen) {
+    if (!menuOpen && !skillPickerOpen) {
       return;
     }
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (!menuContainerRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        !menuContainerRef.current?.contains(target) &&
+        !skillPickerContainerRef.current?.contains(target)
+      ) {
         setMenuOpen(false);
+        setSkillPickerQuery(null);
       }
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setMenuOpen(false);
+        setSkillPickerQuery(null);
       }
     };
 
@@ -126,7 +196,7 @@ export function ChatInput({
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [menuOpen]);
+  }, [menuOpen, skillPickerOpen]);
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
@@ -162,19 +232,47 @@ export function ChatInput({
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const target = e.target;
+    const parsedPrefix = parseExplicitSkillPrefix(target.value);
+    if (parsedPrefix) {
+      onSelectedSkillsChange?.([parsedPrefix.skill]);
+      onValueChange(parsedPrefix.nextValue);
+      setSkillPickerQuery(null);
+      target.value = parsedPrefix.nextValue;
+      syncTextareaHeight(target);
+      return;
+    }
+
+    const slashQuery = getSlashSkillQuery(target.value);
+    setSkillPickerQuery(slashQuery);
     onValueChange(target.value);
     syncTextareaHeight(target);
   };
 
-  const openEditPicker = useCallback(() => {
+  const handleSkillSelect = useCallback(
+    (skill: AgentSkill) => {
+      onSelectedSkillsChange?.([skill]);
+      onValueChange('');
+      setSkillPickerQuery(null);
+      resetTextareaHeight(internalTextareaRef.current);
+      internalTextareaRef.current?.focus();
+    },
+    [onSelectedSkillsChange, onValueChange, resetTextareaHeight]
+  );
+
+  const handleSelectedSkillClear = useCallback(() => {
+    onSelectedSkillsChange?.([]);
+    internalTextareaRef.current?.focus();
+  }, [onSelectedSkillsChange]);
+
+  const openRewritePicker = useCallback(() => {
     if (controlsLocked) {
       return;
     }
     setMenuOpen(false);
-    hiddenEditInputRef.current?.click();
+    hiddenRewriteInputRef.current?.click();
   }, [controlsLocked]);
 
-  const handleEditFileChange = useCallback(
+  const handleRewriteFileChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       event.target.value = '';
@@ -186,9 +284,9 @@ export function ChatInput({
         return;
       }
       setLocalNotice(null);
-      await onEditFileSelect?.(file);
+      await onRewriteFileSelect?.(file);
     },
-    [onEditFileSelect]
+    [onRewriteFileSelect]
   );
 
   const isEmpty = !value.trim();
@@ -203,18 +301,18 @@ export function ChatInput({
       >
         <div className="flex flex-col gap-3">
           <input
-            ref={hiddenEditInputRef}
+            ref={hiddenRewriteInputRef}
             type="file"
             accept=".doc,.docx"
             className="hidden"
-            data-testid="chat-edit-file-input"
-            onChange={handleEditFileChange}
+            data-testid="chat-rewrite-file-input"
+            onChange={handleRewriteFileChange}
           />
 
-          {isEditMode && editFile ? (
+          {isRewriteFileMode && rewriteFile ? (
             <div
               className="flex items-start justify-between gap-3 rounded-2xl border border-blue-200/90 bg-blue-50/70 px-3.5 py-3"
-              data-testid="chat-edit-file-card"
+              data-testid="chat-rewrite-file-card"
             >
               <div className="flex min-w-0 items-start gap-3">
                 <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-blue-600 shadow-sm">
@@ -222,22 +320,22 @@ export function ChatInput({
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700">
-                    <span>上传文件修改</span>
+                    <span>上传文件重写</span>
                   </div>
                   <p className="mt-1 truncate text-sm font-semibold text-slate-900">
-                    {editFile.original_name}
+                    {rewriteFile.original_name}
                   </p>
                   <p className="mt-1 text-xs text-slate-600">
-                    {formatFileSize(editFile.size)}
+                    {formatFileSize(rewriteFile.size)}
                   </p>
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={openEditPicker}
+                  onClick={openRewritePicker}
                   disabled={controlsLocked}
-                  data-testid="chat-edit-file-replace"
+                  data-testid="chat-rewrite-file-replace"
                   className={cn(
                     'rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition-colors',
                     controlsLocked ? 'cursor-not-allowed opacity-60' : 'hover:bg-blue-100/60'
@@ -247,9 +345,9 @@ export function ChatInput({
                 </button>
                 <button
                   type="button"
-                  onClick={onEditFileRemove}
+                  onClick={onRewriteFileRemove}
                   disabled={controlsLocked}
-                  data-testid="chat-edit-file-remove"
+                  data-testid="chat-rewrite-file-remove"
                   className={cn(
                     'flex h-8 w-8 items-center justify-center rounded-xl border border-blue-200 bg-white text-slate-500 transition-colors',
                     controlsLocked ? 'cursor-not-allowed opacity-60' : 'hover:bg-blue-100/60'
@@ -261,7 +359,34 @@ export function ChatInput({
             </div>
           ) : null}
 
-          <div>
+          {selectedSkill ? (
+            <div className="flex items-center gap-2 px-2" data-testid="chat-selected-skill-row">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                已选能力
+              </span>
+              <div
+                className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700"
+                data-testid={`chat-selected-skill-${selectedSkill}`}
+              >
+                <span>{selectedSkill}</span>
+                <button
+                  type="button"
+                  onClick={handleSelectedSkillClear}
+                  disabled={controlsLocked}
+                  aria-label="清除已选能力"
+                  data-testid="chat-selected-skill-clear"
+                  className={cn(
+                    'inline-flex h-4 w-4 items-center justify-center rounded-full text-emerald-700 transition-colors',
+                    controlsLocked ? 'cursor-not-allowed opacity-60' : 'hover:bg-emerald-100'
+                  )}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          <div ref={skillPickerContainerRef} className="relative">
             <textarea
               ref={internalTextareaRef}
               value={value}
@@ -282,6 +407,38 @@ export function ChatInput({
                 overflowY: 'hidden',
               }}
             />
+
+            {skillPickerOpen ? (
+              <div
+                className="absolute bottom-full left-2 right-2 z-30 mb-2 overflow-hidden rounded-[22px] border border-slate-200 bg-white/96 p-2 shadow-2xl shadow-slate-300/30 backdrop-blur"
+                data-testid="chat-skill-picker"
+              >
+                {filteredSkillOptions.map((option) => {
+                  const isSelected = option.skill === selectedSkill;
+                  return (
+                    <button
+                      key={option.skill}
+                      type="button"
+                      onClick={() => handleSkillSelect(option.skill)}
+                      data-testid={`chat-skill-option-${option.skill}`}
+                      className={cn(
+                        'flex w-full items-start gap-3 rounded-2xl border px-3.5 py-3 text-left transition-colors',
+                        isSelected
+                          ? 'border-emerald-200 bg-emerald-50/80'
+                          : 'border-transparent bg-slate-50/80 hover:border-blue-200 hover:bg-blue-50/70'
+                      )}
+                    >
+                      <div className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-sm font-semibold text-slate-900">{option.title}</span>
+                        <span className="mt-1 text-xs leading-5 text-slate-600">
+                          {option.description}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
 
           <div className="flex items-end justify-between gap-3 px-2 pb-0.5">
@@ -291,6 +448,7 @@ export function ChatInput({
                   type="button"
                   onClick={() => setMenuOpen((current) => !current)}
                   disabled={controlsLocked}
+                  aria-label={loading ? '更多操作处理中' : '打开更多操作'}
                   aria-expanded={menuOpen}
                   aria-haspopup="menu"
                   data-testid="chat-plus-trigger"
@@ -301,7 +459,14 @@ export function ChatInput({
                       : 'hover:border-blue-200 hover:bg-blue-50/70 hover:text-blue-700'
                   )}
                 >
-                  <Plus className="h-4 w-4" />
+                  {loading ? (
+                    <Loader2
+                      data-testid="chat-plus-loading-icon"
+                      className="h-4 w-4 animate-spin"
+                    />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
                 </button>
 
                 {menuOpen && !controlsLocked ? (
@@ -313,17 +478,17 @@ export function ChatInput({
                     <button
                       type="button"
                       role="menuitem"
-                      onClick={openEditPicker}
-                      data-testid="chat-plus-menu-edit"
+                      onClick={openRewritePicker}
+                      data-testid="chat-plus-menu-rewrite-file"
                       className="flex w-full items-start gap-3 rounded-2xl border border-transparent bg-slate-50/80 px-3.5 py-3 text-left transition-colors hover:border-blue-200 hover:bg-blue-50/70"
                     >
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-blue-600 shadow-sm">
                         <FileText className="h-5 w-5" />
                       </div>
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900">上传文件修改</p>
+                        <p className="text-sm font-semibold text-slate-900">上传文件重写</p>
                         <p className="mt-1 text-xs leading-5 text-slate-600">
-                          上传一个 Word 文档，并按输入要求只修改当前锚点区正文。
+                          上传一个 Word 文档，并按输入要求重写当前锚点区正文。
                         </p>
                       </div>
                     </button>

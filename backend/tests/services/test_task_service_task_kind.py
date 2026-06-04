@@ -35,50 +35,50 @@ def isolate_task_queue():
 
 def _build_task(
     *,
-    task_id: str = "task-edit-1",
-    task_kind: InternalTaskKind = InternalTaskKind.EDIT,
+    task_id: str = "task-rewrite-1",
+    task_kind: InternalTaskKind = InternalTaskKind.REWRITE,
 ) -> Task:
     return Task(
         task_id=task_id,
-        user_session_id="conv-edit-1",
+        user_session_id="conv-rewrite-1",
         created_at=datetime.now(),
         task_kind=task_kind,
     )
 
 
-def test_get_task_preserves_edit_task_kind():
+def test_get_task_preserves_rewrite_task_kind():
     queue = TaskQueueManager()
     with queue._data_lock:
-        queue._tasks["task-edit-1"] = _build_task()
+        queue._tasks["task-rewrite-1"] = _build_task()
 
-    response = TaskService(queue).get_task("task-edit-1")
+    response = TaskService(queue).get_task("task-rewrite-1")
 
     assert response is not None
     assert response.data is not None
-    assert response.data.task_kind.value == "edit"
+    assert response.data.task_kind.value == "rewrite"
 
 
-def test_list_tasks_preserves_edit_task_kind():
+def test_list_tasks_preserves_rewrite_task_kind():
     queue = TaskQueueManager()
     with queue._data_lock:
-        queue._tasks["task-edit-1"] = _build_task()
+        queue._tasks["task-rewrite-1"] = _build_task()
 
     response = TaskService(queue).list_tasks(status_filter=[TaskStatus.QUEUED])
 
     assert response.total == 1
-    assert response.tasks[0].task_kind.value == "edit"
+    assert response.tasks[0].task_kind.value == "rewrite"
 
 
-def test_heartbeat_task_preserves_edit_task_kind():
+def test_heartbeat_task_preserves_rewrite_task_kind():
     queue = TaskQueueManager()
     with queue._data_lock:
-        queue._tasks["task-edit-1"] = _build_task()
+        queue._tasks["task-rewrite-1"] = _build_task()
 
-    response = TaskService(queue).heartbeat_task("task-edit-1")
+    response = TaskService(queue).heartbeat_task("task-rewrite-1")
 
     assert response is not None
     assert response.alive is True
-    assert response.task_kind.value == "edit"
+    assert response.task_kind.value == "rewrite"
 
 def test_task_service_maps_comment_supplement_task_kind():
     queue = TaskQueueManager()

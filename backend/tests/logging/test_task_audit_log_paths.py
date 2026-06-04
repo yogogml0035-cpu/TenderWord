@@ -4,47 +4,12 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-from backend.models.generate import EditTaskRequest, FormType, GenerateResponse, LLMModel
+from backend.models.generate import FormType, GenerateResponse, InsertionConfig
 from backend.models.tender import TenderData
 from backend.services.document_service import DocumentService, SSECallback
 from backend.util.log_util.skill_audit_log import (
-    create_edit_audit_log,
     create_rewrite_audit_log,
 )
-
-
-def _build_edit_request() -> EditTaskRequest:
-    return EditTaskRequest(
-        conversation_id="conv-edit-1",
-        form_type=FormType.XJCG_TENDER,
-        model=LLMModel.DEEPSEEK,
-        edit_prompt="请把交付日期改为合同签订后30天",
-        file_path="/tmp/source.docx",
-        tender_lx=0,
-        fund_source_lx=1,
-        tender_data_snapshot=TenderData(
-            project_name="项目A",
-            project_number="NO-1",
-            project_content="内容",
-            buyer_name="采购人",
-        ),
-    )
-
-
-def test_create_edit_audit_log_creates_prefixed_file(tmp_path, monkeypatch):
-    def _fake_get_task_audit_dir(prefix: str = "rewrite") -> Path:
-        return tmp_path / f"{prefix}_dir"
-
-    monkeypatch.setattr(
-        "backend.util.log_util.skill_audit_log._get_task_audit_dir",
-        _fake_get_task_audit_dir,
-    )
-
-    log_path = create_edit_audit_log("conv-edit-1", now=0.0)
-
-    assert Path(log_path).is_file()
-    assert Path(log_path).parent == tmp_path / "edit_dir"
-    assert Path(log_path).name.startswith("edit_")
 
 
 def test_create_rewrite_audit_log_stays_under_rewrite_dir(tmp_path, monkeypatch):
@@ -63,26 +28,27 @@ def test_create_rewrite_audit_log_stays_under_rewrite_dir(tmp_path, monkeypatch)
     assert Path(log_path).name.startswith("rewrite_")
 
 
-def test_create_edit_task_passes_task_audit_log_path_to_submit(monkeypatch):
-    request = _build_edit_request()
+def test_create_uploaded_rewrite_task_passes_task_audit_log_path_to_submit(monkeypatch):
     service = DocumentService.__new__(DocumentService)
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr("backend.services.document_service.EDIT_SKILL_GRAPH_CLASS", object())
+    monkeypatch.setattr("backend.services.document_service.REWRITE_SKILL_GRAPH_CLASS", object())
     monkeypatch.setattr(
-        "backend.services.document_service.create_edit_audit_log",
+        "backend.services.document_service.create_rewrite_audit_log",
         lambda audit_id: f"/tmp/{audit_id}-audit.json",
     )
 
     service._conversation_service = SimpleNamespace(
-        get_latest_rewrite_state=lambda conversation_id: None
+        has_rewrite_history=lambda conversation_id: False,
+        get_latest_rewrite_state=lambda conversation_id: None,
     )
-    service._allocate_task_callback_pair = lambda: ("task-edit-1", SSECallback("task-edit-1"))
-    service._build_edit_graph_initial_state = (
-        lambda *, request, task_id: {
-            "task_id": task_id,
-            "user_session_id": request.conversation_id,
+    service._allocate_task_callback_pair = lambda: ("task-rewrite-1", SSECallback("task-rewrite-1"))
+    service._build_uploaded_rewrite_initial_state = (
+        lambda **kwargs: {
+            "task_id": kwargs["task_id"],
+            "user_session_id": kwargs["conversation_id"],
             "tender_type": "xjcg",
+            "rewrite_source": "uploaded_file",
         }
     )
 
@@ -90,19 +56,39 @@ def test_create_edit_task_passes_task_audit_log_path_to_submit(monkeypatch):
         captured.update(kwargs)
         return GenerateResponse(
             success=True,
-            task_id="task-edit-1",
+            task_id="task-rewrite-1",
             message="ok",
-            task_kind="edit",
+            task_kind="rewrite",
         )
 
     service._submit_graph_task = _fake_submit_graph_task
 
-    response = asyncio.run(service.create_edit_task(request))
+    response = asyncio.run(
+        service.create_rewrite_task(
+            conversation_id="conv-rewrite-1",
+            user_prompt="请把交付日期改为合同签订后30天",
+            model_provider="deepseek",
+            file_path="/tmp/source.docx",
+            form_type=FormType.XJCG_TENDER,
+            insertion_config=InsertionConfig(
+                before_text="第三章 采购需求",
+                after_text="第四章 响应文件有关格式",
+            ),
+            tender_lx=0,
+            fund_source_lx=1,
+            tender_data_snapshot=TenderData(
+                project_name="项目A",
+                project_number="NO-1",
+                project_content="内容",
+                buyer_name="采购人",
+            ),
+        )
+    )
 
     assert response.success is True
-    assert captured["task_audit_log_path"] == "/tmp/task-edit-1-audit.json"
-    assert captured["task_user_prompt"] == request.edit_prompt
-    assert captured["task_kind"] == "edit"
+    assert captured["task_audit_log_path"] == "/tmp/task-rewrite-1-audit.json"
+    assert captured["task_user_prompt"] == "请把交付日期改为合同签订后30天"
+    assert captured["task_kind"] == "rewrite"
 
 
 def test_invoke_graph_async_writes_task_and_legacy_audit_keys(monkeypatch):
@@ -127,10 +113,10 @@ def test_invoke_graph_async_writes_task_and_legacy_audit_keys(monkeypatch):
         service._invoke_graph_async(
             compiled_graph=object(),
             initial_state={},
-            task_id="task-edit-1",
-            callback=SSECallback("task-edit-1"),
+            task_id="task-rewrite-1",
+            callback=SSECallback("task-rewrite-1"),
             model_provider="deepseek",
-            llm_node_name="edit_text",
+            llm_node_name="rewrite_text",
             task_audit_log_path="/tmp/task-audit.json",
             rewrite_log_path=None,
         )

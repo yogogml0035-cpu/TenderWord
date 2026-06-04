@@ -1,0 +1,17 @@
+
+> frontend@0.1.0 test:e2e
+> playwright test --project=chromium e2e/test_agent_run_chat_panel.spec.ts -g sends controlled edit_context for explicit edit skill and renders the accepted task card
+
+
+Running 1 test using 1 worker
+
+[1A[2K(node:47170) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:47170) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[1/1] [chromium] › e2e/test_agent_run_chat_panel.spec.ts:546:7 › Agent run chat panel › sends controlled edit_context for explicit edit skill and renders the accepted task card
+[1A[2K  1 passed (6.5s)
