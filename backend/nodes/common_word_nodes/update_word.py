@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import re
-from typing import Optional, Dict, Any
+from typing import Callable, Optional, Dict, Any
 import time
 import pathlib
 import sys
@@ -41,6 +41,7 @@ from backend.util.word_util import (
     wdCollapseEnd,
     wdActiveEndPageNumber,
     wdWithInTable,
+    normalize_word_body_text,
 )
 from backend.util.word_util.anchor_utils import (
     find_anchor_range,
@@ -50,11 +51,12 @@ from backend.util.log_util.progress_log import progress_log
 
 from backend.helper.word_helper.range_utils import (
     is_locked_exception,
+    is_range_locked as helper_is_range_locked,
     find_editable_insertion_pos,
     find_next_editable_pos,
     find_next_editable_pos_bounded,
     find_prev_editable_pos,
-    ensure_editable_insert_range,
+    ensure_editable_insert_range as helper_ensure_editable_insert_range,
 )
 from backend.helper.word_helper.text_parsing import (
     parse_table_block,
@@ -79,6 +81,7 @@ from backend.helper.word_helper.content_ops import (
 )
 from backend.helper.word_helper.paragraph_boundary_ops import (
     ensure_paragraph_break_after_paragraph,
+    insert_paragraph_break_before_paragraph,
 )
 from backend.helper.word_helper.cleanup_ops import (
     multi_pass_cleanup,
@@ -93,6 +96,42 @@ COMMON_TWO_FIELD_PROFILE = get_protected_field_profile("xjcg")
 DELIVERY_DATE_MARKER, PAYMENT_METHOD_MARKER = (
     COMMON_TWO_FIELD_PROFILE.ordered_markers
 )
+DELIVERY_DATE_FIELD_NAME = "交付日期"
+
+
+def _require_pre_field_insert_pos(
+    insert_pos: Optional[int],
+    field_start: int,
+    *,
+    field_name: str,
+) -> int:
+    if insert_pos is None or int(insert_pos) > int(field_start):
+        raise ValueError(
+            f"块1在{field_name}字段前未找到可编辑插入点，停止以避免写入字段值区"
+        )
+    return int(insert_pos)
+
+
+def _resolve_pre_field_insert_pos(
+    *,
+    get_field_start: Callable[[], int],
+    find_prev_editable_pos: Callable[..., Optional[int]],
+    repair_before_field: Callable[[], bool],
+    field_name: str,
+    max_lookback: int = 20000,
+) -> int:
+    field_start = int(get_field_start())
+    safe_before = find_prev_editable_pos(field_start, max_lookback=max_lookback)
+    if safe_before is None and repair_before_field():
+        field_start = int(get_field_start())
+        safe_before = find_prev_editable_pos(field_start, max_lookback=max_lookback)
+        if safe_before is None:
+            return field_start
+    return _require_pre_field_insert_pos(
+        safe_before,
+        field_start,
+        field_name=field_name,
+    )
 
 
 def split_polished_text_into_blocks(
@@ -622,6 +661,10 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
 
                 def is_range_locked(rng) -> bool:
                     try:
+                        return helper_is_range_locked(doc, rng)
+                    except Exception:
+                        pass
+                    try:
                         if hasattr(rng, "Locked") and rng.Locked:
                             return True
                     except Exception:
@@ -854,35 +897,164 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
 
                 flow = resolve_block_flow(protected_fields)
 
-                # 插入块1（始终执行，优先在交付日期前，否则回退到目标页起始可编辑位置）
+                def refresh_delivery_field_range():
+                    current = protected_fields[DELIVERY_DATE_MARKER]
+                    refreshed = refind_field(DELIVERY_DATE_MARKER)
+                    if refreshed is not None:
+                        current = refreshed
+                        protected_fields[DELIVERY_DATE_MARKER] = current
+                    return current
+
+                def get_delivery_field_start() -> int:
+                    return int(refresh_delivery_field_range().Start)
+
+                def get_delivery_pre_field_bound_end() -> int:
+                    return get_delivery_field_start()
+
+                def repair_before_delivery_field() -> bool:
+                    delivery_rng = refresh_delivery_field_range()
+                    start_before = int(delivery_rng.Start)
+                    repaired = insert_paragraph_break_before_paragraph(
+                        doc,
+                        delivery_rng,
+                        fallback_pos=int(insertion_bound_start),
+                        tender_type=str(tender_type or "xjcg"),
+                        field_name=DELIVERY_DATE_FIELD_NAME,
+                        log=insertion_log_parts.append,
+                    )
+                    if repaired:
+                        protected_fields[DELIVERY_DATE_MARKER] = (
+                            refind_field(DELIVERY_DATE_MARKER) or delivery_rng
+                        )
+                        insertion_log_parts.append(
+                            "    交付日期字段前已尝试造段，"
+                            f"字段起点 {start_before} -> "
+                            f"{int(protected_fields[DELIVERY_DATE_MARKER].Start)}"
+                        )
+                    else:
+                        insertion_log_parts.append("    交付日期字段前造段失败。")
+                    return bool(repaired)
+
+                def prepare_delivery_pre_field_cursor() -> None:
+                    helper_ensure_editable_insert_range(
+                        doc,
+                        insert_rng,
+                        int(insertion_bound_start),
+                        get_delivery_pre_field_bound_end,
+                    )
+                    _require_pre_field_insert_pos(
+                        int(insert_rng.Start),
+                        get_delivery_field_start(),
+                        field_name=DELIVERY_DATE_FIELD_NAME,
+                    )
+
+                def insert_text_directly_before_delivery(line):
+                    delivery_rng = refresh_delivery_field_range()
+                    start_pos = int(delivery_rng.Start)
+                    text_to_insert = normalize_word_body_text(line) + "\r"
+                    delivery_rng.InsertBefore(text_to_insert)
+                    inserted_end = start_pos + len(text_to_insert)
+                    inserted_rng = doc.Range(start_pos, max(start_pos, inserted_end - 1))
+                    try:
+                        apply_standard_insert_format(
+                            inserted_rng,
+                            font_name=insert_font_name,
+                            font_size=insert_font_size,
+                            log_parts=insertion_log_parts,
+                        )
+                    except Exception as exc:
+                        insertion_log_parts.append(
+                            f"    警告: 字段前直接插入内容格式化失败: {exc}"
+                        )
+                    refreshed = refind_field(DELIVERY_DATE_MARKER)
+                    if refreshed is not None:
+                        protected_fields[DELIVERY_DATE_MARKER] = refreshed
+                        insert_range_pos = int(refreshed.Start)
+                    else:
+                        insert_range_pos = inserted_end
+                    insert_rng.SetRange(insert_range_pos, insert_range_pos)
+                    insert_rng.Collapse(wdCollapseStart)
+                    return inserted_rng
+
+                def insert_pre_field_content_with_formatting(insert_range, line):
+                    try:
+                        return helper_insert_content_with_formatting(
+                            doc,
+                            insert_range,
+                            line,
+                            bound_start=int(insertion_bound_start),
+                            get_bound_end=get_delivery_pre_field_bound_end,
+                            font_name=insert_font_name,
+                            font_size=insert_font_size,
+                            log_parts=insertion_log_parts,
+                        )
+                    except Exception as exc:
+                        insertion_log_parts.append(
+                            f"    字段前常规插入失败，改用段落直接插入: {exc}"
+                        )
+                        return insert_text_directly_before_delivery(line)
+
+                def insert_pre_field_table_with_formatting(insert_range, rows):
+                    try:
+                        return helper_insert_table_with_formatting(
+                            doc,
+                            insert_range,
+                            rows,
+                            get_bound_end=get_delivery_pre_field_bound_end,
+                            font_name=insert_font_name,
+                            font_size=insert_font_size,
+                            log_parts=insertion_log_parts,
+                        )
+                    except Exception as exc:
+                        insertion_log_parts.append(
+                            f"    字段前表格插入失败，改按文本表格插入: {exc}"
+                        )
+                        for row in rows:
+                            line = "| " + " | ".join(str(cell) for cell in row) + " |"
+                            insert_text_directly_before_delivery(line)
+                        return None
+
+                # 插入块1：有交付日期字段时只能写在字段前，禁止向后漂移到字段值区。
                 insertion_log_parts.append("  正在插入块1...")
                 selection.GoTo(wdGoToPage, wdGoToAbsolute, target_page)
                 insert_rng = selection.Range
                 insert_rng.Collapse(wdCollapseStart)
 
                 if flow["has_delivery"]:
-                    delivery_date_rng = protected_fields[DELIVERY_DATE_MARKER]
-                    before_pos = int(delivery_date_rng.Start)
-                    safe_before = find_prev_editable_pos(before_pos, max_lookback=20000)
-                    if safe_before is None:
-                        safe_before = find_editable_insertion_pos(
-                            int(page_start_after), max_lookahead=20000
-                        )
+                    safe_before = _resolve_pre_field_insert_pos(
+                        get_field_start=get_delivery_field_start,
+                        find_prev_editable_pos=find_prev_editable_pos,
+                        repair_before_field=repair_before_delivery_field,
+                        field_name=DELIVERY_DATE_FIELD_NAME,
+                    )
                     insert_rng.SetRange(safe_before, safe_before)
                     insert_rng.Collapse(wdCollapseStart)
+                    prepare_delivery_pre_field_cursor()
 
                 block1_items = convert_lines_to_items(block1)
                 for item in block1_items:
                     try:
+                        if flow["has_delivery"]:
+                            prepare_delivery_pre_field_cursor()
                         if item["type"] == "text":
-                            inserted_rng = insert_content_with_formatting(
-                                insert_rng, item["line"]
-                            )
+                            if flow["has_delivery"]:
+                                inserted_rng = insert_pre_field_content_with_formatting(
+                                    insert_rng, item["line"]
+                                )
+                            else:
+                                inserted_rng = insert_content_with_formatting(
+                                    insert_rng, item["line"]
+                                )
                             insertion_log_parts.append(
                                 f"    已插入: {item['line'][:50]}..."
                             )
                         elif item["type"] == "table":
-                            insert_table_with_formatting(insert_rng, item["rows"])
+                            if flow["has_delivery"]:
+                                insert_pre_field_table_with_formatting(
+                                    insert_rng, item["rows"]
+                                )
+                            else:
+                                insert_table_with_formatting(insert_rng, item["rows"])
                             insertion_log_parts.append(
                                 f"    已插入表格，行数 {len(item['rows'])}。"
                             )

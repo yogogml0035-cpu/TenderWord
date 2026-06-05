@@ -37,6 +37,137 @@ def _strip_paragraph_tail(text: str) -> str:
     return stripped
 
 
+def _range_bounds(rng: Any) -> tuple[int, int] | None:
+    try:
+        start = int(rng.Start)
+        end = int(rng.End)
+    except Exception:
+        return None
+    if end < start:
+        return None
+    return start, end
+
+
+def _first_paragraph_range_at(doc, pos: int) -> Optional[Any]:
+    try:
+        paragraphs = doc.Range(int(pos), int(pos)).Paragraphs
+    except Exception:
+        return None
+
+    try:
+        paragraph = paragraphs(1)
+        return getattr(paragraph, "Range", None)
+    except Exception:
+        pass
+
+    try:
+        for paragraph in paragraphs:
+            return getattr(paragraph, "Range", None)
+    except Exception:
+        return None
+    return None
+
+
+def _expand_to_text_line_range(
+    doc,
+    start: int,
+    end: int,
+    *,
+    bound_start: int,
+    bound_end: int,
+) -> Optional[Any]:
+    paragraph_rng = _first_paragraph_range_at(doc, start)
+    if paragraph_rng is None or _is_table_paragraph(paragraph_rng):
+        return None
+
+    try:
+        doc_end = int(getattr(getattr(doc, "Content", None), "End", bound_end))
+    except Exception:
+        doc_end = int(bound_end)
+    scan_start = max(int(bound_start), int(start) - PROTECTED_FIELD_SCAN_MARGIN)
+    scan_end = min(doc_end, int(bound_end), int(end) + PROTECTED_FIELD_SCAN_MARGIN)
+    if scan_end <= scan_start:
+        return None
+
+    try:
+        scan_text = str(getattr(doc.Range(scan_start, scan_end), "Text", "") or "")
+    except Exception:
+        return None
+    if not scan_text:
+        return None
+
+    rel_start = max(0, int(start) - scan_start)
+    rel_end = max(rel_start, min(len(scan_text), int(end) - scan_start))
+    boundary_chars = "\r\n\a\f"
+
+    line_start = 0
+    for index in range(min(rel_start, len(scan_text)) - 1, -1, -1):
+        if scan_text[index] in boundary_chars:
+            line_start = index + 1
+            break
+
+    line_end = len(scan_text)
+    for index in range(min(rel_end, len(scan_text)), len(scan_text)):
+        if scan_text[index] in boundary_chars:
+            line_end = index
+            break
+
+    if line_end <= line_start:
+        return None
+    try:
+        return doc.Range(scan_start + line_start, scan_start + line_end)
+    except Exception:
+        return None
+
+
+def _resolve_logical_protected_field_range(
+    doc,
+    candidate_rng: Any,
+    marker: str,
+    *,
+    bound_start: int,
+    bound_end: int,
+) -> Optional[Any]:
+    bounds = _range_bounds(candidate_rng)
+    if bounds is None:
+        return None
+    start, end = bounds
+
+    candidates: list[Any] = []
+    text_line_rng = _expand_to_text_line_range(
+        doc,
+        start,
+        end,
+        bound_start=bound_start,
+        bound_end=bound_end,
+    )
+    if text_line_rng is not None:
+        candidates.append(text_line_rng)
+
+    for pos in (start, max(start, end - 1)):
+        paragraph_rng = _first_paragraph_range_at(doc, pos)
+        if paragraph_rng is not None:
+            candidates.append(paragraph_rng)
+
+    candidates.append(candidate_rng)
+
+    seen: set[tuple[int, int]] = set()
+    for rng in candidates:
+        rng_bounds = _range_bounds(rng)
+        if rng_bounds is None or rng_bounds in seen:
+            continue
+        seen.add(rng_bounds)
+        if _is_table_paragraph(rng):
+            continue
+        try:
+            text = str(getattr(rng, "Text", "") or "")
+        except Exception:
+            continue
+        if match_protected_field_line(text, marker):
+            return rng
+    return None
+
+
 def canonicalize_protected_field_marker(marker: str) -> str:
     field_name = str(marker or "").strip().rstrip(":：").strip()
     if not field_name:
@@ -298,6 +429,18 @@ def normalize_protected_field_paragraphs(
         for marker in canonical_markers:
             matched = match_protected_field_line(para_text, marker)
             if not matched:
+                logical_rng = _resolve_logical_protected_field_range(
+                    doc,
+                    para_rng,
+                    marker,
+                    bound_start=range_start,
+                    bound_end=range_end,
+                )
+                if logical_rng is not None:
+                    para_rng = logical_rng
+                    para_text = str(getattr(para_rng, "Text", "") or "")
+                    matched = match_protected_field_line(para_text, marker)
+            if not matched:
                 continue
             if matched["source_marker"] == marker:
                 break
@@ -350,8 +493,15 @@ def scan_protected_fields_in_range(
         for marker in canonical_markers:
             if marker in found:
                 continue
-            if match_protected_field_line(para_text, marker):
-                found[marker] = para_rng
+            matched_rng = _resolve_logical_protected_field_range(
+                doc,
+                para_rng,
+                marker,
+                bound_start=range_start,
+                bound_end=range_end,
+            )
+            if matched_rng is not None:
+                found[marker] = matched_rng
     return found
 
 
@@ -573,13 +723,19 @@ def refind_protected_paragraph(
         except Exception:
             pos = search_rng.Start
         if int(bound_start) <= pos <= int(bound_end):
-            para_rng = doc.Range(pos, pos).Paragraphs(1).Range
-            if _is_table_paragraph(para_rng):
+            para_rng = _first_paragraph_range_at(doc, pos)
+            if para_rng is None or _is_table_paragraph(para_rng):
                 search_rng.Collapse(wdCollapseEnd)
                 continue
-            para_text = str(getattr(para_rng, "Text", "") or "").strip()
-            if match_protected_field_line(para_text, marker):
-                return para_rng
+            logical_rng = _resolve_logical_protected_field_range(
+                doc,
+                para_rng,
+                marker,
+                bound_start=bound_start,
+                bound_end=bound_end,
+            )
+            if logical_rng is not None:
+                return logical_rng
         search_rng.Collapse(wdCollapseEnd)
     return None
 
@@ -662,6 +818,54 @@ def update_protected_field(
     if new_value is None:
         return True
 
+    def _append_missing_suffix_if_truncated(
+        value_start_pos: int,
+        expected_value: str,
+    ) -> None:
+        try:
+            current_para_rng = _first_paragraph_range_at(doc, value_start_pos)
+            if current_para_rng is None:
+                return
+            current_text = str(getattr(current_para_rng, "Text", "") or "")
+            current_match = match_protected_field_line(current_text, canonical_marker)
+            if not current_match:
+                return
+            actual_value = str(current_match.get("value") or "")
+            if actual_value == expected_value:
+                return
+            if not expected_value.startswith(actual_value):
+                return
+
+            missing_suffix = expected_value[len(actual_value):]
+            if not missing_suffix:
+                return
+
+            insert_pos = (
+                int(current_para_rng.Start)
+                + int(current_match["colon_index"])
+                + 1
+                + len(actual_value)
+            )
+            suffix_rng = doc.Range(insert_pos, insert_pos)
+            suffix_rng.InsertBefore(missing_suffix)
+            formatted_suffix_rng = doc.Range(insert_pos, insert_pos + len(missing_suffix))
+            reset_generated_text_font_format(
+                formatted_suffix_rng,
+                font_name=font_name,
+                font_size=font_size,
+                log_parts=log_parts,
+            )
+            if log_parts is not None:
+                log_parts.append(
+                    f"  受保护字段 '{canonical_marker}' 写入后检测到截断，"
+                    f"已补写缺失后缀: {missing_suffix[:50]}..."
+                )
+        except Exception as exc:
+            if log_parts is not None:
+                log_parts.append(
+                    f"  警告: 校验/补写 '{canonical_marker}' 字段值截断失败: {exc}"
+                )
+
     try:
         para_rng = protected_fields[canonical_marker]
         para_text = str(getattr(para_rng, "Text", "") or "")
@@ -679,6 +883,7 @@ def update_protected_field(
         value_rng = doc.Range(value_start, value_end)
         new_value_clean = new_value.replace("\r", "").replace("\n", "")
         value_rng.Text = new_value_clean
+        _append_missing_suffix_if_truncated(value_start, new_value_clean)
         formatted_value_rng = doc.Range(value_start, value_start + len(new_value_clean))
         reset_generated_text_font_format(
             formatted_value_rng,

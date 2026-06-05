@@ -72,14 +72,19 @@ def insert_paragraph_break_before_paragraph(
     """
     在字段段落前补一个真实正文段落边界。
 
-    优先使用字段段落自身的可见起点；失败时回退到外部提供的 fallback 位置。
+    优先使用字段段落自身的可见起点；若该位置属于受保护标签，改用 Word
+    段落级 InsertParagraphBefore 在字段段前造段，最后才回退到外部位置。
     """
     paragraph_candidates: list[int] = []
     if paragraph_range is not None:
         try:
-            para_text_raw = str(getattr(paragraph_range, "Text", "") or "")
+            word_paragraph_range = paragraph_range.Paragraphs(1).Range
+        except Exception:
+            word_paragraph_range = paragraph_range
+        try:
+            para_text_raw = str(getattr(word_paragraph_range, "Text", "") or "")
             primary_offset = find_first_visible_insert_offset(para_text_raw)
-            paragraph_start = int(paragraph_range.Start)
+            paragraph_start = int(word_paragraph_range.Start)
             paragraph_candidates = [
                 paragraph_start + primary_offset,
                 paragraph_start,
@@ -88,7 +93,9 @@ def insert_paragraph_break_before_paragraph(
             safe_insert_pos = find_safe_insert_position(
                 doc,
                 paragraph_candidates,
-                max_forward_scan_chars=24 if uses_wide_scan_window(tender_type) else 8,
+                # Do not scan forward here: for protected labels, the next
+                # writable slot may be the field value after the colon.
+                max_forward_scan_chars=0,
                 field_name=field_name,
                 log=log,
             )
@@ -98,13 +105,22 @@ def insert_paragraph_break_before_paragraph(
         except Exception:
             pass
 
+        try:
+            word_paragraph_range.InsertParagraphBefore()
+            return True
+        except Exception as exc:
+            if log:
+                log(f"{field_name}字段前段落级造段失败：{exc}")
+
     if fallback_pos is None:
         return False
 
     fallback_insert_pos = find_safe_insert_position(
         doc,
         [fallback_pos],
-        max_forward_scan_chars=24 if uses_wide_scan_window(tender_type) else 8,
+        # Same rule as above: before-field repair must not drift into the
+        # protected field's editable value range.
+        max_forward_scan_chars=0,
         field_name=field_name,
         log=log,
     )

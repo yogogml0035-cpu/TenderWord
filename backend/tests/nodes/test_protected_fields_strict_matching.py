@@ -47,6 +47,10 @@ class _FakeParagraphRange:
     def Text(self) -> str:
         return self._record.text
 
+    @Text.setter
+    def Text(self, value: str) -> None:
+        self._record.text = str(value)
+
     def Information(self, code: int) -> int:
         if code == wdWithInTable:
             return -1 if self._record.in_table else 0
@@ -122,9 +126,17 @@ class _FakeRangeView:
 
     @property
     def Paragraphs(self) -> _FakeParagraphCollection:
-        return _FakeParagraphCollection(
-            list(self._doc.iter_paragraphs(int(self.Start), int(self.End)))
-        )
+        if int(self.Start) == int(self.End):
+            paragraph = self._doc.paragraph_for_pos(int(self.Start))
+            return _FakeParagraphCollection([paragraph] if paragraph else [])
+        records = list(self._doc.iter_paragraph_records(int(self.Start), int(self.End)))
+        if (
+            len(records) == 1
+            and int(self.Start) > int(records[0].start)
+            and int(self.End) < int(records[0].end)
+        ):
+            return _FakeParagraphCollection([_FakeParagraphRangeBackedParagraph(self)])
+        return _FakeParagraphCollection([_FakeParagraph(record) for record in records])
 
     @property
     def Text(self) -> str:
@@ -164,6 +176,14 @@ class _FakeDoc:
             cursor = record.end
 
     def slice_text(self, start: int, end: int) -> str:
+        records = list(self.iter_paragraph_records(int(start), int(end)))
+        if len(records) > 1:
+            pieces: list[str] = []
+            for record in records:
+                rel_start = max(0, int(start) - int(record.start))
+                rel_end = min(len(record.text), max(rel_start, int(end) - int(record.start)))
+                pieces.append(record.text[rel_start:rel_end])
+            return "\r".join(pieces)
         for record in self._records:
             if int(record.start) <= int(start) <= int(record.end):
                 rel_start = max(0, int(start) - int(record.start))
@@ -203,6 +223,40 @@ class _FakeDoc:
         range_view = _FakeRangeView(self, start, end)
         self.created_ranges.append(range_view)
         return range_view
+
+    def iter_paragraph_records(self, start: int, end: int):
+        start_i = int(start)
+        end_i = int(end)
+        if end_i <= start_i:
+            record = self.record_for_pos(start_i)
+            if record is not None:
+                yield record
+            return
+        for record in self._records:
+            p_start = int(record.start)
+            p_end = int(record.end)
+            if p_end < start_i:
+                continue
+            if p_start > end_i:
+                continue
+            yield record
+
+    def record_for_pos(self, pos: int) -> _ParagraphRecord | None:
+        for record in self._records:
+            if int(record.start) <= int(pos) < int(record.end):
+                return record
+        return None
+
+    def paragraph_for_pos(self, pos: int) -> _FakeParagraph | None:
+        record = self.record_for_pos(pos)
+        if record is None:
+            return None
+        return _FakeParagraph(record)
+
+
+class _FakeParagraphRangeBackedParagraph:
+    def __init__(self, range_view: _FakeRangeView):
+        self.Range = range_view
 
 
 def _assert_clean_generated_format(range_view: _FakeRangeView) -> None:
@@ -293,6 +347,42 @@ def test_update_protected_field_accepts_word_manual_line_break_tail() -> None:
     _assert_clean_generated_format(doc.created_ranges[-1])
 
 
+def test_update_protected_field_appends_suffix_when_word_truncates_value_writeback() -> None:
+    class _TruncatingRangeView(_FakeRangeView):
+        @property
+        def Text(self) -> str:
+            return self._doc.slice_text(int(self.Start), int(self.End))
+
+        @Text.setter
+        def Text(self, value: str) -> None:
+            value_text = str(value)
+            if value_text == "合同签订后30天内交货":
+                value_text = "合同签订"
+            self._doc.replace_slice(int(self.Start), int(self.End), value_text)
+            self.End = int(self.Start) + len(value_text)
+
+    class _TruncatingDoc(_FakeDoc):
+        def Range(self, start: int, end: int) -> _FakeRangeView:
+            range_view = _TruncatingRangeView(self, start, end)
+            self.created_ranges.append(range_view)
+            return range_view
+
+    doc = _TruncatingDoc([("交付日期：旧值", False)])
+    protected_fields = {DELIVERY_DATE_MARKER: doc.Range(0, doc.Content.End)}
+    log_parts: list[str] = []
+
+    assert update_protected_field(
+        doc,
+        DELIVERY_DATE_MARKER,
+        "合同签订后30天内交货",
+        protected_fields,
+        log_parts=log_parts,
+    )
+
+    assert doc._records[0].text == "交付日期：合同签订后30天内交货"
+    assert any("检测到截断" in line for line in log_parts)
+
+
 def test_insert_prefix_before_keyword_resets_generated_prefix_font_only() -> None:
     doc = _FakeDoc([("交付日期：旧值", False)])
     protected_fields = {DELIVERY_DATE_MARKER: doc.Range(0, doc.Content.End)}
@@ -357,6 +447,60 @@ def test_normalize_protected_field_paragraphs_and_collect_refresh_use_canonical_
     )
     assert set(refreshed.keys()) == {DELIVERY_DATE_MARKER, PAYMENT_METHOD_MARKER}
     assert refreshed[PAYMENT_METHOD_MARKER].Text == "付款方式：按季度结算"
+
+
+def test_collect_protected_fields_expands_split_field_chunk_to_logical_line() -> None:
+    doc = _FakeDoc(
+        [
+            ("1、设备名称及数量：射频治疗仪/壹套", False),
+            ("2、交付日期：第1包：射频治疗仪采购", False),
+            ("3、交付地点：采购人指定地点", False),
+            ("4、付款方式：设备验收合格后采购人支付合同金额的100%", False),
+        ]
+    )
+    delivery = doc._records[1]
+    payment = doc._records[3]
+    delivery_chunk_start = delivery.start + len("2、")
+    payment_chunk_start = payment.start + len("4、")
+
+    original_range = doc.Range
+
+    def _range_with_split_chunks(start: int, end: int):
+        if int(start) == 0 and int(end) == 10_000:
+            return type(
+                "_SplitScanRange",
+                (),
+                {
+                    "Paragraphs": _FakeParagraphCollection(
+                        [
+                            _FakeParagraphRangeBackedParagraph(
+                                original_range(delivery_chunk_start, delivery.end - 1)
+                            ),
+                            _FakeParagraphRangeBackedParagraph(
+                                original_range(payment_chunk_start, payment.end - 1)
+                            ),
+                        ]
+                    )
+                },
+            )()
+        return original_range(start, end)
+
+    doc.Range = _range_with_split_chunks  # type: ignore[method-assign]
+
+    protected_fields = collect_protected_fields(
+        doc=doc,
+        markers=[DELIVERY_DATE_MARKER, PAYMENT_METHOD_MARKER],
+        target_range=(0, 10_000),
+        fallback_range=None,
+    )
+
+    assert protected_fields[DELIVERY_DATE_MARKER].Start == delivery.start
+    assert protected_fields[DELIVERY_DATE_MARKER].Text == "2、交付日期：第1包：射频治疗仪采购"
+    assert protected_fields[PAYMENT_METHOD_MARKER].Start == payment.start
+    assert (
+        protected_fields[PAYMENT_METHOD_MARKER].Text
+        == "4、付款方式：设备验收合格后采购人支付合同金额的100%"
+    )
 
 
 def test_refresh_profile_protected_fields_rejects_stale_cross_paragraph_existing_range() -> None:
@@ -453,3 +597,47 @@ def test_refind_protected_paragraph_skips_table_hits_and_returns_strict_line() -
     )
     assert para is not None
     assert para.Text == "2、交付日期：合同签订后30天"
+
+
+def test_refind_protected_paragraph_expands_split_field_chunk_to_logical_line() -> None:
+    doc = _FakeDoc(
+        [
+            ("2、交付日期：第1包：射频治疗仪采购", False),
+            ("3、交付地点：采购人指定地点", False),
+        ]
+    )
+    delivery = doc._records[0]
+    delivery_chunk_start = delivery.start + len("2、")
+
+    class _SplitFind(_FakeFind):
+        def Execute(self) -> bool:
+            if self._range_view.Start > delivery_chunk_start:
+                return False
+            self._range_view.Start = delivery_chunk_start
+            self._range_view.End = delivery.end - 1
+            return True
+
+    class _SplitSearchRange(_FakeRangeView):
+        def __init__(self, doc: _FakeDoc, start: int, end: int):
+            super().__init__(doc, start, end)
+            self.Find = _SplitFind(self)
+
+    original_range = doc.Range
+
+    def _range_with_split_find(start: int, end: int):
+        if int(start) == 0 and int(end) == 10_000:
+            return _SplitSearchRange(doc, start, end)
+        return original_range(start, end)
+
+    doc.Range = _range_with_split_find  # type: ignore[method-assign]
+
+    para = refind_protected_paragraph(
+        doc=doc,
+        marker=DELIVERY_DATE_MARKER,
+        bound_start=0,
+        bound_end=10_000,
+    )
+
+    assert para is not None
+    assert para.Start == delivery.start
+    assert para.Text == "2、交付日期：第1包：射频治疗仪采购"

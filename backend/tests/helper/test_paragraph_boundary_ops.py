@@ -4,9 +4,16 @@ import backend.helper.word_helper.paragraph_boundary_ops as boundary_ops
 
 
 class _FakeAnchorRange:
-    def __init__(self, end: int, *, start: int = 0):
+    def __init__(self, end: int, *, start: int = 0, fail_insert_before: bool = False):
         self.Start = int(start)
         self.End = int(end)
+        self.fail_insert_before = bool(fail_insert_before)
+        self.insert_paragraph_before_calls = 0
+
+    def InsertParagraphBefore(self) -> None:
+        if self.fail_insert_before:
+            raise RuntimeError("locked paragraph")
+        self.insert_paragraph_before_calls += 1
 
 
 class _FakeRange:
@@ -22,15 +29,35 @@ class _FakeRange:
     def InsertBefore(self, text: str) -> None:
         self._doc.insert_before_calls.append((self.Start, self.End, text))
 
+    def InsertParagraphAfter(self) -> None:
+        self._doc.insert_paragraph_after_calls.append((self.Start, self.End))
+
 
 class _FakeDoc:
     def __init__(self, *, doc_end: int = 300, range_texts: dict[tuple[int, int], str] | None = None):
         self.Content = type("_FakeContent", (), {"End": int(doc_end)})()
         self.range_texts = dict(range_texts or {})
         self.insert_before_calls: list[tuple[int, int, str]] = []
+        self.insert_paragraph_after_calls: list[tuple[int, int]] = []
 
     def Range(self, start: int, end: int):
         return _FakeRange(self, start, end)
+
+
+class _FakeParagraphCollection:
+    def __init__(self, paragraph_range):
+        self._paragraph_range = paragraph_range
+
+    def __call__(self, _index: int):
+        return type("_FakeParagraph", (), {"Range": self._paragraph_range})()
+
+
+class _FakeInnerRange:
+    def __init__(self, full_paragraph_range):
+        self.Start = int(full_paragraph_range.Start) + 2
+        self.End = int(full_paragraph_range.End)
+        self.Text = "交付日期：合同签订后30天"
+        self.Paragraphs = _FakeParagraphCollection(full_paragraph_range)
 
 
 def test_ensure_paragraph_break_after_paragraph_inserts_before_safe_slot(monkeypatch) -> None:
@@ -110,6 +137,112 @@ def test_ensure_paragraph_break_after_paragraph_reuses_existing_writable_boundar
     assert inserted_break is False
     assert boundary_pos == 128
     assert doc.insert_before_calls == []
+
+
+def test_insert_paragraph_break_before_paragraph_does_not_scan_into_field_value(
+    monkeypatch,
+) -> None:
+    doc = _FakeDoc()
+    paragraph_range = _FakeAnchorRange(128, start=100, fail_insert_before=True)
+    calls: list[tuple[list[int], int]] = []
+
+    def _fake_find_safe_insert_position(doc, candidates, **kwargs):
+        del doc
+        candidate_list = [int(candidate) for candidate in candidates]
+        max_forward = int(kwargs.get("max_forward_scan_chars") or 0)
+        calls.append((candidate_list, max_forward))
+        if candidate_list == [100, 100]:
+            return None
+        return 96
+
+    monkeypatch.setattr(
+        boundary_ops,
+        "find_safe_insert_position",
+        _fake_find_safe_insert_position,
+    )
+
+    restored = boundary_ops.insert_paragraph_break_before_paragraph(
+        doc,
+        paragraph_range,
+        fallback_pos=96,
+        tender_type="gngk_hw_zc",
+        field_name="交付日期",
+    )
+
+    assert restored is True
+    assert calls == [([100, 100], 0), ([96], 0)]
+    assert paragraph_range.insert_paragraph_before_calls == 0
+    assert doc.insert_before_calls == []
+    assert doc.insert_paragraph_after_calls == [(96, 96)]
+
+
+def test_insert_paragraph_break_before_paragraph_uses_paragraph_before_when_label_start_locked(
+    monkeypatch,
+) -> None:
+    doc = _FakeDoc()
+    paragraph_range = _FakeAnchorRange(128, start=100)
+    calls: list[tuple[list[int], int]] = []
+
+    def _fake_find_safe_insert_position(doc, candidates, **kwargs):
+        del doc
+        candidate_list = [int(candidate) for candidate in candidates]
+        max_forward = int(kwargs.get("max_forward_scan_chars") or 0)
+        calls.append((candidate_list, max_forward))
+        return None
+
+    monkeypatch.setattr(
+        boundary_ops,
+        "find_safe_insert_position",
+        _fake_find_safe_insert_position,
+    )
+
+    restored = boundary_ops.insert_paragraph_break_before_paragraph(
+        doc,
+        paragraph_range,
+        fallback_pos=96,
+        tender_type="xjcg",
+        field_name="交付日期",
+    )
+
+    assert restored is True
+    assert calls == [([100, 100], 0)]
+    assert paragraph_range.insert_paragraph_before_calls == 1
+    assert doc.insert_before_calls == []
+    assert doc.insert_paragraph_after_calls == []
+
+
+def test_insert_paragraph_break_before_paragraph_uses_full_paragraph_for_split_range(
+    monkeypatch,
+) -> None:
+    doc = _FakeDoc()
+    full_paragraph_range = _FakeAnchorRange(128, start=100)
+    inner_range = _FakeInnerRange(full_paragraph_range)
+    calls: list[tuple[list[int], int]] = []
+
+    def _fake_find_safe_insert_position(doc, candidates, **kwargs):
+        del doc
+        candidate_list = [int(candidate) for candidate in candidates]
+        max_forward = int(kwargs.get("max_forward_scan_chars") or 0)
+        calls.append((candidate_list, max_forward))
+        return None
+
+    monkeypatch.setattr(
+        boundary_ops,
+        "find_safe_insert_position",
+        _fake_find_safe_insert_position,
+    )
+
+    restored = boundary_ops.insert_paragraph_break_before_paragraph(
+        doc,
+        inner_range,
+        fallback_pos=96,
+        tender_type="xjcg",
+        field_name="交付日期",
+    )
+
+    assert restored is True
+    assert calls == [([100, 100], 0)]
+    assert full_paragraph_range.insert_paragraph_before_calls == 1
 
 
 def test_ensure_paragraph_break_after_paragraph_splits_current_paragraph_when_next_is_heading(

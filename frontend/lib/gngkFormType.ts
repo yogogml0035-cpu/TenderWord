@@ -22,7 +22,7 @@ export function resolveGngkFormType({
 }: ResolveGngkFormTypeInput): GngkFormType {
   // 工程类当前先复用服务链路，避免因缺少独立 graph 导致无法提交。
   if (tender_lx === 1 || tender_lx === 2) {
-    return fund_lx === 1 ? 'gngk_fw_cz_tender' : 'gngk_fw_zc_tender';
+    return fund_lx === 1 && ifzgcg !== 2 ? 'gngk_fw_cz_tender' : 'gngk_fw_zc_tender';
   }
 
   if (fund_lx === 1 && ifzgcg !== 2) {
