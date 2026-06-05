@@ -147,6 +147,9 @@ class ClauseRiskProfile:
     reasons: tuple[str, ...]
 
 
+DISPLAY_HYBRID_THRESHOLD = 0.8
+
+
 def configure_console_output() -> None:
     for stream_name in ("stdout", "stderr"):
         stream = getattr(sys, stream_name, None)
@@ -504,7 +507,8 @@ def run_one_query_mode(
         store=store,
         top_k=max(top_k * 4, 30),
     )
-    return dedupe_hits_by_case_id(hits, top_k=top_k)
+    deduped = dedupe_hits_by_case_id(hits, top_k=top_k)
+    return [hit for hit in deduped if hit.hybrid_score > DISPLAY_HYBRID_THRESHOLD]
 
 
 def run_risk_filtered_query_mode(
@@ -545,7 +549,7 @@ def run_risk_filtered_query_mode(
 
     ranked: list[HybridHit] = []
     for index in set(raw_bm25) | set(raw_vector):
-        hybrid_score = 0.45 * normalized_bm25.get(index, 0.0) + 0.55 * normalized_vector.get(index, 0.0)
+        hybrid_score = 0.6 * normalized_bm25.get(index, 0.0) + 0.4 * normalized_vector.get(index, 0.0)
         ranked.append(
             HybridHit(
                 rank=0,
@@ -557,7 +561,7 @@ def run_risk_filtered_query_mode(
         )
 
     ranked.sort(key=lambda item: item.hybrid_score, reverse=True)
-    return dedupe_hits_by_case_id(
+    deduped = dedupe_hits_by_case_id(
         [
             HybridHit(
                 rank=rank,
@@ -570,9 +574,13 @@ def run_risk_filtered_query_mode(
         ],
         top_k=top_k,
     )
+    return [hit for hit in deduped if hit.hybrid_score > DISPLAY_HYBRID_THRESHOLD]
 
 
 def print_hits(hits: list[HybridHit]) -> None:
+    if not hits:
+        print(f"Top hits: none (all hits below hybrid threshold {DISPLAY_HYBRID_THRESHOLD:.1f})")
+        return
     print("Top hits:")
     for hit in hits:
         chunk = hit.chunk
@@ -593,7 +601,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build a real bad-case KB and run BM25 + vector hybrid retrieval."
     )
-    parser.add_argument("--top-k", type=int, default=10, help="Number of hybrid hits to print.")
+    parser.add_argument("--top-k", type=int, default=3, help="Maximum number of hybrid hits to print.")
     parser.add_argument("--clause-limit", type=int, default=20, help="Max number of clauses to test.")
     parser.add_argument("--collection", default=None, help="Qdrant collection name.")
     parser.add_argument("--qdrant-url", default=None, help="Qdrant base URL.")
@@ -613,6 +621,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     configure_console_output()
     args = parse_args()
+    effective_top_k = max(1, int(args.top_k))
     config = load_retrieval_config(
         collection_name=args.collection,
         qdrant_url=args.qdrant_url,
@@ -686,7 +695,7 @@ def main() -> int:
                 bm25_index=bm25_index,
                 embedder=embedder,
                 store=store,
-                top_k=args.top_k,
+                top_k=effective_top_k,
             )
             print_hits(hits)
 
@@ -702,7 +711,7 @@ def main() -> int:
                 bm25_index=bm25_index,
                 embedder=embedder,
                 store=store,
-                top_k=args.top_k,
+                top_k=effective_top_k,
             )
             print_hits(hits)
 

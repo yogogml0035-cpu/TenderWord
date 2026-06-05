@@ -383,6 +383,68 @@ def test_update_protected_field_appends_suffix_when_word_truncates_value_writeba
     assert any("检测到截断" in line for line in log_parts)
 
 
+def test_update_protected_field_uses_visible_offsets_for_doc_ranges() -> None:
+    class _DocRangeView(_FakeRangeView):
+        @property
+        def Text(self) -> str:
+            pieces: list[str] = []
+            for pos in range(int(self.Start), int(self.End)):
+                pieces.append(self._doc.char_at_word_pos(pos))
+            return "".join(pieces)
+
+        @Text.setter
+        def Text(self, value: str) -> None:
+            self._doc.replace_word_slice(int(self.Start), int(self.End), str(value))
+            self.End = int(self.Start) + len(str(value))
+
+    class _DocRangeDoc(_FakeDoc):
+        def __init__(self) -> None:
+            super().__init__([("交付日期：合同签订", False)])
+            self._records[0].start = 100
+            self._records[0].end = 111
+            self.Content.End = 112
+            self.write_ranges: list[tuple[int, int, str]] = []
+
+        def char_at_word_pos(self, pos: int) -> str:
+            if pos == 100:
+                return ""
+            rel = int(pos) - 101
+            if 0 <= rel < len(self._records[0].text):
+                return self._records[0].text[rel]
+            if rel == len(self._records[0].text):
+                return "\r"
+            return ""
+
+        def replace_word_slice(self, start: int, end: int, value: str) -> None:
+            self.write_ranges.append((int(start), int(end), value))
+            rel_start = max(0, int(start) - 101)
+            rel_end = max(rel_start, int(end) - 101)
+            record = self._records[0]
+            record.text = f"{record.text[:rel_start]}{value}{record.text[rel_end:]}"
+            record.end = record.start + len(record.text) + 1
+            self.Content.End = record.end + 1
+
+        def Range(self, start: int, end: int) -> _FakeRangeView:
+            range_view = _DocRangeView(self, start, end)
+            self.created_ranges.append(range_view)
+            return range_view
+
+    doc = _DocRangeDoc()
+    protected_fields = {DELIVERY_DATE_MARKER: doc.Range(100, 111)}
+    log_parts: list[str] = []
+
+    assert update_protected_field(
+        doc,
+        DELIVERY_DATE_MARKER,
+        "合同签订后30天内交货",
+        protected_fields,
+        log_parts=log_parts,
+    )
+
+    assert doc._records[0].text == "交付日期：合同签订后30天内交货"
+    assert doc.write_ranges == [(106, 110, "合同签订后30天内交货")]
+
+
 def test_insert_prefix_before_keyword_resets_generated_prefix_font_only() -> None:
     doc = _FakeDoc([("交付日期：旧值", False)])
     protected_fields = {DELIVERY_DATE_MARKER: doc.Range(0, doc.Content.End)}

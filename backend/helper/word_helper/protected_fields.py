@@ -68,6 +68,32 @@ def _first_paragraph_range_at(doc, pos: int) -> Optional[Any]:
     return None
 
 
+def _resolve_visible_offset_pos(doc, para_rng: Any, visible_offset: int) -> Optional[int]:
+    bounds = _range_bounds(para_rng)
+    if bounds is None:
+        return None
+    start, end = bounds
+    target_offset = max(0, int(visible_offset))
+    if target_offset == 0:
+        return start
+
+    seen = 0
+    for pos in range(start, end):
+        try:
+            text = str(getattr(doc.Range(pos, pos + 1), "Text", "") or "")
+        except Exception:
+            return None
+        if not text:
+            continue
+        for char in text:
+            if char in ("\r", "\a"):
+                return pos if seen >= target_offset else None
+            seen += 1
+            if seen >= target_offset:
+                return pos + 1
+    return end if seen >= target_offset else None
+
+
 def _expand_to_text_line_range(
     doc,
     start: int,
@@ -818,19 +844,28 @@ def update_protected_field(
     if new_value is None:
         return True
 
-    def _append_missing_suffix_if_truncated(
+    def _read_current_field_value(
+        value_start_pos: int,
+    ) -> tuple[Optional[Any], Optional[dict[str, Any]], str]:
+        current_para_rng = _first_paragraph_range_at(doc, value_start_pos)
+        if current_para_rng is None:
+            return None, None, ""
+        current_text = str(getattr(current_para_rng, "Text", "") or "")
+        current_match = match_protected_field_line(current_text, canonical_marker)
+        return current_para_rng, current_match, (
+            str(current_match.get("value") or "") if current_match else ""
+        )
+
+    def _repair_truncated_value(
         value_start_pos: int,
         expected_value: str,
     ) -> None:
         try:
-            current_para_rng = _first_paragraph_range_at(doc, value_start_pos)
-            if current_para_rng is None:
+            current_para_rng, current_match, actual_value = _read_current_field_value(
+                value_start_pos
+            )
+            if current_para_rng is None or current_match is None:
                 return
-            current_text = str(getattr(current_para_rng, "Text", "") or "")
-            current_match = match_protected_field_line(current_text, canonical_marker)
-            if not current_match:
-                return
-            actual_value = str(current_match.get("value") or "")
             if actual_value == expected_value:
                 return
             if not expected_value.startswith(actual_value):
@@ -840,30 +875,57 @@ def update_protected_field(
             if not missing_suffix:
                 return
 
-            insert_pos = (
-                int(current_para_rng.Start)
-                + int(current_match["colon_index"])
-                + 1
-                + len(actual_value)
+            insert_pos = _resolve_visible_offset_pos(
+                doc,
+                current_para_rng,
+                int(current_match["colon_index"]) + 1 + len(actual_value),
             )
-            suffix_rng = doc.Range(insert_pos, insert_pos)
-            suffix_rng.InsertBefore(missing_suffix)
-            formatted_suffix_rng = doc.Range(insert_pos, insert_pos + len(missing_suffix))
-            reset_generated_text_font_format(
-                formatted_suffix_rng,
-                font_name=font_name,
-                font_size=font_size,
-                log_parts=log_parts,
+            if insert_pos is None:
+                insert_pos = (
+                    int(current_para_rng.Start)
+                    + int(current_match["colon_index"])
+                    + 1
+                    + len(actual_value)
+                )
+            try:
+                suffix_rng = doc.Range(insert_pos, insert_pos)
+                suffix_rng.InsertBefore(missing_suffix)
+                formatted_suffix_rng = doc.Range(
+                    insert_pos, insert_pos + len(missing_suffix)
+                )
+                reset_generated_text_font_format(
+                    formatted_suffix_rng,
+                    font_name=font_name,
+                    font_size=font_size,
+                    log_parts=log_parts,
+                )
+                if log_parts is not None:
+                    log_parts.append(
+                        f"  受保护字段 '{canonical_marker}' 写入后检测到截断，"
+                        f"已补写缺失后缀: {missing_suffix[:50]}..."
+                    )
+            except Exception as exc:
+                if log_parts is not None:
+                    log_parts.append(
+                        f"  受保护字段 '{canonical_marker}' 值区补写后缀失败，"
+                        f"未改动字段名: {exc}"
+                    )
+
+            current_para_rng, current_match, actual_value = _read_current_field_value(
+                value_start_pos
             )
-            if log_parts is not None:
-                log_parts.append(
-                    f"  受保护字段 '{canonical_marker}' 写入后检测到截断，"
-                    f"已补写缺失后缀: {missing_suffix[:50]}..."
+            if (
+                current_para_rng is not None
+                and current_match is not None
+                and actual_value != expected_value
+            ):
+                raise RuntimeError(
+                    f"字段值写入后仍不完整: expected={expected_value!r}, actual={actual_value!r}"
                 )
         except Exception as exc:
             if log_parts is not None:
                 log_parts.append(
-                    f"  警告: 校验/补写 '{canonical_marker}' 字段值截断失败: {exc}"
+                    f"  警告: 校验/修复 '{canonical_marker}' 字段值截断失败: {exc}"
                 )
 
     try:
@@ -873,17 +935,24 @@ def update_protected_field(
         if not matched:
             return False
 
-        value_start = int(para_rng.Start) + int(matched["colon_index"]) + 1
+        value_start = _resolve_visible_offset_pos(
+            doc,
+            para_rng,
+            int(matched["colon_index"]) + 1,
+        )
         visible_text = _strip_paragraph_tail(para_text)
-        trim = len(para_text) - len(visible_text)
-        value_end = int(para_rng.End) - trim
+        value_end = _resolve_visible_offset_pos(doc, para_rng, len(visible_text))
+        if value_start is None or value_end is None:
+            value_start = int(para_rng.Start) + int(matched["colon_index"]) + 1
+            trim = len(para_text) - len(visible_text)
+            value_end = int(para_rng.End) - trim
         if value_end < value_start:
             value_end = value_start
 
         value_rng = doc.Range(value_start, value_end)
         new_value_clean = new_value.replace("\r", "").replace("\n", "")
         value_rng.Text = new_value_clean
-        _append_missing_suffix_if_truncated(value_start, new_value_clean)
+        _repair_truncated_value(value_start, new_value_clean)
         formatted_value_rng = doc.Range(value_start, value_start + len(new_value_clean))
         reset_generated_text_font_format(
             formatted_value_rng,

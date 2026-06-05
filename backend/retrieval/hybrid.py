@@ -37,8 +37,8 @@ def hybrid_search(
     store: QdrantBadCaseStore,
     top_k: int = 10,
     vector_limit: int = 50,
-    bm25_weight: float = 0.45,
-    vector_weight: float = 0.55,
+    bm25_weight: float = 0.6,
+    vector_weight: float = 0.4,
 ) -> list[HybridHit]:
     bm25_hits = bm25_index.score(query)
     vector_hits = store.search(query_vector=query_vector, limit=vector_limit)
@@ -76,4 +76,3 @@ def hybrid_search(
         )
         for rank, hit in enumerate(ranked[:top_k], start=1)
     ]
-
