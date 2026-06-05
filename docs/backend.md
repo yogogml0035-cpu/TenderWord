@@ -33,6 +33,8 @@
 - 批注与样式写回摘要属于任务结果和 SSE `done` 契约，不得在 state、任务结果或前端下载卡中丢失。
 - Agent run 只做任务创建前置流；只有 `task_accepted` 才进入后台 task、SSE 和下载链路，`needs_input` 不创建任务也不复制任务状态机。
 - 上传 Word 文件后的修改统一走 `rewrite`；`/api/edit`、edit skill 和 edit task kind 已删除，不保留兼容入口。
+- 上传文件 rewrite 的前端文件类型是 `rewrite_source`；后端 task skill state 内部用 `rewrite_source="uploaded_file"` 路由上传来源。
+- Agent run 审计日志只能写白名单结构化字段和 scrub 后摘要；给 agent 暴露运行态信息时优先使用只读公共摘要工具，不返回完整任务结果、下载路径或客户原文。
 - LLM 流式超时统一复用后端 settings 中的 `LLM_STREAM_TIMEOUT_SECONDS`。
 
 ## 招标类型扩展

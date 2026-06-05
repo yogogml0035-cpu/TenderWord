@@ -1,6 +1,6 @@
 # TenderWord 接口边界
 
-**生成日期：** 2026-06-04
+**生成日期：** 2026-06-05
 
 本文件记录 TenderWord 当前已确认的系统级接口边界。具体模型和行为以 `backend/api/`、`backend/models/`、`frontend/types/api.ts` 和 `frontend/lib/api.ts` 为准。
 
@@ -87,6 +87,7 @@
 - `selected_skills`、`context_snapshot.uploaded_files` 和 `context_snapshot.rewrite_context` 变化必须同步 `backend/models/agent_run.py`、`frontend/types/api.ts`、`frontend/stores/chatStore.ts` 和 `ChatPanel`。
 - `task_accepted` 只负责把 agent run 收敛为“已创建任务”；后续排队、SSE、取消、下载和结果卡仍沿用既有 task / stream 契约，不能在 agent run 自己复制第二套任务状态机。
 - `generation_style` 和 `generation_mode` 是 generate-only 字段，不得透传进 rewrite 请求模型、skill state 或 prompt surface。
+- agent run 审计日志只允许白名单结构化字段和 scrub 后摘要；公共上下文读取只能返回会话/任务公共摘要，不暴露完整结果或下载路径。
 
 ### Rewrite 任务
 
@@ -101,7 +102,7 @@
 
 同步要求：
 - `/api/edit`、edit skill、edit task kind 和 `create_edit_task_tool` 已删除；旧调用表现为 404，不做历史会话迁移。
-- 上传 Word 文件 rewrite 必须带非空用户重写指令、当前页面 `form_type`、完整锚点、`tender_lx` 和 `fund_source_lx`；`tender_data_snapshot` 只是可选快照，不能因为未获取招标数据而阻断上传文件 rewrite。缺必需条件时返回 `needs_input`，不自动猜测文档类型或锚点。
+- 上传 Word 文件 rewrite 必须带非空用户重写指令、当前页面 `form_type`、完整锚点、`tender_lx` 和 `fund_source_lx`；前端上传文件类型是 `rewrite_source`，后端 task skill state 内部用 `rewrite_source="uploaded_file"` 标记上传来源；`tender_data_snapshot` 只是可选快照，不能因为未获取招标数据而阻断上传文件 rewrite。缺必需条件时返回 `needs_input`，不自动猜测文档类型或锚点。
 - 上传文件链路优先于会话 rewrite history；rewrite 完成后前端用 SSE `done.output_file` 更新输入框文件卡，后续 rewrite 继续修改最新输出文件。用户删除文件卡后清空上传链路，后续 rewrite 回到会话生成 / 重写历史。
 
 ### 补充批注任务

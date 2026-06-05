@@ -1,6 +1,6 @@
 # 后端结构事实地图
 
-**分析日期：** 2026-06-04
+**分析日期：** 2026-06-05
 
 **范围：** `backend/` 源码、测试与后端相关启动脚本。
 
@@ -105,7 +105,7 @@ backend/
 - `backend/agents/comments/tools.py`：批注引用校验与 Word 边界内写回工具。
 - `backend/agents/comments/types.py`：批注候选、校验结果与写回统计类型。
 - `backend/agents/comments/workspace.py`：批注智能体审计工作区。
-- `backend/agents/task_context_assistant/`：agent run 使用的受控 rewrite 工具、上下文读取工具和审计日志。
+- `backend/agents/task_context_assistant/`：agent run 使用的受控 rewrite 工具、上下文读取工具、公共摘要工具和审计日志 scrub。
 
 ### Word helper 与工具层
 
@@ -161,4 +161,4 @@ backend/
 
 ---
 
-*后端结构分析：2026-06-04*
+*后端结构分析：2026-06-05*

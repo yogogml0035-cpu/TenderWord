@@ -24,6 +24,8 @@
 - 前端 URL canonical 化必须走统一 mapper/store helper。
 - `TenderFormShared` 初始化优先级保持 `draft > URL > default`。
 - 从 `sessionStorage` 恢复 running task 前必须先查任务状态；404 或 `TASK_NOT_FOUND` 收敛为本地中断态。
+- `selected_skills` 是一次性 agent run 草稿字段，消息发出后必须清空；上传 rewrite 文件存在时才隐式选择 rewrite。
+- 上传文件 rewrite 使用 `rewrite_source` 文件类型，并通过 `uploaded_files` + `rewrite_context` 向 agent run 提供受控上下文。
 
 ## SSE 与任务展示
 

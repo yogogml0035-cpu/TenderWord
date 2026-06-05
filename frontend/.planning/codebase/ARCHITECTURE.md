@@ -1,7 +1,7 @@
-<!-- refreshed: 2026-06-04 -->
+<!-- refreshed: 2026-06-05 -->
 # 前端架构事实地图
 
-**分析日期：** 2026-06-04
+**分析日期：** 2026-06-05
 
 **范围：** `frontend/`，并在启动、验证和 API 边界上参考根级 `AGENTS.md`、`README.md` 与 `scripts/`。
 
@@ -59,6 +59,7 @@ Next.js App Router
 - 当前可创建后台任务的 skill 是 `rewrite`；agent run 返回 `needs_input` 时只追加普通 AI 提示，不进入任务/SSE 链路。
 - 上传待改 Word 文件使用 `uploadFile(file, 'rewrite_source')`，文件写入会话 draft 的 `rewrite_file`，并自动选择 rewrite skill。
 - 上传文件 rewrite 的 `form_type` 在 `ChatPanel` 中按当前页面类型和 draft 调用 `resolveGngkFormType()`，必须与生成链路共用 `frontend/lib/gngkFormType.ts`。
+- `selected_skills` 是一次性能力选择；发送后清空。存在 `rewrite_file` 时隐式选择 rewrite，只有 `task_accepted` 才进入后台任务/SSE/下载链路。
 - `chat_input` 在消息受理时立即清空；中断恢复使用 `pending_rewrite_prompt` / `pending_rewrite_task_id`。
 
 ### 补充批注
@@ -123,4 +124,4 @@ Next.js App Router
 
 ---
 
-*前端架构分析：2026-06-04*
+*前端架构分析：2026-06-05*

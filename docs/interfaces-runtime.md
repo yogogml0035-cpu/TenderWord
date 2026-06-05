@@ -30,7 +30,9 @@
 - `task_accepted` 只负责把 agent run 收敛为“已创建任务”；后续排队、SSE、取消、下载和结果卡仍沿用既有 task / stream 契约。
 - `needs_input` 不创建后台任务。
 - 上传 Word 文件 rewrite 必须带非空用户重写指令、当前页面 `form_type`、完整锚点、`tender_lx` 和 `fund_source_lx`。
+- 上传文件 rewrite 前端上传类型是 `rewrite_source`；后端 task skill state 用 `rewrite_source="uploaded_file"` 标记上传来源。
 - `tender_data_snapshot` 只是可选上下文，不能因为未获取招标数据而阻断上传文件 rewrite。
+- agent run 审计和公共摘要工具不得暴露完整用户原文、真实路径、token、traceback、完整任务结果或下载路径。
 
 ## 补充批注
 

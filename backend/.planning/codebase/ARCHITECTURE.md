@@ -1,7 +1,7 @@
-<!-- refreshed: 2026-06-04 -->
+<!-- refreshed: 2026-06-05 -->
 # 后端架构事实地图
 
-**分析日期：** 2026-06-04
+**分析日期：** 2026-06-05
 
 **范围：** 仅覆盖 `backend/`，并在启动、验证和 Windows/WSL 运行边界上参考根级 `AGENTS.md`、`README.md` 与 `scripts/`。
 
@@ -82,6 +82,7 @@ FastAPI /api
 - 右侧聊天走 `POST /api/agent/runs/stream`，返回 NDJSON agent run 事件。
 - Agent run 的编排真源是 `backend/services/agent_run_service.py` 和 `backend/agents/task_context_assistant/`。
 - 当前 agent run 暴露的后台任务能力只有 rewrite；缺少会话文档、上传文件上下文或必要锚点时返回 `needs_input`，不会创建任务。
+- Agent run 审计日志只写白名单结构化字段，落盘前统一 scrub token、`.env`、私有绝对路径和 traceback；上下文读取工具只返回会话/任务公共摘要，不暴露完整结果或下载路径。
 - rewrite 是 task skill runtime，声明在 `backend/skills/rewrite/`，执行图由 `backend/graphs/skill_graph.py` 构造。
 - 上传 Word 文件后的修改同样走 rewrite：agent run 通过受控上下文把 `file_path`、`form_type`、锚点、`tender_lx` 和 `fund_source_lx` 交给 `DocumentService.create_rewrite_task()`。
 - `/api/edit`、edit task kind、edit skill 和旧用户路由入口当前不存在；旧调用表现为 404，不作为兼容链路维护。
@@ -153,4 +154,4 @@ FastAPI /api
 
 ---
 
-*后端架构分析：2026-06-04*
+*后端架构分析：2026-06-05*

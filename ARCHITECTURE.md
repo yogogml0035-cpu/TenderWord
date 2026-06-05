@@ -1,6 +1,6 @@
 # TenderWord 架构地图
 
-**生成日期：** 2026-06-04
+**生成日期：** 2026-06-05
 
 本文件是根级系统架构地图，描述 TenderWord 的系统边界、子系统职责和推荐理解路径。实现细节仍以代码为准；子系统内部事实以 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 为准。
 
@@ -51,6 +51,7 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 - `TaskQueueManager` 串行化文档任务、跟踪进度、取消、心跳和清理。
 - `SSEManager` 事件缓冲、客户端管理和重连重放。
 - 标准 tender graph、rewrite task skill graph、任务上下文助手 `task_context_assistant` 和 `generation_mode=agent` 的 content agent 分支。
+- 任务上下文助手的审计日志 scrub、公共摘要工具和受控 rewrite 任务创建。
 - agent generate 与补充批注共用的 `comment_agent` 批注生成、锚点校验、写回统计和过程事件。
 - Word COM 生命周期、共享 Word helper、类型特化节点和 Prompt Layer。
 - 外部 LLM provider、招标详情接口和模板候选接口的后端代理。
@@ -166,7 +167,7 @@ backend/prompts/ 与 backend/skills/
 
 ### 任务上下文助手 / Rewrite
 
-`POST /api/agent/runs/stream` 是右侧聊天唯一流式入口。它返回 NDJSON agent run 事件，由任务上下文助手结合 `selected_skills`、受控 `context_snapshot` 和确定性 guard，决定是返回 `needs_input` 追问，还是通过受控 tool 创建 rewrite task。上传 Word 文件后的修改也统一归入 rewrite：必须有用户重写指令、当前页面 `form_type`、完整锚点、标的类型和资金性质；招标数据快照只是可选上下文。缺条件时只返回 `needs_input`。`task_accepted` 后，agent run 即结束；后续排队、Word COM 执行、SSE、取消和下载继续沿用现有任务主链路。
+`POST /api/agent/runs/stream` 是右侧聊天唯一流式入口。它返回 NDJSON agent run 事件，由任务上下文助手结合 `selected_skills`、受控 `context_snapshot` 和确定性 guard，决定是返回 `needs_input` 追问，还是通过受控 tool 创建 rewrite task。上传 Word 文件后的修改也统一归入 rewrite：前端上传文件类型是 `rewrite_source`，后端 task skill state 内部用 `rewrite_source="uploaded_file"` 标记上传来源；创建任务必须有用户重写指令、当前页面 `form_type`、完整锚点、标的类型和资金性质，招标数据快照只是可选上下文。缺条件时只返回 `needs_input`。`task_accepted` 后，agent run 即结束；后续排队、Word COM 执行、SSE、取消和下载继续沿用现有任务主链路。Agent run 审计日志只写白名单结构化字段并做敏感信息 scrub，公共摘要工具不暴露完整结果或下载路径。
 
 关键入口：
 - `frontend/components/chat/ChatPanel.tsx`

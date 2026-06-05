@@ -1,6 +1,6 @@
 # 前端集成事实地图
 
-**分析日期：** 2026-06-04
+**分析日期：** 2026-06-05
 
 **范围：** `frontend/` 对后端 API、浏览器运行时、存储、测试工具和本地启动环境的集成边界。
 
@@ -51,6 +51,7 @@
 - 文件上传通过 `FormData` 发往后端 upload API。
 - 初次生成只使用模板文件和技术参数文件；模板候选选择成功后只回填模板文件槽位。
 - 上传文件修改使用独立 `rewrite_source` 文件类型，不复用初次生成上传槽位。
+- 上传文件 rewrite 的 agent run payload 使用 `uploaded_files` 传文件摘要，用 `rewrite_context` 传 `form_type`、锚点、`tender_lx`、`fund_source_lx` 和可选招标数据快照；不得夹带 `generation_mode`、`comment_generation_mode` 等初次生成字段。
 - 下载通过后端 download API 或模板候选代理下载 URL。
 - 模板候选外部文件 URL 不应在前端直接请求。
 - 初次生成下载卡可以触发补充批注任务；该任务必须通过项目内 `POST /api/comment-supplement` 创建，不能直接在前端修改文档。
@@ -99,4 +100,4 @@
 
 ---
 
-*前端集成分析：2026-06-04*
+*前端集成分析：2026-06-05*

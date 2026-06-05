@@ -1,6 +1,6 @@
 # 后端集成事实地图
 
-**分析日期：** 2026-06-04
+**分析日期：** 2026-06-05
 
 **范围：** `backend/` 对外部服务、浏览器客户端、文件系统、Word COM 和运行环境的集成边界。
 
@@ -38,7 +38,9 @@
 - 请求模型：`AgentRunStreamRequest`，只接收受控 `context_snapshot`、`selected_skills` 和用户消息。
 - 当前支持的 skill 是 `rewrite`；普通聊天未确认独立后台任务能力。
 - 上传 Word 文件 rewrite 需要 `file_path`、`form_type`、完整 `insertion_config`、`tender_lx`、`fund_source_lx`，`tender_data_snapshot` 只是可选快照。
+- 前端上传文件类型是 `rewrite_source`；进入后端 task skill state 后，上传来源用 `rewrite_source="uploaded_file"` 标记并在 rewrite 节点中路由。
 - 任务创建仍复用 `DocumentService.create_rewrite_task()`，后续排队、SSE、取消和下载不在 agent run 中复制状态机。
+- agent run 读取上下文只能通过受控摘要工具；审计日志不得记录完整用户消息、真实路径、token、traceback 或完整任务结果。
 
 ### 补充批注任务
 
@@ -129,4 +131,4 @@
 
 ---
 
-*后端集成分析：2026-06-04*
+*后端集成分析：2026-06-05*

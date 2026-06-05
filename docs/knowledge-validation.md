@@ -13,6 +13,7 @@
 
 - 改 Prompt Layer、task skill、generate/rewrite/comment_supplement runtime、`generation_mode`/`comment_generation_mode`、content/comment agent、Word COM、任务结果、SSE、批注/样式写回或 Word helper：更新共享运行时知识包。
 - 改招标类型 identity、`form_type` 分派、anchor、graph/state/node/replacement、URL、会话、`sessionStorage`、生成草稿字段、过程卡或排队恢复：更新类型身份与会话知识包。
+- 改 agent run 审计日志、公共摘要工具、上传文件 rewrite 来源标记、`selected_skills` 一次性语义或上传文件 rewrite 上下文：同时检查共享运行时知识包和类型身份与会话知识包。
 - 改模板候选、AI 重排、下载代理、文件回填或模板弹窗：更新模板候选知识包。
 - 大范围改动后若 `.planning/codebase/` 或系统地图明显过期，先刷新对应子项目事实地图，再更新系统地图。
 - 知识包只写当前仍成立的边界、同步面、验证入口和回归风险；不保存单次排障时间线。

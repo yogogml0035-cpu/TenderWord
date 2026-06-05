@@ -1,6 +1,6 @@
 # 前端测试事实地图
 
-**分析日期：** 2026-06-04
+**分析日期：** 2026-06-05
 
 **范围：** `frontend/__tests__/`、`frontend/e2e/` 与前端验证命令。
 
@@ -41,6 +41,7 @@ frontend/e2e/
 - API client：`frontend/__tests__/unit/lib/test_api.test.ts`、`test_api_base_url.test.ts`。
 - 表单转换器与 `gngk` form type 分派：`frontend/__tests__/unit/lib/test_form_data_converter.test.ts`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`。
 - Agent run：`frontend/e2e/test_agent_run_chat_panel.spec.ts`、`frontend/__tests__/unit/components/chat/test_agent_thinking_message.test.tsx`、`frontend/__tests__/unit/lib/test_api.test.ts`。
+- 上传文件 rewrite：`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx` 覆盖 `rewrite_source` 上传、隐式 rewrite skill 和 `gngk` form type 上下文。
 - SSE：`frontend/__tests__/unit/lib/test_sse.test.ts`、`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/types/test_api_sse_agent_step.test.ts`。
 - store：`frontend/__tests__/unit/stores/`。
 - URL 映射：`frontend/__tests__/unit/utils/test_tender_type_mapper.test.ts`。
@@ -115,4 +116,4 @@ git diff --check
 
 ---
 
-*前端测试分析：2026-06-04*
+*前端测试分析：2026-06-05*

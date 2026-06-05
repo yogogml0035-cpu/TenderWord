@@ -1,6 +1,6 @@
 # 后端编码约定事实地图
 
-**分析日期：** 2026-06-04
+**分析日期：** 2026-06-05
 
 **范围：** `backend/` 源码和测试约定。
 
@@ -84,6 +84,7 @@
 - `agent_step` 是智能体生成的用户态过程事件，不替代 `done` / `error` 终态；新增或调整时必须同步后端模型、SSE manager、前端 named event、类型和 store 测试。
 - `AgentRunStreamRequest.context_snapshot` 是受控最小上下文，不能在 agent run 中读取前端未提交的本地状态或外部文件路径。
 - 上传文件 rewrite 只能由 agent run tool 创建后台 rewrite task，不新增独立 edit task kind 或 `/api/edit` 兼容入口。
+- agent run 审计日志只能写白名单字段和 scrub 后摘要；需要给 agent 暴露运行态信息时，优先做只读公共摘要工具，不把下载路径、完整结果或原始用户正文交给 agent。
 
 ## 测试约定
 
@@ -95,4 +96,4 @@
 
 ---
 
-*后端编码约定分析：2026-06-04*
+*后端编码约定分析：2026-06-05*

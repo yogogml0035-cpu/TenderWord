@@ -19,6 +19,14 @@ TenderWord 是招标文档生成、修改、补充批注和模板复用系统；
 - API shape、SSE、任务类型、招标类型、Prompt/LLM、Word helper、模板候选等跨层改动必须同步前后端模型、类型、客户端、测试和相关知识包。
 - `generation_style`、`generation_mode`、`comment_generation_mode` 和 `style_writeback_mode` 是 generate-only 字段，不得进入 rewrite 请求模型、skill state 或 prompt surface。
 - `gngk` 在前端只是一种 UI 类型；提交到后端时必须由共享 helper 按 `tender_lx + fund_lx + ifzgcg` 分派到具体 form type。
+- 上传文件 rewrite 前端使用 `rewrite_source` 文件类型，后端 task skill state 用 `rewrite_source="uploaded_file"` 标记来源；不要恢复旧 edit 入口或把上传修改做成第二套任务链路。
+- Agent run 只负责任务创建前置流；审计日志和摘要工具只暴露 scrub 后白名单信息，不记录或返回完整客户原文、真实密钥、私有路径、traceback 或下载路径。
+
+## 验证与维护
+
+- 文档型变更至少运行 `git diff --check`，并扫描本轮改动文档中的密钥/token 模式；仅文档变更不需要跑代码测试或 E2E。
+- 前端代码改动至少运行 lint、type-check 和相关测试；后端代码改动至少运行 pytest；Word COM 闭环需要 Windows + Word/WPS COM。
+- 改动影响长期边界时，同步刷新对应 `.planning/codebase/`、`coding_maps/`、`docs/` 或 `asset/` 知识包。
 
 ## 详细文档
 

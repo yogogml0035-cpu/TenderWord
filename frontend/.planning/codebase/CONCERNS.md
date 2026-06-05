@@ -1,6 +1,6 @@
 # 前端风险事实地图
 
-**分析日期：** 2026-06-04
+**分析日期：** 2026-06-05
 
 **范围：** `frontend/` 当前技术债、脆弱点、安全边界和测试缺口。
 
@@ -30,6 +30,11 @@
 - 文件：`frontend/components/chat/ChatPanel.tsx`、`frontend/lib/api.ts`、`frontend/types/api.ts`
 - 风险：如果前端把 agent run 的 `run_started` / `thinking_stage` 当成后台任务状态，会和 task summary、SSE、取消和下载链路分叉。
 - 安全修改：只有 `task_accepted` 才调用 `startTask()`；`needs_input` 和非任务 `done` 只更新普通 AI 消息或思考卡。
+
+**一次性能力选择不能泄漏：**
+- 文件：`frontend/components/chat/ChatPanel.tsx`、`frontend/stores/chatStore.ts`
+- 风险：`selected_skills` 若发送后不清空，会让下一条普通聊天误走 rewrite；上传文件移除后若不清空，会继续携带过期文件上下文。
+- 安全修改：消息受理后清空 `selected_skills`；`rewrite_file` 存在时才隐式选择 rewrite，删除文件卡时同时清空能力选择。
 
 ## 已知脆弱区
 
@@ -100,4 +105,4 @@
 
 ---
 
-*前端风险审计：2026-06-04*
+*前端风险审计：2026-06-05*

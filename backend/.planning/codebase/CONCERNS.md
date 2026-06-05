@@ -1,6 +1,6 @@
 # 后端风险事实地图
 
-**分析日期：** 2026-06-04
+**分析日期：** 2026-06-05
 
 **范围：** `backend/` 当前技术债、脆弱点、安全边界和测试缺口。
 
@@ -40,6 +40,11 @@
 - 文件：`backend/api/agent.py`、`backend/services/agent_run_service.py`、`backend/agents/task_context_assistant/`
 - 风险：如果在 agent run 内复制排队、SSE、下载或取消状态，会和 `TaskQueueManager` 的真实任务生命周期分叉。
 - 安全修改：agent run 只输出 `needs_input` 或 `task_accepted`；后台任务创建后立刻交回既有 task / SSE 链路。
+
+**Agent run 审计与摘要工具必须保持最小暴露：**
+- 文件：`backend/agents/task_context_assistant/logging.py`、`backend/agents/task_context_assistant/tools.py`
+- 风险：直接落原始 event payload 或完整任务结果，会把用户原文、私有路径、token、traceback 或下载路径写入日志/agent 上下文。
+- 安全修改：审计日志继续走白名单字段和 scrub；只读工具只返回 rewrite 可用性、公共进度和摘要。
 
 ## 已知脆弱区
 
@@ -118,4 +123,4 @@
 
 ---
 
-*后端风险审计：2026-06-04*
+*后端风险审计：2026-06-05*

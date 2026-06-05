@@ -1,6 +1,6 @@
 # 前端编码约定事实地图
 
-**分析日期：** 2026-06-04
+**分析日期：** 2026-06-05
 
 **范围：** `frontend/` 源码、类型、测试和 UI 状态约定。
 
@@ -36,6 +36,7 @@
 - 深链 URL 参数要先写入 draft，再让表单初始化读取。
 - `generation_mode` 是会话级 generate 草稿字段，默认 `workflow`，不按 `gngk` 子类型分桶。
 - `comment_generation_mode` 是会话级 generate 草稿字段，默认 `on`，只影响初次生成批注分支。
+- `selected_skills` 是一次性 agent run 草稿字段，消息发出后清空；上传 rewrite 文件时可隐式选择 rewrite，但不能泄漏到下一条普通消息。
 - canonical URL 构造和重写统一走 `buildCanonicalSearchParams()`、`syncBrowserUrlToConversation()` 和 store helper。
 - `gngk` 会话身份按 `tenderType + tenderno + tender_lx + fund_lx` 匹配。
 
@@ -81,4 +82,4 @@
 
 ---
 
-*前端编码约定分析：2026-06-04*
+*前端编码约定分析：2026-06-05*
