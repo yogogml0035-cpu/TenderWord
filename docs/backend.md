@@ -34,7 +34,7 @@
 - Agent run 只做任务创建前置流；只有 `task_accepted` 才进入后台 task、SSE 和下载链路，`needs_input` 不创建任务也不复制任务状态机。
 - 上传 Word 文件后的修改统一走 `rewrite`；`/api/edit`、edit skill 和 edit task kind 已删除，不保留兼容入口。
 - 上传文件 rewrite 的前端文件类型是 `rewrite_source`；后端 task skill state 内部用 `rewrite_source="uploaded_file"` 路由上传来源。
-- Agent run 审计日志只能写白名单结构化字段和 scrub 后摘要；给 agent 暴露运行态信息时优先使用只读公共摘要工具，不返回完整任务结果、下载路径或客户原文。
+- Agent run 审计日志只能写白名单结构化字段和 scrub 后摘要；给 agent 暴露运行态信息时优先使用只读公共摘要工具，不返回完整任务结果、下载路径。
 - 生成/批注 agent workspace 和审计日志文件名使用共享日志命名清洗辅助；新增 agent workspace 不要复制独立文件名规则。
 - LLM 流式超时统一复用后端 settings 中的 `LLM_STREAM_TIMEOUT_SECONDS`。
 - `backend/retrieval/` 当前是批注坏案例检索诊断/实验入口，不属于主业务链路；接入正式批注流程前必须补降级行为和测试。
