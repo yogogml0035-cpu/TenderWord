@@ -23,6 +23,7 @@ Source: prd.json
 - `render_comment_prompt_with_bad_case_context()` 是 retrieval-aware 批注 prompt 渲染入口；空 context 必须与 `render_comment_prompt()` 输出兼容，非空 context 只消费 5 字段 prompt context。
 - `generate_comments` 的 bad case 增强集中在 `_build_bad_case_context_for_comments()`；无 context 时仍走 `render_comment_prompt()`，有 context 才走 `render_comment_prompt_with_bad_case_context()`，`comments_prompt_file` 保存最终实际发送 prompt。
 - `generate_comments` 的 retrieval JSON 只写入 prompt log 目录下的 `*_comments_bad_case_retrieval_*.json`；节点仅补充完整 `polished_text` 并序列化 runtime payload，不把日志路径写回 state 或前端可见字段。
+- `comment_agent` 自主生成模式的 bad case 检索必须放在 Word 打开且锚点范围解析完成之后；prompt/retrieval 证据写入 `comment_agent_audit` 目录，不回传 state、SSE 或下载卡。
 
 ## 2026-06-08 17:43 - US-001
 - 实现了正式 bad case loader 默认读取 `backend/retrieval/bad_cases/comment_bad_cases.md`，并解析 v2 `---BEGIN_BAD_CASE--- ... ---END_BAD_CASE---` 字段。
@@ -160,4 +161,16 @@ Source: prd.json
   - `comments_bad_case_retrieval_file` 是文件命名口径，不是 state 输出字段；不要把该路径加入 SSE、下载卡、`agent_step` 或返回 state。
   - 正常检索日志应继续直接序列化 `BadCaseRetrievalResult.to_log_payload()`；节点只补充完整 `polished_text`，避免重复拼 clause/source/injected 结构。
   - 检索异常时使用 `build_failed_bad_case_retrieval_payload()`，这样失败日志仍保留 clause split 结果和 `failure_summary`。
+---
+
+## 2026-06-08 21:00 - US-012
+- 将 bad case 检索接入 `comment_agent` 自主生成模式：仅 `allow_comment_generation=True` 且 `initial_comments=[]` 时，在 Word 打开并解析出批注范围后基于完整 `polished_text` 检索。
+- 有命中时复用 `render_comment_prompt_with_bad_case_context()` 把 5 字段 context 拼入 `comment_generation_instruction`；无命中或检索失败时回退原始统一批注 prompt。
+- 为自主生成模式写入 `comment_agent_audit` 兼容的 prompt 文件和 `*_comments_bad_case_retrieval_*.json`，但不把路径或检索状态写回 state、SSE、下载卡或 `agent_step`。
+- 更改的文件：`backend/nodes/common_word_nodes/comment_agent.py`、`backend/tests/nodes/test_comment_agent_writeback_node.py`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/nodes/common_word_nodes/comment_agent.py backend/tests/nodes/test_comment_agent_writeback_node.py`；`backend/.venv-linux/bin/python -m pytest backend/tests/nodes/test_comment_agent_writeback_node.py -v`；`backend/.venv-linux/bin/python -m pytest backend/tests/nodes/test_comment_agent_writeback_node.py backend/tests/nodes/test_generate_comments_bad_case.py backend/tests/retrieval/test_comment_bad_case_runtime.py backend/tests/prompts/test_comment_prompt_bad_case_context.py -v`；`backend/.venv-linux/bin/python -m pytest backend/tests -q`；`backend/.venv/Scripts/python.exe -m py_compile backend/nodes/common_word_nodes/comment_agent.py backend/tests/nodes/test_comment_agent_writeback_node.py`；`backend/.venv/Scripts/python.exe -m pytest backend/tests/nodes/test_comment_agent_writeback_node.py -v`；`git diff --check -- backend/nodes/common_word_nodes/comment_agent.py backend/tests/nodes/test_comment_agent_writeback_node.py`
+- **未来迭代的学习：**
+  - `comment_agent` 节点层负责构造自主生成 instruction；`backend/agents/comments/comment_agent.py` 的工具门禁和锚点修复语义无需为 bad case 检索改动。
+  - 纯修复模式要通过 `initial_comments` 是否为空隔离，不能只看 `generation_mode=agent`。
+  - 自主生成模式的日志根目录应复用 `COMMENT_AGENT_AUDIT_ROOT`，测试中需要 monkeypatch 到临时目录避免污染真实 prompts_log。
 ---
