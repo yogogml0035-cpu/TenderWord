@@ -148,6 +148,9 @@ class ClauseRiskProfile:
 
 
 DISPLAY_HYBRID_THRESHOLD = 0.8
+QUERY_MODE_CLAUSE_ONLY = "clause_only"
+QUERY_MODE_RISK_FILTERED = "risk_filtered_query"
+DISPLAY_QUERY_MODES = (QUERY_MODE_CLAUSE_ONLY, QUERY_MODE_RISK_FILTERED)
 
 
 def configure_console_output() -> None:
@@ -597,18 +600,52 @@ def print_hits(hits: list[HybridHit]) -> None:
         print(f"     {_preview(chunk.text, limit=260)}")
 
 
+def parse_query_modes(value: str) -> tuple[str, ...]:
+    modes = tuple(mode.strip() for mode in value.split(",") if mode.strip())
+    if not modes:
+        raise argparse.ArgumentTypeError("At least one query mode is required.")
+
+    unknown_modes = [mode for mode in modes if mode not in DISPLAY_QUERY_MODES]
+    if unknown_modes:
+        choices = ", ".join(DISPLAY_QUERY_MODES)
+        raise argparse.ArgumentTypeError(
+            f"Unknown query mode: {', '.join(unknown_modes)}. Choices: {choices}."
+        )
+
+    deduped: list[str] = []
+    for mode in modes:
+        if mode not in deduped:
+            deduped.append(mode)
+    return tuple(deduped)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build a real bad-case KB and run BM25 + vector hybrid retrieval."
     )
-    parser.add_argument("--top-k", type=int, default=3, help="Maximum number of hybrid hits to print.")
-    parser.add_argument("--clause-limit", type=int, default=20, help="Max number of clauses to test.")
+    parser.add_argument("--top-k", type=int, default=5, help="Maximum number of hybrid hits to print.")
+    parser.add_argument(
+        "--clause-limit",
+        "--query-count",
+        dest="clause_limit",
+        type=int,
+        default=20,
+        help="Max number of clauses to query.",
+    )
     parser.add_argument("--collection", default=None, help="Qdrant collection name.")
     parser.add_argument("--qdrant-url", default=None, help="Qdrant base URL.")
     parser.add_argument(
         "--compare-modes",
         action="store_true",
-        help="Compare clause_only, package_section_clause, and risk_filtered_query for each clause.",
+        help="Compare clause_only and risk_filtered_query for each clause.",
+    )
+    parser.add_argument(
+        "--query-modes",
+        "--query-mode",
+        dest="query_modes",
+        type=parse_query_modes,
+        default=None,
+        help="Comma-separated query modes to print. Choices: clause_only, risk_filtered_query. Default: clause_only.",
     )
     parser.add_argument(
         "--keep-existing",
@@ -622,6 +659,11 @@ def main() -> int:
     configure_console_output()
     args = parse_args()
     effective_top_k = max(1, int(args.top_k))
+    effective_clause_limit = max(1, int(args.clause_limit))
+    selected_query_modes = args.query_modes or (QUERY_MODE_CLAUSE_ONLY,)
+    if args.compare_modes and args.query_modes is None:
+        selected_query_modes = DISPLAY_QUERY_MODES
+
     config = load_retrieval_config(
         collection_name=args.collection,
         qdrant_url=args.qdrant_url,
@@ -631,17 +673,20 @@ def main() -> int:
     if not chunks:
         raise RuntimeError(f"No bad-case chunks were parsed from {TEST_KNOWLEDGE_FILE}")
 
-    clauses = split_user_document_into_clauses(TEST_USER_DOCUMENT)
-    if not clauses:
+    all_clauses = split_user_document_into_clauses(TEST_USER_DOCUMENT)
+    if not all_clauses:
         raise RuntimeError("No user clauses were parsed.")
-    clauses = clauses[: args.clause_limit]
+    clauses = all_clauses[:effective_clause_limit]
 
     print(f"Knowledge file: {TEST_KNOWLEDGE_FILE}")
     print(f"Parsed chunks: {len(chunks)}")
-    print(f"Parsed user clauses: {len(clauses)}")
+    print(f"Parsed user clauses: {len(all_clauses)}")
+    print(f"Query clauses: {len(clauses)} (limit: {effective_clause_limit})")
+    print(f"Top K: {effective_top_k}")
     print(f"Qdrant: {config.qdrant_url}")
     print(f"Collection: {config.collection_name}")
     print(f"Embedding model: {config.embedding_model}")
+    print(f"Query modes: {', '.join(selected_query_modes)}")
 
     bm25_index = BM25Index([chunk.text for chunk in chunks])
     embedder = EmbeddingClient(
@@ -676,21 +721,16 @@ def main() -> int:
 
     for clause in clauses:
         clause_only_query = build_clause_only_query(clause)
-        contextual_query = build_package_section_clause_query(clause)
-        risk_profile = generate_clause_risk_profile(clause)
         print("\n" + "=" * 120)
         print(f"{clause.clause_id} | {clause.package} | {clause.section}")
         print(f"Title: {clause.title}")
         print(f"Text: {_preview(clause.text, limit=320)}")
-        modes = [("clause_only", clause_only_query)]
-        if args.compare_modes:
-            modes.append(("package_section_clause", contextual_query))
 
-        for mode_name, query_text in modes:
-            print(f"\nQuery mode: {mode_name}")
-            print(f"Query text: {_preview(query_text, limit=360)}")
+        if QUERY_MODE_CLAUSE_ONLY in selected_query_modes:
+            print(f"\nQuery mode: {QUERY_MODE_CLAUSE_ONLY}")
+            print(f"Query text: {_preview(clause_only_query, limit=360)}")
             hits = run_one_query_mode(
-                query_text=query_text,
+                query_text=clause_only_query,
                 chunks=chunks,
                 bm25_index=bm25_index,
                 embedder=embedder,
@@ -699,7 +739,9 @@ def main() -> int:
             )
             print_hits(hits)
 
-        if args.compare_modes:
+        if QUERY_MODE_RISK_FILTERED in selected_query_modes:
+            contextual_query = build_package_section_clause_query(clause)
+            risk_profile = generate_clause_risk_profile(clause)
             print("\nQuery mode: risk_filtered_query")
             print(f"Query text: {_preview(contextual_query, limit=360)}")
             print(f"Risk filter: {', '.join(risk_profile.risk_types)}")
