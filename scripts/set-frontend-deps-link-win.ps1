@@ -131,8 +131,8 @@ if (Test-Path -LiteralPath $linkPath) {
     if (-not (Test-Path -LiteralPath $preservePath)) {
         Write-Host "[deps] preserving real frontend\node_modules as $preserveName"
         Rename-Item -LiteralPath $linkPath -NewName $preserveName
-    } elseif ($Target -eq "win" -and $detectedPlatform -ne "win") {
-        Write-Host "[deps] removing non-Windows frontend\node_modules so Windows dependencies can be restored"
+    } elseif ($detectedPlatform -and $detectedPlatform -ne $Target) {
+        Write-Host "[deps] removing $detectedPlatform frontend\node_modules because frontend\$preserveName already exists"
         Remove-GeneratedDirectory -Path $linkPath
     } else {
         $detectedText = if ($detectedPlatform) { " detected as $detectedPlatform" } else { "" }

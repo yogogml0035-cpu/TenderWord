@@ -27,11 +27,15 @@ Next.js.
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $launcher = Join-Path $repoRoot "scripts\start-dev.ps1"
+$psHost = Get-Command pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $psHost) {
+    $psHost = Get-Command powershell.exe -ErrorAction Stop | Select-Object -First 1
+}
 
 $args = @("-ExecutionPolicy", "Bypass", "-File", $launcher)
 if ($BackendOnly) {
     $args += "-BackendOnly"
 }
 
-& powershell.exe @args
+& $psHost.Source @args
 exit $LASTEXITCODE

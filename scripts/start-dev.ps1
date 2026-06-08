@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$BackendOnly
 )
 
@@ -32,24 +32,15 @@ function Assert-PathExists {
     }
 }
 
-function Assert-WindowsVenvCompatible {
-    param(
-        [string]$PyVenvConfigPath,
-        [string]$FailureMessage
-    )
+function Test-WindowsVenvCompatible {
+    param([string]$PyVenvConfigPath)
 
-    Assert-PathExists -Path $PyVenvConfigPath -FailureMessage $FailureMessage
+    if (-not (Test-Path -LiteralPath $PyVenvConfigPath)) {
+        return $false
+    }
 
     $configContent = Get-Content -LiteralPath $PyVenvConfigPath -Raw -ErrorAction Stop
-    if ($configContent -match "(?m)^(home|executable|command)\s*=\s*/") {
-        Fail @"
-检测到 backend\.venv 是用 WSL/Linux Python 创建的，无法直接被 Windows Python 使用。
-请在 Windows PowerShell 中重新创建 backend\.venv，例如：
-  cd $repoRoot\backend
-  py -3.12 -m venv .venv
-  .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-"@
-    }
+    return ($configContent -notmatch "(?m)^(home|executable|command)\s*=\s*/")
 }
 
 function Assert-PathWithinDirectory {
@@ -78,6 +69,128 @@ function Remove-DirectoryIfPresent {
 
     Assert-PathWithinDirectory -Path $Path -Directory $ContainingDirectory
     Remove-Item -LiteralPath $Path -Recurse -Force
+}
+
+function Move-BackendVenvAside {
+    param(
+        [string]$VenvDir,
+        [string]$BackendDir,
+        [string]$BaseName,
+        [string]$Reason
+    )
+
+    if (-not (Test-Path -LiteralPath $VenvDir)) {
+        return
+    }
+
+    Assert-PathWithinDirectory -Path $VenvDir -Directory $BackendDir
+
+    $targetName = $BaseName
+    if (Test-Path -LiteralPath (Join-Path $BackendDir $targetName)) {
+        $targetName = "$BaseName-$(Get-Date -Format yyyyMMddHHmmss)"
+    }
+
+    Write-Info "检测到 $Reason，已保留为 backend\$targetName。"
+    Rename-Item -LiteralPath $VenvDir -NewName $targetName
+}
+
+function Test-PythonCommand {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments
+    )
+
+    $testArgs = @()
+    if ($Arguments) {
+        $testArgs += $Arguments
+    }
+    $testArgs += @("-c", "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)")
+
+    & $FilePath @testArgs *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Get-WindowsPythonCommand {
+    $py = Get-Command py.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($py) {
+        foreach ($versionArg in @("-3.12", "-3.11", "-3")) {
+            if (Test-PythonCommand -FilePath $py.Source -Arguments @($versionArg)) {
+                return [pscustomobject]@{
+                    FilePath = $py.Source
+                    Arguments = @($versionArg)
+                }
+            }
+        }
+    }
+
+    $python = Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($python -and (Test-PythonCommand -FilePath $python.Source -Arguments @())) {
+        return [pscustomobject]@{
+            FilePath = $python.Source
+            Arguments = @()
+        }
+    }
+
+    Fail "未找到可创建后端虚拟环境的 Windows Python 3.11+。请先安装 Python 3.11 或 3.12，并确保 py.exe 或 python.exe 在 PATH 中。"
+}
+
+function New-WindowsBackendVenv {
+    param(
+        [string]$VenvDir
+    )
+
+    $pythonCommand = Get-WindowsPythonCommand
+    $createArgs = @()
+    if ($pythonCommand.Arguments) {
+        $createArgs += $pythonCommand.Arguments
+    }
+    $createArgs += @("-m", "venv", $VenvDir)
+
+    Write-Info "正在创建 Windows 后端虚拟环境 backend\.venv..."
+    & $pythonCommand.FilePath @createArgs
+    if ($LASTEXITCODE -ne 0) {
+        Fail "创建 backend\.venv 失败。"
+    }
+}
+
+function Install-WindowsBackendRequirements {
+    param(
+        [string]$PythonExe,
+        [string]$RequirementsPath
+    )
+
+    Assert-PathExists -Path $PythonExe -FailureMessage "缺少 backend\.venv\Scripts\python.exe，无法安装后端依赖。"
+    Assert-PathExists -Path $RequirementsPath -FailureMessage "缺少 backend\requirements.txt，无法安装后端依赖。"
+
+    Write-Info "正在安装 Windows 后端依赖 backend\requirements.txt..."
+    & $PythonExe -m pip install -r $RequirementsPath
+    if ($LASTEXITCODE -ne 0) {
+        Fail "安装 Windows 后端依赖失败。"
+    }
+}
+
+function Ensure-WindowsBackendVenv {
+    param(
+        [string]$BackendDir,
+        [string]$RequirementsPath
+    )
+
+    $venvDir = Join-Path $BackendDir ".venv"
+    $pythonExe = Join-Path $venvDir "Scripts\python.exe"
+    $pyVenvConfig = Join-Path $venvDir "pyvenv.cfg"
+
+    if ((Test-Path -LiteralPath $pyVenvConfig) -and
+        -not (Test-WindowsVenvCompatible -PyVenvConfigPath $pyVenvConfig)) {
+        Move-BackendVenvAside -VenvDir $venvDir -BackendDir $BackendDir -BaseName ".venv-linux" -Reason "backend\.venv 是 WSL/Linux Python 环境"
+    } elseif ((Test-Path -LiteralPath $venvDir) -and
+        (-not (Test-Path -LiteralPath $pythonExe) -or -not (Test-Path -LiteralPath $pyVenvConfig))) {
+        Move-BackendVenvAside -VenvDir $venvDir -BackendDir $BackendDir -BaseName ".venv-backup" -Reason "backend\.venv 不完整"
+    }
+
+    if (-not (Test-Path -LiteralPath $pythonExe)) {
+        New-WindowsBackendVenv -VenvDir $venvDir
+        Install-WindowsBackendRequirements -PythonExe $pythonExe -RequirementsPath $RequirementsPath
+    }
 }
 
 function Get-CommandPath {
@@ -306,11 +419,13 @@ function Start-ServiceWindow {
     $escapedTitle = Escape-SingleQuotedText -Text $Title
     $escapedDir = Escape-SingleQuotedText -Text $WorkingDirectory
     $escapedBanner = Escape-SingleQuotedText -Text $Banner
-    $scriptBlock = "& { " +
-        "`$host.UI.RawUI.WindowTitle = '$escapedTitle'; " +
-        "Set-Location -LiteralPath '$escapedDir'; " +
-        "Write-Host '$escapedBanner' -ForegroundColor Cyan; " +
+    $scriptBlock = @(
+        "& { "
+        "`$host.UI.RawUI.WindowTitle = '$escapedTitle'; "
+        "Set-Location -LiteralPath '$escapedDir'; "
+        "Write-Host '$escapedBanner' -ForegroundColor Cyan; "
         "$CommandText }"
+    ) -join ""
 
     $startProcessArgs = @{
         FilePath = $ShellPath
@@ -363,15 +478,15 @@ $frontendDir = Join-Path $repoRoot "frontend"
 
 $backendEntry = Join-Path $backendDir "main.py"
 $backendPython = Join-Path $backendDir ".venv\Scripts\python.exe"
-$backendPyVenvConfig = Join-Path $backendDir ".venv\pyvenv.cfg"
+$backendRequirements = Join-Path $backendDir "requirements.txt"
 $frontendPackage = Join-Path $frontendDir "package.json"
 $backendEnv = Join-Path $backendDir ".env"
 $frontendEnv = Join-Path $frontendDir ".env.local"
 $frontendDepsLinkScript = Join-Path $repoRoot "scripts\set-frontend-deps-link-win.ps1"
 
 Assert-PathExists -Path $backendEntry -FailureMessage "未找到 backend\main.py。请确认当前目录是项目根目录。"
-Assert-PathExists -Path $backendPython -FailureMessage "缺少 backend\.venv\Scripts\python.exe。请先在 backend 目录创建并安装虚拟环境。"
-Assert-WindowsVenvCompatible -PyVenvConfigPath $backendPyVenvConfig -FailureMessage "缺少 backend\.venv\pyvenv.cfg。请先正确创建后端虚拟环境。"
+Assert-PathExists -Path $backendRequirements -FailureMessage "缺少 backend\requirements.txt，无法安装后端依赖。"
+Ensure-WindowsBackendVenv -BackendDir $backendDir -RequirementsPath $backendRequirements
 Assert-PathExists -Path $backendEnv -FailureMessage "缺少 backend\.env。请先参考 backend\.env.example 创建环境文件。"
 
 $shellPath = Get-PowerShellHostPath
@@ -419,8 +534,13 @@ $frontendSummary = "dev (npm run dev)"
 Write-Info "运行后端预检查..."
 $backendCheckOutput = & $backendPython -c "import asyncio; import fastapi; import uvicorn; import pydantic_settings; import backend.main" 2>&1
 if ($LASTEXITCODE -ne 0) {
-    $details = ($backendCheckOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
-    Fail "后端预检查失败。请先修复 Python/依赖/本机环境问题后再启动。`n$details"
+    Write-Info "后端预检查失败，尝试重新安装 Windows 后端依赖..."
+    Install-WindowsBackendRequirements -PythonExe $backendPython -RequirementsPath $backendRequirements
+    $backendCheckOutput = & $backendPython -c "import asyncio; import fastapi; import uvicorn; import pydantic_settings; import backend.main" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $details = ($backendCheckOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+        Fail "后端预检查失败。请先修复 Python/依赖/本机环境问题后再启动。`n$details"
+    }
 }
 
 if ($launchFrontend) {
@@ -451,7 +571,11 @@ try {
         "--reload-dir task"
         "--reload-dir util"
     ) -join " "
-    $backendCommandText = "`$env:WATCHFILES_FORCE_POLLING='true'; `$env:WATCHFILES_POLL_DELAY_MS='300'; & $backendPythonLiteral -m uvicorn main:app --host 0.0.0.0 --port 8000 $backendReloadArgsText"
+    $backendCommandText = @(
+        "`$env:WATCHFILES_FORCE_POLLING='true'; "
+        "`$env:WATCHFILES_POLL_DELAY_MS='300'; "
+        "& $backendPythonLiteral -m uvicorn main:app --host 0.0.0.0 --port 8000 $backendReloadArgsText"
+    ) -join ""
     $backendProcess = Start-ServiceWindow `
         -ShellPath $shellPath `
         -Title "TenderWord Backend (8000)" `

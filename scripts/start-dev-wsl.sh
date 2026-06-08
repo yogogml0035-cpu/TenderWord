@@ -43,6 +43,26 @@ remove_frontend_dir() {
   esac
 }
 
+remove_active_node_modules_for_wsl_install() {
+  local frontend_dir="$repo_root/frontend"
+  local link_path="$frontend_dir/node_modules"
+
+  if [[ -L "$link_path" ]]; then
+    rm "$link_path"
+    return
+  fi
+
+  if [[ -d "$link_path" ]]; then
+    local detected_platform
+    detected_platform="$(detect_node_modules_platform "$link_path")"
+    if [[ -n "$detected_platform" && "$detected_platform" != "wsl" ]]; then
+      fail "frontend/node_modules 是 $detected_platform 依赖目录，拒绝在 WSL 安装流程中直接覆盖。"
+    fi
+
+    rm -rf "$link_path"
+  fi
+}
+
 link_wsl_frontend_dependencies() {
   local frontend_dir="$repo_root/frontend"
   local link_path="$frontend_dir/node_modules"
@@ -67,6 +87,9 @@ link_wsl_frontend_dependencies() {
     if [[ ! -e "$frontend_dir/$preserve_name" ]]; then
       printf '[start-dev-wsl] 保留现有 frontend/node_modules 为 %s...\n' "$preserve_name"
       mv "$link_path" "$frontend_dir/$preserve_name"
+    elif [[ -n "$detected_platform" && "$detected_platform" != "wsl" ]]; then
+      printf '[start-dev-wsl] frontend/%s 已存在，移除当前 %s 依赖目录以切换到 WSL。\n' "$preserve_name" "$detected_platform"
+      rm -rf "$link_path"
     else
       fail "frontend/node_modules 是真实目录，且 frontend/$preserve_name 已存在；请先手动确认后移走其中一个目录。"
     fi
@@ -106,7 +129,6 @@ ps_host="$(select_powershell_host)" || fail "未找到可用的 Windows PowerShe
 [[ -f "$script_path" ]] || fail "未找到 $script_path"
 [[ -f "$deps_link_script" ]] || fail "未找到 $deps_link_script"
 [[ -f "$repo_root/backend/main.py" ]] || fail "未找到 backend/main.py"
-[[ -f "$repo_root/backend/.venv/Scripts/python.exe" ]] || fail "缺少 backend/.venv/Scripts/python.exe"
 [[ -f "$repo_root/backend/.env" ]] || fail "缺少 backend/.env"
 [[ -f "$repo_root/frontend/package.json" ]] || fail "未找到 frontend/package.json"
 [[ -f "$repo_root/frontend/.env.local" ]] || fail "缺少 frontend/.env.local"
@@ -129,6 +151,7 @@ fi
 if [[ ! -f "$repo_root/frontend/node_modules/.bin/next" ]] || ! (cd "$repo_root/frontend" && node -e "require('lightningcss')") >/dev/null 2>&1; then
   printf '[start-dev-wsl] 检测到 WSL 原生前端依赖缺失或平台不匹配，正在执行 npm ci...\n'
   link_wsl_frontend_dependencies
+  remove_active_node_modules_for_wsl_install
   remove_frontend_dir "$repo_root/frontend/node_modules-wsl"
   remove_frontend_dir "$repo_root/frontend/.next"
   (cd "$repo_root/frontend" && npm ci && mv node_modules node_modules-wsl)
