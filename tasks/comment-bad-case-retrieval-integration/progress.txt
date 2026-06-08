@@ -26,6 +26,7 @@ Source: prd.json
 - `comment_agent` 自主生成模式的 bad case 检索必须放在 Word 打开且锚点范围解析完成之后；prompt/retrieval 证据写入 `comment_agent_audit` 目录，不回传 state、SSE 或下载卡。
 - `backend/scripts/test_comment_hybrid_retrieval.py` 只是正式 runtime 的诊断壳；默认读取 `backend/retrieval/bad_cases`，不再保留独立 v2 解析、条款切分、Qdrant upsert 或 collection recreate 逻辑。
 - `backend/tests/graphs/test_generation_mode_branching.py` 可用 sentinel 列表验证分支节点是否会触发检索；`comment_generation_mode=off` 应在 graph 层同时跳过 `generate_comments` 和 `comment_agent`。
+- 全仓 `git diff --check` 会把 CRLF-only 脏文件判成 trailing whitespace；最终验证前要确认工作区没有无内容 diff 的行尾漂移。
 
 ## 2026-06-08 17:43 - US-001
 - 实现了正式 bad case loader 默认读取 `backend/retrieval/bad_cases/comment_bad_cases.md`，并解析 v2 `---BEGIN_BAD_CASE--- ... ---END_BAD_CASE---` 字段。
@@ -209,4 +210,15 @@ Source: prd.json
   - graph 分流边界不要只看最终状态字段；给被跳过节点加 sentinel 更能防止 `comment_generation_mode=off` 误触发检索。
   - US-015 的 focused 回归入口应优先组合 retrieval、prompt、node 和 graph 四层测试，避免依赖真实 Qdrant、embedding provider 或 Word COM。
   - 当前完整 backend 测试基线可在 Linux venv 下通过，适合作为 bad case retrieval 后续改动的回归门槛。
+---
+
+## 2026-06-08 22:05 - US-015
+- 修复了 US-015 验证失败项：将 `backend/.env.example` 和两个其他任务 Playwright 日志的 CRLF-only 脏状态恢复为 LF，消除全仓 `git diff --check` 的 trailing whitespace 报错。
+- 重新确认 US-015 focused 回归已覆盖 retrieval、prompt、node 和 graph 分流边界，并将 PRD 状态恢复为通过。
+- 更改的文件：`backend/.env.example`、`tasks/agent-run-skill-chat-refactor/logs/us-006-playwright.log`、`tasks/agent-run-skill-chat-refactor/logs/us-010-playwright.log`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/tests/graphs/test_generation_mode_branching.py`；`backend/.venv-linux/bin/python -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py backend/tests/prompts/test_comment_prompt_bad_case_context.py backend/tests/nodes/test_generate_comments_bad_case.py backend/tests/nodes/test_comment_agent_writeback_node.py backend/tests/graphs/test_generation_mode_branching.py -v`；`backend/.venv-linux/bin/python -m pytest backend/tests -q`；`git diff --check`
+- **未来迭代的学习：**
+  - `git diff --check` 的失败可能来自无业务内容变化的行尾漂移；先用 `git diff --numstat` / `git diff --name-status` 区分真实内容 diff 和 CRLF-only 状态。
+  - 修复验证阻塞时只做行尾归一化，不改日志和环境示例的实际内容，避免把无关任务文件变成语义改动。
+  - PRD 被 validator 标回失败后，修复完成要清空 `notes` 并把 `passes` 重新设为 `true`，保留 `retryCount` 作为历史重试信息。
 ---
