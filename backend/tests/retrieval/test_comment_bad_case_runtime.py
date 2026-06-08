@@ -14,13 +14,15 @@ from backend.retrieval.bad_case_loader import (
     load_bad_cases,
     parse_bad_cases,
 )
-from backend.retrieval.bm25 import BM25Index
+from backend.retrieval.bm25 import BM25Hit, BM25Index
 from backend.retrieval.comment_bad_case_runtime import (
     CLAUSE_SPLIT_MODE_CLAUSE_ONLY,
     CLAUSE_SPLIT_MODE_FALLBACK_FULL_TEXT,
+    RETRIEVAL_MODE_BM25_ONLY,
     build_clause_only_query,
     clear_bad_case_runtime_cache,
     load_bad_case_runtime_index,
+    retrieve_bad_case_hits_bm25_only,
     split_polished_text_into_clauses,
 )
 from backend.retrieval.hybrid import HybridHit
@@ -287,6 +289,88 @@ def test_split_polished_text_returns_empty_fallback_for_blank_text() -> None:
 
     assert split_result.clause_split_mode == CLAUSE_SPLIT_MODE_FALLBACK_FULL_TEXT
     assert split_result.clauses == []
+
+
+def test_bm25_only_retrieval_uses_cached_index_and_filters_top3(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    clear_bad_case_runtime_cache()
+    _write_v2_bad_case(tmp_path, "a.md", "TW_COMMENT_BM25_A", "心率小数精度")
+    _write_v2_bad_case(tmp_path, "b.md", "TW_COMMENT_BM25_B", "心率固定档位")
+    _write_v2_bad_case(tmp_path, "c.md", "TW_COMMENT_BM25_C", "心率边界符号")
+    _write_v2_bad_case(tmp_path, "d.md", "TW_COMMENT_BM25_D", "心率宣传表述")
+    runtime_index = load_bad_case_runtime_index(tmp_path)
+    full_chunk_indexes = [
+        index
+        for index, chunk in enumerate(runtime_index.chunks)
+        if chunk.field == "full"
+    ]
+    query_texts: list[str] = []
+
+    def fake_score(query: str) -> list[BM25Hit]:
+        query_texts.append(query)
+        return [
+            BM25Hit(index=full_chunk_indexes[0], score=10.0),
+            BM25Hit(index=full_chunk_indexes[1], score=9.5),
+            BM25Hit(index=full_chunk_indexes[2], score=9.0),
+            BM25Hit(index=full_chunk_indexes[3], score=1.0),
+        ]
+
+    monkeypatch.setattr(runtime_index.bm25_index, "score", fake_score)
+
+    result = retrieve_bad_case_hits_bm25_only(
+        """
+一、技术需求
+1、心率指标应支持精确小数显示。
+2、心率指标应支持固定档位。
+""",
+        directory=tmp_path,
+    )
+
+    assert result.retrieval_mode == RETRIEVAL_MODE_BM25_ONLY
+    assert query_texts == [
+        "1、心率指标应支持精确小数显示。",
+        "2、心率指标应支持固定档位。",
+    ]
+    assert len(result.clause_results) == 2
+    for clause_result in result.clause_results:
+        assert len(clause_result.pre_filter_hits) == 4
+        assert len(clause_result.filtered_hits) == 3
+        assert [hit.rank for hit in clause_result.filtered_hits] == [1, 2, 3]
+        assert [round(hit.score, 3) for hit in clause_result.filtered_hits] == [
+            1.0,
+            0.944,
+            0.889,
+        ]
+        assert all(hit.score > 0.8 for hit in clause_result.filtered_hits)
+        assert all(hit.vector_score == 0.0 for hit in clause_result.filtered_hits)
+        assert all(
+            hit.retrieval_mode == RETRIEVAL_MODE_BM25_ONLY
+            for hit in clause_result.filtered_hits
+        )
+    assert len(result.filtered_hits) == 6
+    assert result.to_log_payload()["retrieval_mode"] == RETRIEVAL_MODE_BM25_ONLY
+
+
+def test_bm25_only_retrieval_returns_payload_when_directory_unavailable(
+    tmp_path: Path,
+) -> None:
+    clear_bad_case_runtime_cache()
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+
+    result = retrieve_bad_case_hits_bm25_only(
+        "一、技术需求\n1、心率指标应支持精确小数显示。",
+        directory=empty_dir,
+    )
+    payload = result.to_log_payload()
+
+    assert result.retrieval_mode == RETRIEVAL_MODE_BM25_ONLY
+    assert result.filtered_hits == []
+    assert result.clause_results[0].filtered_hits == []
+    assert payload["failure_summary"]["status"] == "bad_case_context unavailable"
+    assert payload["warnings"]
 
 
 def _write_v2_bad_case(
