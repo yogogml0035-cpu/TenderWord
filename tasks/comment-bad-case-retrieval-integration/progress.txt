@@ -12,6 +12,7 @@ Source: prd.json
 - `backend/retrieval/` 当前仍被文档标记为实验入口，本任务将其中 bad case 检索提升为正式批注增强入口。
 - Ralph stories 已收窄为 15 个可独立验证切片，按 loader、目录、缓存、切分、BM25、hybrid、context、日志、prompt、节点、脚本、文档、回归的依赖顺序执行。
 - `backend/retrieval/bad_case_loader.py` 暴露正式 bad case 默认目录和主文件入口；v2 `---BEGIN_BAD_CASE---` 解析与旧格式解析需要保持兼容。
+- `load_bad_case_directory()` 是目录级 bad case runtime 入口；它按文件名扫描 `*.md`，坏文件只进入 warning/failure payload，不应阻断有效文件加载。
 - `frontend/package.json` 的开发验证入口当前固定为 `next dev --webpack -p 8502`；默认 Turbopack 在本仓库的 Tailwind 4/lightningcss 组合下会在 Linux/WSL 里卡在 native module 解析。
 
 ## 2026-06-08 17:43 - US-001
@@ -33,4 +34,16 @@ Source: prd.json
   - Validator 若要求浏览器验证，优先复用 `npm run dev` 的 8502 端口，不要再直接用默认 Turbopack 命令。
   - `lightningcss` 在普通 Node `require()` 可用，不代表 Next dev 的 bundler 解析链路可用；要用真实页面加载做最终判断。
   - 验证证据统一写到当前 requirement 的 `screenshots/` 和 `logs/`，便于后续 validator 直接复查。
+---
+
+## 2026-06-08 18:20 - US-002
+- 实现了目录级 bad case 加载结果对象，运行时默认扫描 `backend/retrieval/bad_cases/*.md` 并按文件名稳定排序加载。
+- 单个 `.md` 文件解析失败时只记录 warning 和 failure 详情，继续加载其他正常文件；空目录或全失败时返回 `bad_case_context unavailable` 状态。
+- `to_log_payload()` 记录 `source_files`、成功/失败文件数、失败文件名、失败原因、warnings 和 unavailable failure summary。
+- 更改的文件：`backend/retrieval/bad_case_loader.py`、`backend/tests/retrieval/test_comment_bad_case_runtime.py`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/retrieval/bad_case_loader.py backend/tests/retrieval/test_comment_bad_case_runtime.py`；`backend/.venv-linux/bin/python -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -v`；`backend/.venv-linux/bin/python -m pytest backend/tests -q`；`backend/.venv/Scripts/python.exe -m py_compile backend/retrieval/bad_case_loader.py backend/tests/retrieval/test_comment_bad_case_runtime.py`；`backend/.venv/Scripts/python.exe -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -v`
+- **未来迭代的学习：**
+  - 目录级入口返回 `BadCaseDirectoryLoadResult`；后续缓存和 BM25Index 应基于这个结果扩展，不要重新扫描或复制 loader 逻辑。
+  - `load_bad_case_chunks()` 默认已经走正式目录扫描；传入文件路径时仍保持单文件兼容。
+  - 检索日志 payload 早期字段在 `to_log_payload()` 中集中生成，后续 retrieval JSON 应复用或扩展该结构。
 ---

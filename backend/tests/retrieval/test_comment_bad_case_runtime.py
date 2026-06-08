@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 from backend.retrieval.bad_case_loader import (
+    BAD_CASE_CONTEXT_AVAILABLE,
+    BAD_CASE_CONTEXT_UNAVAILABLE,
     DEFAULT_BAD_CASE_DIR,
     DEFAULT_COMMENT_BAD_CASE_FILE,
     build_bad_case_chunks,
+    load_bad_case_directory,
     load_bad_case_chunks,
     load_bad_cases,
     parse_bad_cases,
@@ -83,3 +89,97 @@ def test_legacy_bad_case_parser_remains_supported() -> None:
     assert cases[0].fields["问题类别"] == "合规风险"
     assert chunks[0].chunk_id == "case_01:full"
     assert chunks[0].metadata["category"] == "合规风险"
+
+
+def test_directory_loader_scans_markdown_files_by_file_name(tmp_path: Path) -> None:
+    _write_v2_bad_case(tmp_path, "b.md", "TW_COMMENT_B", "B 风险")
+    _write_v2_bad_case(tmp_path, "a.md", "TW_COMMENT_A", "A 风险")
+
+    result = load_bad_case_directory(tmp_path)
+    chunks = load_bad_case_chunks(tmp_path)
+
+    assert result.available is True
+    assert result.bad_case_context_status == BAD_CASE_CONTEXT_AVAILABLE
+    assert [source.file_name for source in result.source_files] == ["a.md", "b.md"]
+    assert [case.case_id for case in result.cases] == ["TW_COMMENT_A", "TW_COMMENT_B"]
+    assert chunks[0].case_id == "TW_COMMENT_A"
+
+
+def test_directory_loader_skips_bad_files_and_records_log_payload(
+    tmp_path: Path,
+    caplog,
+) -> None:
+    _write_v2_bad_case(tmp_path, "good.md", "TW_COMMENT_GOOD", "正常风险")
+    (tmp_path / "broken.md").write_text(
+        "---BEGIN_BAD_CASE---\nnot a parseable bad case\n",
+        encoding="utf-8",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="backend.retrieval.bad_case_loader"):
+        result = load_bad_case_directory(tmp_path)
+
+    payload = result.to_log_payload()
+
+    assert result.available is True
+    assert [source.file_name for source in result.source_files] == ["good.md"]
+    assert [failure.file_name for failure in result.failed_files] == ["broken.md"]
+    assert result.failed_files[0].reason == "no bad cases parsed"
+    assert any(
+        "skipping bad case file broken.md" in item.message for item in caplog.records
+    )
+    assert payload["load_summary"]["successful_file_count"] == 1
+    assert payload["load_summary"]["failed_file_count"] == 1
+    assert payload["load_summary"]["failed_files"][0]["file_name"] == "broken.md"
+    assert payload["failure_summary"] is None
+
+
+def test_directory_loader_returns_unavailable_for_empty_or_all_bad_directory(
+    tmp_path: Path,
+) -> None:
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+    empty_result = load_bad_case_directory(empty_dir)
+
+    bad_dir = tmp_path / "bad"
+    bad_dir.mkdir()
+    (bad_dir / "broken.md").write_text("not a bad case", encoding="utf-8")
+    bad_result = load_bad_case_directory(bad_dir)
+    bad_payload = bad_result.to_log_payload()
+
+    assert empty_result.available is False
+    assert empty_result.bad_case_context_status == BAD_CASE_CONTEXT_UNAVAILABLE
+    assert empty_result.to_log_payload()["failure_summary"]["status"] == (
+        BAD_CASE_CONTEXT_UNAVAILABLE
+    )
+    assert bad_result.available is False
+    assert bad_result.bad_case_context_status == BAD_CASE_CONTEXT_UNAVAILABLE
+    assert bad_payload["load_summary"]["successful_file_count"] == 0
+    assert bad_payload["load_summary"]["failed_files"][0]["file_name"] == "broken.md"
+    assert bad_payload["failure_summary"]["status"] == BAD_CASE_CONTEXT_UNAVAILABLE
+    assert bad_payload["failure_summary"]["reason"] == (
+        "all bad case files failed to parse"
+    )
+
+
+def _write_v2_bad_case(
+    directory: Path,
+    file_name: str,
+    case_id: str,
+    risk_pattern: str,
+) -> None:
+    (directory / file_name).write_text(
+        f"""
+---BEGIN_BAD_CASE---
+bad_case_id: {case_id}
+risk_layer: general_tender
+risk_type: 参数指纹
+risk_pattern: {risk_pattern}
+recommended_comment_policy:
+  - 建议提示：确认该要求是否必要。
+applicability_boundary:
+  - 有明确标准依据时可保留。
+anchor_policy: 锚点取完整分句。
+---END_BAD_CASE---
+""",
+        encoding="utf-8",
+    )

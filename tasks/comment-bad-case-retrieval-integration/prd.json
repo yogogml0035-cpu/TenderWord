@@ -19,7 +19,7 @@
       "priority": 1,
       "passes": true,
       "notes": "",
-      "retryCount": 1,
+      "retryCount": 0,
       "blocked": false
     },
     {
@@ -35,7 +35,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "",
       "retryCount": 0,
       "blocked": false
