@@ -1,0 +1,292 @@
+{
+  "project": "TenderWord",
+  "branchName": "ralph/comment-bad-case-retrieval-integration",
+  "description": "将批注 bad case 检索正式接入 generate_comments、自主生成模式下的 comment_agent 和 comment_supplement，并保持 prompt-level soft priority、运行时降级和完整检索日志。",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "统一 v2 bad case loader 与正式目录",
+      "description": "作为维护者，我需要让正式 loader 读取 backend/retrieval/bad_cases 目录中的 v2 bad case 文件，以便主链路不再依赖 test_doc。",
+      "acceptanceCriteria": [
+        "正式运行时默认把 backend/retrieval/bad_cases 作为 bad case 输入目录",
+        "backend/retrieval/bad_cases/comment_bad_cases.md 会被识别为当前主文件",
+        "loader 能解析 ---BEGIN_BAD_CASE--- ... ---END_BAD_CASE--- 结构中的 bad_case_id、risk_type、risk_pattern、recommended_comment_policy、applicability_boundary 和 anchor_policy",
+        "loader 生成的 BadCaseChunk 仍可被现有 HybridHit 和 BM25Index 消费",
+        "generate_comments、自主生成模式下的 comment_agent 和 comment_supplement 不再从 backend/test_doc 读取 bad case 文件",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-002",
+      "title": "实现目录扫描与坏文件跳过",
+      "description": "作为维护者，我需要运行时扫描 bad case 目录并跳过损坏文件，以便单个文件错误不会阻断批注生成。",
+      "acceptanceCriteria": [
+        "运行时扫描 backend/retrieval/bad_cases/*.md 并按文件名稳定排序加载",
+        "单个 .md 文件解析失败时只记录 warning 并继续加载其余正常文件",
+        "目录为空或所有文件都无法解析时，运行时返回 bad_case_context unavailable 而不是抛出硬失败",
+        "检索日志 payload 会记录成功加载文件数、失败文件名和失败原因",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-003",
+      "title": "缓存 chunks 和 BM25Index",
+      "description": "作为维护者，我需要进程内缓存 bad case chunks 和 BM25Index，以便重复生成批注时不重复构建相同内存结构。",
+      "acceptanceCriteria": [
+        "第一次加载 bad case 目录后会缓存 chunks 和 BM25Index",
+        "当任一 bad case 文件的 mtime 或 size 变化时，下次调用会自动重载缓存",
+        "每篇 polished_text 的检索结果不会进入缓存",
+        "运行时不会创建磁盘缓存文件，也不会写入任何持久缓存",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-004",
+      "title": "实现 clause_only 切分与整篇回退",
+      "description": "作为维护者，我需要正式运行时复用实验脚本的 clause_only 切分逻辑，并在切分失败时回退整篇检索。",
+      "acceptanceCriteria": [
+        "运行时沿用实验脚本的包、章节和数字顿号条款切分规则",
+        "每个检索查询只使用条款正文作为 clause_only 查询文本",
+        "当 polished_text 无法切出任何条款时，系统把整篇 polished_text 作为单个查询单元继续检索",
+        "检索日志 payload 记录 clause_split_mode 为 clause_only 或 fallback_full_text",
+        "第一版不扩展到 1.1、（一）或表格单元格级切分",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-005",
+      "title": "实现 BM25-only 检索模式",
+      "description": "作为维护者，我需要先完成不依赖外部向量服务的 BM25-only 检索，以便 hybrid 不可用时仍有增强能力。",
+      "acceptanceCriteria": [
+        "BM25-only 模式使用缓存中的 BM25Index 对每个 clause_only 查询打分",
+        "BM25-only 模式会把 BM25 原始分归一化成 0-1 score",
+        "BM25-only 模式对每个条款仍只保留 top3 且 score > 0.8 的命中",
+        "BM25-only 模式的命中可以进入后续去重、排序和 prompt context 构建",
+        "检索日志 payload 标记 retrieval_mode 为 bm25_only",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-006",
+      "title": "实现 hybrid 检索与自动降级",
+      "description": "作为维护者，我需要在向量链路可用时走 BM25 + vector hybrid，并在任一向量环节失败时自动降级到 BM25-only。",
+      "acceptanceCriteria": [
+        "向量配置和 Qdrant 可用时，运行时使用 BM25 + vector 计算 hybrid score",
+        "embedding 配置缺失、embedding 调用失败、Qdrant healthcheck 失败或 Qdrant search 抛错时，运行时自动切换为 BM25-only",
+        "hybrid 模式对每个条款仍只保留 top3 且 score > 0.8 的命中",
+        "hybrid 失败原因会进入 warnings，但不会让批注生成任务失败",
+        "检索日志 payload 标记最终 retrieval_mode 为 hybrid 或 bm25_only",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-007",
+      "title": "聚合命中并构建 prompt context",
+      "description": "作为维护者，我需要把多条款命中的 bad case 去重、排序并压缩成只含 5 个字段的 prompt 规则块。",
+      "acceptanceCriteria": [
+        "同一个 case_id 被多个条款命中时，只保留一次",
+        "同一个 case_id 多次命中时，保留最高 score 作为排序依据",
+        "最终注入的 bad case 条目按 score 从高到低排序，分数相同按 case_id 稳定排序",
+        "最终注入 prompt 的 bad case 数量上限为 12 条",
+        "注入 prompt 的 bad case 条目只包含 risk_type、risk_pattern、recommended_comment_policy、applicability_boundary、anchor_policy 这 5 个字段",
+        "case_id、score 和命中条款正文不会进入 prompt context",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-008",
+      "title": "构建 retrieval JSON 日志 payload",
+      "description": "作为维护者，我需要让运行时产出结构化 retrieval JSON payload，以便节点只负责写文件而不重复组织检索详情。",
+      "acceptanceCriteria": [
+        "payload 包含 source_files、clause_split_summary、retrieval_mode、warnings 和 failure_summary",
+        "payload 中每个 clause 记录完整条款正文、过滤前命中和过滤后命中",
+        "payload 中 injected_bad_cases 记录最终注入清单，并保留 case_id 和 score 供归档回看",
+        "无命中、目录不可用或检索失败时也能生成可写入的 payload",
+        "payload 不会通过 SSE、下载卡或 agent_step 对前端展示",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-009",
+      "title": "新增 retrieval-aware 批注 prompt 渲染入口",
+      "description": "作为维护者，我需要在不破坏 render_comment_prompt 的前提下，新增能接收 bad_case_context 的批注 prompt 渲染入口。",
+      "acceptanceCriteria": [
+        "保留现有 render_comment_prompt 作为兼容入口",
+        "新增 retrieval-aware 渲染入口，并底层复用现有 comment_prompt.py",
+        "当 bad_case_context 为空时，新增入口输出与原始入口兼容",
+        "当 bad_case_context 非空时，user prompt 会追加结构化 markdown bad case 规则块",
+        "system prompt 会用条件式文字说明 bad case 规则块可能存在，而不是默认假设一定存在",
+        "prompt 明确禁止把 bad case 文本作为 reference_text，reference_text 只能来自当前 polished_text",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-010",
+      "title": "接入 generate_comments prompt 增强",
+      "description": "作为 workflow 生成用户，我希望 generate_comments 在调用模型前自动应用 bad case 检索增强，并在无命中或失败时回退原 prompt。",
+      "acceptanceCriteria": [
+        "generate_comments 在构造最终 system prompt 和 user prompt 之前执行 bad case 检索",
+        "有命中时，generate_comments 会把压缩后的 bad_case_context 注入最终实际发送给模型的 prompt",
+        "无命中时，generate_comments 继续使用原始 comment_prompt，不创建额外错误",
+        "检索失败时，generate_comments 记录 warning 后继续调用模型，而不是返回新的硬失败",
+        "comments_prompt_file 保存最终实际发送给模型的 prompt 内容",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-011",
+      "title": "为 generate_comments 写入 retrieval JSON 文件",
+      "description": "作为维护者，我需要 generate_comments 把运行时返回的 retrieval payload 写成 JSON 文件，以便回看每次条款命中过程。",
+      "acceptanceCriteria": [
+        "generate_comments 为每次 bad case 检索生成一个 comments_bad_case_retrieval_file JSON 文件",
+        "JSON 文件记录完整 polished_text、每个条款完整正文、过滤前命中、过滤后命中、最终注入 bad case 列表和 warnings",
+        "检索失败时也会写入 failure_summary，而不是跳过 retrieval 日志生成",
+        "该日志不会通过 SSE、下载卡或 agent_step 对前端用户展示",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-012",
+      "title": "接入自主生成模式下的 comment_agent",
+      "description": "作为维护者，我需要让 comment_agent 只在自主生成批注时应用 bad case 增强，并保持已有候选修复模式不受影响。",
+      "acceptanceCriteria": [
+        "comment_agent 只有在 allow_comment_generation=true 且 initial_comments 为空时才执行 bad case 检索增强",
+        "comment_agent 已有 initial_comments 的纯修复模式不会执行 bad case 检索，也不会改写 comment_generation_instruction",
+        "comment_agent 只有在 Word 已打开并解析出批注范围后才执行 bad case 检索",
+        "bad case 检索使用完整 polished_text 作为输入，而不是再次从 Word 反抽正文",
+        "有命中时，bad_case_context 会被拼入 comment_generation_instruction；无命中或检索失败时回退原始 instruction",
+        "comment_agent 的 prompt 和 retrieval 文件会写入与现有 comment_agent 审计/日志体系兼容的位置",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-013",
+      "title": "让实验脚本复用正式运行时",
+      "description": "作为维护者，我需要把 test_comment_hybrid_retrieval.py 改成正式运行时的诊断入口，以便主链路和实验入口不再双轨漂移。",
+      "acceptanceCriteria": [
+        "backend/scripts/test_comment_hybrid_retrieval.py 不再保留独立的 v2 解析、条款切分和检索核心逻辑",
+        "脚本默认从 backend/retrieval/bad_cases 读取正式 bad case 真源",
+        "脚本仍能输出 clause_only 模式下的命中结果，方便人工观察",
+        "如果脚本文件当前存在用户本地改动，改造过程会在保留用户改动的前提下完成，而不是直接覆盖文件",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-014",
+      "title": "更新知识包和系统边界文档",
+      "description": "作为维护者，我需要把 retrieval 从实验入口更新为正式批注增强入口，并同步降级和范围边界。",
+      "acceptanceCriteria": [
+        "asset/shared_runtime_word_skill_knowledge_pack.md 不再把 backend/retrieval 描述为纯实验入口，而是描述为 generate_comments、自主生成模式下的 comment_agent 和 comment_supplement 的正式增强入口",
+        "docs/interfaces-runtime.md、INTERFACES.md、coding_maps/SYSTEM_MAP.md、docs/backend.md 中关于 retrieval 的实验描述被同步修正",
+        "更新后的文档保留 comment_generation_mode 是 generate-only 字段且 rewrite 不接入 bad case 检索的边界",
+        "更新后的文档说明 hybrid 失败会降级到 bm25_only、检索失败不会阻塞批注生成、retrieval 状态不进入前端展示",
+        "git diff --check passes",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-015",
+      "title": "执行 focused 回归验证",
+      "description": "作为维护者，我需要用 focused tests 验证检索、prompt、节点边界和图分流，以便确认 bad case 增强没有越界进入 rewrite 或纯修复模式。",
+      "acceptanceCriteria": [
+        "retrieval tests 覆盖目录扫描、坏文件跳过、缓存重载、条款切分、fallback_full_text、bm25_only、hybrid fallback 和 context 截断",
+        "prompt tests 覆盖无 context 兼容输出、有 context 只注入 5 个字段、禁止 bad case 作为 reference_text",
+        "node tests 覆盖 generate_comments 有命中、无命中、检索失败降级，以及 comment_agent 自主生成才注入",
+        "graph tests 覆盖 comment_generation_mode=off 时 workflow 和 agent 分支都不触发 bad case 检索",
+        "所有新测试都使用 fake 或 mock，不依赖真实 Qdrant、embedding provider 或 Word COM",
+        "git diff --check passes",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "",
+      "retryCount": 0,
+      "blocked": false
+    }
+  ]
+}

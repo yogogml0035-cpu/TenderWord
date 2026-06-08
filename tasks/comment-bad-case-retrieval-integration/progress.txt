@@ -1,0 +1,13 @@
+# Ralph Progress
+
+Requirement: tasks/comment-bad-case-retrieval-integration
+Started: 2026-06-08 16:45
+Source: prd.json
+
+## Codebase Patterns
+
+- `backend/prompts/comment_prompt.py` 是当前批注生成 prompt 唯一真源；新增 retrieval-aware 入口必须复用它。
+- `generate_comments` 负责 workflow 批注生成和 prompt/raw/repaired/new_comments 日志；bad case 增强应在 LLM 调用前完成。
+- `comment_agent` 只有在 `allow_comment_generation=True && initial_comments=[]` 时自主生成批注；已有候选时是锚点修复模式，不注入 bad case。
+- `backend/retrieval/` 当前仍被文档标记为实验入口，本任务将其中 bad case 检索提升为正式批注增强入口。
+- Ralph stories 已收窄为 15 个可独立验证切片，按 loader、目录、缓存、切分、BM25、hybrid、context、日志、prompt、节点、脚本、文档、回归的依赖顺序执行。
