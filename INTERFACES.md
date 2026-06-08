@@ -1,6 +1,6 @@
 # TenderWord 接口边界
 
-**生成日期：** 2026-06-05
+**生成日期：** 2026-06-08
 
 本文件记录 TenderWord 当前已确认的系统级接口边界。具体模型和行为以 `backend/api/`、`backend/models/`、`frontend/types/api.ts` 和 `frontend/lib/api.ts` 为准。
 
@@ -87,7 +87,7 @@
 - NDJSON 行格式由后端 service 层共享辅助序列化；新增 agent/chat 流事件时不要在调用方各自手写 JSON 行。
 - `selected_skills`、`context_snapshot.uploaded_files` 和 `context_snapshot.rewrite_context` 变化必须同步 `backend/models/agent_run.py`、`frontend/types/api.ts`、`frontend/stores/chatStore.ts` 和 `ChatPanel`。
 - `task_accepted` 只负责把 agent run 收敛为“已创建任务”；后续排队、SSE、取消、下载和结果卡仍沿用既有 task / stream 契约，不能在 agent run 自己复制第二套任务状态机。
-- `generation_style` 和 `generation_mode` 是 generate-only 字段，不得透传进 rewrite 请求模型、skill state 或 prompt surface。
+- `generation_style`、`generation_mode`、`comment_generation_mode` 和 `style_writeback_mode` 是 generate-only 字段，不得透传进 rewrite 请求模型、skill state 或 prompt surface。
 - agent run 审计日志只允许白名单结构化字段和 scrub 后摘要；公共上下文读取只能返回会话/任务公共摘要，不暴露完整结果或下载路径。
 
 ### Rewrite 任务

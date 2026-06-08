@@ -8,9 +8,9 @@
 
 **运行器：**
 - Jest `^29.7.0` - 单元/集成测试。
-- Config: `frontend/jest.config.ts`。
-- Environment: `jsdom`。
-- Setup: `setupFiles` 使用 `frontend/polyfills.js`，`setupFilesAfterEnv` 使用 `frontend/jest.setup.js`。
+- 配置： `frontend/jest.config.ts`。
+- 环境： `jsdom`。
+- 设置： `setupFiles` 使用 `frontend/polyfills.js`，`setupFilesAfterEnv` 使用 `frontend/jest.setup.js`。
 - 注意：`frontend/jest.setup.ts` 存在，但当前 Jest 配置实际引用的是 `frontend/jest.setup.js`。
 
 **断言库：**
@@ -20,8 +20,8 @@
 
 **E2E 运行器：**
 - Playwright `@playwright/test`。
-- Config: `frontend/playwright.config.ts`。
-- Browser project: Chromium，非 CI 默认可使用系统 Chrome channel。
+- 配置： `frontend/playwright.config.ts`。
+- 浏览器项目： Chromium，非 CI 默认可使用系统 Chrome channel。
 
 **运行命令：**
 
@@ -30,8 +30,8 @@ cd frontend
 npm run lint           # ESLint
 npm run type-check     # tsc -p tsconfig.typecheck.json --noEmit
 npm run test           # Jest 全量测试
-npm run test:watch     # Jest watch
-npm run test:coverage  # Jest coverage
+npm run test:watch     # Jest 监听模式
+npm run test:coverage  # Jest 覆盖率
 npm run test:e2e       # Playwright E2E
 ```
 
@@ -94,10 +94,10 @@ describe('API Client', () => {
   });
 
   describe('createGenerateTask', () => {
-    it('should return task info on success', async () => {
-      // arrange fetch mock
-      // act
-      // assert returned task fields and request body
+    it('成功时返回任务信息', async () => {
+      // 准备 fetch mock
+      // 执行动作
+      // 断言返回的任务字段和请求体
     });
   });
 });
@@ -105,7 +105,7 @@ describe('API Client', () => {
 
 实际示例见 `frontend/__tests__/unit/lib/test_api.test.ts`。
 
-**Hook Testing Pattern：**
+**Hook 测试模式：**
 
 ```typescript
 jest.mock('@/hooks/useSSE', () => ({ useSSE: jest.fn() }));
@@ -132,10 +132,10 @@ renderHook(() =>
 
 **框架：**
 - Jest mocks。
-- MSW for API mock server。
-- Playwright route mocks for browser tests。
+- MSW 用于 API mock server。
+- Playwright route mocks 用于浏览器测试。
 
-**MSW Pattern：**
+**MSW 模式：**
 
 ```typescript
 import { setupServer } from 'msw/node';
@@ -146,7 +146,7 @@ export const server = setupServer(...handlers);
 
 实际文件：`frontend/mocks/server.ts`、`frontend/mocks/handlers.ts`。
 
-**Fetch Mock Pattern：**
+**Fetch Mock 模式：**
 
 ```typescript
 globalThis.fetch = jest.fn().mockResolvedValue({
@@ -158,11 +158,11 @@ globalThis.fetch = jest.fn().mockResolvedValue({
 
 实际文件：`frontend/__tests__/unit/lib/test_api.test.ts`。
 
-**What to Mock：**
+**需要 Mock：**
 - 后端 API response、fetch stream、SSE hook、task status、sessionStorage/localStorage。
 - Word COM、真实后端队列、真实下载文件内容和外部模板文件 URL。
 
-**What NOT to Mock：**
+**不要 Mock：**
 - 纯转换/解析 helper 的核心逻辑，例如 `frontend/lib/formDataConverter.ts`、`frontend/lib/gngkFormType.ts`、`frontend/utils/tenderTypeMapper.ts`。
 - Store reducer/action 的状态迁移本身，除非测试目标是 UI 组件且 store 行为已在 store 测试覆盖。
 
@@ -192,15 +192,15 @@ export class ConversationFactory {
 **位置：**
 - 通用数据工厂：`frontend/__tests__/mocks/data-factories.ts`。
 - SSE mock：`frontend/__tests__/mocks/sse-mock.ts`。
-- Testing Library render helper：`frontend/__tests__/utils/test-utils.tsx`。
+- Testing Library 渲染 helper：`frontend/__tests__/utils/test-utils.tsx`。
 - MSW handlers：`frontend/mocks/handlers.ts`。
 
 ## 覆盖率
 
-**Requirements：**
+**覆盖率门槛：**
 - `frontend/jest.config.ts` 配置全局 coverage threshold：branches/functions/lines/statements 均为 50。
-- Coverage 收集范围：`components/`、`hooks/`、`lib/`、`stores/`。
-- Coverage 排除：`.d.ts`、`node_modules`、`.next`、`frontend/mocks/`。
+- 覆盖率收集范围：`components/`、`hooks/`、`lib/`、`stores/`。
+- 覆盖率排除：`.d.ts`、`node_modules`、`.next`、`frontend/mocks/`。
 
 **查看覆盖率：**
 
@@ -212,17 +212,17 @@ npm run test:coverage
 ## 测试类型
 
 **单元测试：**
-- Scope: API client、pure helper、stores、hooks、组件细节和类型守卫。
-- Examples: `frontend/__tests__/unit/lib/test_api.test.ts`、`frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`、`frontend/__tests__/unit/utils/test_tender_type_mapper.test.ts`。
+- 范围： API client、pure helper、stores、hooks、组件细节和类型守卫。
+- 示例： `frontend/__tests__/unit/lib/test_api.test.ts`、`frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`、`frontend/__tests__/unit/utils/test_tender_type_mapper.test.ts`。
 
 **集成测试：**
-- Scope: Testing Library provider/render 示例和跨小模块行为。
-- Examples: `frontend/__tests__/integration/examples/test_example_component.test.tsx`。
+- 范围： Testing Library provider/render 示例和跨小模块行为。
+- 示例： `frontend/__tests__/integration/examples/test_example_component.test.tsx`。
 
 **E2E 测试：**
-- Framework: Playwright。
-- Scope: `/tender` 页面、URL 会话行为、agent run 聊天面板、生成模式、补充批注、上传槽位等浏览器契约。
-- Examples: `frontend/e2e/test_home.spec.ts`、`frontend/e2e/test_url_conversation.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`、`frontend/e2e/test_comment_supplement.spec.ts`。
+- 框架： Playwright。
+- 范围： `/tender` 页面、URL 会话行为、agent run 聊天面板、生成模式、补充批注、上传槽位等浏览器契约。
+- 示例： `frontend/e2e/test_home.spec.ts`、`frontend/e2e/test_url_conversation.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`、`frontend/e2e/test_comment_supplement.spec.ts`。
 
 ## 常见模式
 
@@ -252,13 +252,13 @@ await expect(createGenerateTask(validGenerateRequest)).rejects.toMatchObject({
 
 实际文件：`frontend/__tests__/unit/lib/test_api.test.ts`。
 
-**Store Testing：**
+**Store 测试：**
 - 清空 browser storage。
 - `useChatStore.setState()` 建立 conversations、currentConversationId、activeTaskIds、taskMessageMap。
 - 调用 store action。
 - 断言 conversation messages、task summary、stream store 或 storage key。
 
-**Playwright Pattern：**
+**Playwright 模式：**
 - Playwright config 的 baseURL 是 `http://localhost:8502`。
 - `webServer.command` 是 `npm run dev -- --webpack`。
 - locator 优先使用 role、accessible name、`data-testid` 或限定容器。

@@ -60,6 +60,10 @@
 - 公共 `comment_agent` graph 节点位于 `backend/nodes/common_word_nodes/comment_agent.py`，只作为批注增强项运行：它重新按锚点解析 Word 正文范围，调用 `backend/agents/comments/run_comment_agent()`，并把结果收敛成 `comment_writeback` 摘要；自主生成批注时会基于完整 `polished_text` 应用 bad case prompt 增强，已有 `initial_comments` 的锚点修复模式不执行检索；节点异常、保存失败、上下文缺失或检索失败只能降级为 warning，不能让已保存正文的 generate 任务失败。
 - 独立 `comment_supplement` 任务通过 `CommentSupplementGraph` 执行，节点顺序为 `prepare_comment_supplement -> comment_agent -> finalize_comment_supplement`。准备节点复制 latest 文档为新副本；`comment_agent` 在补充批注任务里直接基于 latest `rewrite_state.polished_text` 复用 `comment_prompt.py` 和 bad case prompt 增强生成批注候选，再做锚点校验和 Word 写回；完成后会话最新 `rewrite_state.prepared_doc_path` 指向补充批注后的副本，后续 rewrite 应继续使用该路径。
 - bad case 检索运行时优先尝试 hybrid；embedding 配置、向量调用、Qdrant healthcheck 或 search 不可用时自动降级到 `bm25_only`。无命中、坏文件或检索失败都只写 retrieval JSON / warning，不阻塞批注生成，也不把检索状态、日志路径或命中详情透传到 SSE、下载卡或 `agent_step`。
+- bad case loader 必须同时支持 v2 `---BEGIN_BAD_CASE---` 块格式和旧格式；目录入口按文件名稳定扫描 `backend/retrieval/bad_cases/*.md`，单个坏文件只进入 warning / failure payload，不能阻断其它有效文件加载。
+- `load_bad_case_runtime_index()` 是 bad case chunks 与 `BM25Index` 的进程内缓存入口；缓存只按目录内 markdown 文件的 mtime/size 签名失效，不缓存单篇 `polished_text` 的检索结果，也不写磁盘缓存文件。
+- `split_polished_text_into_clauses()` 是当前 `clause_only` 切分入口，只覆盖包、中文数字章节和数字顿号条款；切不出条款时回退整篇正文检索。不要在未验证前扩展到 `1.1`、`（一）` 或表格单元格级切分。
+- prompt context 注入前必须先按 `case_id` 去重并稳定排序；注入给模型的 bad case 只保留 `risk_type`、`risk_pattern`、`recommended_comment_policy`、`applicability_boundary`、`anchor_policy` 5 个字段，`case_id`、score、命中条款和审计字段只留在 retrieval JSON。
 
 ### DeepAgents 初次生成
 

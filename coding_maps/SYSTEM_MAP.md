@@ -1,6 +1,6 @@
 # TenderWord 系统地图
 
-**生成日期：** 2026-06-05
+**生成日期：** 2026-06-08
 
 本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它不替代代码真源、不替代根级 `AGENTS.md` 的执行红线，也不替代 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 的子系统事实文档。
 
@@ -85,7 +85,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - 前端会话、草稿、任务摘要和历史状态使用 `sessionStorage`，主要由 `frontend/stores/chatStore.ts`、`frontend/stores/historyStore.ts` 和 `frontend/stores/chatTaskSessionStore.ts` 持久化。
 - 前端活跃 SSE 文本、日志、进度、当前节点和未完成 agent step 快照是内存态，位于 `frontend/stores/chatStreamStore.ts`；完成态 `agent-step` 过程卡进入 `chatStore.conversations`。
 - 后端任务、会话和 SSE 事件当前是内存态；上传、下载、生成文档、prompt log 和运行日志是本地文件。
-- 后端没有已确认的外部数据库；外部集成主要是 LLM provider、招标详情接口、模板候选接口、Word COM，以及批注 bad case retrieval 可选使用的 Qdrant/embedding。`backend/retrieval/` 已是 `generate_comments`、自主生成模式 `comment_agent` 和 `comment_supplement` 的正式 prompt 增强运行时；hybrid 失败会降级到 `bm25_only`，检索失败不阻塞批注生成。
+- 后端没有已确认的外部数据库；外部集成主要是 LLM provider、招标详情接口、模板候选接口、Word COM，以及批注 bad case retrieval。`backend/retrieval/` 已是 `generate_comments`、自主生成模式 `comment_agent` 和 `comment_supplement` 的正式 prompt 增强运行时；向量配置可用时使用 Qdrant/embedding，hybrid 失败会降级到 `bm25_only`，检索失败不阻塞批注生成。
 - 本地完整运行的关键环境是 Windows + Word COM；WSL 场景下前端可在 Linux Node 运行，后端仍需要 Windows Python 和 Word COM。
 
 ## 按任务分类的阅读指南
@@ -95,6 +95,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 先读：
 
 - `AGENTS.md`
+- `docs/backend.md`
 - `backend/.planning/codebase/ARCHITECTURE.md`
 - `backend/.planning/codebase/STRUCTURE.md`
 - `backend/.planning/codebase/INTEGRATIONS.md`
@@ -114,6 +115,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 先读：
 
 - `AGENTS.md`
+- `docs/frontend.md`
 - `frontend/.planning/codebase/ARCHITECTURE.md`
 - `frontend/.planning/codebase/STRUCTURE.md`
 - `frontend/.planning/codebase/CONVENTIONS.md`
@@ -134,6 +136,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 
 必须同时读：
 
+- `docs/interfaces-runtime.md`
 - `INTERFACES.md`
 - `backend/models/`
 - `backend/api/`
@@ -204,6 +207,10 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - `README.md`
 - `ARCHITECTURE.md`
 - `INTERFACES.md`
+- `docs/backend.md`
+- `docs/frontend.md`
+- `docs/interfaces-runtime.md`
+- `docs/knowledge-validation.md`
 - `backend/.planning/codebase/ARCHITECTURE.md`
 - `backend/.planning/codebase/INTEGRATIONS.md`
 - `backend/.planning/codebase/STRUCTURE.md`
