@@ -8,7 +8,10 @@ def _identity_node(state, config=None):
     return {}
 
 
-def _build_graph(calls: list[str]) -> StandardTenderWorkflowGraph:
+def _build_graph(
+    calls: list[str],
+    bad_case_retrieval_calls: list[str] | None = None,
+) -> StandardTenderWorkflowGraph:
     def _extract_node(state, config=None):
         calls.append("extract_tender_params")
         return {"tender_params": "extracted params"}
@@ -27,6 +30,8 @@ def _build_graph(calls: list[str]) -> StandardTenderWorkflowGraph:
 
     def _comments_node(state, config=None):
         calls.append("generate_comments")
+        if bad_case_retrieval_calls is not None:
+            bad_case_retrieval_calls.append("workflow")
         return {"polished_comments": []}
 
     def _update_node(state, config=None):
@@ -39,6 +44,8 @@ def _build_graph(calls: list[str]) -> StandardTenderWorkflowGraph:
 
     def _comment_agent_node(state, config=None):
         calls.append("comment_agent")
+        if bad_case_retrieval_calls is not None:
+            bad_case_retrieval_calls.append("agent")
         return {
             "comment_writeback_result": {
                 "summary": "AI 批注写入：生成 0 条，成功 0 条，失败 0 条，跳过 0 条",
@@ -67,10 +74,13 @@ def _build_graph(calls: list[str]) -> StandardTenderWorkflowGraph:
 
 
 def _run_graph(
-    generation_mode: str, *, comment_generation_mode: str = "on"
+    generation_mode: str,
+    *,
+    comment_generation_mode: str = "on",
+    bad_case_retrieval_calls: list[str] | None = None,
 ) -> tuple[dict, list[str]]:
     calls: list[str] = []
-    result = _build_graph(calls).compile().invoke(
+    result = _build_graph(calls, bad_case_retrieval_calls).compile().invoke(
         {
             "generation_mode": generation_mode,
             "comment_generation_mode": comment_generation_mode,
@@ -135,6 +145,32 @@ def test_agent_branch_skips_comment_agent_when_comment_generation_is_off() -> No
     assert result["polished_text"] == "agent text"
     assert result["polished_comments"] == []
     assert result["generated_comment_count"] == 0
+
+
+def test_workflow_off_branch_does_not_trigger_bad_case_retrieval() -> None:
+    bad_case_retrieval_calls: list[str] = []
+
+    _result, calls = _run_graph(
+        "workflow",
+        comment_generation_mode="off",
+        bad_case_retrieval_calls=bad_case_retrieval_calls,
+    )
+
+    assert "generate_comments" not in calls
+    assert bad_case_retrieval_calls == []
+
+
+def test_agent_off_branch_does_not_trigger_bad_case_retrieval() -> None:
+    bad_case_retrieval_calls: list[str] = []
+
+    _result, calls = _run_graph(
+        "agent",
+        comment_generation_mode="off",
+        bad_case_retrieval_calls=bad_case_retrieval_calls,
+    )
+
+    assert "comment_agent" not in calls
+    assert bad_case_retrieval_calls == []
 
 
 def test_agent_branch_uses_comment_agent_regardless_of_source_document_path() -> None:

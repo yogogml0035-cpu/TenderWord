@@ -25,6 +25,7 @@ Source: prd.json
 - `generate_comments` 的 retrieval JSON 只写入 prompt log 目录下的 `*_comments_bad_case_retrieval_*.json`；节点仅补充完整 `polished_text` 并序列化 runtime payload，不把日志路径写回 state 或前端可见字段。
 - `comment_agent` 自主生成模式的 bad case 检索必须放在 Word 打开且锚点范围解析完成之后；prompt/retrieval 证据写入 `comment_agent_audit` 目录，不回传 state、SSE 或下载卡。
 - `backend/scripts/test_comment_hybrid_retrieval.py` 只是正式 runtime 的诊断壳；默认读取 `backend/retrieval/bad_cases`，不再保留独立 v2 解析、条款切分、Qdrant upsert 或 collection recreate 逻辑。
+- `backend/tests/graphs/test_generation_mode_branching.py` 可用 sentinel 列表验证分支节点是否会触发检索；`comment_generation_mode=off` 应在 graph 层同时跳过 `generate_comments` 和 `comment_agent`。
 
 ## 2026-06-08 17:43 - US-001
 - 实现了正式 bad case loader 默认读取 `backend/retrieval/bad_cases/comment_bad_cases.md`，并解析 v2 `---BEGIN_BAD_CASE--- ... ---END_BAD_CASE---` 字段。
@@ -197,4 +198,15 @@ Source: prd.json
   - retrieval 长期边界更新需要同时检查 `asset/shared_runtime_word_skill_knowledge_pack.md`、`docs/interfaces-runtime.md`、`INTERFACES.md`、`coding_maps/SYSTEM_MAP.md` 和 `docs/backend.md`，否则系统地图会继续暴露旧实验口径。
   - `retrieval JSON` 是后端审计文件，不是任务 state / SSE / 下载卡字段；新增日志字段时也要保持前端不可见边界。
   - 文档型 story 仍要先跑 `git diff --check` 和密钥模式扫描；代码未变时可用现有 pytest/type-check 证明基线没有被文档提交破坏。
+---
+
+## 2026-06-08 21:49 - US-015
+- 补齐 graph 分流层 focused 回归：在 `comment_generation_mode=off` 的 workflow 和 agent 分支中加入 bad case 检索 sentinel，确认不会进入 `generate_comments` 或 `comment_agent` 检索路径。
+- 执行 focused 回归套件，覆盖 retrieval 目录扫描/坏文件/缓存/切分/fallback/BM25/hybrid/context，prompt 5 字段注入与 `reference_text` 禁止，节点命中/无命中/失败降级/自主生成注入，以及 graph off 分流。
+- 更改的文件：`backend/tests/graphs/test_generation_mode_branching.py`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/tests/graphs/test_generation_mode_branching.py`；`backend/.venv-linux/bin/python -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py backend/tests/prompts/test_comment_prompt_bad_case_context.py backend/tests/nodes/test_generate_comments_bad_case.py backend/tests/nodes/test_comment_agent_writeback_node.py backend/tests/graphs/test_generation_mode_branching.py -v`；`backend/.venv-linux/bin/python -m pytest backend/tests -q`；`git diff --check -- backend/tests/graphs/test_generation_mode_branching.py`
+- **未来迭代的学习：**
+  - graph 分流边界不要只看最终状态字段；给被跳过节点加 sentinel 更能防止 `comment_generation_mode=off` 误触发检索。
+  - US-015 的 focused 回归入口应优先组合 retrieval、prompt、node 和 graph 四层测试，避免依赖真实 Qdrant、embedding provider 或 Word COM。
+  - 当前完整 backend 测试基线可在 Linux venv 下通过，适合作为 bad case retrieval 后续改动的回归门槛。
 ---
