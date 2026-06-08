@@ -37,7 +37,8 @@
 - Agent run 审计日志只能写白名单结构化字段和 scrub 后摘要；给 agent 暴露运行态信息时优先使用只读公共摘要工具，不返回完整任务结果、下载路径。
 - 生成/批注 agent workspace 和审计日志文件名使用共享日志命名清洗辅助；新增 agent workspace 不要复制独立文件名规则。
 - LLM 流式超时统一复用后端 settings 中的 `LLM_STREAM_TIMEOUT_SECONDS`。
-- `backend/retrieval/` 当前是批注坏案例检索诊断/实验入口，不属于主业务链路；接入正式批注流程前必须补降级行为和测试。
+- `backend/retrieval/` 是批注 bad case 检索正式运行时，接入 `generate_comments`、自主生成模式 `comment_agent` 和 `comment_supplement` 的 prompt 增强；rewrite 和 `comment_generation_mode=off` 不触发该检索。
+- bad case retrieval 优先 hybrid，embedding / Qdrant 任一环节失败时降级到 `bm25_only`；无命中、坏文件或检索失败只写 warning / retrieval JSON，不阻塞批注生成，也不把检索状态、日志路径或命中详情展示到 SSE、下载卡或 `agent_step`。
 
 ## 招标类型扩展
 

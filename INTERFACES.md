@@ -235,13 +235,19 @@ Word COM 只存在于后端：
 - 模板候选：`TEMPLATE_CANDIDATE_API_URL` -> `backend/util/common_util/template_candidates.py`。
 - 模板下载：必须经过 `TEMPLATE_CANDIDATE_ALLOWED_HOSTS` 和 `validate_template_download_url()`。
 
+### 内部批注坏案例检索
+
+- `backend/retrieval/` 是批注 bad case 检索正式运行时，不是对前端开放的新 API。
+- 正式接入点只包括 `generate_comments`、自主生成模式 `comment_agent` 和 `comment_supplement` 的 prompt 增强；rewrite 和 `comment_generation_mode=off` 不触发 bad case 检索。
+- hybrid 失败时降级到 `bm25_only`，检索失败、无命中或坏文件不会阻塞批注生成。
+- retrieval JSON 只作为后端审计文件落盘，检索状态、日志路径和命中详情不进入 SSE、下载卡或 `agent_step`。
+
 ## 未证实或当前不存在的接口
 
 - 当前源文档未确认稳定登录、用户认证或权限接口。
 - 当前源文档未确认外部数据库、Redis、队列服务或对象存储。
 - 当前源文档未确认第三方入站 webhook。
 - 当前源文档未确认部署平台或 CI workflow 文件。
-- `backend/retrieval/` 当前只是批注坏案例检索诊断/实验入口，未确认接入正式 API、任务 graph 或批注主链路。
 
 这些能力若后续新增，需要先建立代码真源，再同步本文件和对应 `.planning/codebase/` 文档。
 

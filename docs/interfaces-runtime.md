@@ -15,7 +15,7 @@
 - 生成节点只消费 `template_path` 与 `tender_param_paths`，不要重新引入旧文件槽位。
 - `generation_style`、`generation_mode`、`comment_generation_mode` 和 `style_writeback_mode` 都是 generate-only 字段，不得进入 rewrite 请求模型、skill state 或 prompt surface。
 - `generation_mode=workflow` 走旧 `generate_polished_text`，`generation_mode=agent` 走公共 `content_agent`。
-- `comment_generation_mode=off` 时 workflow 与 agent 生成都跳过 AI 批注生成，不进入 rewrite 链路。
+- `comment_generation_mode=off` 时 workflow 与 agent 生成都跳过 AI 批注生成和 bad case 检索增强，不进入 rewrite 链路。
 
 ## 任务与 SSE
 
@@ -23,6 +23,7 @@
 - 新增 SSE 事件类型必须同步后端模型、事件发送、前端 union 类型、`frontend/lib/sse.ts` named event 注册、`useChatSSE` 解析和测试。
 - 任务失败必须最终表现为 `error` 或 `done`，不能让 SSE 静默中断。
 - `comment_writeback_*` 和 `style_writeback_*` 摘要属于任务结果契约，不得在 state、任务结果或 `done` 事件中丢失。
+- bad case retrieval JSON 属于后端 prompt/retrieval 审计文件，不进入 SSE、下载卡、任务结果或 `agent_step` 前端展示。
 
 ## Agent Run 与 Rewrite
 
@@ -53,4 +54,5 @@
 - 模板候选外部列表请求、下载代理、落盘和文件名清洗统一由后端处理。
 - 外部模板下载链接必须继续受后端白名单约束。
 - 前端 API base URL、Next rewrite 和开发期 allowed origin 是同一条本地联调链路，不能只改其中一处。
-- `backend/retrieval/` 的 Qdrant/embedding 当前只作为批注坏案例检索诊断/实验入口，未确认接入正式 API 或任务主链路。
+- `backend/retrieval/` 是批注 bad case 检索正式运行时，接入 `generate_comments`、自主生成模式 `comment_agent` 和 `comment_supplement` 的 prompt 增强；rewrite 不接入该检索，也不新增对前端公开的 API 字段。
+- retrieval 运行时优先 hybrid，Qdrant/embedding 任一环节不可用或失败时降级为 `bm25_only`；无命中、坏文件或检索失败只记录 warning / retrieval JSON，不阻塞批注生成。

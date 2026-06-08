@@ -22,7 +22,7 @@
 - SSE 与日志透传：`backend/core/sse_manager.py`、`backend/api/stream.py`、`backend/models/sse.py`、`backend/util/log_util/`
 - Agent/chat NDJSON 行序列化：`backend/services/chat_stream_service.py`
 - Agent workspace 日志命名：`backend/agents/log_naming.py`
-- 批注坏案例检索：`backend/retrieval/` 当前只作为诊断/实验入口，不是 generate / rewrite / comment_supplement 主链路真源。
+- 批注坏案例检索：`backend/retrieval/` 是 `generate_comments`、自主生成模式 `comment_agent` 和 `comment_supplement` 的正式 prompt 增强入口；坏案例真源目录是 `backend/retrieval/bad_cases/`，rewrite 不接入该检索。
 
 ## 运行时分层
 
@@ -53,12 +53,13 @@
 - `POST /api/comment-supplement` 是独立补充批注入口；请求只携带会话、当前下载卡文件路径和模型。`DocumentService.create_comment_supplement_task()` 必须校验 latest `rewrite_state`、`polished_text`、当前文件存在且等于 latest `prepared_doc_path` 后才创建任务。
 - `generation_mode`、`generation_style`、`comment_generation_mode` 与 `style_writeback_mode` 都是 generate-only 字段：`DocumentService._build_initial_state()` 可写入 generate state，rewrite 请求模型和初始 state 不得注入这些字段。
 - `generation_mode` 当前只允许 `workflow` 与 `agent`，默认 `workflow`。`workflow` 继续走 `generate_polished_text`，保留 `render_generate_prompt()`、`stream_llm_completion()` 和旧 `llm` snapshot 事件；`agent` 只影响初次 generate 的生成节点选择，最终仍必须产出 `polished_text` 给批注开关开启时的批注分支、样式回写、Word 写回和下载主干。
-- `comment_generation_mode` 当前只允许 `on` 与 `off`，默认 `on`。`on` 时 workflow generate 继续经过 `generate_comments`，agent generate 继续在 `update_word` 后经过公共 `comment_agent`；`off` 时两种生成方式都跳过批注生成逻辑，并在 `comments_branch_done` 设置 `suppress_ai_comment_writeback=True`、清空临时批注计数。
+- `comment_generation_mode` 当前只允许 `on` 与 `off`，默认 `on`。`on` 时 workflow generate 继续经过 `generate_comments`，agent generate 继续在 `update_word` 后经过公共 `comment_agent`；`off` 时两种生成方式都跳过批注生成逻辑和 bad case 检索增强，并在 `comments_branch_done` 设置 `suppress_ai_comment_writeback=True`、清空临时批注计数。
 - generate 成功后的后端 `rewrite_state` 可以保留 `generation_mode`、`polished_text`、`prepared_doc_path` 和后续链路所需的稳定运行态字段；初次生成时的临时批注推导结果不应进入任务 result、SSE `done`、前端下载卡 metadata 或 `sessionStorage`。
 - 标准生成 graph 的分流只在 `StandardTenderWorkflowGraph` 基类实现：`generation_mode_gate` 后按 `_select_generation_node()` 进入 `generate_polished_text` 或 `content_agent`；正文生成后再按 `comment_generation_mode` 选择 workflow 的 `generate_comments` 或跳过，`update_word` 后再按 `generation_mode=agent && comment_generation_mode=on` 选择是否进入公共 `comment_agent`。类型 graph 不应复制这段分流。
 - `generation_mode=agent` 的 `update_word` 只负责正文、样式和保存：`comments_branch_done` 会在 agent 分支或 `comment_generation_mode=off` 时设置 `suppress_ai_comment_writeback=True`，各类型 update 节点必须跳过确定性 AI 批注写回；`comment_generation_mode=on` 时，agent generate 的 `update_word` 完成后由标准 graph 路由到公共 `comment_agent` 节点，workflow 分支不得进入该节点。agent generate 无 `polished_comments` 时，`comment_agent` 可复用 `backend/prompts/comment_prompt.py` 自主生成批注候选。
-- 公共 `comment_agent` graph 节点位于 `backend/nodes/common_word_nodes/comment_agent.py`，只作为批注增强项运行：它重新按锚点解析 Word 正文范围，调用 `backend/agents/comments/run_comment_agent()`，并把结果收敛成 `comment_writeback` 摘要；节点异常、保存失败或上下文缺失只能降级为 warning，不能让已保存正文的 generate 任务失败。
-- 独立 `comment_supplement` 任务通过 `CommentSupplementGraph` 执行，节点顺序为 `prepare_comment_supplement -> comment_agent -> finalize_comment_supplement`。准备节点复制 latest 文档为新副本；`comment_agent` 在补充批注任务里直接基于 latest `rewrite_state.polished_text` 复用 `comment_prompt.py` 生成批注候选，再做锚点校验和 Word 写回；完成后会话最新 `rewrite_state.prepared_doc_path` 指向补充批注后的副本，后续 rewrite 应继续使用该路径。
+- 公共 `comment_agent` graph 节点位于 `backend/nodes/common_word_nodes/comment_agent.py`，只作为批注增强项运行：它重新按锚点解析 Word 正文范围，调用 `backend/agents/comments/run_comment_agent()`，并把结果收敛成 `comment_writeback` 摘要；自主生成批注时会基于完整 `polished_text` 应用 bad case prompt 增强，已有 `initial_comments` 的锚点修复模式不执行检索；节点异常、保存失败、上下文缺失或检索失败只能降级为 warning，不能让已保存正文的 generate 任务失败。
+- 独立 `comment_supplement` 任务通过 `CommentSupplementGraph` 执行，节点顺序为 `prepare_comment_supplement -> comment_agent -> finalize_comment_supplement`。准备节点复制 latest 文档为新副本；`comment_agent` 在补充批注任务里直接基于 latest `rewrite_state.polished_text` 复用 `comment_prompt.py` 和 bad case prompt 增强生成批注候选，再做锚点校验和 Word 写回；完成后会话最新 `rewrite_state.prepared_doc_path` 指向补充批注后的副本，后续 rewrite 应继续使用该路径。
+- bad case 检索运行时优先尝试 hybrid；embedding 配置、向量调用、Qdrant healthcheck 或 search 不可用时自动降级到 `bm25_only`。无命中、坏文件或检索失败都只写 retrieval JSON / warning，不阻塞批注生成，也不把检索状态、日志路径或命中详情透传到 SSE、下载卡或 `agent_step`。
 
 ### DeepAgents 初次生成
 

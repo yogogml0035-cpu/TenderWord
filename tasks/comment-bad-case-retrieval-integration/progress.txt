@@ -9,7 +9,7 @@ Source: prd.json
 - `backend/prompts/comment_prompt.py` 是当前批注生成 prompt 唯一真源；新增 retrieval-aware 入口必须复用它。
 - `generate_comments` 负责 workflow 批注生成和 prompt/raw/repaired/new_comments 日志；bad case 增强应在 LLM 调用前完成。
 - `comment_agent` 只有在 `allow_comment_generation=True && initial_comments=[]` 时自主生成批注；已有候选时是锚点修复模式，不注入 bad case。
-- `backend/retrieval/` 当前仍被文档标记为实验入口，本任务将其中 bad case 检索提升为正式批注增强入口。
+- `backend/retrieval/` 已是批注 bad case 检索正式增强入口；文档边界应保持只接入 `generate_comments`、自主生成模式 `comment_agent` 和 `comment_supplement`，不进入 rewrite 或 `comment_generation_mode=off`。
 - Ralph stories 已收窄为 15 个可独立验证切片，按 loader、目录、缓存、切分、BM25、hybrid、context、日志、prompt、节点、脚本、文档、回归的依赖顺序执行。
 - `backend/retrieval/bad_case_loader.py` 暴露正式 bad case 默认目录和主文件入口；v2 `---BEGIN_BAD_CASE---` 解析与旧格式解析需要保持兼容。
 - `load_bad_case_directory()` 是目录级 bad case runtime 入口；它按文件名扫描 `*.md`，坏文件只进入 warning/failure payload，不应阻断有效文件加载。
@@ -186,4 +186,15 @@ Source: prd.json
   - 诊断脚本应继续调用正式 runtime，不要恢复脚本本地 parser、splitter、risk filter、BM25Index 或 Qdrant 写入流程。
   - `--clause-limit` 通过正式 `split_polished_text_into_clauses()` 预裁剪输入，保证脚本诊断少量条款时不会对整篇样例执行向量查询。
   - Windows Python 能运行脚本和测试；在当前 bash 捕获 Windows 控制台输出时中文可能显示为编码替换字符，不影响检索结果或测试断言。
+---
+
+## 2026-06-08 21:34 - US-014
+- 将 retrieval 文档口径从诊断/实验入口更新为正式批注 prompt 增强入口，覆盖 `generate_comments`、自主生成模式 `comment_agent` 和 `comment_supplement`。
+- 同步保留边界：`comment_generation_mode` 仍是 generate-only 字段，rewrite 和 `comment_generation_mode=off` 不触发 bad case 检索；hybrid 失败降级到 `bm25_only`，检索失败不阻塞批注生成，retrieval 状态不进入前端展示。
+- 更改的文件：`asset/shared_runtime_word_skill_knowledge_pack.md`、`docs/interfaces-runtime.md`、`INTERFACES.md`、`coding_maps/SYSTEM_MAP.md`、`docs/backend.md`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`git diff --check -- asset/shared_runtime_word_skill_knowledge_pack.md docs/interfaces-runtime.md INTERFACES.md coding_maps/SYSTEM_MAP.md docs/backend.md`；敏感信息扫描只命中文档中的 `token` / `.env` 规则说明，没有真实密钥；`npm run type-check`；`backend/.venv-linux/bin/python -m pytest backend/tests -q`
+- **未来迭代的学习：**
+  - retrieval 长期边界更新需要同时检查 `asset/shared_runtime_word_skill_knowledge_pack.md`、`docs/interfaces-runtime.md`、`INTERFACES.md`、`coding_maps/SYSTEM_MAP.md` 和 `docs/backend.md`，否则系统地图会继续暴露旧实验口径。
+  - `retrieval JSON` 是后端审计文件，不是任务 state / SSE / 下载卡字段；新增日志字段时也要保持前端不可见边界。
+  - 文档型 story 仍要先跑 `git diff --check` 和密钥模式扫描；代码未变时可用现有 pytest/type-check 证明基线没有被文档提交破坏。
 ---
