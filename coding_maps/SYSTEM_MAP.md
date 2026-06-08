@@ -42,7 +42,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 ### 任务上下文助手与 rewrite
 
 - 右侧聊天统一从 `frontend/components/chat/ChatPanel.tsx` 发起，通过 `frontend/lib/api.ts` 调用 `POST /api/agent/runs/stream`。
-- 后端 `backend/api/agent.py` 返回 NDJSON agent run 事件，编排真源是 `backend/services/agent_run_service.py`；这里负责显式 `selected_skills`、自然语言兜底、guard、`needs_input`、`task_accepted` 和 JSONL 审计日志。
+- 后端 `backend/api/agent.py` 返回 NDJSON agent run 事件，编排真源是 `backend/services/agent_run_service.py`；NDJSON 行序列化复用 service 层共享辅助。这里负责显式 `selected_skills`、自然语言兜底、guard、`needs_input`、`task_accepted` 和 JSONL 审计日志。
 - task-context assistant 运行时与 tool 真源在 `backend/agents/task_context_assistant/`：它只暴露受控 rewrite skill、受控上下文读取工具、公共摘要工具，以及复用 `DocumentService.create_rewrite_task()` 的 `create_rewrite_task_tool`。
 - rewrite 真正进入队列后，仍走既有 task runtime：声明和 guide 在 `backend/skills/rewrite/`，执行图在 `backend/graphs/skill_graph.py` 与 `backend/graphs/task_skill_workflows.py`，后续 SSE、取消、下载和结果卡继续复用同一任务主链路。
 - 上传 Word 文件后的修改统一走 rewrite：前端上传文件类型是 `rewrite_source`，agent run payload 由 `uploaded_files` 提供文件摘要、由 `context_snapshot.rewrite_context` 提供当前页面 `form_type`、锚点、`tender_lx`、`fund_source_lx` 和可选招标数据快照；后端 task skill state 内部用 `rewrite_source="uploaded_file"` 标记上传来源。
@@ -56,6 +56,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - 后端 `DocumentService` 校验当前会话 latest `rewrite_state`、`polished_text` 和 source file 后，提交 `CommentSupplementGraph`。
 - `CommentSupplementGraph` 复制当前文档副本，调用 `backend/agents/comments/` 的 `comment_agent` 生成/校验/写回补充批注，完成后更新会话 latest `rewrite_state.prepared_doc_path` 并通过同一 SSE / 下载链路返回结果。
 - rewrite 和 comment_supplement 下载卡不应再次显示补充批注动作。
+- 生成/批注 agent 的 workspace 与审计日志共享后端日志命名清洗辅助；新增 agent workspace 不应各自复制文件名规则。
 
 ### 模板候选
 
@@ -84,7 +85,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - 前端会话、草稿、任务摘要和历史状态使用 `sessionStorage`，主要由 `frontend/stores/chatStore.ts`、`frontend/stores/historyStore.ts` 和 `frontend/stores/chatTaskSessionStore.ts` 持久化。
 - 前端活跃 SSE 文本、日志、进度、当前节点和未完成 agent step 快照是内存态，位于 `frontend/stores/chatStreamStore.ts`；完成态 `agent-step` 过程卡进入 `chatStore.conversations`。
 - 后端任务、会话和 SSE 事件当前是内存态；上传、下载、生成文档、prompt log 和运行日志是本地文件。
-- 后端没有已确认的外部数据库；外部集成主要是 LLM provider、招标详情接口、模板候选接口和 Word COM。
+- 后端没有已确认的外部数据库；外部集成主要是 LLM provider、招标详情接口、模板候选接口和 Word COM。`backend/retrieval/` 的 Qdrant/embedding 当前是批注坏案例检索诊断/实验入口，不是主业务链路。
 - 本地完整运行的关键环境是 Windows + Word COM；WSL 场景下前端可在 Linux Node 运行，后端仍需要 Windows Python 和 Word COM。
 
 ## 按任务分类的阅读指南
@@ -182,6 +183,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - agent run 审计日志和摘要工具是否仍只暴露 scrub 后白名单字段。
 - Word COM 相关改动是否仍然经过任务队列、graph 锁、取消检查和进度包装。
 - Prompt、LLM 流式、`content_agent` 或 `comment_agent` 改动是否复用 `LLM_STREAM_TIMEOUT_SECONDS`，并保留 Prompt Layer 与智能体协议边界。
+- `backend/retrieval/` 是否仍只按诊断/实验入口使用；接入正式批注链路前是否补了降级行为、外部依赖 mock 和测试。
 - `content_verify_agent` 是否只输出真实需修复 findings，并把“无问题 / 无需修改”的无效审核项折叠为 `[]`。
 - 模板候选改动是否仍由后端代理外部列表、文件下载和白名单校验。
 - 前端 running task 恢复是否先查任务状态，避免直接连接已不存在的 SSE。

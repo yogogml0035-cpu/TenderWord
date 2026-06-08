@@ -27,6 +27,7 @@
 ## Agent Run 与 Rewrite
 
 - `POST /api/agent/runs/stream` 是右侧聊天唯一流式入口，返回 NDJSON agent run 事件。
+- NDJSON 行格式由后端 service 层共享辅助序列化，新增事件时同步前端 parser、类型和测试。
 - `task_accepted` 只负责把 agent run 收敛为“已创建任务”；后续排队、SSE、取消、下载和结果卡仍沿用既有 task / stream 契约。
 - `needs_input` 不创建后台任务。
 - 上传 Word 文件 rewrite 必须带非空用户重写指令、当前页面 `form_type`、完整锚点、`tender_lx` 和 `fund_source_lx`。
@@ -52,3 +53,4 @@
 - 模板候选外部列表请求、下载代理、落盘和文件名清洗统一由后端处理。
 - 外部模板下载链接必须继续受后端白名单约束。
 - 前端 API base URL、Next rewrite 和开发期 allowed origin 是同一条本地联调链路，不能只改其中一处。
+- `backend/retrieval/` 的 Qdrant/embedding 当前只作为批注坏案例检索诊断/实验入口，未确认接入正式 API 或任务主链路。

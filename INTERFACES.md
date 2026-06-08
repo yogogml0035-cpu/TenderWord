@@ -84,6 +84,7 @@
 
 同步要求：
 - NDJSON event shape 变化必须同步 `frontend/types/api.ts` 和 `ChatPanel`。
+- NDJSON 行格式由后端 service 层共享辅助序列化；新增 agent/chat 流事件时不要在调用方各自手写 JSON 行。
 - `selected_skills`、`context_snapshot.uploaded_files` 和 `context_snapshot.rewrite_context` 变化必须同步 `backend/models/agent_run.py`、`frontend/types/api.ts`、`frontend/stores/chatStore.ts` 和 `ChatPanel`。
 - `task_accepted` 只负责把 agent run 收敛为“已创建任务”；后续排队、SSE、取消、下载和结果卡仍沿用既有 task / stream 契约，不能在 agent run 自己复制第二套任务状态机。
 - `generation_style` 和 `generation_mode` 是 generate-only 字段，不得透传进 rewrite 请求模型、skill state 或 prompt surface。
@@ -240,6 +241,7 @@ Word COM 只存在于后端：
 - 当前源文档未确认外部数据库、Redis、队列服务或对象存储。
 - 当前源文档未确认第三方入站 webhook。
 - 当前源文档未确认部署平台或 CI workflow 文件。
+- `backend/retrieval/` 当前只是批注坏案例检索诊断/实验入口，未确认接入正式 API、任务 graph 或批注主链路。
 
 这些能力若后续新增，需要先建立代码真源，再同步本文件和对应 `.planning/codebase/` 文档。
 

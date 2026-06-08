@@ -1,134 +1,215 @@
 # 后端集成事实地图
 
-**分析日期：** 2026-06-05
+**分析日期：** 2026-06-08
 
-**范围：** `backend/` 对外部服务、浏览器客户端、文件系统、Word COM 和运行环境的集成边界。
+**范围：** `backend/` 对前端、外部 HTTP、LLM、Word COM、文件系统、检索、日志和本地运行环境的集成边界。`backend/.env` 文件存在但不读取内容。
 
-## API 与外部服务
+## APIs & External Services
 
-### 前端调用边界
+**Frontend API Boundary:**
+- FastAPI routers 注册在 `backend/main.py`，统一挂载 `/api` 前缀，健康检查除外。
+- 主要 endpoints:
+  - `POST /api/generate` - 创建初次生成任务，文件 `backend/api/generate.py`
+  - `GET /api/generate/{task_id}` - 获取生成任务状态，文件 `backend/api/generate.py`
+  - `GET /api/stream/{task_id}` - SSE 任务流，文件 `backend/api/stream.py`
+  - `GET /api/stream/{task_id}/status` - SSE 连接状态，文件 `backend/api/stream.py`
+  - `GET /api/tasks`、`GET /api/tasks/{task_id}`、`DELETE /api/tasks/{task_id}`、`POST /api/tasks/{task_id}/heartbeat` - 任务管理，文件 `backend/api/tasks.py`
+  - `POST /api/agent/runs/stream` - NDJSON agent run，文件 `backend/api/agent.py`
+  - `POST /api/comment-supplement` - 补充批注任务，文件 `backend/api/comment_supplement.py`
+  - `POST /api/upload`、`POST /api/upload/multiple` - 文件上传，文件 `backend/api/upload.py`
+  - `GET /api/download/{file_path:path}` - 文件下载，文件 `backend/api/download.py`
+  - `GET /api/tender/{tender_no}` - 招标详情代理，文件 `backend/api/tender.py`
+  - `GET /api/template-candidates`、`GET /api/template-candidates/download`、`POST /api/template-candidates/select` - 模板候选代理，文件 `backend/api/template_candidates.py`
+  - `POST /api/conversations/{conversation_id}/heartbeat` - 会话心跳，文件 `backend/api/conversations.py`
+- Root health endpoints:
+  - `/health`、`/health/ready`、`/health/live`、`/` 在 `backend/main.py`，不挂 `/api`。
 
-- 后端 API 前缀是 `/api`，router 注册在 `backend/main.py`。
-- 前端应只通过 `frontend/lib/api.ts` 调用后端。
-- 生成、agent run、补充批注、任务、SSE、会话心跳、上传、下载、招标详情、模板候选都在 `backend/api/` 下暴露。
-- 根级健康检查端点是 `/health`、`/health/ready` 和 `/health/live`，不走 `/api` 前缀；当前 readiness 只表达应用就绪检查，不代表 Word COM 真实闭环可用。
+**LLM Providers:**
+- DeepSeek - 文本生成默认 provider。
+  - SDK/Client: OpenAI-compatible client via `openai` / `httpx`
+  - Auth: `DEEPSEEK_API_KEY`
+  - Config: `DEEPSEEK_BASE_URL`, `DEEPSEEK_MODEL`
+  - Files: `backend/config/settings.py`, `backend/util/common_util/llm_stream_utils.py`
+- Qwen / DashScope - 可选 LLM provider。
+  - SDK/Client: OpenAI-compatible API through `langchain-openai` / HTTP
+  - Auth: `DASHSCOPE_API_KEY`
+  - Config: `DASHSCOPE_BASE_URL`, `QWEN_MODEL`
+  - Files: `backend/config/settings.py`, `backend/util/common_util/llm_stream_utils.py`
+- Doubao / ARK - 可选 LLM provider。
+  - SDK/Client: `volcengine-python-sdk[ark]` and OpenAI-compatible usage in model factory
+  - Auth: `ARK_API_KEY`
+  - Config: `ARK_BASE_URL`, `DOUBAO_MODEL`
+  - Files: `backend/config/settings.py`, `backend/util/common_util/llm_stream_utils.py`
+- LangSmith - 可选 tracing environment exposure.
+  - SDK/Client: LangChain/LangSmith environment variables
+  - Auth: `LANGSMITH_API_KEY`
+  - Config: `LANGSMITH_TRACING`, `LANGSMITH_ENDPOINT`, `LANGSMITH_PROJECT`
+  - Files: `backend/config/settings.py`, `backend/tests/config/test_settings_langsmith.py`
 
-### LLM Provider
+**Agents:**
+- DeepAgents content generation.
+  - SDK/Client: `deepagents.create_deep_agent`
+  - Auth: uses selected LLM provider config
+  - Files: `backend/agents/generation/content_agents.py`, `backend/agents/generation/model_factory.py`
+- DeepAgents task context assistant.
+  - SDK/Client: `deepagents.create_deep_agent`
+  - Auth: uses selected LLM provider config
+  - Files: `backend/agents/task_context_assistant/factory.py`, `backend/services/agent_run_service.py`
+- LangChain comment agent.
+  - SDK/Client: `langchain.agents.create_agent`, `ToolCallLimitMiddleware`
+  - Auth: uses selected LLM provider config
+  - Files: `backend/agents/comments/comment_agent.py`, `backend/agents/comments/tools.py`
 
-- LLM 流式调用集中在 `backend/util/common_util/llm_stream_utils.py`。
-- 当前模型枚举在 `backend/models/generate.py`：`deepseek`、`qwen`、`doubao`。
-- Provider 配置在 `backend/config/settings.py`，包括 key、base URL、模型名和 `LLM_STREAM_TIMEOUT_SECONDS`。
-- 生成、rewrite、agent run、补充批注和模板候选 AI 重排都应复用统一流式超时配置。
-- 初次生成的 `generation_mode=agent` 通过 `backend/agents/generation/` 调用 DeepAgents；模型配置仍复用 `settings.get_llm_config()` 和 OpenAI-compatible client 参数。
-- `comment_agent` 运行时位于 `backend/agents/comments/`，通过统一批注 prompt、LangChain agent 和工具门禁完成批注候选生成、锚点校验和写回前复核。
-- `content_agent` 工作区默认位于 `backend/prompts_log/content_agent_workspace/`，作为智能体输入、草稿、审核、修订和最终正文的本地审计边界。
-- `comment_agent` 审计工作区默认位于 `backend/prompts_log/comment_agent_audit/`，只记录结构化候选、校验和写回统计。
+**External Tender Data:**
+- 招标详情系统 - 按招标编号拉取项目数据。
+  - SDK/Client: `requests.get`
+  - Auth: 未检测到单独认证字段；URL 来自配置。
+  - Config: `TENDER_DATA_API_URL`, `EXTERNAL_REQUEST_TIMEOUT_SECONDS`
+  - Files: `backend/util/common_util/fetch_tender_data.py`, `backend/api/tender.py`
 
-### Agent Step SSE
+**Template Candidate System:**
+- 模板候选外部系统 - 获取候选、代理下载、选择并落盘。
+  - SDK/Client: `requests.get`
+  - Auth: 未检测到单独认证字段；URL 和白名单来自配置。
+  - Config: `TEMPLATE_CANDIDATE_API_URL`, `TEMPLATE_CANDIDATE_ALLOWED_HOSTS`, `TEMPLATE_CANDIDATE_RANKING_LLM_PROVIDER`
+  - Files: `backend/util/common_util/template_candidates.py`, `backend/api/template_candidates.py`, `backend/services/template_candidate_ranking_service.py`
 
-- 智能体生成步骤通过 `SSEEventType.AGENT_STEP` 推送。
-- `DocumentService` 在 graph config 中注入 `agent_step_callback`，公共 `content_agent` 节点、子 agent 和 `comment_agent` 通过该 callback 进入 `SSEManager`。
-- `SSEManager.send_agent_step()` 会进入事件缓冲，断线重连时可随 `Last-Event-ID` 重放。
-- 前端必须在 `frontend/lib/sse.ts` 显式监听 `agent_step` named event，再由 `frontend/hooks/useChatSSE.ts` 映射为过程卡。
+**Retrieval / Vector Search:**
+- Qdrant - 批注坏案例向量检索诊断/实验入口，当前未接入主业务链路。
+  - SDK/Client: direct `httpx.Client`
+  - Auth: `QDRANT_API_KEY`
+  - Config: `QDRANT_URL`, `COMMENT_BAD_CASE_COLLECTION`
+  - Files: `backend/retrieval/qdrant_store.py`, `backend/retrieval/config.py`
+- Embedding API - 为检索诊断/实验脚本生成查询和坏案例向量。
+  - SDK/Client: HTTP client in `backend/retrieval/embeddings.py`
+  - Auth: `EMBEDDING_API_KEY` 或 fallback `DASHSCOPE_API_KEY`
+  - Config: `EMBEDDING_BASE_URL`, `SILICONFLOW_BASE_URL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`
+  - Files: `backend/retrieval/config.py`, `backend/retrieval/embeddings.py`
 
-### Agent Run 与上传文件 rewrite
+## Data Storage
 
-- 后端入口：`POST /api/agent/runs/stream`。
-- 流式格式：NDJSON，事件包括 `run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`needs_input`、`done`、`error`。
-- 请求模型：`AgentRunStreamRequest`，只接收受控 `context_snapshot`、`selected_skills` 和用户消息。
-- 当前支持的 skill 是 `rewrite`；普通聊天未确认独立后台任务能力。
-- 上传 Word 文件 rewrite 需要 `file_path`、`form_type`、完整 `insertion_config`、`tender_lx`、`fund_source_lx`，`tender_data_snapshot` 只是可选快照。
-- 前端上传文件类型是 `rewrite_source`；进入后端 task skill state 后，上传来源用 `rewrite_source="uploaded_file"` 标记并在 rewrite 节点中路由。
-- 任务创建仍复用 `DocumentService.create_rewrite_task()`，后续排队、SSE、取消和下载不在 agent run 中复制状态机。
-- agent run 读取上下文只能通过受控摘要工具；审计日志不得记录完整用户消息、真实路径、token、traceback 或完整任务结果。
+**Databases:**
+- 外部数据库未检测到。
+- 任务、队列、SSE buffer、会话快照均为进程内存态。
+  - Files: `backend/task/task_queue_manager.py`, `backend/core/sse_manager.py`, `backend/services/conversation_service.py`
 
-### 补充批注任务
+**File Storage:**
+- Local filesystem only.
+- 上传、模板选择、生成产物和下载文件位于 `settings.UPLOAD_DIR`。
+  - Config: `UPLOAD_DIR`, `MAX_UPLOAD_SIZE`, `ALLOWED_EXTENSIONS`
+  - Files: `backend/config/settings.py`, `backend/util/common_util/upload_storage.py`, `backend/api/download.py`
+- Agent/workspace audit 文件位于 `backend/prompts_log/`。
+  - Files: `backend/agents/generation/workspace.py`, `backend/agents/comments/workspace.py`
+- 日志文件位于 `backend/logs/` 或配置目录。
+  - Files: `backend/util/log_util/`
 
-- 后端入口：`POST /api/comment-supplement`。
-- 任务类型：`comment_supplement`，复用任务状态、心跳、SSE、下载和 `agent_step` 事件通道。
-- Service 边界：`DocumentService.create_comment_supplement_task()` 校验会话 latest `rewrite_state`、`polished_text` 和当前下载文件路径，拒绝缺失或过期来源。
-- Graph 边界：`CommentSupplementGraph` 只处理当前文档副本的补充批注，不重新生成正文；`comment_agent` 运行时来自 `backend/agents/comments/`，成功后更新会话 latest `rewrite_state.prepared_doc_path`。
-- 前端触发来自初次生成下载卡，rewrite 和 comment_supplement 下载卡不应再次显示补充批注动作。
+**Caching:**
+- SSE events: in-memory per-task cache in `backend/core/sse_manager.py`，受 `SSE_MAX_EVENTS_PER_TASK` 和 `SSE_EVENT_TTL` 控制。
+- Task queue and conversation snapshots: in-memory cache/singletons in `backend/task/task_queue_manager.py` and `backend/services/conversation_service.py`。
+- Redis/cache service: 未检测到。
 
-### 初次生成文件与批注开关
+## Authentication & Identity
 
-- 生成请求的文件输入只接受模板文件和技术参数文件。
-- `DocumentService` 将文件输入装配为 `template_path` 与 `tender_param_paths`，`prepare_template` 复制模板，`extract_tender_params` 从模板提取参考正文并拼接技术参数文本。
-- `comment_generation_mode=off` 只跳过初次生成批注逻辑；正文生成、Word 写回、样式回填、任务结果和下载链路不应受影响。
+**Auth Provider:**
+- Not detected as an enforced API layer.
+  - Implementation: `backend/main.py` 注册的业务 routers 未检测到统一 auth dependency。
+  - Auth-related packages: `python-jose[cryptography]`、`passlib[bcrypt]` 在 `backend/requirements.txt` 中声明，但不是当前 API router 的统一鉴权实现。
 
-### 招标详情接口
+**Identity / Session:**
+- `conversation_id` 用于会话级 rewrite history 和补充批注上下文。
+  - Files: `backend/models/generate.py`, `backend/models/agent_run.py`, `backend/services/conversation_service.py`
+- `user_session_id` 用于任务归属和队列状态。
+  - Files: `backend/task/task_queue_manager.py`, `backend/models/task.py`
 
-- 后端入口：`GET /api/tender/{tender_no}`。
-- 工具层：`backend/util/common_util/fetch_tender_data.py`。
-- 配置：`TENDER_DATA_API_URL`。
-- 前端不应直接知道外部接口细节。
+## Monitoring & Observability
 
-### 模板候选接口
+**Error Tracking:**
+- 外部 error tracking 未检测到。
+- 可选 LangSmith tracing config 存在，但不是强依赖。
 
-- 后端入口：`backend/api/template_candidates.py`。
-- 工具层：`backend/util/common_util/template_candidates.py`。
-- AI 重排：`backend/services/template_candidate_ranking_service.py`。
-- Prompt：`backend/prompts/template_candidate_ranking_prompt.py`。
-- 外部下载链接必须经过 `TEMPLATE_CANDIDATE_ALLOWED_HOSTS` 校验。
-- `year < 2025` 或缺失/非法年份的候选只允许下载参考，不允许选择写入表单。
+**Logs:**
+- JSON stdout logging: `backend/main.py`
+- User progress log: `backend/util/log_util/progress_log.py`
+- Execution diagnostics: `backend/util/log_util/execution_log.py`
+- Prompt log: `backend/util/log_util/prompt_log.py`
+- Skill audit log: `backend/util/log_util/skill_audit_log.py`
+- SSE log bridge: `backend/util/log_util/sse_log_handler.py`
+- Log cleanup: `backend/util/log_util/log_cleanup.py`
 
-### Word COM
+**SSE Observability:**
+- Event types: `log`、`llm`、`progress`、`node_start`、`node_complete`、`agent_step`、`done`、`error`、`heartbeat`。
+- Contract source: `backend/models/sse.py`
+- Manager source: `backend/core/sse_manager.py`
 
-- Word COM 只在后端运行。
-- COM 生命周期位于 `backend/util/word_util/word_application_util.py`。
-- COM 锁与重试位于 `backend/util/word_util/word_com_manager.py`。
-- Graph 级锁位于 `backend/graphs/base_graph.py`。
-- 任务队列串行化位于 `backend/task/task_queue_manager.py`。
+## CI/CD & Deployment
 
-## 数据存储
+**Hosting:**
+- Not detected.
+- Local ASGI entry: `backend/main.py`
+- Root development scripts: `scripts/start-dev.ps1`, `scripts/start-dev-wsl.sh`
 
-- 任务、进度、队列状态、SSE 事件缓存和会话快照当前是进程内存态。
-- 上传文件、模板候选选择结果和生成文件存储在 `settings.UPLOAD_DIR` 下。
-- 上传落盘、文件名清洗、扩展名/大小校验位于 `backend/util/common_util/upload_storage.py`。
-- 下载接口必须确认目标路径解析在上传目录内。
-- 当前源码未确认外部数据库、Redis、对象存储或消息队列。
+**CI Pipeline:**
+- Not detected from backend scan.
+- Full Word COM validation requires Windows + Word/WPS COM; CI without COM should only claim no-COM unit coverage.
 
-## 认证与身份
+## Environment Configuration
 
-- 当前后端 API 路由未检测到登录、权限或认证依赖。
-- 依赖文件中有 auth 相关包，但当前 `backend/main.py` 注册的业务 router 未使用稳定认证层。
-- 如果后续新增认证，应同步后端依赖、API 契约、前端 `ApiError` 处理和测试。
+**Required env vars by feature:**
+- LLM generate/rewrite/comment/template ranking:
+  - `DEEPSEEK_API_KEY` for DeepSeek
+  - `DASHSCOPE_API_KEY` for Qwen/DashScope
+  - `ARK_API_KEY` for Doubao/ARK
+- Optional LangSmith:
+  - `LANGSMITH_TRACING`
+  - `LANGSMITH_ENDPOINT`
+  - `LANGSMITH_API_KEY`
+  - `LANGSMITH_PROJECT`
+- External tender/template:
+  - `TENDER_DATA_API_URL`
+  - `TEMPLATE_CANDIDATE_API_URL`
+  - `TEMPLATE_CANDIDATE_ALLOWED_HOSTS`
+- File/task/SSE:
+  - `UPLOAD_DIR`
+  - `LOCK_FILE_PATH`
+  - `LOCK_TIMEOUT`
+  - `TASK_HEARTBEAT_TIMEOUT`
+  - `SSE_MAX_EVENTS_PER_TASK`
+- Retrieval:
+  - `QDRANT_URL`
+  - `QDRANT_API_KEY`
+  - `COMMENT_BAD_CASE_COLLECTION`
+  - `EMBEDDING_API_KEY`
+  - `EMBEDDING_BASE_URL`
+  - `EMBEDDING_MODEL`
 
-## 监控与日志
+**Secrets location:**
+- `backend/.env` 文件存在，包含本地私有配置；不得读取或引用内容。
+- `backend/.env.example` 文件存在，可用于字段名参考；不得把真实值写入文档、日志或测试夹具。
 
-- `backend/main.py` 配置 JSON stdout logging，并启动 progress/execution log listener。
-- `progress_log` 面向用户进度，并可通过 SSE 转发。
-- `execution_log` 面向排障堆栈、关键参数摘要和 graph 执行细节。
-- `prompt_log` 和 `skill_audit_log` 分别记录 prompt 与 skill task 审计。
-- 当前未确认外部 APM、日志平台或 tracing 系统。
-- 当前未确认外部 LangSmith / tracing 为强依赖；相关配置存在时应保持可选、fail-soft。
+## Webhooks & Callbacks
 
-## CI/CD 与部署
+**Incoming:**
+- Third-party inbound webhooks: None detected.
+- Browser-to-backend task event subscription: `GET /api/stream/{task_id}` via SSE。
+- Browser-to-backend agent run stream: `POST /api/agent/runs/stream` returns NDJSON。
 
-- 当前源文档未确认稳定 CI workflow。
-- 代码真源中的本地运行入口是 `backend/main.py`、`scripts/start-dev.ps1` 和 `scripts/start-dev-wsl.sh`。
-- 后端完整验收需要 Windows + Word COM；CI/WSL 更适合跑无 COM 单元测试。
-- 健康检查可以用于进程存活或本地代理探测，但不能替代 `scripts/diagnose_word.py` 或真实 Word COM 生成验收。
+**Outgoing:**
+- LLM provider calls from `backend/util/common_util/llm_stream_utils.py` and agent model factory.
+- 招标详情 external HTTP from `backend/util/common_util/fetch_tender_data.py`。
+- 模板候选 external HTTP from `backend/util/common_util/template_candidates.py`。
+- Qdrant and embedding HTTP from `backend/retrieval/`，当前用于批注坏案例检索诊断/实验。
 
-## 环境配置
+## Integration Guardrails
 
-- 后端配置由 `backend/config/settings.py` 读取。
-- `backend/.env.example` 是示例文件；`backend/.env` 是本地私有文件。
-- 重要运行配置包括上传目录、LLM provider、外部招标详情 URL、模板候选 URL、模板下载白名单、任务心跳、SSE 保留和锁超时。
-- 文档和日志不得记录真实 key、token、客户原文或私有文件内容。
-
-## Webhook 与回调
-
-- 当前后端未确认第三方入站 webhook。
-- SSE 是服务端到浏览器的任务事件通道，不是外部 webhook。
-
-## 集成风险
-
-- LLM provider 调整时必须同步 `LLMModel`、settings、stream helper、prompt 调用侧和测试。
-- 模板候选下载改动必须保留白名单与路径安全，避免 SSRF 和任意文件写入。
-- Word COM 改动必须保留任务队列、graph 锁、COM 锁、取消检查和进度包装。
-- API shape 变化必须同步 `backend/models/`、`frontend/types/api.ts`、`frontend/lib/api.ts` 和测试。
+- Frontend must not call external tender/template URLs directly; backend proxies and validates.
+- Template candidate downloads must preserve allowed-host validation in `backend/util/common_util/template_candidates.py`.
+- File downloads must preserve `settings.UPLOAD_DIR` path containment in `backend/api/download.py`.
+- LLM provider additions must update `backend/models/generate.py`, `backend/config/settings.py`, `backend/util/common_util/llm_stream_utils.py`, agent model factory, and tests.
+- SSE event additions must update `backend/models/sse.py`, `backend/core/sse_manager.py`, frontend event parsing, and tests.
+- NDJSON event shape changes for agent/chat streams must update `backend/services/chat_stream_service.py`, `backend/services/agent_run_service.py`, frontend parser/types, and tests.
+- Word COM operations must stay behind task queue and graph locks; no direct COM use from API routes or agent run tools.
+- Agent run audit logs must use scrubbed whitelist fields from `backend/agents/task_context_assistant/logging.py`.
 
 ---
 
-*后端集成分析：2026-06-05*
+*后端集成审计：2026-06-08*

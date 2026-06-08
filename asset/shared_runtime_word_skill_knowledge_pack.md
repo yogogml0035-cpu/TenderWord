@@ -20,6 +20,9 @@
 - Prompt Layer：`backend/prompts/`
 - Word 业务 helper：`backend/helper/word_helper/`
 - SSE 与日志透传：`backend/core/sse_manager.py`、`backend/api/stream.py`、`backend/models/sse.py`、`backend/util/log_util/`
+- Agent/chat NDJSON 行序列化：`backend/services/chat_stream_service.py`
+- Agent workspace 日志命名：`backend/agents/log_naming.py`
+- 批注坏案例检索：`backend/retrieval/` 当前只作为诊断/实验入口，不是 generate / rewrite / comment_supplement 主链路真源。
 
 ## 运行时分层
 
@@ -38,13 +41,13 @@
 - `POST /api/agent/runs/stream` 默认由 `backend/services/agent_run_service.py` 构造 `TaskContextDeepAgentsRunner`，再调用 `backend/agents/task_context_assistant/factory.py#create_task_context_assistant()`；生产路径的语义选择属于 DeepAgents + rewrite skill，不应在 service 层用关键词 `_select_skill()` 判断。service 层只做客观不可执行条件 preflight、NDJSON 事件映射和审计落盘。
 - task-context assistant 创建 rewrite 任务只能通过 `backend/agents/task_context_assistant/tools.py` 中的 `create_rewrite_task_tool` 复用 `DocumentService.create_rewrite_task()`；guard 先检查上传 Word 文件链路，其次检查 `rewrite history`，缺条件时返回 `needs_input`，不能直接操作 Word COM。
 - `POST /api/agent/runs/stream` 必须先流出 `run_started` 和 `thinking_stage: understand completed`，再等待 `create_rewrite_task_tool` 创建 rewrite 任务；任务创建慢时前端过程卡应推进到上下文检查阶段，不能卡在“理解需求”。
-- agent run NDJSON 事件来自 Pydantic `model_dump()`，可选字段会以 `null` 出现；前端 parser 必须把 `selected_skill: null`、`guard_result: null`、`tool_name: null` 和 `task_id: null` 当作缺省值处理，不能静默丢弃后续 `needs_input` / `done` 终态。
+- agent run NDJSON 事件来自 Pydantic `model_dump()` 并经 service 层共享辅助序列化为单行事件；可选字段会以 `null` 出现。前端 parser 必须把 `selected_skill: null`、`guard_result: null`、`tool_name: null` 和 `task_id: null` 当作缺省值处理，不能静默丢弃后续 `needs_input` / `done` 终态；新增 agent/chat 流事件时不要在调用方各自手写 JSON 行。
 - 会话已有可改写文档时，用户直接输入带章节号、指标、条款等文档定位线索和“需要/增加/调整/★/▲”等编辑线索的要求，应由 task-context DeepAgents 根据上下文选择 rewrite；“生成内容太多换行 / 内容需要紧凑 / 排版格式调整”等已生成内容风格或排版修改也属于 rewrite 语义。不要强迫用户显式输入 `$rewrite` 或“改写/重写”。
 - 上传 Word 文件后的修改统一走 rewrite。上传文件 rewrite 必须有非空用户重写指令、上传文件路径、当前页面 `form_type`、完整锚点、`tender_lx` 和 `fund_source_lx`；`tender_data_snapshot` 只是可选快照，不能因为未获取招标数据而阻断上传文件 rewrite。缺任一关键上下文时只返回 `needs_input`，不能自动猜测文档类型或锚点。
 - 上传文件 rewrite 依赖 `rewrite_source="uploaded_file"` 在 `TaskSkillGraphState` 中穿过 LangGraph schema，再由 `select_resolve_branch()` 路由到 `extract_rewrite_context`；新增分支标记必须同步声明到 task skill state，避免初始 state 被过滤后误回落到 rewrite history。
 - 上传文件 rewrite 的 task graph 必须保持单次 Word 删除：`extract_rewrite_context -> rewrite_text -> delete_section -> update_word`。不要同时保留 `extract_rewrite_context -> delete_section` 和 `rewrite_text -> delete_section`，否则 `delete_section` 会执行两次并可能与 `update_word` 并发抢占同一 Word COM 文档。
 - `backend/agents/task_context_assistant/factory.py` 是右侧 agent run DeepAgents 工厂真源。运行时 backend 必须通过 `CompositeBackend` 把 `/skills/`、`/scratch/`、`/workspace/` 分隔到独立 `FilesystemBackend(virtual_mode=True)`；`/skills/` 只镜像 rewrite 受控 skill 目录，不能裸挂项目根、`.env`、`backend/logs` 或任意本机绝对路径。
-- `backend/agents/task_context_assistant/logging.py` 是 agent run JSONL 审计真源：每个 run 写 `backend/logs/agent-run-<run_id>.jsonl`，只记录白名单结构化字段（`run_id`、`conversation_id`、`selected_skills`、阶段摘要、`guard_result`、`tool_name`、`task_id` 等），并统一 scrub 掉凭证、认证头、`.env`、私有绝对路径、完整原文和 traceback。
+- `backend/agents/task_context_assistant/logging.py` 是 agent run JSONL 审计真源：每个 run 写 `backend/logs/agent-run-<run_id>.jsonl`，只记录白名单结构化字段（`run_id`、`conversation_id`、`selected_skills`、阶段摘要、`guard_result`、`tool_name`、`task_id` 等），并统一 scrub 掉凭证、认证头、`.env`、私有绝对路径、完整原文和 traceback。生成/批注 agent workspace 与审计日志的文件名片段复用 `backend/agents/log_naming.py`，新增 agent workspace 不要复制独立清洗规则。
 - task-context assistant 读取上下文时不能直接读 `backend/logs` 或任务结果原始 payload；必须通过 `read_current_conversation_summary_tool` / `read_current_task_public_summary_tool` 这种受控工具，只返回当前会话的最近 agent run 摘要、rewrite 可用性和任务公共进度概览，不暴露输出路径、完整结果或隐藏推理。
 - `/api/edit`、edit skill、edit task kind 和 `create_edit_task_tool` 已删除；右侧聊天与任务判路统一走 `POST /api/agent/runs/stream`，不再保留 `/api/user/stream` 或 edit 兼容入口。
 - `POST /api/comment-supplement` 是独立补充批注入口；请求只携带会话、当前下载卡文件路径和模型。`DocumentService.create_comment_supplement_task()` 必须校验 latest `rewrite_state`、`polished_text`、当前文件存在且等于 latest `prepared_doc_path` 后才创建任务。

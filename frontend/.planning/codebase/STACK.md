@@ -1,79 +1,101 @@
 # 前端技术栈事实地图
 
-**分析日期：** 2026-06-05
+**分析日期：** 2026-06-08
 
-**范围：** `frontend/` 及前端启动/测试相关根脚本。
+**范围：** 仅 `frontend/` 子项目。依据当前 `frontend/package.json`、前端配置文件、源码目录、测试配置和项目级 `.agents/skills/` 轻量索引刷新；未读取 `.env.local`、`.env.local.example` 或 `.npmrc` 内容。
 
-## 语言与运行时
+## 语言
 
-- **TypeScript / TSX**：应用、组件、hook、store、API client、测试。
-- **React JSX**：Next App Router 页面与客户端组件。
-- **CSS + Tailwind 4**：全局样式与 utility。
-- **JavaScript**：Jest setup、polyfill。
-- **PowerShell / Bash**：本地启动脚本。
+**主要语言：**
+- TypeScript 5 - 应用源码、API client、Zustand store、类型定义、Jest/Playwright 测试，见 `frontend/app/`、`frontend/components/`、`frontend/lib/`、`frontend/stores/`、`frontend/types/`。
+- TSX / React JSX - Next.js 页面与客户端组件，见 `frontend/app/tender/page.tsx`、`frontend/components/chat/`、`frontend/components/forms/`。
 
-Node 要求来自 `frontend/package.json`：`>=20.9.0`；`frontend/.nvmrc` 固定 Node 20。
+**辅助语言：**
+- CSS - Tailwind 4 入口、主题变量和少量全局组件 class，见 `frontend/app/globals.css`。
+- JavaScript - Jest setup 和运行时 polyfill，见 `frontend/jest.setup.js`、`frontend/polyfills.js`。
 
-## 包管理与脚本
+## 运行时
 
-- 包管理器：npm。
-- lockfile：`frontend/package-lock.json`。
-- 依赖安装推荐：`npm ci`。
+**环境：**
+- Node.js `>=20.9.0` - 由 `frontend/package.json` 的 `engines.node` 声明。
+- Node 20 - 由 `frontend/.nvmrc` 固定主版本。
+- 浏览器运行时 - 前端依赖 `fetch`、`EventSource`、`sessionStorage`、`URLSearchParams` 和 DOM APIs。
 
-常用脚本：
+**包管理器：**
+- npm - `frontend/package-lock.json` 存在。
+- 依赖安装使用 npm 语义；不要在 Windows 与 WSL 之间盲目复用 `frontend/node_modules/`。
 
-```bash
-npm run dev            # Next dev server，端口 8502
-npm run build          # Next production build
-npm run start          # Next production server，端口 8502
-npm run lint           # ESLint
-npm run type-check     # tsc --noEmit
-npm run test           # Jest
-npm run test:coverage  # Jest coverage
-npm run test:e2e       # Playwright
-```
+## 框架
 
-## 核心框架与库
+**核心：**
+- Next.js `^16.2.6` - App Router、dev/build/start、rewrites、headers，见 `frontend/package.json`、`frontend/app/`、`frontend/next.config.ts`。
+- React `19.2.3` / React DOM `19.2.3` - 客户端组件和 hooks。
+- Zustand `^5.0.11` - 会话、任务、stream、历史和 UI 状态，见 `frontend/stores/`。
+- Tailwind CSS `^4` + `@tailwindcss/postcss` - utility 样式和 PostCSS 集成，见 `frontend/app/globals.css`、`frontend/postcss.config.mjs`。
 
-| 技术 | 用途 | 证据 |
-| --- | --- | --- |
-| Next.js 16 | App Router、dev/build、rewrites、headers | `frontend/package.json`, `frontend/next.config.ts` |
-| React 19 | 客户端组件与 hooks | `frontend/components/`, `frontend/app/tender/page.tsx` |
-| Tailwind CSS 4 | 样式系统 | `frontend/app/globals.css`, `frontend/postcss.config.mjs` |
-| Zustand 5 | 会话、stream、历史与 UI 状态 | `frontend/stores/` |
-| lucide-react | 图标库 | `frontend/package.json` |
-| Jest + Testing Library | 单元/集成测试 | `frontend/jest.config.ts`, `frontend/__tests__/` |
-| MSW | API mock | `frontend/mocks/` |
-| Playwright | E2E | `frontend/playwright.config.ts`, `frontend/e2e/` |
-| ESLint / Prettier | lint 与格式化 | `frontend/eslint.config.mjs`, `frontend/.prettierrc` |
+**测试：**
+- Jest `^29.7.0` - 单元/集成测试 runner，见 `frontend/jest.config.ts`。
+- `jest-environment-jsdom` `^30.3.0` - DOM 测试环境。
+- Testing Library - React 组件测试，见 `frontend/__tests__/unit/components/`。
+- MSW `^2.12.10` - 测试 API mock，见 `frontend/mocks/`。
+- Playwright `^1.58.2` - E2E 测试，见 `frontend/playwright.config.ts`、`frontend/e2e/`。
+
+**构建/开发：**
+- ESLint 9 + `eslint-config-next` - lint，见 `frontend/eslint.config.mjs`。
+- Prettier 3 + `prettier-plugin-tailwindcss` - 格式化与 Tailwind class 排序，见 `frontend/.prettierrc`。
+- TypeScript compiler - `frontend/tsconfig.json` 和 `frontend/tsconfig.typecheck.json`。
+
+## 关键依赖
+
+**关键：**
+- `next` - 页面、构建、开发服务器和 `/api` rewrite。
+- `react` / `react-dom` - UI runtime。
+- `zustand` - 本地会话、草稿、任务摘要和恢复状态。
+- `lucide-react` - 图标库，组件按钮和状态图标优先使用它。
+- `tailwind-merge` / `clsx` - className 组合，见 `frontend/lib/utils.ts`。
+
+**基础设施：**
+- `undici` / `und` - 测试或 Node fetch 兼容依赖，见 `frontend/package.json`。
+- `msw` - Jest API mocking，见 `frontend/mocks/handlers.ts`。
+- `ts-node` - TypeScript 配置执行支持，见 `frontend/jest.config.ts` 等工具链。
 
 ## 配置
 
-- Next 配置：`frontend/next.config.ts`。
-- TypeScript 配置：`frontend/tsconfig.json`，包含 `@/*` alias；稳定类型检查走 `frontend/tsconfig.typecheck.json`，避开 Next dev 生成缓存。
-- Jest 配置：`frontend/jest.config.ts`。
-- Playwright 配置：`frontend/playwright.config.ts`，baseURL 为 `http://localhost:8502`。
-- 环境示例：`frontend/.env.local.example`。
-- `.nvmrc` 固定 Node 20；`.npmrc` 固定 npm registry 并开启 `engine-strict=true`。
-- `frontend/next.config.ts` 会从 `NEXT_PUBLIC_API_URL` 推导开发期允许来源，并把 `/api/:path*` rewrite 到后端 API base URL。
+**环境：**
+- `frontend/.env.local` 存在，只作为本地环境配置文件；不得读取或写入真实值。
+- `frontend/.env.local.example` 存在，只记录示例文件存在；不得复制其中内容到长期文档。
+- `NEXT_PUBLIC_API_URL` 是前端可识别的 API base URL 配置键；解析逻辑在 `frontend/lib/apiBaseUrl.ts`，开发期 rewrite 在 `frontend/next.config.ts`。
+- 缺省 API base URL 由 `frontend/lib/apiBaseUrl.ts` 回落到本机后端端口或按浏览器 hostname 推导。
 
-## 前端入口
-
-- 页面入口：`frontend/app/page.tsx` 直接重定向到 `/tender`，`frontend/app/tender/page.tsx` 承载工作台。
-- API / agent run 入口：`frontend/lib/api.ts`。
-- SSE 入口：`frontend/lib/sse.ts`、`frontend/hooks/useChatSSE.ts`。
-- 表单转换：`frontend/lib/formDataConverter.ts`；`gngk` form type 分派：`frontend/lib/gngkFormType.ts`。
-- URL 映射：`frontend/utils/tenderTypeMapper.ts`。
-- 主 store：`frontend/stores/chatStore.ts`。
+**构建：**
+- `frontend/next.config.ts`：Next 配置、`/api/:path*` rewrite、生产缓存 header、开发来源白名单和图片远程模式。
+- `frontend/tsconfig.json`：严格 TypeScript、`@/*` path alias、Next 插件。
+- `frontend/tsconfig.typecheck.json`：稳定 type-check 专用配置，排除 `.next/dev`。
+- `frontend/eslint.config.mjs`：Next core web vitals、Next TS 和 React hooks 规则。
+- `frontend/.prettierrc`：2 空格、单引号、分号、100 列、Tailwind 插件。
+- `frontend/jest.config.ts`：Next/Jest 集成、jsdom、coverage、moduleNameMapper 和 MSW transform 兼容。
+- `frontend/playwright.config.ts`：E2E baseURL、Chromium 项目、dev server。
 
 ## 平台要求
 
-- 前端 dev server 默认端口：`8502`。
-- WSL 中运行前端时，必须使用 Linux `node` / `npm`。
-- Windows 启动前端时，`frontend/node_modules` 应由 Windows npm 安装或由启动脚本修复。
-- 测试前若在 WSL，优先设置 `TMPDIR=/tmp TMP=/tmp TEMP=/tmp`，避免继承 Windows 临时目录导致 Jest/Playwright 缓存失败。
-- 若通过局域网 IP 或非 localhost 访问 dev server，先确认 `NEXT_PUBLIC_API_URL` 能被 `next.config.ts` 解析为允许来源，否则 HMR 或 dev-only 资源可能被拦截。
+**开发：**
+- 默认前端端口是 `8502`，脚本见 `frontend/package.json` 的 `dev` / `start`。
+- 常规命令：
+
+```bash
+npm run dev
+npm run lint
+npm run type-check
+npm run test
+npm run test:e2e
+```
+
+- WSL 环境运行测试时优先显式设置 `TMPDIR=/tmp TMP=/tmp TEMP=/tmp`，避免继承 Windows 临时目录导致缓存或浏览器工具异常。
+
+**生产：**
+- 当前前端产物由 Next.js build/start 承载；仓库内未在 `frontend/` 检测到独立前端部署平台配置。
+- 前端生产构建不忽略 TypeScript build errors，见 `frontend/next.config.ts` 的 `typescript.ignoreBuildErrors: false`。
 
 ---
 
-*前端技术栈分析：2026-06-05*
+*前端技术栈分析：2026-06-08*

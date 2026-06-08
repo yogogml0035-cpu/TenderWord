@@ -1,103 +1,119 @@
 # 前端集成事实地图
 
-**分析日期：** 2026-06-05
+**分析日期：** 2026-06-08
 
-**范围：** `frontend/` 对后端 API、浏览器运行时、存储、测试工具和本地启动环境的集成边界。
+**范围：** 仅 `frontend/` 对后端 API、浏览器运行时、本地存储、文件上传下载、SSE/NDJSON、测试工具和开发服务器的集成边界。未读取 `.env.local`、`.env.local.example`、`.npmrc` 或任何真实凭据。
 
-## 后端 API
+## API 与外部服务
 
-- 前端后端调用统一经由 `frontend/lib/api.ts`。
-- API base URL 由 `frontend/lib/apiBaseUrl.ts` 解析。
-- Next dev rewrites 在 `frontend/next.config.ts` 中把 `/api/:path*` 代理到后端。
-- `frontend/next.config.ts` 还会根据 `NEXT_PUBLIC_API_URL` 和本地地址生成 `allowedDevOrigins`，用于 LAN / IP 访问开发服务时加载 HMR 与 dev-only 资源。
-- JSON 请求走 `request<T>()` / `api.get/post/put/delete`。
-- 上传、下载、NDJSON、SSE URL 使用 `frontend/lib/api.ts` 的专用 helper。
+**TenderWord 后端 API：**
+- 服务用途：招标数据查询、模板候选、文件上传、生成任务、补充批注任务、任务状态、心跳、下载、agent run。
+- SDK/Client：无第三方 SDK；统一使用 `fetch` 封装在 `frontend/lib/api.ts`。
+- Auth：未检测到稳定认证 header 或登录凭据；当前 API helper 不注入 auth。
+- Base URL：由 `frontend/lib/apiBaseUrl.ts` 解析 `NEXT_PUBLIC_API_URL`，无配置时使用本机后端默认值或按当前浏览器 hostname 推导。
+- 开发代理：`frontend/next.config.ts` 将 `/api/:path*` rewrite 到后端 API base URL。
 
-关键 helper 包括：
+**Agent Run NDJSON：**
+- 服务用途：聊天输入先经任务上下文助手判定 rewrite 能力、需求补充和任务创建。
+- 入口：`streamAgentRun()` 调用 `/api/agent/runs/stream`，见 `frontend/lib/api.ts`。
+- 事件类型：`run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`needs_input`、`done`、`error`，类型位于 `frontend/types/api.ts`。
+- 后台任务边界：只有 `task_accepted` 进入 task summary、SSE、取消和下载链路；`needs_input` 与非任务 `done` 只更新聊天消息或思考卡。
 
-- `createGenerateTask()`
-- `createCommentSupplementTask()`
-- `getTaskStatus()`
-- `getTaskList()`
-- `cancelTask()`
-- `sendTaskHeartbeat()`
-- `streamAgentRun()`
-- `uploadFile()` / `uploadFiles()`
-- `downloadFile()` / `getDownloadUrl()`
-- `fetchTemplateCandidates()`
-- `selectTemplateCandidate()`
-- `getTemplateCandidateDownloadUrl()`
-- `sendConversationHeartbeat()`
+**任务 SSE：**
+- 服务用途：生成、rewrite、补充批注任务的实时日志、进度、LLM 文本、agent step、终态。
+- 入口：`getTaskStreamUrl()` 和 `useChatSSE()`，见 `frontend/lib/api.ts`、`frontend/hooks/useChatSSE.ts`。
+- Runtime：`frontend/lib/sse.ts` 包装浏览器 `EventSource`，支持 heartbeat timeout、`lastEventId`、事件去重和重连。
+- Named events：底层显式注册 `connected`、`log`、`llm`、`progress`、`agent_step`、`status`、`error`、`done`、`heartbeat`。
 
-## SSE 与 NDJSON
-
-- 任务 SSE URL 由 `getTaskStreamUrl()` 构造。
-- `frontend/lib/sse.ts` 包装 `EventSource`，支持 heartbeat timeout、last event id、去重和重连。
-- `frontend/hooks/useChatSSE.ts` 把后端 SSE 事件映射到 `chatStreamStore` 与 `chatStore`。
-- `agent_step` 是 named SSE event，必须由 `frontend/lib/sse.ts` 显式注册 `addEventListener` 后才能到达 `useChatSSE`。
-- `comment_supplement` 任务的 `comment_agent` 过程卡也走 `agent_step`；完成态才持久化为会话消息。
-- 任务上下文助手通过 `streamAgentRun()` 解析 `/api/agent/runs/stream` 的 NDJSON 事件；后台任务只在 `task_accepted` 后进入任务/SSE 链路。
-
-## 浏览器存储
-
-- `chatStore`、`chatTaskSessionStore`、`historyStore`、`useAppStore` 使用 `sessionStorage`。
-- `chatStreamStore` 是内存态，不持久化完整 stream payload；未完成的 agent step 快照也只留在这里。
-- 浏览器地址栏必须与当前会话身份同步，canonical URL 走 `tenderTypeMapper`。
-- 完成态 `agent-step` 过程卡保存在 `chatStore.conversations`，但不纳入旧 task log/content/download 三卡分组。
-
-## 文件与下载
-
-- 浏览器不直接访问本地文件系统。
-- 文件上传通过 `FormData` 发往后端 upload API。
-- 初次生成只使用模板文件和技术参数文件；模板候选选择成功后只回填模板文件槽位。
-- 上传文件修改使用独立 `rewrite_source` 文件类型，不复用初次生成上传槽位。
-- 上传文件 rewrite 的 agent run payload 使用 `uploaded_files` 传文件摘要，用 `rewrite_context` 传 `form_type`、锚点、`tender_lx`、`fund_source_lx` 和可选招标数据快照；不得夹带 `generation_mode`、`comment_generation_mode` 等初次生成字段。
-- 下载通过后端 download API 或模板候选代理下载 URL。
-- 模板候选外部文件 URL 不应在前端直接请求。
-- 初次生成下载卡可以触发补充批注任务；该任务必须通过项目内 `POST /api/comment-supplement` 创建，不能直接在前端修改文档。
-
-## 模板候选
-
+**模板候选：**
+- 服务用途：获取可选模板候选、选择候选、通过后端代理下载候选文件。
 - UI：`frontend/components/forms/TemplateCandidateDialog.tsx`。
-- 表单回填：`frontend/components/forms/TenderFormShared.tsx`。
-- 类型：`frontend/types/api.ts` 的 `TemplateCandidate*`。
-- 前端只展示后端返回的候选、ranking summary、可选状态和 blocked reason。
-- 年份和白名单等安全规则由后端执行，前端只按后端结果禁用选择。
+- 表单接入：`frontend/components/forms/TenderFormShared.tsx`。
+- API helper：`fetchTemplateCandidates()`、`selectTemplateCandidate()`、`getTemplateCandidateDownloadUrl()`，见 `frontend/lib/api.ts`。
+- 约束：前端只展示后端返回的候选、ranking、`selectable` 和 `blocked_reason`；不得直接访问外部模板候选 URL。
+
+## 数据存储
+
+**浏览器本地状态：**
+- `chat-storage` - `frontend/stores/chatStore.ts` 使用 Zustand persist + `sessionStorage` 保存会话、草稿、任务摘要、任务消息映射和未读结果。
+- `chat-task-session-storage` - `frontend/stores/chatTaskSessionStore.ts` 使用 `sessionStorage` 保存 task id 与 last event id。
+- `tender-history-storage` - `frontend/stores/historyStore.ts` 使用 `sessionStorage` 保存历史条目。
+- `tender-app-storage` - `frontend/stores/useAppStore.ts` 持久化部分 UI 状态；当前文件使用 Zustand persist，但未显式设置 `sessionStorage` adapter，按 Zustand 默认存储行为处理。
+
+**Transient runtime：**
+- `frontend/stores/chatStreamStore.ts` 是内存 store，不持久化完整 stream payload。
+- 运行中的 `agent_step` 快照只留在 `chatStreamStore.agentSteps`；完成态再由 `chatStore.upsertAgentStepMessage()` 持久化为会话消息。
+
+**数据库：**
+- 前端未直接连接数据库。
+- 后端任务、文件和会话心跳数据通过 API 访问；前端文档不记录后端内部连接信息。
+
+**File Storage：**
+- 浏览器不直接访问本地文件系统。
+- 上传经 `uploadFile()` / `uploadFiles()` 发送 `FormData` 到 `/api/upload` 或 `/api/upload/multiple`。
+- 下载经 `downloadFile()` / `getDownloadUrl()` 访问 `/api/download/{file_path}`，模板候选下载经 `/api/template-candidates/download`。
+
+**Caching：**
+- 模板候选在 `TenderFormShared` 内按招标编号和项目名缓存当前组件生命周期结果。
+- Next 生产 header 对静态资源使用 immutable cache，对其他路径 no-store，见 `frontend/next.config.ts`。
 
 ## 认证与身份
 
-- 当前前端没有稳定登录入口或 auth header。
-- 会话身份是浏览器本地 conversation identity，不是用户认证身份。
-- 如果后续增加认证，需要同步 `frontend/lib/api.ts`、错误处理、路由守卫、测试和 `INTERFACES.md`。
+**认证提供方：**
+- 未检测到登录页、认证 provider、JWT 注入或权限 UI。
 
-## 监控与日志
+**前端会话身份：**
+- 会话 identity 是浏览器本地 conversation id 和 `TenderType`/招标编号/`gngk` 子类型组合，不是安全身份。
+- `gngk` 会话匹配使用 `tenderType + tenderno + tender_lx + fund_lx`，实现见 `frontend/app/tender/page.tsx`、`frontend/stores/chatStore.ts`。
 
-- 用户可见任务日志通过 `TaskLogMessage` 渲染。
-- 前端排障日志主要是 `console.error` / `console.warn`。
-- 当前未确认外部前端监控或 APM。
+## 监控与可观测性
 
-## CI/CD 与 E2E
+**错误追踪：**
+- 未检测到 Sentry、Datadog、OpenTelemetry 等前端监控 SDK。
 
-- Playwright config 会自动启动 `npm run dev`，baseURL 为 `http://localhost:8502`。
-- E2E 主要用于不依赖真实 Word COM 的浏览器契约；真实生成链路需要后端和 Word COM 环境。
-- 当前未确认稳定 CI workflow 文件。
+**Logs：**
+- 用户可见任务日志通过 `TaskLogMessage`、`TaskContentMessage`、`TaskDownloadMessage` 展示，组件位于 `frontend/components/chat/`。
+- 排障日志使用 `console.error` / `console.log`，主要见 `frontend/lib/sse.ts`、`frontend/components/chat/ChatPanel.tsx`、`frontend/components/chat/FormPanel.tsx`。
+- E2E 中会收集浏览器 console 作为验证证据，见 `frontend/e2e/test_comment_supplement.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`。
+
+## CI/CD 与部署
+
+**Hosting：**
+- `frontend/` 内未检测到 Vercel、Docker、GitHub Actions 等明确部署配置。
+- Next.js dev/start 端口固定为 `8502`，见 `frontend/package.json`。
+
+**CI Pipeline：**
+- 当前 `frontend/` 范围未检测到 CI workflow 文件。
+- Playwright config 在本地或 CI 下可自动启动 `npm run dev -- --webpack`，见 `frontend/playwright.config.ts`。
 
 ## 环境配置
 
-- `.env.local` 用于前端本地环境，示例为 `frontend/.env.local.example`。
-- `NEXT_PUBLIC_API_URL` 可配置后端地址；若缺省，base URL resolver 会按当前浏览器位置推导。
-- 修改 `NEXT_PUBLIC_API_URL` 时要同时考虑 API client base URL、Next rewrite 目标和开发期 allowed origin。
-- 文档不得记录私有 URL、token 或客户样例内容。
+**必要环境变量：**
+- `NEXT_PUBLIC_API_URL` - 可选；配置后影响浏览器 API base URL、Next rewrite 目标和开发期 allowed origins。
 
-## 集成风险
+**凭据文件位置：**
+- `frontend/.env.local` 文件存在，作为本地环境配置；不得读取内容或写入文档。
+- `frontend/.env.local.example` 文件存在，作为示例环境文件；本次未读取内容。
+- `frontend/.npmrc` 文件存在；本次未读取内容。
 
-- API shape 变化必须同步 `frontend/types/api.ts`、`frontend/lib/api.ts`、后端模型和测试。
-- `generation_mode` 和 `comment_generation_mode` 都是初次生成字段，不能透传到 rewrite。
-- SSE 事件变化必须同步事件类型、底层 named event 注册、解析、store 映射和测试。
-- gngk form type 分派必须集中在 `frontend/lib/gngkFormType.ts`，`formDataConverter.ts` 与 `ChatPanel.tsx` 的上传文件 rewrite 上下文只能调用共享 helper。
-- URL 参数变化必须同步 `tenderTypeMapper.ts`、store、页面启动和 E2E。
-- 模板候选改动不能绕过后端代理。
+## Webhook 与回调
+
+**Incoming：**
+- 前端没有自定义后端回调 endpoint；Next App Router 中未检测到 `frontend/app/api/` route。
+
+**Outgoing：**
+- JSON / upload / download：由 `frontend/lib/api.ts` 发起。
+- SSE：由 `frontend/lib/sse.ts` 发起 `EventSource` 连接。
+- NDJSON：由 `streamNdjson()` 发起 fetch stream。
+
+## 集成修改规则
+
+- 新后端接口必须同步 `frontend/types/api.ts` 和 `frontend/lib/api.ts`，并补 `frontend/__tests__/unit/lib/test_api.test.ts`。
+- 新 SSE 事件必须同步 `frontend/types/api.ts` 的事件 union、`frontend/lib/sse.ts` named event 注册、`frontend/hooks/useChatSSE.ts` 映射和相关 hook/store 测试。
+- `generation_mode`、`comment_generation_mode`、`style_writeback_mode` 是初次生成字段；rewrite 的 agent run 上下文不得透传这些字段。
+- 上传文件 rewrite 使用 `fileType: 'rewrite_source'` 和 `rewrite_context`；不要恢复旧 edit 入口或新建第二套任务链路。
+- 模板候选外部 URL 必须继续通过后端 API 代理，不得从组件直接请求。
 
 ---
 
-*前端集成分析：2026-06-05*
+*前端集成分析：2026-06-08*

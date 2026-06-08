@@ -119,4 +119,3 @@ class QdrantBadCaseStore:
                     )
                 )
         return hits
-
