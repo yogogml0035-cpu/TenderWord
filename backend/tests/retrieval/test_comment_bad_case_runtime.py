@@ -15,6 +15,10 @@ from backend.retrieval.bad_case_loader import (
     parse_bad_cases,
 )
 from backend.retrieval.bm25 import BM25Index
+from backend.retrieval.comment_bad_case_runtime import (
+    clear_bad_case_runtime_cache,
+    load_bad_case_runtime_index,
+)
 from backend.retrieval.hybrid import HybridHit
 
 
@@ -159,6 +163,57 @@ def test_directory_loader_returns_unavailable_for_empty_or_all_bad_directory(
     assert bad_payload["failure_summary"]["reason"] == (
         "all bad case files failed to parse"
     )
+
+
+def test_bad_case_runtime_index_caches_chunks_and_bm25_index(tmp_path: Path) -> None:
+    clear_bad_case_runtime_cache()
+    _write_v2_bad_case(tmp_path, "case.md", "TW_COMMENT_CACHE_1", "精确小数风险")
+
+    first = load_bad_case_runtime_index(tmp_path)
+    second = load_bad_case_runtime_index(tmp_path)
+
+    assert first is second
+    assert first.chunks is second.chunks
+    assert first.bm25_index is second.bm25_index
+    assert first.bm25_index.score("精确小数")
+
+
+def test_bad_case_runtime_index_reloads_when_file_signature_changes(
+    tmp_path: Path,
+) -> None:
+    clear_bad_case_runtime_cache()
+    case_file = tmp_path / "case.md"
+    _write_v2_bad_case(tmp_path, case_file.name, "TW_COMMENT_CACHE_1", "精确小数风险")
+    first = load_bad_case_runtime_index(tmp_path)
+
+    _write_v2_bad_case(
+        tmp_path,
+        case_file.name,
+        "TW_COMMENT_CACHE_2",
+        "异常资格条件和排他性条款风险",
+    )
+    second = load_bad_case_runtime_index(tmp_path)
+
+    assert second is not first
+    assert second.bm25_index is not first.bm25_index
+    assert second.chunks[0].case_id == "TW_COMMENT_CACHE_2"
+    assert second.bm25_index.score("排他性条款")
+
+
+def test_bad_case_runtime_index_does_not_create_disk_cache_files(
+    tmp_path: Path,
+) -> None:
+    clear_bad_case_runtime_cache()
+    _write_v2_bad_case(tmp_path, "case.md", "TW_COMMENT_CACHE_1", "精确小数风险")
+    before = sorted(path.name for path in tmp_path.iterdir())
+
+    runtime_index = load_bad_case_runtime_index(tmp_path)
+    runtime_index.bm25_index.score("第一篇正文")
+    runtime_index.bm25_index.score("第二篇正文")
+    load_bad_case_runtime_index(tmp_path)
+
+    after = sorted(path.name for path in tmp_path.iterdir())
+    assert after == before
 
 
 def _write_v2_bad_case(

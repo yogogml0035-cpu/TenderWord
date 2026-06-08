@@ -14,6 +14,7 @@ Source: prd.json
 - `backend/retrieval/bad_case_loader.py` 暴露正式 bad case 默认目录和主文件入口；v2 `---BEGIN_BAD_CASE---` 解析与旧格式解析需要保持兼容。
 - `load_bad_case_directory()` 是目录级 bad case runtime 入口；它按文件名扫描 `*.md`，坏文件只进入 warning/failure payload，不应阻断有效文件加载。
 - `frontend/package.json` 的开发验证入口当前固定为 `next dev --webpack -p 8502`；默认 Turbopack 在本仓库的 Tailwind 4/lightningcss 组合下会在 Linux/WSL 里卡在 native module 解析。
+- `load_bad_case_runtime_index()` 是 bad case chunks + BM25Index 的进程内缓存入口；后续 clause split、BM25-only 和 hybrid runtime 应复用它，不要直接重复构建索引。
 
 ## 2026-06-08 17:43 - US-001
 - 实现了正式 bad case loader 默认读取 `backend/retrieval/bad_cases/comment_bad_cases.md`，并解析 v2 `---BEGIN_BAD_CASE--- ... ---END_BAD_CASE---` 字段。
@@ -46,4 +47,16 @@ Source: prd.json
   - 目录级入口返回 `BadCaseDirectoryLoadResult`；后续缓存和 BM25Index 应基于这个结果扩展，不要重新扫描或复制 loader 逻辑。
   - `load_bad_case_chunks()` 默认已经走正式目录扫描；传入文件路径时仍保持单文件兼容。
   - 检索日志 payload 早期字段在 `to_log_payload()` 中集中生成，后续 retrieval JSON 应复用或扩展该结构。
+---
+
+## 2026-06-08 18:41 - US-003
+- 新增了 `backend/retrieval/comment_bad_case_runtime.py`，提供进程内 bad case runtime index 缓存，缓存内容包括目录加载结果、chunks 和对应的 `BM25Index`。
+- 缓存签名基于正式目录下 `.md` 文件集合、文件 mtime 和 size；任一 bad case 文件变化时下一次调用会自动重载，不创建任何磁盘缓存文件。
+- 补充 cache focused tests，验证重复调用复用同一个 runtime index、文件签名变化重建 `BM25Index`、不同正文查询不会产生持久缓存文件。
+- 更改的文件：`backend/retrieval/comment_bad_case_runtime.py`、`backend/tests/retrieval/test_comment_bad_case_runtime.py`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/retrieval/comment_bad_case_runtime.py backend/tests/retrieval/test_comment_bad_case_runtime.py`；`backend/.venv-linux/bin/python -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -v`；`backend/.venv/Scripts/python.exe -m py_compile backend/retrieval/comment_bad_case_runtime.py backend/tests/retrieval/test_comment_bad_case_runtime.py`；`backend/.venv/Scripts/python.exe -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -v`；`backend/.venv-linux/bin/python -m pytest backend/tests -q`；`git diff --check -- backend/retrieval/comment_bad_case_runtime.py backend/tests/retrieval/test_comment_bad_case_runtime.py`
+- **未来迭代的学习：**
+  - `comment_bad_case_runtime.py` 现在是正式检索 runtime 的承载模块，后续检索步骤应在这里继续扩展，而不是把逻辑塞回 loader。
+  - 缓存只按 bad case 文件签名失效，不接收也不缓存 `polished_text` 级结果；正文检索仍应每次按当前输入实时计算。
+  - 测试中需要调用 `clear_bad_case_runtime_cache()` 避免跨用例共享进程缓存影响断言。
 ---
