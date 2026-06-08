@@ -5,6 +5,7 @@ from backend.prompts.comment_prompt import (
     COMMENT_SYSTEM_PROMPT,
     COMMENT_USER_PROMPT,
     render_comment_prompt,
+    render_comment_prompt_with_bad_case_context,
 )
 from backend.prompts.generate_by_param_prompt import (
     GENERATE_BY_PARAM_PROMPT_REGISTRY,
@@ -82,6 +83,7 @@ __all__ = [
     "normalize_generation_style",
     "parse_rewrite_target_selection",
     "render_comment_prompt",
+    "render_comment_prompt_with_bad_case_context",
     "render_generate_by_param_prompt",
     "render_generate_by_template_prompt",
     "render_generate_prompt",

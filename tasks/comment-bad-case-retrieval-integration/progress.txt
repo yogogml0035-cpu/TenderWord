@@ -20,6 +20,7 @@ Source: prd.json
 - `retrieve_bad_case_hits()` 是正式 hybrid-first 入口；它只查询 Qdrant，不 upsert、不 recreate，任一向量环节异常都会带 warning 回退到 BM25-only。
 - prompt 注入前先用 `select_injected_bad_case_hits()` 做 `case_id` 级去重和按 `(-score, case_id)` 稳定排序，再由 `build_bad_case_prompt_context()` 投影到 5 个可注入字段，避免把审计字段泄漏给模型。
 - `BadCaseRetrievalResult.to_log_payload()` 是 retrieval JSON payload 真源；后续节点只应序列化它，不要在 `generate_comments` 或 `comment_agent` 中重组检索细节。
+- `render_comment_prompt_with_bad_case_context()` 是 retrieval-aware 批注 prompt 渲染入口；空 context 必须与 `render_comment_prompt()` 输出兼容，非空 context 只消费 5 字段 prompt context。
 
 ## 2026-06-08 17:43 - US-001
 - 实现了正式 bad case loader 默认读取 `backend/retrieval/bad_cases/comment_bad_cases.md`，并解析 v2 `---BEGIN_BAD_CASE--- ... ---END_BAD_CASE---` 字段。
@@ -122,4 +123,16 @@ Source: prd.json
   - US-011 写 `comments_bad_case_retrieval_file` 时应直接 `json.dump(result.to_log_payload())`，避免节点层重新拼 source、clause 和 injected bad case 结构。
   - `to_log_payload()` 中的 `clauses` 已经包含完整 clause 正文和 `query_text`；后续只需要在节点层额外补充完整 `polished_text`。
   - `injected_bad_cases` 是审计用结构，可以包含 `case_id` 和 score；prompt 注入仍必须继续使用 `build_bad_case_prompt_context()` 的 5 字段收敛结构。
+---
+
+## 2026-06-08 20:10 - US-009
+- 新增 `render_comment_prompt_with_bad_case_context()`，保留 `render_comment_prompt()` 兼容入口；空 context 时直接返回原始 prompt 输出。
+- 非空 bad case context 会在 system prompt 中追加条件式说明，并在 user prompt 末尾追加结构化 `【bad_case参考规则】` markdown 块。
+- prompt 渲染只消费 `risk_type`、`risk_pattern`、`recommended_comment_policy`、`applicability_boundary`、`anchor_policy` 五个字段，并明确禁止把 bad case 文本作为 `reference_text` 来源。
+- 更改的文件：`backend/prompts/comment_prompt.py`、`backend/prompts/__init__.py`、`backend/tests/prompts/test_comment_prompt_bad_case_context.py`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/prompts/comment_prompt.py backend/prompts/__init__.py backend/tests/prompts/test_comment_prompt_bad_case_context.py`；`backend/.venv-linux/bin/python -m pytest backend/tests/prompts/test_comment_prompt_bad_case_context.py backend/tests/prompts/test_comment_prompt_reference_contract.py -v`；`backend/.venv/Scripts/python.exe -m pytest backend/tests/prompts/test_comment_prompt_bad_case_context.py backend/tests/prompts/test_comment_prompt_reference_contract.py -v`；`backend/.venv-linux/bin/python -m pytest backend/tests -q`；`git diff --check -- backend/prompts/comment_prompt.py backend/prompts/__init__.py backend/tests/prompts/test_comment_prompt_bad_case_context.py`
+- **未来迭代的学习：**
+  - US-010 接入 `generate_comments` 时应调用 `render_comment_prompt_with_bad_case_context()`，不要在节点层手写 bad case markdown。
+  - 传给 prompt 层的 context 应来自 `build_bad_case_prompt_context()`，避免把 `case_id`、score、命中条款正文或 chunk 审计字段注入模型。
+  - prompt 层只负责渲染和字段过滤，不负责检索、日志写入、Word COM 或任务状态变更。
 ---
