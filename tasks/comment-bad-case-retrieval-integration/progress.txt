@@ -12,6 +12,7 @@ Source: prd.json
 - `backend/retrieval/` 当前仍被文档标记为实验入口，本任务将其中 bad case 检索提升为正式批注增强入口。
 - Ralph stories 已收窄为 15 个可独立验证切片，按 loader、目录、缓存、切分、BM25、hybrid、context、日志、prompt、节点、脚本、文档、回归的依赖顺序执行。
 - `backend/retrieval/bad_case_loader.py` 暴露正式 bad case 默认目录和主文件入口；v2 `---BEGIN_BAD_CASE---` 解析与旧格式解析需要保持兼容。
+- `frontend/package.json` 的开发验证入口当前固定为 `next dev --webpack -p 8502`；默认 Turbopack 在本仓库的 Tailwind 4/lightningcss 组合下会在 Linux/WSL 里卡在 native module 解析。
 
 ## 2026-06-08 17:43 - US-001
 - 实现了正式 bad case loader 默认读取 `backend/retrieval/bad_cases/comment_bad_cases.md`，并解析 v2 `---BEGIN_BAD_CASE--- ... ---END_BAD_CASE---` 字段。
@@ -22,4 +23,14 @@ Source: prd.json
   - 正式 bad case 主文件常量是 `DEFAULT_COMMENT_BAD_CASE_FILE`，目录常量是 `DEFAULT_BAD_CASE_DIR`。
   - `build_bad_case_chunks()` 会根据字段自动区分 v2 和旧格式，后续 runtime 可以直接复用 `load_bad_case_chunks()`，不要复制实验脚本里的解析逻辑。
   - 全仓 `git diff --check` 当前会被本轮前已存在的 CRLF 改动拦住；提交前应对本轮暂存文件跑 `git diff --cached --check`。
+---
+
+## 2026-06-08 18:05 - US-001
+- 修复了 US-001 的验证阻塞项：将 `frontend` 开发脚本切换到 `next dev --webpack -p 8502`，避开 Turbopack 在 Linux/WSL 下对 `lightningcss` native optional module 的解析失败，重新完成浏览器验证。
+- 更改的文件：`frontend/package.json`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`npm run dev` 后 `http://127.0.0.1:8502/` 可跳转并加载 `/tender`；Playwright 截图 `tasks/comment-bad-case-retrieval-integration/screenshots/validator-us-001-pass-3.png`；console 日志 `tasks/comment-bad-case-retrieval-integration/logs/validator-us-001-pass-3-browser-console.log`；network 日志 `tasks/comment-bad-case-retrieval-integration/logs/validator-us-001-pass-3-browser-requests.log`；`npm run type-check`；`backend/.venv-linux/bin/python -m py_compile backend/retrieval/bad_case_loader.py backend/tests/retrieval/test_comment_bad_case_runtime.py`；`backend/.venv-linux/bin/python -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -v`；`backend/.venv/Scripts/python.exe -m py_compile backend/retrieval/bad_case_loader.py backend/tests/retrieval/test_comment_bad_case_runtime.py`；`backend/.venv/Scripts/python.exe -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -v`
+- **未来迭代的学习：**
+  - Validator 若要求浏览器验证，优先复用 `npm run dev` 的 8502 端口，不要再直接用默认 Turbopack 命令。
+  - `lightningcss` 在普通 Node `require()` 可用，不代表 Next dev 的 bundler 解析链路可用；要用真实页面加载做最终判断。
+  - 验证证据统一写到当前 requirement 的 `screenshots/` 和 `logs/`，便于后续 validator 直接复查。
 ---
