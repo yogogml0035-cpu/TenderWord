@@ -27,6 +27,14 @@ RETRIEVAL_MODE_HYBRID = "hybrid"
 DEFAULT_BM25_ONLY_TOP_K = 3
 DEFAULT_BM25_ONLY_SCORE_THRESHOLD = 0.8
 DEFAULT_HYBRID_VECTOR_LIMIT = 50
+DEFAULT_BAD_CASE_PROMPT_CONTEXT_LIMIT = 12
+BAD_CASE_PROMPT_CONTEXT_FIELDS = (
+    "risk_type",
+    "risk_pattern",
+    "recommended_comment_policy",
+    "applicability_boundary",
+    "anchor_policy",
+)
 
 _PACKAGE_HEADING_RE = re.compile(r"^第\d+包：.*$")
 _SECTION_HEADING_RE = re.compile(r"^[一二三四五六七八九十]+、.*$")
@@ -165,6 +173,50 @@ class BadCaseRetrievalResult:
                 for clause_result in self.clause_results
             ],
         }
+
+
+def select_injected_bad_case_hits(
+    result: BadCaseRetrievalResult,
+    *,
+    limit: int = DEFAULT_BAD_CASE_PROMPT_CONTEXT_LIMIT,
+) -> list[BadCaseRetrievalHit]:
+    """Return the deduped hit list that will back prompt injection."""
+
+    if limit <= 0:
+        return []
+
+    best_hits_by_case_id: dict[str, BadCaseRetrievalHit] = {}
+    for hit in result.filtered_hits:
+        case_id = hit.case_id
+        if not case_id:
+            continue
+        current = best_hits_by_case_id.get(case_id)
+        if current is None or hit.score > current.score:
+            best_hits_by_case_id[case_id] = hit
+
+    ranked_hits = sorted(
+        best_hits_by_case_id.values(),
+        key=lambda hit: (-hit.score, hit.case_id),
+    )
+    return ranked_hits[:limit]
+
+
+def build_bad_case_prompt_context(
+    result: BadCaseRetrievalResult,
+    *,
+    limit: int = DEFAULT_BAD_CASE_PROMPT_CONTEXT_LIMIT,
+) -> list[dict[str, str]]:
+    """Build the compact bad-case context safe for prompt injection.
+
+    The prompt context intentionally excludes case ids, scores, chunk ids and
+    matched clause text. Retrieval logs can use select_injected_bad_case_hits()
+    when they need those audit fields.
+    """
+
+    return [
+        _build_bad_case_prompt_entry(hit)
+        for hit in select_injected_bad_case_hits(result, limit=limit)
+    ]
 
 
 @dataclass(frozen=True)
@@ -516,6 +568,14 @@ def _normalize_scores(scores: dict[int, float]) -> dict[int, float]:
 
 def _rerank_hits(hits: list[BadCaseRetrievalHit]) -> list[BadCaseRetrievalHit]:
     return [replace(hit, rank=rank) for rank, hit in enumerate(hits, start=1)]
+
+
+def _build_bad_case_prompt_entry(hit: BadCaseRetrievalHit) -> dict[str, str]:
+    metadata = hit.chunk.metadata
+    return {
+        field: str(metadata.get(field, "") or "")
+        for field in BAD_CASE_PROMPT_CONTEXT_FIELDS
+    }
 
 
 def _fallback_to_bm25_only(

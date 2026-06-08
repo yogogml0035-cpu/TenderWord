@@ -8,6 +8,7 @@ import pytest
 from backend.retrieval.bad_case_loader import (
     BAD_CASE_CONTEXT_AVAILABLE,
     BAD_CASE_CONTEXT_UNAVAILABLE,
+    BadCaseChunk,
     DEFAULT_BAD_CASE_DIR,
     DEFAULT_COMMENT_BAD_CASE_FILE,
     build_bad_case_chunks,
@@ -19,15 +20,24 @@ from backend.retrieval.bad_case_loader import (
 from backend.retrieval.bm25 import BM25Hit, BM25Index
 from backend.retrieval.config import RetrievalConfig
 from backend.retrieval.comment_bad_case_runtime import (
+    BAD_CASE_PROMPT_CONTEXT_FIELDS,
     CLAUSE_SPLIT_MODE_CLAUSE_ONLY,
     CLAUSE_SPLIT_MODE_FALLBACK_FULL_TEXT,
+    DEFAULT_BAD_CASE_PROMPT_CONTEXT_LIMIT,
     RETRIEVAL_MODE_BM25_ONLY,
     RETRIEVAL_MODE_HYBRID,
+    BadCaseRetrievalHit,
+    BadCaseRetrievalResult,
+    ClauseRetrievalResult,
+    ClauseSplitResult,
+    QueryClause,
+    build_bad_case_prompt_context,
     build_clause_only_query,
     clear_bad_case_runtime_cache,
     load_bad_case_runtime_index,
     retrieve_bad_case_hits,
     retrieve_bad_case_hits_bm25_only,
+    select_injected_bad_case_hits,
     split_polished_text_into_clauses,
 )
 from backend.retrieval.hybrid import HybridHit
@@ -514,6 +524,93 @@ def test_hybrid_retrieval_falls_back_to_bm25_when_vector_layer_fails(
     assert result.to_log_payload()["retrieval_mode"] == RETRIEVAL_MODE_BM25_ONLY
 
 
+def test_bad_case_prompt_context_dedupes_keeps_highest_score_and_sorts() -> None:
+    first_clause = _make_query_clause(
+        "clause_001",
+        "clause text for first hit must not enter prompt context",
+    )
+    second_clause = _make_query_clause(
+        "clause_002",
+        "clause text for second hit must not enter prompt context",
+    )
+    low_score_duplicate = _make_prompt_context_hit(
+        "TW_CONTEXT_A",
+        0.84,
+        "A lower score risk",
+    )
+    high_score_duplicate = _make_prompt_context_hit(
+        "TW_CONTEXT_A",
+        0.96,
+        "A higher score risk",
+    )
+    highest_score = _make_prompt_context_hit(
+        "TW_CONTEXT_B",
+        0.98,
+        "B highest score risk",
+    )
+    tied_score = _make_prompt_context_hit(
+        "TW_CONTEXT_C",
+        0.96,
+        "C tied score risk",
+    )
+    result = _build_prompt_context_result(
+        [
+            (first_clause, [low_score_duplicate, highest_score]),
+            (second_clause, [tied_score, high_score_duplicate]),
+        ]
+    )
+
+    selected_hits = select_injected_bad_case_hits(result)
+    prompt_context = build_bad_case_prompt_context(result)
+
+    assert [(hit.case_id, hit.score) for hit in selected_hits] == [
+        ("TW_CONTEXT_B", 0.98),
+        ("TW_CONTEXT_A", 0.96),
+        ("TW_CONTEXT_C", 0.96),
+    ]
+    assert [entry["risk_pattern"] for entry in prompt_context] == [
+        "B highest score risk",
+        "A higher score risk",
+        "C tied score risk",
+    ]
+    assert all(
+        set(entry) == set(BAD_CASE_PROMPT_CONTEXT_FIELDS)
+        for entry in prompt_context
+    )
+    serialized_context = repr(prompt_context)
+    assert "TW_CONTEXT_" not in serialized_context
+    assert "0.98" not in serialized_context
+    assert "clause text for" not in serialized_context
+    assert "chunk_id" not in serialized_context
+
+
+def test_bad_case_prompt_context_limits_to_twelve_and_tie_sorts_by_case_id() -> None:
+    clause = _make_query_clause("clause_001", "matched clause body stays internal")
+    hits = [
+        _make_prompt_context_hit(
+            f"TW_CONTEXT_{index:02d}",
+            0.91,
+            f"risk pattern {index:02d}",
+        )
+        for index in reversed(range(DEFAULT_BAD_CASE_PROMPT_CONTEXT_LIMIT + 2))
+    ]
+    result = _build_prompt_context_result([(clause, hits)])
+
+    selected_hits = select_injected_bad_case_hits(result)
+    prompt_context = build_bad_case_prompt_context(result)
+
+    assert len(selected_hits) == DEFAULT_BAD_CASE_PROMPT_CONTEXT_LIMIT
+    assert len(prompt_context) == DEFAULT_BAD_CASE_PROMPT_CONTEXT_LIMIT
+    assert [hit.case_id for hit in selected_hits] == [
+        f"TW_CONTEXT_{index:02d}"
+        for index in range(DEFAULT_BAD_CASE_PROMPT_CONTEXT_LIMIT)
+    ]
+    assert [entry["risk_pattern"] for entry in prompt_context] == [
+        f"risk pattern {index:02d}"
+        for index in range(DEFAULT_BAD_CASE_PROMPT_CONTEXT_LIMIT)
+    ]
+
+
 def _write_v2_bad_case(
     directory: Path,
     file_name: str,
@@ -535,6 +632,69 @@ anchor_policy: 锚点取完整分句。
 ---END_BAD_CASE---
 """,
         encoding="utf-8",
+    )
+
+
+def _make_query_clause(clause_id: str, text: str) -> QueryClause:
+    return QueryClause(
+        clause_id=clause_id,
+        package="第1包：测试包",
+        section="二、技术需求",
+        title=f"{clause_id} title",
+        text=text,
+    )
+
+
+def _make_prompt_context_hit(
+    case_id: str,
+    score: float,
+    risk_pattern: str,
+) -> BadCaseRetrievalHit:
+    return BadCaseRetrievalHit(
+        rank=1,
+        chunk=BadCaseChunk(
+            chunk_id=f"{case_id}:full",
+            case_id=case_id,
+            title=risk_pattern,
+            field="full",
+            text=f"full bad case text for {case_id}",
+            metadata={
+                "case_id": case_id,
+                "risk_type": "参数指纹",
+                "risk_pattern": risk_pattern,
+                "recommended_comment_policy": "建议提示：确认该要求是否必要。",
+                "applicability_boundary": "有明确标准依据时可保留。",
+                "anchor_policy": "锚点取完整分句。",
+                "debug_score": str(score),
+            },
+        ),
+        score=score,
+        bm25_score=score,
+        vector_score=0.0,
+        retrieval_mode=RETRIEVAL_MODE_BM25_ONLY,
+    )
+
+
+def _build_prompt_context_result(
+    clause_hits: list[tuple[QueryClause, list[BadCaseRetrievalHit]]],
+) -> BadCaseRetrievalResult:
+    clauses = [clause for clause, _hits in clause_hits]
+    return BadCaseRetrievalResult(
+        split_result=ClauseSplitResult(
+            clauses=clauses,
+            clause_split_mode=CLAUSE_SPLIT_MODE_CLAUSE_ONLY,
+        ),
+        clause_results=[
+            ClauseRetrievalResult(
+                clause=clause,
+                pre_filter_hits=hits,
+                filtered_hits=hits,
+            )
+            for clause, hits in clause_hits
+        ],
+        retrieval_mode=RETRIEVAL_MODE_BM25_ONLY,
+        warnings=[],
+        failure_summary=None,
     )
 
 

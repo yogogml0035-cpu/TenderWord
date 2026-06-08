@@ -18,6 +18,7 @@ Source: prd.json
 - `split_polished_text_into_clauses()` 是正式 clause_only 切分入口；只识别 `第N包：`、中文数字章节和数字顿号条款，不能在首版扩展到 `1.1`、`（一）` 或表格单元格。
 - `retrieve_bad_case_hits_bm25_only()` 是正式 BM25-only 入口；它返回 `BadCaseRetrievalResult`，按 clause 保留 `pre_filter_hits` 和 `filtered_hits`，并统一标记 `retrieval_mode=bm25_only`。
 - `retrieve_bad_case_hits()` 是正式 hybrid-first 入口；它只查询 Qdrant，不 upsert、不 recreate，任一向量环节异常都会带 warning 回退到 BM25-only。
+- prompt 注入前先用 `select_injected_bad_case_hits()` 做 `case_id` 级去重和按 `(-score, case_id)` 稳定排序，再由 `build_bad_case_prompt_context()` 投影到 5 个可注入字段，避免把审计字段泄漏给模型。
 
 ## 2026-06-08 17:43 - US-001
 - 实现了正式 bad case loader 默认读取 `backend/retrieval/bad_cases/comment_bad_cases.md`，并解析 v2 `---BEGIN_BAD_CASE--- ... ---END_BAD_CASE---` 字段。
@@ -97,4 +98,15 @@ Source: prd.json
   - 后续 prompt context、retrieval JSON 和节点接入应优先调用 `retrieve_bad_case_hits()`，不要分别手写 hybrid 和 BM25 fallback。
   - runtime 的 hybrid 路径只做查询，不负责 collection 创建、upsert 或重建向量索引；诊断/索引准备仍应留给脚本或外部流程。
   - `BadCaseRetrievalResult.warnings` 是向量链路降级原因的承载位置，节点层只需要记录或写日志，不应把它升级为任务失败。
+---
+
+## 2026-06-08 19:41 - US-007
+- 实现了运行时 bad case 注入选择与 prompt context 构建：按 `case_id` 去重、多条款命中取最高分、按 `score` 降序和 `case_id` 升序稳定排序，并限制最终注入上限为 12 条。
+- 新增 `build_bad_case_prompt_context()`，只向后续 prompt 层暴露 `risk_type`、`risk_pattern`、`recommended_comment_policy`、`applicability_boundary`、`anchor_policy` 五个字段，避免 `case_id`、`score`、chunk 信息和命中条款正文进入模型上下文。
+- 更改的文件：`backend/retrieval/comment_bad_case_runtime.py`、`backend/tests/retrieval/test_comment_bad_case_runtime.py`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/retrieval/comment_bad_case_runtime.py backend/tests/retrieval/test_comment_bad_case_runtime.py`；`backend/.venv-linux/bin/python -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -v`；`backend/.venv-linux/bin/python -m pytest backend/tests -q`；`backend/.venv/Scripts/python.exe -m py_compile backend/retrieval/comment_bad_case_runtime.py backend/tests/retrieval/test_comment_bad_case_runtime.py`；`backend/.venv/Scripts/python.exe -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -v`；`git diff --check -- backend/retrieval/comment_bad_case_runtime.py backend/tests/retrieval/test_comment_bad_case_runtime.py`
+- **未来迭代的学习：**
+  - 后续 US-008 的 retrieval JSON 应直接复用 `select_injected_bad_case_hits()` 生成 `injected_bad_cases`，这样日志能保留 `case_id`/`score`，而 prompt 仍保持 5 字段收敛。
+  - prompt context helper 只做字段投影，不做 markdown 渲染；US-009 应在 `backend/prompts/comment_prompt.py` 中消费这个结构，保持 prompt 真源单一。
+  - 同分排序要按 `case_id` 稳定化，否则多文件目录和多条款命中会让最终 prompt 顺序抖动。
 ---
