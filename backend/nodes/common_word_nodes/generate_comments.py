@@ -20,9 +20,14 @@ from typing import Callable, Optional
 from backend.prompts.comment_prompt import (
     COMMENT_PROMPT_REGISTRY,
     render_comment_prompt,
+    render_comment_prompt_with_bad_case_context,
     render_comment_json_repair_prompt,
 )
 from backend.prompts.types import CommentPromptInput
+from backend.retrieval.comment_bad_case_runtime import (
+    build_bad_case_prompt_context,
+    retrieve_bad_case_hits,
+)
 from backend.states import TenderGraphStateBase
 from backend.util.common_util import (
     LLMTimeoutError,
@@ -210,6 +215,28 @@ def _write_text_if_possible(path, content: str) -> None:
         file.write(str(content or ""))
 
 
+def _build_bad_case_context_for_comments(
+    polished_text: str,
+) -> list[dict[str, str]]:
+    try:
+        retrieval_result = retrieve_bad_case_hits(polished_text)
+    except Exception as e:
+        progress_log.warning(
+            f"[generate_comments] bad case 检索失败，已回退原批注 prompt: {e}"
+        )
+        return []
+
+    for warning in retrieval_result.warnings:
+        progress_log.warning(f"[generate_comments] bad case 检索警告: {warning}")
+
+    bad_case_context = build_bad_case_prompt_context(retrieval_result)
+    if bad_case_context:
+        progress_log.debug(
+            f"[generate_comments] bad case 检索命中 {len(bad_case_context)} 条，将注入批注 prompt"
+        )
+    return bad_case_context
+
+
 def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
     """
     基于修改文本使用 LLM 生成批注指令。
@@ -250,12 +277,18 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
     progress_log.debug(f"[generate_comments] 招标类型: {tender_type}")
 
     # 实现提示词选择和验证
-    rendered_prompt = render_comment_prompt(
-        CommentPromptInput(
-            tender_type=str(tender_type or "xjcg"),
-            polished_text=str(polished_text or ""),
-        )
+    prompt_input = CommentPromptInput(
+        tender_type=str(tender_type or "xjcg"),
+        polished_text=str(polished_text or ""),
     )
+    bad_case_context = _build_bad_case_context_for_comments(prompt_input.polished_text)
+    if bad_case_context:
+        rendered_prompt = render_comment_prompt_with_bad_case_context(
+            prompt_input,
+            bad_case_context,
+        )
+    else:
+        rendered_prompt = render_comment_prompt(prompt_input)
     system_prompt = rendered_prompt.system_prompt
     formatted_user_prompt = rendered_prompt.user_prompt
 

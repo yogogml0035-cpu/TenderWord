@@ -21,6 +21,7 @@ Source: prd.json
 - prompt 注入前先用 `select_injected_bad_case_hits()` 做 `case_id` 级去重和按 `(-score, case_id)` 稳定排序，再由 `build_bad_case_prompt_context()` 投影到 5 个可注入字段，避免把审计字段泄漏给模型。
 - `BadCaseRetrievalResult.to_log_payload()` 是 retrieval JSON payload 真源；后续节点只应序列化它，不要在 `generate_comments` 或 `comment_agent` 中重组检索细节。
 - `render_comment_prompt_with_bad_case_context()` 是 retrieval-aware 批注 prompt 渲染入口；空 context 必须与 `render_comment_prompt()` 输出兼容，非空 context 只消费 5 字段 prompt context。
+- `generate_comments` 的 bad case 增强集中在 `_build_bad_case_context_for_comments()`；无 context 时仍走 `render_comment_prompt()`，有 context 才走 `render_comment_prompt_with_bad_case_context()`，`comments_prompt_file` 保存最终实际发送 prompt。
 
 ## 2026-06-08 17:43 - US-001
 - 实现了正式 bad case loader 默认读取 `backend/retrieval/bad_cases/comment_bad_cases.md`，并解析 v2 `---BEGIN_BAD_CASE--- ... ---END_BAD_CASE---` 字段。
@@ -135,4 +136,16 @@ Source: prd.json
   - US-010 接入 `generate_comments` 时应调用 `render_comment_prompt_with_bad_case_context()`，不要在节点层手写 bad case markdown。
   - 传给 prompt 层的 context 应来自 `build_bad_case_prompt_context()`，避免把 `case_id`、score、命中条款正文或 chunk 审计字段注入模型。
   - prompt 层只负责渲染和字段过滤，不负责检索、日志写入、Word COM 或任务状态变更。
+---
+
+## 2026-06-08 20:27 - US-010
+- 将 bad case 检索接入 `generate_comments` 的 LLM 调用前路径：先对 `polished_text` 调用正式 runtime，再把压缩后的 5 字段 context 交给 retrieval-aware prompt 渲染。
+- 无命中时继续使用原始批注 prompt；检索异常和 runtime warnings 只记录 warning，不改变节点返回语义或阻断 LLM 调用。
+- `comments_prompt_file` 继续写入最终实际发送给模型的 system prompt + user prompt，命中时包含 `【bad_case参考规则】`，无命中或失败时保持原 prompt。
+- 更改的文件：`backend/nodes/common_word_nodes/generate_comments.py`、`backend/tests/nodes/test_generate_comments.py`、`backend/tests/nodes/test_generate_comments_bad_case.py`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/nodes/common_word_nodes/generate_comments.py backend/tests/nodes/test_generate_comments.py backend/tests/nodes/test_generate_comments_bad_case.py`；`backend/.venv-linux/bin/python -m pytest backend/tests/nodes/test_generate_comments.py backend/tests/nodes/test_generate_comments_bad_case.py -v`；`backend/.venv-linux/bin/python -m pytest backend/tests -q`；`backend/.venv/Scripts/python.exe -m py_compile backend/nodes/common_word_nodes/generate_comments.py backend/tests/nodes/test_generate_comments.py backend/tests/nodes/test_generate_comments_bad_case.py`；`backend/.venv/Scripts/python.exe -m pytest backend/tests/nodes/test_generate_comments.py backend/tests/nodes/test_generate_comments_bad_case.py -v`；`git diff --check -- backend/nodes/common_word_nodes/generate_comments.py backend/tests/nodes/test_generate_comments.py backend/tests/nodes/test_generate_comments_bad_case.py`
+- **未来迭代的学习：**
+  - 节点层只需要把 runtime 结果转换成 prompt context，不应在 `generate_comments` 中重组 retrieval JSON；US-011 应直接基于 `BadCaseRetrievalResult.to_log_payload()` 写文件。
+  - 现有 `generate_comments` 单元测试应 monkeypatch `_build_bad_case_context_for_comments()` 隔离真实检索，新增接入测试再分别 fake 检索命中、无命中、异常和 warning。
+  - 检索 warning 是降级信息，不等于节点失败；不要把它塞进 SSE、下载卡或返回状态。
 ---
