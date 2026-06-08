@@ -8,6 +8,7 @@ from threading import RLock
 from typing import Protocol
 
 from backend.retrieval.bad_case_loader import (
+    BAD_CASE_CONTEXT_UNAVAILABLE,
     DEFAULT_BAD_CASE_DIR,
     BadCaseChunk,
     BadCaseDirectoryLoadResult,
@@ -81,17 +82,7 @@ class ClauseSplitResult:
         return {
             "clause_split_mode": self.clause_split_mode,
             "clause_count": len(self.clauses),
-            "clauses": [
-                {
-                    "clause_id": clause.clause_id,
-                    "package": clause.package,
-                    "section": clause.section,
-                    "title": clause.title,
-                    "text": clause.text,
-                    "query_text": clause.query_text,
-                }
-                for clause in self.clauses
-            ],
+            "clauses": [_build_clause_log_payload(clause) for clause in self.clauses],
         }
 
 
@@ -131,14 +122,7 @@ class ClauseRetrievalResult:
 
     def to_log_payload(self) -> dict[str, object]:
         return {
-            "clause": {
-                "clause_id": self.clause.clause_id,
-                "package": self.clause.package,
-                "section": self.clause.section,
-                "title": self.clause.title,
-                "text": self.clause.text,
-                "query_text": self.clause.query_text,
-            },
+            "clause": _build_clause_log_payload(self.clause),
             "pre_filter_hits": [
                 hit.to_log_payload() for hit in self.pre_filter_hits
             ],
@@ -227,6 +211,37 @@ def build_bad_case_prompt_context(
         _build_bad_case_prompt_entry(hit)
         for hit in select_injected_bad_case_hits(result, limit=limit)
     ]
+
+
+def build_failed_bad_case_retrieval_payload(
+    polished_text: str,
+    exc: Exception,
+) -> dict[str, object]:
+    """Build a writable retrieval payload when runtime retrieval raises."""
+
+    split_result = split_polished_text_into_clauses(polished_text)
+    message = _format_failure_message(exc)
+    return {
+        "source_files": [],
+        "load_summary": None,
+        "clause_split_summary": split_result.to_log_payload(),
+        "retrieval_mode": "unavailable",
+        "warnings": [f"bad case retrieval failed; using base prompt: {message}"],
+        "failure_summary": {
+            "status": BAD_CASE_CONTEXT_UNAVAILABLE,
+            "reason": "retrieval_failed",
+            "message": message,
+        },
+        "clauses": [
+            {
+                "clause": _build_clause_log_payload(clause),
+                "pre_filter_hits": [],
+                "filtered_hits": [],
+            }
+            for clause in split_result.clauses
+        ],
+        "injected_bad_cases": [],
+    }
 
 
 @dataclass(frozen=True)
@@ -584,6 +599,17 @@ def _rerank_hits(hits: list[BadCaseRetrievalHit]) -> list[BadCaseRetrievalHit]:
     return [replace(hit, rank=rank) for rank, hit in enumerate(hits, start=1)]
 
 
+def _build_clause_log_payload(clause: QueryClause) -> dict[str, object]:
+    return {
+        "clause_id": clause.clause_id,
+        "package": clause.package,
+        "section": clause.section,
+        "title": clause.title,
+        "text": clause.text,
+        "query_text": clause.query_text,
+    }
+
+
 def _build_bad_case_prompt_entry(hit: BadCaseRetrievalHit) -> dict[str, str]:
     metadata = hit.chunk.metadata
     return {
@@ -627,12 +653,17 @@ def _fallback_to_bm25_only(
 
 
 def _format_hybrid_warning(exc: Exception) -> str:
+    message = _format_failure_message(exc)
+    return f"hybrid retrieval unavailable; falling back to bm25_only: {message}"
+
+
+def _format_failure_message(exc: Exception) -> str:
     message = str(exc).replace("\n", " ").strip()
     if len(message) > 300:
         message = f"{message[:300]}..."
     if not message:
         message = exc.__class__.__name__
-    return f"hybrid retrieval unavailable; falling back to bm25_only: {message}"
+    return message
 
 
 def _create_embedding_client(config: RetrievalConfig) -> _EmbeddingClient:

@@ -15,7 +15,7 @@ import asyncio
 import json
 import re
 import time
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from backend.prompts.comment_prompt import (
     COMMENT_PROMPT_REGISTRY,
@@ -26,6 +26,7 @@ from backend.prompts.comment_prompt import (
 from backend.prompts.types import CommentPromptInput
 from backend.retrieval.comment_bad_case_runtime import (
     build_bad_case_prompt_context,
+    build_failed_bad_case_retrieval_payload,
     retrieve_bad_case_hits,
 )
 from backend.states import TenderGraphStateBase
@@ -215,16 +216,34 @@ def _write_text_if_possible(path, content: str) -> None:
         file.write(str(content or ""))
 
 
+def _write_json_if_possible(path, payload: dict[str, object]) -> None:
+    if not path:
+        return
+    with open(path, "w", encoding="utf-8") as file:
+        json.dump(payload, file, ensure_ascii=False, indent=2)
+
+
+def _with_polished_text_in_retrieval_payload(
+    payload: dict[str, object] | None,
+    polished_text: str,
+) -> dict[str, object] | None:
+    if payload is None:
+        return None
+    enriched_payload = dict(payload)
+    enriched_payload["polished_text"] = polished_text
+    return enriched_payload
+
+
 def _build_bad_case_context_for_comments(
     polished_text: str,
-) -> list[dict[str, str]]:
+) -> tuple[list[dict[str, str]], dict[str, object] | None]:
     try:
         retrieval_result = retrieve_bad_case_hits(polished_text)
     except Exception as e:
         progress_log.warning(
             f"[generate_comments] bad case 检索失败，已回退原批注 prompt: {e}"
         )
-        return []
+        return [], build_failed_bad_case_retrieval_payload(polished_text, e)
 
     for warning in retrieval_result.warnings:
         progress_log.warning(f"[generate_comments] bad case 检索警告: {warning}")
@@ -234,7 +253,21 @@ def _build_bad_case_context_for_comments(
         progress_log.debug(
             f"[generate_comments] bad case 检索命中 {len(bad_case_context)} 条，将注入批注 prompt"
         )
-    return bad_case_context
+    to_log_payload = getattr(retrieval_result, "to_log_payload", None)
+    retrieval_payload = to_log_payload() if callable(to_log_payload) else None
+    return bad_case_context, retrieval_payload
+
+
+def _coerce_bad_case_context_result(
+    value: Any,
+) -> tuple[list[dict[str, str]], dict[str, object] | None]:
+    if (
+        isinstance(value, tuple)
+        and len(value) == 2
+        and isinstance(value[1], (dict, type(None)))
+    ):
+        return list(value[0] or []), value[1]
+    return list(value or []), None
 
 
 def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
@@ -281,7 +314,9 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
         tender_type=str(tender_type or "xjcg"),
         polished_text=str(polished_text or ""),
     )
-    bad_case_context = _build_bad_case_context_for_comments(prompt_input.polished_text)
+    bad_case_context, bad_case_retrieval_payload = _coerce_bad_case_context_result(
+        _build_bad_case_context_for_comments(prompt_input.polished_text)
+    )
     if bad_case_context:
         rendered_prompt = render_comment_prompt_with_bad_case_context(
             prompt_input,
@@ -297,6 +332,7 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
     comments_prompt_file = None
     raw_comments_file = None
     repaired_comments_file = None
+    comments_bad_case_retrieval_file = None
     try:
         prompts_log_dir = get_generate_prompt_log_dir(__file__)
 
@@ -320,9 +356,22 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
         new_comments_file = (
             prompts_log_dir / f"prompt_{prompt_base}_new_comments_{timestamp}.txt"
         )
+        comments_bad_case_retrieval_file = (
+            prompts_log_dir
+            / f"prompt_{prompt_base}_comments_bad_case_retrieval_{timestamp}.json"
+        )
 
         with open(comments_prompt_file, "w", encoding="utf-8") as f:
             f.write(system_prompt + "\n" + formatted_user_prompt)
+        enriched_retrieval_payload = _with_polished_text_in_retrieval_payload(
+            bad_case_retrieval_payload,
+            prompt_input.polished_text,
+        )
+        if enriched_retrieval_payload is not None:
+            _write_json_if_possible(
+                comments_bad_case_retrieval_file,
+                enriched_retrieval_payload,
+            )
     except Exception as e:
         progress_log.warning(f"[generate_comments] 警告: 准备批注输出文件路径失败: {e}")
 

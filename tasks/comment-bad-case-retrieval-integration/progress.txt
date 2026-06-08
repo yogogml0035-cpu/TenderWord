@@ -22,6 +22,7 @@ Source: prd.json
 - `BadCaseRetrievalResult.to_log_payload()` 是 retrieval JSON payload 真源；后续节点只应序列化它，不要在 `generate_comments` 或 `comment_agent` 中重组检索细节。
 - `render_comment_prompt_with_bad_case_context()` 是 retrieval-aware 批注 prompt 渲染入口；空 context 必须与 `render_comment_prompt()` 输出兼容，非空 context 只消费 5 字段 prompt context。
 - `generate_comments` 的 bad case 增强集中在 `_build_bad_case_context_for_comments()`；无 context 时仍走 `render_comment_prompt()`，有 context 才走 `render_comment_prompt_with_bad_case_context()`，`comments_prompt_file` 保存最终实际发送 prompt。
+- `generate_comments` 的 retrieval JSON 只写入 prompt log 目录下的 `*_comments_bad_case_retrieval_*.json`；节点仅补充完整 `polished_text` 并序列化 runtime payload，不把日志路径写回 state 或前端可见字段。
 
 ## 2026-06-08 17:43 - US-001
 - 实现了正式 bad case loader 默认读取 `backend/retrieval/bad_cases/comment_bad_cases.md`，并解析 v2 `---BEGIN_BAD_CASE--- ... ---END_BAD_CASE---` 字段。
@@ -148,4 +149,15 @@ Source: prd.json
   - 节点层只需要把 runtime 结果转换成 prompt context，不应在 `generate_comments` 中重组 retrieval JSON；US-011 应直接基于 `BadCaseRetrievalResult.to_log_payload()` 写文件。
   - 现有 `generate_comments` 单元测试应 monkeypatch `_build_bad_case_context_for_comments()` 隔离真实检索，新增接入测试再分别 fake 检索命中、无命中、异常和 warning。
   - 检索 warning 是降级信息，不等于节点失败；不要把它塞进 SSE、下载卡或返回状态。
+---
+
+## 2026-06-08 20:41 - US-011
+- 为 `generate_comments` 增加 `comments_bad_case_retrieval_file` JSON 落盘，文件记录完整 `polished_text`、runtime `to_log_payload()` 中的 clause 命中、过滤后命中、最终注入清单和 warnings。
+- 增加检索异常 payload helper，`retrieve_bad_case_hits()` 抛错时仍会写入 `failure_summary`、clause split 结果和空命中列表，并回退原批注 prompt。
+- 更改的文件：`backend/nodes/common_word_nodes/generate_comments.py`、`backend/retrieval/comment_bad_case_runtime.py`、`backend/tests/nodes/test_generate_comments_bad_case.py`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/retrieval/comment_bad_case_runtime.py backend/nodes/common_word_nodes/generate_comments.py backend/tests/nodes/test_generate_comments_bad_case.py`；`backend/.venv-linux/bin/python -m pytest backend/tests/nodes/test_generate_comments_bad_case.py -v`；`backend/.venv-linux/bin/python -m pytest backend/tests/nodes/test_generate_comments.py backend/tests/nodes/test_generate_comments_bad_case.py backend/tests/retrieval/test_comment_bad_case_runtime.py -v`；`backend/.venv-linux/bin/python -m pytest backend/tests -q`；`backend/.venv/Scripts/python.exe -m py_compile backend/retrieval/comment_bad_case_runtime.py backend/nodes/common_word_nodes/generate_comments.py backend/tests/nodes/test_generate_comments_bad_case.py`；`backend/.venv/Scripts/python.exe -m pytest backend/tests/nodes/test_generate_comments_bad_case.py backend/tests/retrieval/test_comment_bad_case_runtime.py -v`；`git diff --check -- backend/retrieval/comment_bad_case_runtime.py backend/nodes/common_word_nodes/generate_comments.py backend/tests/nodes/test_generate_comments_bad_case.py`
+- **未来迭代的学习：**
+  - `comments_bad_case_retrieval_file` 是文件命名口径，不是 state 输出字段；不要把该路径加入 SSE、下载卡、`agent_step` 或返回 state。
+  - 正常检索日志应继续直接序列化 `BadCaseRetrievalResult.to_log_payload()`；节点只补充完整 `polished_text`，避免重复拼 clause/source/injected 结构。
+  - 检索异常时使用 `build_failed_bad_case_retrieval_payload()`，这样失败日志仍保留 clause split 结果和 `failure_summary`。
 ---

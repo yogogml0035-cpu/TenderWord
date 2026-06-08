@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -204,3 +205,152 @@ def test_generate_comments_logs_retrieval_warnings_without_blocking_llm(
     assert len(llm_calls) == 1
     assert any("falling back to bm25_only" in message for message in warnings)
     assert result["generated_comment_count"] == 0
+
+
+def test_generate_comments_writes_bad_case_retrieval_json_file(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    retrieval_payload = {
+        "source_files": [
+            {
+                "file_name": "comment_bad_cases.md",
+                "path": "/fake/comment_bad_cases.md",
+                "case_count": 1,
+                "chunk_count": 2,
+            }
+        ],
+        "load_summary": {
+            "successful_file_count": 1,
+            "failed_file_count": 0,
+            "failed_files": [],
+        },
+        "clause_split_summary": {
+            "clause_split_mode": "clause_only",
+            "clause_count": 1,
+            "clauses": [
+                {
+                    "clause_id": "clause_001",
+                    "text": "1、心率检测精度为12.5。",
+                    "query_text": "1、心率检测精度为12.5。",
+                }
+            ],
+        },
+        "retrieval_mode": "bm25_only",
+        "warnings": ["falling back to bm25_only"],
+        "failure_summary": None,
+        "clauses": [
+            {
+                "clause": {
+                    "clause_id": "clause_001",
+                    "text": "1、心率检测精度为12.5。",
+                    "query_text": "1、心率检测精度为12.5。",
+                },
+                "pre_filter_hits": [
+                    {
+                        "case_id": "TW_COMMENT_001",
+                        "score": 0.91,
+                        "risk_type": "参数指纹",
+                        "risk_pattern": "精确小数参数可能形成供应商指向性",
+                    }
+                ],
+                "filtered_hits": [
+                    {
+                        "case_id": "TW_COMMENT_001",
+                        "score": 0.91,
+                        "risk_type": "参数指纹",
+                        "risk_pattern": "精确小数参数可能形成供应商指向性",
+                    }
+                ],
+            }
+        ],
+        "injected_bad_cases": [
+            {
+                "injection_rank": 1,
+                "case_id": "TW_COMMENT_001",
+                "score": 0.91,
+                "risk_type": "参数指纹",
+                "risk_pattern": "精确小数参数可能形成供应商指向性",
+                "recommended_comment_policy": "建议提示：改为合理区间。",
+                "applicability_boundary": "适用于技术参数过细场景。",
+                "anchor_policy": "锚定当前文本中的精确小数参数。",
+            }
+        ],
+    }
+
+    async def _fake_stream_llm_completion(**_kwargs):
+        return "[]"
+
+    monkeypatch.setattr(
+        generate_comments_module, "get_generate_prompt_log_dir", lambda _anchor: tmp_path
+    )
+    monkeypatch.setattr(
+        generate_comments_module,
+        "retrieve_bad_case_hits",
+        lambda _polished_text: SimpleNamespace(
+            warnings=["falling back to bm25_only"],
+            to_log_payload=lambda: retrieval_payload,
+        ),
+    )
+    monkeypatch.setattr(
+        generate_comments_module,
+        "build_bad_case_prompt_context",
+        lambda _result: [],
+    )
+    monkeypatch.setattr(
+        generate_comments_module, "stream_llm_completion", _fake_stream_llm_completion
+    )
+
+    result = generate_comments_module.generate_comments(_base_state(), _base_config())
+
+    retrieval_files = list(tmp_path.glob("*_comments_bad_case_retrieval_*.json"))
+    assert len(retrieval_files) == 1
+    saved_payload = json.loads(retrieval_files[0].read_text(encoding="utf-8"))
+    assert saved_payload["polished_text"] == "1、心率检测精度为12.5。"
+    assert saved_payload["warnings"] == ["falling back to bm25_only"]
+    assert saved_payload["failure_summary"] is None
+    assert saved_payload["clauses"][0]["clause"]["text"] == "1、心率检测精度为12.5。"
+    assert saved_payload["clauses"][0]["pre_filter_hits"][0]["case_id"] == "TW_COMMENT_001"
+    assert saved_payload["clauses"][0]["filtered_hits"][0]["score"] == 0.91
+    assert saved_payload["injected_bad_cases"][0]["case_id"] == "TW_COMMENT_001"
+    assert "comments_bad_case_retrieval_file" not in result
+    assert "agent_step" not in result
+
+
+def test_generate_comments_writes_failure_payload_when_bad_case_retrieval_raises(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    async def _fake_stream_llm_completion(**_kwargs):
+        return "[]"
+
+    def _raise_retrieval_failure(_polished_text: str):
+        raise RuntimeError("vector search unavailable")
+
+    monkeypatch.setattr(
+        generate_comments_module, "get_generate_prompt_log_dir", lambda _anchor: tmp_path
+    )
+    monkeypatch.setattr(
+        generate_comments_module,
+        "retrieve_bad_case_hits",
+        _raise_retrieval_failure,
+    )
+    monkeypatch.setattr(
+        generate_comments_module, "stream_llm_completion", _fake_stream_llm_completion
+    )
+
+    result = generate_comments_module.generate_comments(_base_state(), _base_config())
+
+    retrieval_files = list(tmp_path.glob("*_comments_bad_case_retrieval_*.json"))
+    assert len(retrieval_files) == 1
+    saved_payload = json.loads(retrieval_files[0].read_text(encoding="utf-8"))
+    assert saved_payload["polished_text"] == "1、心率检测精度为12.5。"
+    assert saved_payload["retrieval_mode"] == "unavailable"
+    assert saved_payload["failure_summary"]["reason"] == "retrieval_failed"
+    assert "vector search unavailable" in saved_payload["failure_summary"]["message"]
+    assert saved_payload["clause_split_summary"]["clause_split_mode"] == "clause_only"
+    assert saved_payload["clauses"][0]["clause"]["text"] == "1、心率检测精度为12.5。"
+    assert saved_payload["clauses"][0]["pre_filter_hits"] == []
+    assert saved_payload["clauses"][0]["filtered_hits"] == []
+    assert saved_payload["injected_bad_cases"] == []
+    assert "comments_bad_case_retrieval_file" not in result
