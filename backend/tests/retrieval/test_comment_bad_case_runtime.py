@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import pytest
+
 from backend.retrieval.bad_case_loader import (
     BAD_CASE_CONTEXT_AVAILABLE,
     BAD_CASE_CONTEXT_UNAVAILABLE,
@@ -15,17 +17,21 @@ from backend.retrieval.bad_case_loader import (
     parse_bad_cases,
 )
 from backend.retrieval.bm25 import BM25Hit, BM25Index
+from backend.retrieval.config import RetrievalConfig
 from backend.retrieval.comment_bad_case_runtime import (
     CLAUSE_SPLIT_MODE_CLAUSE_ONLY,
     CLAUSE_SPLIT_MODE_FALLBACK_FULL_TEXT,
     RETRIEVAL_MODE_BM25_ONLY,
+    RETRIEVAL_MODE_HYBRID,
     build_clause_only_query,
     clear_bad_case_runtime_cache,
     load_bad_case_runtime_index,
+    retrieve_bad_case_hits,
     retrieve_bad_case_hits_bm25_only,
     split_polished_text_into_clauses,
 )
 from backend.retrieval.hybrid import HybridHit
+from backend.retrieval.qdrant_store import VectorHit
 
 
 def test_default_bad_case_file_uses_formal_retrieval_directory() -> None:
@@ -373,6 +379,141 @@ def test_bm25_only_retrieval_returns_payload_when_directory_unavailable(
     assert payload["warnings"]
 
 
+def test_hybrid_retrieval_uses_embedding_and_qdrant_when_available(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    clear_bad_case_runtime_cache()
+    _write_v2_bad_case(tmp_path, "a.md", "TW_COMMENT_HYBRID_A", "心率小数精度")
+    _write_v2_bad_case(tmp_path, "b.md", "TW_COMMENT_HYBRID_B", "心率固定档位")
+    _write_v2_bad_case(tmp_path, "c.md", "TW_COMMENT_HYBRID_C", "心率边界符号")
+    _write_v2_bad_case(tmp_path, "d.md", "TW_COMMENT_HYBRID_D", "心率宣传表述")
+    runtime_index = load_bad_case_runtime_index(tmp_path)
+    full_chunk_indexes = [
+        index
+        for index, chunk in enumerate(runtime_index.chunks)
+        if chunk.field == "full"
+    ]
+    query_texts: list[str] = []
+
+    def fake_score(query: str) -> list[BM25Hit]:
+        query_texts.append(query)
+        return [
+            BM25Hit(index=full_chunk_indexes[0], score=10.0),
+            BM25Hit(index=full_chunk_indexes[1], score=9.5),
+            BM25Hit(index=full_chunk_indexes[2], score=9.0),
+            BM25Hit(index=full_chunk_indexes[3], score=1.0),
+        ]
+
+    monkeypatch.setattr(runtime_index.bm25_index, "score", fake_score)
+    embedder = _FakeEmbeddingClient()
+    store = _FakeQdrantStore(
+        vector_hits=[
+            VectorHit(index=full_chunk_indexes[0], score=10.0, payload={}),
+            VectorHit(index=full_chunk_indexes[1], score=9.5, payload={}),
+            VectorHit(index=full_chunk_indexes[2], score=9.0, payload={}),
+            VectorHit(index=full_chunk_indexes[3], score=1.0, payload={}),
+        ]
+    )
+
+    result = retrieve_bad_case_hits(
+        """
+一、技术需求
+1、心率指标应支持精确小数显示。
+2、心率指标应支持固定档位。
+""",
+        directory=tmp_path,
+        config_loader=_fake_retrieval_config,
+        embedding_client_factory=lambda config: embedder,
+        qdrant_store_factory=lambda config: store,
+    )
+
+    assert result.retrieval_mode == RETRIEVAL_MODE_HYBRID
+    assert query_texts == [
+        "1、心率指标应支持精确小数显示。",
+        "2、心率指标应支持固定档位。",
+    ]
+    assert embedder.queries == query_texts
+    assert store.healthcheck_count == 1
+    assert store.query_vectors == [[0.1, 0.2], [0.1, 0.2]]
+    assert len(result.clause_results) == 2
+    for clause_result in result.clause_results:
+        assert len(clause_result.pre_filter_hits) == 4
+        assert len(clause_result.filtered_hits) == 3
+        assert [hit.rank for hit in clause_result.filtered_hits] == [1, 2, 3]
+        assert [round(hit.score, 3) for hit in clause_result.filtered_hits] == [
+            1.0,
+            0.944,
+            0.889,
+        ]
+        assert all(hit.score > 0.8 for hit in clause_result.filtered_hits)
+        assert all(hit.vector_score > 0.0 for hit in clause_result.filtered_hits)
+        assert all(
+            hit.retrieval_mode == RETRIEVAL_MODE_HYBRID
+            for hit in clause_result.filtered_hits
+        )
+    assert result.to_log_payload()["retrieval_mode"] == RETRIEVAL_MODE_HYBRID
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_warning"),
+    [
+        ("config", "Missing embedding API key"),
+        ("embedding", "embedding failed"),
+        ("healthcheck", "qdrant healthcheck failed"),
+        ("search", "qdrant search failed"),
+    ],
+)
+def test_hybrid_retrieval_falls_back_to_bm25_when_vector_layer_fails(
+    tmp_path: Path,
+    monkeypatch,
+    failure_kind: str,
+    expected_warning: str,
+) -> None:
+    clear_bad_case_runtime_cache()
+    _write_v2_bad_case(tmp_path, "case.md", "TW_COMMENT_FALLBACK", "心率小数精度")
+    runtime_index = load_bad_case_runtime_index(tmp_path)
+    full_chunk_index = next(
+        index
+        for index, chunk in enumerate(runtime_index.chunks)
+        if chunk.field == "full"
+    )
+
+    def fake_score(query: str) -> list[BM25Hit]:
+        return [BM25Hit(index=full_chunk_index, score=10.0)]
+
+    def config_loader() -> RetrievalConfig:
+        if failure_kind == "config":
+            raise RuntimeError("Missing embedding API key. Set EMBEDDING_API_KEY.")
+        return _fake_retrieval_config()
+
+    monkeypatch.setattr(runtime_index.bm25_index, "score", fake_score)
+    embedder = _FakeEmbeddingClient(
+        fail_on_embed=failure_kind == "embedding"
+    )
+    store = _FakeQdrantStore(
+        vector_hits=[VectorHit(index=full_chunk_index, score=1.0, payload={})],
+        fail_on_healthcheck=failure_kind == "healthcheck",
+        fail_on_search=failure_kind == "search",
+    )
+
+    result = retrieve_bad_case_hits(
+        "一、技术需求\n1、心率指标应支持精确小数显示。",
+        directory=tmp_path,
+        config_loader=config_loader,
+        embedding_client_factory=lambda config: embedder,
+        qdrant_store_factory=lambda config: store,
+    )
+
+    assert result.retrieval_mode == RETRIEVAL_MODE_BM25_ONLY
+    assert len(result.filtered_hits) == 1
+    assert result.filtered_hits[0].vector_score == 0.0
+    assert result.filtered_hits[0].retrieval_mode == RETRIEVAL_MODE_BM25_ONLY
+    assert any(expected_warning in warning for warning in result.warnings)
+    assert any("falling back to bm25_only" in warning for warning in result.warnings)
+    assert result.to_log_payload()["retrieval_mode"] == RETRIEVAL_MODE_BM25_ONLY
+
+
 def _write_v2_bad_case(
     directory: Path,
     file_name: str,
@@ -394,4 +535,54 @@ anchor_policy: 锚点取完整分句。
 ---END_BAD_CASE---
 """,
         encoding="utf-8",
+    )
+
+
+class _FakeEmbeddingClient:
+    def __init__(self, *, fail_on_embed: bool = False) -> None:
+        self.fail_on_embed = fail_on_embed
+        self.queries: list[str] = []
+
+    def embed_query(self, text: str) -> list[float]:
+        self.queries.append(text)
+        if self.fail_on_embed:
+            raise RuntimeError("embedding failed")
+        return [0.1, 0.2]
+
+
+class _FakeQdrantStore:
+    def __init__(
+        self,
+        *,
+        vector_hits: list[VectorHit],
+        fail_on_healthcheck: bool = False,
+        fail_on_search: bool = False,
+    ) -> None:
+        self.vector_hits = vector_hits
+        self.fail_on_healthcheck = fail_on_healthcheck
+        self.fail_on_search = fail_on_search
+        self.healthcheck_count = 0
+        self.query_vectors: list[list[float]] = []
+
+    def healthcheck(self) -> None:
+        self.healthcheck_count += 1
+        if self.fail_on_healthcheck:
+            raise RuntimeError("qdrant healthcheck failed")
+
+    def search(self, *, query_vector, limit: int = 50) -> list[VectorHit]:
+        self.query_vectors.append(list(query_vector))
+        if self.fail_on_search:
+            raise RuntimeError("qdrant search failed")
+        return self.vector_hits[:limit]
+
+
+def _fake_retrieval_config() -> RetrievalConfig:
+    return RetrievalConfig(
+        qdrant_url="http://qdrant.test",
+        qdrant_api_key=None,
+        collection_name="comment_bad_cases_test",
+        embedding_base_url="http://embedding.test/v1",
+        embedding_api_key="placeholder",
+        embedding_model="test-embedding-model",
+        embedding_dimensions=None,
     )

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import RLock
+from typing import Protocol
 
 from backend.retrieval.bad_case_loader import (
     DEFAULT_BAD_CASE_DIR,
@@ -12,6 +14,8 @@ from backend.retrieval.bad_case_loader import (
     load_bad_case_directory,
 )
 from backend.retrieval.bm25 import BM25Index
+from backend.retrieval.config import RetrievalConfig, load_retrieval_config
+from backend.retrieval.hybrid import hybrid_search
 
 
 _DirectorySignature = tuple[tuple[str, int, int], ...]
@@ -19,12 +23,32 @@ _DirectorySignature = tuple[tuple[str, int, int], ...]
 CLAUSE_SPLIT_MODE_CLAUSE_ONLY = "clause_only"
 CLAUSE_SPLIT_MODE_FALLBACK_FULL_TEXT = "fallback_full_text"
 RETRIEVAL_MODE_BM25_ONLY = "bm25_only"
+RETRIEVAL_MODE_HYBRID = "hybrid"
 DEFAULT_BM25_ONLY_TOP_K = 3
 DEFAULT_BM25_ONLY_SCORE_THRESHOLD = 0.8
+DEFAULT_HYBRID_VECTOR_LIMIT = 50
 
 _PACKAGE_HEADING_RE = re.compile(r"^第\d+包：.*$")
 _SECTION_HEADING_RE = re.compile(r"^[一二三四五六七八九十]+、.*$")
 _NUMERIC_CLAUSE_RE = re.compile(r"^\d+、.*$")
+
+
+class _EmbeddingClient(Protocol):
+    def embed_query(self, text: str) -> list[float]:
+        ...
+
+
+class _QdrantStore(Protocol):
+    def healthcheck(self) -> None:
+        ...
+
+    def search(self, *, query_vector: Sequence[float], limit: int = 50):
+        ...
+
+
+_ConfigLoader = Callable[[], RetrievalConfig]
+_EmbeddingClientFactory = Callable[[RetrievalConfig], _EmbeddingClient]
+_QdrantStoreFactory = Callable[[RetrievalConfig], _QdrantStore]
 
 
 @dataclass(frozen=True)
@@ -315,6 +339,64 @@ def retrieve_bad_case_hits_bm25_only(
     )
 
 
+def retrieve_bad_case_hits(
+    polished_text: str,
+    *,
+    directory: str | Path | None = None,
+    top_k: int = DEFAULT_BM25_ONLY_TOP_K,
+    score_threshold: float = DEFAULT_BM25_ONLY_SCORE_THRESHOLD,
+    config_loader: _ConfigLoader = load_retrieval_config,
+    embedding_client_factory: _EmbeddingClientFactory | None = None,
+    qdrant_store_factory: _QdrantStoreFactory | None = None,
+) -> BadCaseRetrievalResult:
+    runtime_index = load_bad_case_runtime_index(directory)
+    if not runtime_index.chunks:
+        return retrieve_bad_case_hits_bm25_only(
+            polished_text,
+            directory=directory,
+            top_k=top_k,
+            score_threshold=score_threshold,
+        )
+
+    try:
+        config = config_loader()
+        embedder = (
+            embedding_client_factory or _create_embedding_client
+        )(config)
+        store = (qdrant_store_factory or _create_qdrant_store)(config)
+        store.healthcheck()
+
+        split_result = split_polished_text_into_clauses(polished_text)
+        clause_results = [
+            _retrieve_clause_hits_hybrid(
+                clause=clause,
+                runtime_index=runtime_index,
+                embedder=embedder,
+                store=store,
+                top_k=max(0, top_k),
+                score_threshold=score_threshold,
+            )
+            for clause in split_result.clauses
+        ]
+    except Exception as exc:
+        return _fallback_to_bm25_only(
+            polished_text=polished_text,
+            directory=directory,
+            top_k=top_k,
+            score_threshold=score_threshold,
+            warning=_format_hybrid_warning(exc),
+        )
+
+    load_payload = runtime_index.load_result.to_log_payload()
+    return BadCaseRetrievalResult(
+        split_result=split_result,
+        clause_results=clause_results,
+        retrieval_mode=RETRIEVAL_MODE_HYBRID,
+        warnings=list(runtime_index.load_result.warnings),
+        failure_summary=load_payload["failure_summary"],
+    )
+
+
 def clear_bad_case_runtime_cache() -> None:
     with _CACHE_LOCK:
         _RUNTIME_INDEX_CACHE.clear()
@@ -378,6 +460,49 @@ def _retrieve_clause_hits_bm25_only(
     )
 
 
+def _retrieve_clause_hits_hybrid(
+    *,
+    clause: QueryClause,
+    runtime_index: BadCaseRuntimeIndex,
+    embedder: _EmbeddingClient,
+    store: _QdrantStore,
+    top_k: int,
+    score_threshold: float,
+) -> ClauseRetrievalResult:
+    query = build_clause_only_query(clause)
+    query_vector = embedder.embed_query(query)
+    hybrid_hits = hybrid_search(
+        query=query,
+        chunks=runtime_index.chunks,
+        bm25_index=runtime_index.bm25_index,
+        query_vector=query_vector,
+        store=store,
+        top_k=max(len(runtime_index.chunks), top_k),
+        vector_limit=DEFAULT_HYBRID_VECTOR_LIMIT,
+    )
+
+    pre_filter_hits = [
+        BadCaseRetrievalHit(
+            rank=hit.rank,
+            chunk=hit.chunk,
+            score=hit.hybrid_score,
+            bm25_score=hit.bm25_score,
+            vector_score=hit.vector_score,
+            retrieval_mode=RETRIEVAL_MODE_HYBRID,
+        )
+        for hit in hybrid_hits
+    ]
+    filtered_hits = [
+        hit for hit in pre_filter_hits if hit.score > score_threshold
+    ][:top_k]
+
+    return ClauseRetrievalResult(
+        clause=clause,
+        pre_filter_hits=pre_filter_hits,
+        filtered_hits=_rerank_hits(filtered_hits),
+    )
+
+
 def _normalize_scores(scores: dict[int, float]) -> dict[int, float]:
     if not scores:
         return {}
@@ -391,3 +516,50 @@ def _normalize_scores(scores: dict[int, float]) -> dict[int, float]:
 
 def _rerank_hits(hits: list[BadCaseRetrievalHit]) -> list[BadCaseRetrievalHit]:
     return [replace(hit, rank=rank) for rank, hit in enumerate(hits, start=1)]
+
+
+def _fallback_to_bm25_only(
+    *,
+    polished_text: str,
+    directory: str | Path | None,
+    top_k: int,
+    score_threshold: float,
+    warning: str,
+) -> BadCaseRetrievalResult:
+    result = retrieve_bad_case_hits_bm25_only(
+        polished_text,
+        directory=directory,
+        top_k=top_k,
+        score_threshold=score_threshold,
+    )
+    return replace(result, warnings=[*result.warnings, warning])
+
+
+def _format_hybrid_warning(exc: Exception) -> str:
+    message = str(exc).replace("\n", " ").strip()
+    if len(message) > 300:
+        message = f"{message[:300]}..."
+    if not message:
+        message = exc.__class__.__name__
+    return f"hybrid retrieval unavailable; falling back to bm25_only: {message}"
+
+
+def _create_embedding_client(config: RetrievalConfig) -> _EmbeddingClient:
+    from backend.retrieval.embeddings import EmbeddingClient
+
+    return EmbeddingClient(
+        api_key=config.embedding_api_key,
+        base_url=config.embedding_base_url,
+        model=config.embedding_model,
+        dimensions=config.embedding_dimensions,
+    )
+
+
+def _create_qdrant_store(config: RetrievalConfig) -> _QdrantStore:
+    from backend.retrieval.qdrant_store import QdrantBadCaseStore
+
+    return QdrantBadCaseStore(
+        url=config.qdrant_url,
+        collection_name=config.collection_name,
+        api_key=config.qdrant_api_key,
+    )

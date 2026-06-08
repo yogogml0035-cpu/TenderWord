@@ -17,6 +17,7 @@ Source: prd.json
 - `load_bad_case_runtime_index()` 是 bad case chunks + BM25Index 的进程内缓存入口；后续 clause split、BM25-only 和 hybrid runtime 应复用它，不要直接重复构建索引。
 - `split_polished_text_into_clauses()` 是正式 clause_only 切分入口；只识别 `第N包：`、中文数字章节和数字顿号条款，不能在首版扩展到 `1.1`、`（一）` 或表格单元格。
 - `retrieve_bad_case_hits_bm25_only()` 是正式 BM25-only 入口；它返回 `BadCaseRetrievalResult`，按 clause 保留 `pre_filter_hits` 和 `filtered_hits`，并统一标记 `retrieval_mode=bm25_only`。
+- `retrieve_bad_case_hits()` 是正式 hybrid-first 入口；它只查询 Qdrant，不 upsert、不 recreate，任一向量环节异常都会带 warning 回退到 BM25-only。
 
 ## 2026-06-08 17:43 - US-001
 - 实现了正式 bad case loader 默认读取 `backend/retrieval/bad_cases/comment_bad_cases.md`，并解析 v2 `---BEGIN_BAD_CASE--- ... ---END_BAD_CASE---` 字段。
@@ -84,4 +85,16 @@ Source: prd.json
   - BM25-only 的归一化沿用 hybrid 原型中的 min-max 口径；单条正命中会归一化为 1.0，因此会通过默认阈值。
   - 测试缓存行为时可以先调用 `load_bad_case_runtime_index()`，再 monkeypatch 返回对象里的 `bm25_index.score`；下一次 runtime 调用会复用同一个缓存索引。
   - 后续 US-006 hybrid fallback 可以复用 `BadCaseRetrievalHit`，BM25-only 时 `vector_score` 固定为 0.0，最终 mode 用 `retrieval_mode` 区分。
+---
+
+## 2026-06-08 19:26 - US-006
+- 实现了 hybrid-first bad case 检索入口：向量配置和 Qdrant 可用时按 clause 调用 embedding、Qdrant search 和 `hybrid_search()` 计算 hybrid score。
+- 增加了自动降级：embedding 配置缺失、embedding 调用失败、Qdrant healthcheck 失败或 Qdrant search 抛错时，结果回退到 BM25-only，并把失败原因写入 warnings。
+- 保持每条款 top3 且 `score > 0.8` 的过滤口径，日志 payload 的最终 `retrieval_mode` 会标记为 `hybrid` 或 `bm25_only`。
+- 更改的文件：`backend/retrieval/comment_bad_case_runtime.py`、`backend/tests/retrieval/test_comment_bad_case_runtime.py`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/retrieval/comment_bad_case_runtime.py backend/tests/retrieval/test_comment_bad_case_runtime.py`；`backend/.venv-linux/bin/python -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -k "hybrid or fallback" -v`；`backend/.venv-linux/bin/python -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -v`；`backend/.venv-linux/bin/python -m pytest backend/tests -q`；`git diff --check -- backend/retrieval/comment_bad_case_runtime.py backend/tests/retrieval/test_comment_bad_case_runtime.py`
+- **未来迭代的学习：**
+  - 后续 prompt context、retrieval JSON 和节点接入应优先调用 `retrieve_bad_case_hits()`，不要分别手写 hybrid 和 BM25 fallback。
+  - runtime 的 hybrid 路径只做查询，不负责 collection 创建、upsert 或重建向量索引；诊断/索引准备仍应留给脚本或外部流程。
+  - `BadCaseRetrievalResult.warnings` 是向量链路降级原因的承载位置，节点层只需要记录或写日志，不应把它升级为任务失败。
 ---
