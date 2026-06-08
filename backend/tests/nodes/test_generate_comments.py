@@ -3,10 +3,21 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
+import pytest
+
 
 generate_comments_module = importlib.import_module(
     "backend.nodes.common_word_nodes.generate_comments"
 )
+
+
+@pytest.fixture(autouse=True)
+def _disable_bad_case_context(monkeypatch) -> None:
+    monkeypatch.setattr(
+        generate_comments_module,
+        "_build_bad_case_context_for_comments",
+        lambda _polished_text: [],
+    )
 
 
 def _base_state() -> dict[str, object]:

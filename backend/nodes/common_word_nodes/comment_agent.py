@@ -1,18 +1,30 @@
 from __future__ import annotations
 
+import json
+import time
 from pathlib import Path
 from typing import Any, Callable
 
 from backend.agents.comments import run_comment_agent
+from backend.agents.comments.workspace import COMMENT_AGENT_AUDIT_ROOT
 from backend.agents.generation import AgentStepPayload
+from backend.agents.log_naming import build_agent_log_stem
 from backend.config.tender_config import get_anchor_target_sizes
 from backend.models import AgentStepEventData
 from backend.nodes.common_word_nodes.comment_writeback import (
     CommentWritebackResult,
     build_comment_writeback_summary_payload,
 )
-from backend.prompts.comment_prompt import render_comment_prompt
+from backend.prompts.comment_prompt import (
+    render_comment_prompt,
+    render_comment_prompt_with_bad_case_context,
+)
 from backend.prompts.types import CommentPromptInput
+from backend.retrieval.comment_bad_case_runtime import (
+    build_bad_case_prompt_context,
+    build_failed_bad_case_retrieval_payload,
+    retrieve_bad_case_hits,
+)
 from backend.states.base_state import TenderGraphStateBase
 from backend.util.log_util.progress_log import progress_log
 from backend.util.word_util import (
@@ -154,6 +166,118 @@ def _empty_writeback_result() -> CommentWritebackResult:
         "skipped": 0,
         "issues": [],
     }
+
+
+def _write_json_if_possible(path: Path | None, payload: dict[str, object]) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _with_polished_text_in_retrieval_payload(
+    payload: dict[str, object] | None,
+    polished_text: str,
+) -> dict[str, object] | None:
+    if payload is None:
+        return None
+    enriched_payload = dict(payload)
+    enriched_payload["polished_text"] = polished_text
+    return enriched_payload
+
+
+def _build_bad_case_context_for_comment_agent(
+    polished_text: str,
+) -> tuple[list[dict[str, str]], dict[str, object] | None]:
+    try:
+        retrieval_result = retrieve_bad_case_hits(polished_text)
+    except Exception as error:
+        progress_log.warning(
+            f"[comment_agent] bad case 检索失败，已回退原批注生成规则: {error}"
+        )
+        return [], build_failed_bad_case_retrieval_payload(polished_text, error)
+
+    for warning in retrieval_result.warnings:
+        progress_log.warning(f"[comment_agent] bad case 检索警告: {warning}")
+
+    bad_case_context = build_bad_case_prompt_context(retrieval_result)
+    if bad_case_context:
+        progress_log.debug(
+            f"[comment_agent] bad case 检索命中 {len(bad_case_context)} 条，将注入自主批注生成规则"
+        )
+    to_log_payload = getattr(retrieval_result, "to_log_payload", None)
+    retrieval_payload = to_log_payload() if callable(to_log_payload) else None
+    return bad_case_context, retrieval_payload
+
+
+def _build_comment_generation_instruction(
+    *,
+    tender_type: str,
+    polished_text: str,
+) -> tuple[str, dict[str, object] | None]:
+    prompt_input = CommentPromptInput(
+        tender_type=str(tender_type or "xjcg"),
+        polished_text=str(polished_text or ""),
+    )
+    bad_case_context, retrieval_payload = _build_bad_case_context_for_comment_agent(
+        prompt_input.polished_text
+    )
+    if bad_case_context:
+        rendered_prompt = render_comment_prompt_with_bad_case_context(
+            prompt_input,
+            bad_case_context,
+        )
+    else:
+        rendered_prompt = render_comment_prompt(prompt_input)
+    return (
+        rendered_prompt.system_prompt + "\n\n" + rendered_prompt.user_prompt,
+        retrieval_payload,
+    )
+
+
+def _write_comment_agent_generation_logs(
+    *,
+    task_id: str,
+    project_number: str,
+    project_name: str,
+    comment_generation_instruction: str | None,
+    retrieval_payload: dict[str, object] | None,
+    polished_text: str,
+) -> None:
+    if not comment_generation_instruction:
+        return
+    try:
+        timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+        stem = build_agent_log_stem(
+            task_id,
+            project_number=project_number,
+            project_name=project_name,
+            fallback="comment-agent",
+        )
+        COMMENT_AGENT_AUDIT_ROOT.mkdir(parents=True, exist_ok=True)
+        prompt_file = (
+            COMMENT_AGENT_AUDIT_ROOT
+            / f"{stem}_comment_generation_prompt_{timestamp}.txt"
+        )
+        prompt_file.write_text(comment_generation_instruction, encoding="utf-8")
+
+        enriched_payload = _with_polished_text_in_retrieval_payload(
+            retrieval_payload,
+            polished_text,
+        )
+        if enriched_payload is not None:
+            retrieval_file = (
+                COMMENT_AGENT_AUDIT_ROOT
+                / f"{stem}_comments_bad_case_retrieval_{timestamp}.json"
+            )
+            _write_json_if_possible(retrieval_file, enriched_payload)
+    except Exception as error:
+        progress_log.warning(
+            f"[comment_agent] 警告: 保存自主批注生成日志失败: {error}"
+        )
 
 
 def _state_from_writeback(
@@ -299,21 +423,33 @@ def comment_agent_writeback(
         log_parts.append(f"comment_agent 批注范围: {bound_start}-{bound_end}")
 
         comment_generation_instruction = None
+        bad_case_retrieval_payload = None
+        polished_text = str(state.get("polished_text") or "")
         if allow_comment_generation:
-            rendered_prompt = render_comment_prompt(
-                CommentPromptInput(
-                    tender_type=tender_type,
-                    polished_text=str(state.get("polished_text") or ""),
-                )
+            (
+                comment_generation_instruction,
+                bad_case_retrieval_payload,
+            ) = _build_comment_generation_instruction(
+                tender_type=tender_type,
+                polished_text=polished_text,
             )
-            comment_generation_instruction = (
-                rendered_prompt.system_prompt + "\n\n" + rendered_prompt.user_prompt
+            _write_comment_agent_generation_logs(
+                task_id=str(
+                    configurable.get("task_id")
+                    or state.get("task_id")
+                    or "comment-agent"
+                ),
+                project_number=str(state.get("project_number") or ""),
+                project_name=str(state.get("project_name") or ""),
+                comment_generation_instruction=comment_generation_instruction,
+                retrieval_payload=bad_case_retrieval_payload,
+                polished_text=polished_text,
             )
             log_parts.append("comment_agent 将使用统一批注 prompt 自主生成批注候选")
 
         result = run_comment_agent(
             initial_comments=comments,
-            polished_text=str(state.get("polished_text") or ""),
+            polished_text=polished_text,
             doc=doc,
             bound_start=bound_start,
             bound_end=bound_end,

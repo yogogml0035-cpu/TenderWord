@@ -38,7 +38,7 @@
 - 关键设置：分号开启、单引号、`printWidth: 100`、`tabWidth: 2`、`trailingComma: es5`。
 - Tailwind class 排序由 `prettier-plugin-tailwindcss` 处理。
 
-**Lint：**
+**代码检查：**
 - 使用 ESLint 9 flat config，配置在 `frontend/eslint.config.mjs`。
 - 继承 `eslint-config-next/core-web-vitals` 和 `eslint-config-next/typescript`。
 - React hooks 插件启用，`react-hooks/set-state-in-effect` 当前为 warn。
@@ -81,7 +81,7 @@
 - 合理示例：`frontend/lib/gngkFormType.ts` 注明工程类当前复用服务链路。
 - 不用注释替代类型和测试；API shape 必须落实到 `frontend/types/api.ts` 和测试。
 
-**JSDoc/TSDoc：**
+**文档注释：**
 - 当前部分 hooks、utilities 和测试工厂包含 JSDoc 风格说明，例如 `frontend/hooks/useUrlParams.ts`、`frontend/__tests__/mocks/data-factories.ts`。
 - 新增公共 helper 可保留简短 TSDoc；组件内部简单 handler 不需要解释性注释。
 

@@ -2,200 +2,265 @@
 
 **分析日期：** 2026-06-08
 
-**范围：** `backend/` 当前技术债、脆弱区域、安全边界、性能限制和测试缺口。`backend/.env` 只记录存在性，不读取内容。
+**范围：** 仅覆盖 `backend/` 后端代码、配置、测试、README/项目文档和必要根级约定。`backend/.env` 与 `backend/.env.example` 只确认存在性，不读取内容；文档只记录环境变量名称和风险边界，不记录任何值。
 
-## Tech Debt
+## 技术债
 
-**`BaseGraph` / file lock 重复片段：**
-- Issue: `backend/graphs/base_graph.py` 中存在重复导入和重复 `CrossProcessFileLock.__init__` / `acquire` 定义片段。
-- Files: `backend/graphs/base_graph.py`
-- Impact: 排查锁超时、取消、跨进程互斥和 Windows-only `msvcrt` 行为时容易读错实现分支；重构风险高。
-- Fix approach: 先补锁获取、释放、超时、取消和进度包装测试，再做单独重构；不要夹在功能需求中顺手整理。
+**`BaseGraph` 锁实现存在重复片段：**
+- 问题： `backend/graphs/base_graph.py` 中有重复 import，并且 `CrossProcessFileLock` 内出现重复 `acquire()` 定义/初始化片段；后定义覆盖前定义，阅读和维护锁语义时容易误判。
+- 涉及文件： `backend/graphs/base_graph.py`
+- 影响： Word COM 串行锁、跨进程文件锁、取消检查和进度包装是后端核心临界路径；重复片段会提高修复锁超时、Windows-only `msvcrt` 行为和取消路径的风险。
+- 修复方式： 先补充锁获取、释放、超时、取消和队列顺序测试，再单独清理重复片段；不要把锁清理夹在业务功能变更里。
 
-**大型 Word helper 和节点复杂度高：**
-- Issue: 多个文件体量很大，核心复杂度集中在 Word 样式、COM 写回、service 编排和 agent runtime。
-- Files: `backend/helper/word_helper/inline_style_ops.py`, `backend/nodes/gjgk_word_nodes/gjgk_update_word.py`, `backend/services/document_service.py`, `backend/nodes/common_word_nodes/update_word.py`, `backend/nodes/gngk_word_nodes/gngk_fw_zc_update_word.py`
-- Impact: 小改动可能影响样式回填、表格匹配、批注写回或多类型 graph。
-- Fix approach: 修改前定位最窄 helper/节点；添加 focused tests；避免在同一变更中移动大量逻辑。
+**Word 写回与样式匹配逻辑体量集中：**
+- 问题： Word helper、类型节点、service 和 agent runtime 中存在多个大型文件，复杂度集中在样式回填、段落边界、表格匹配、批注写回和任务收敛。
+- 涉及文件： `backend/helper/word_helper/inline_style_ops.py`, `backend/nodes/gjgk_word_nodes/gjgk_update_word.py`, `backend/services/document_service.py`, `backend/nodes/common_word_nodes/update_word.py`, `backend/nodes/gngk_word_nodes/gngk_fw_zc_update_word.py`, `backend/task/task_queue_manager.py`, `backend/graphs/base_graph.py`
+- 影响： 小改动可能影响 `.doc/.docx` 写回、批注、受保护字段、GNGK 子类型或 SSE 终态。
+- 修复方式： 修改前定位最窄 helper/节点；优先扩展 `backend/tests/helper/`、`backend/tests/nodes/` 和相关 graph/service 测试；不要在类型节点中复制已有 helper 逻辑。
 
-**进程内状态限制：**
-- Issue: 任务、队列、SSE buffer 和会话快照都在进程内存。
-- Files: `backend/task/task_queue_manager.py`, `backend/core/sse_manager.py`, `backend/services/conversation_service.py`
-- Impact: 服务重启会丢失任务状态、SSE 重放历史和会话 rewrite 上下文；多进程/横向扩展会分裂状态。
-- Fix approach: 引入持久化前先定义任务恢复、SSE 事件序列、会话快照一致性和下载文件生命周期契约。
+**任务、SSE 和会话状态是进程内状态：**
+- 问题： 任务队列、任务结果、取消事件、SSE 事件缓存和 rewrite 会话历史都保存在单进程内存。
+- 涉及文件： `backend/task/task_queue_manager.py`, `backend/core/sse_manager.py`, `backend/services/conversation_service.py`, `backend/services/task_service.py`
+- 影响： 服务重启会丢失任务状态、SSE 重放历史和 rewrite 上下文；多进程部署会分裂队列、事件和会话。
+- 修复方式： 引入持久化前先定义任务恢复、SSE event id、会话快照一致性、下载文件生命周期和取消语义。
 
 **Readiness 健康检查是轻量占位：**
-- Issue: `/health/ready` 中 `upload_dir_accessible` 写死为 `True` 并带 TODO。
-- Files: `backend/main.py`
-- Impact: readiness 不能证明上传目录可写、Word COM 可用、pywin32 注册正常或外部 LLM 可达。
-- Fix approach: 保持健康检查语义清晰；如果扩展 readiness，分别报告目录、COM、provider 和外部 HTTP 状态，不要把轻量探测当完整验收。
+- 问题： `/health/ready` 的 `upload_dir_accessible` 当前固定为 `True`，代码中保留实际目录权限检查 TODO。
+- 涉及文件： `backend/main.py`
+- 影响： readiness 不能证明 `UPLOAD_DIR` 可写、Word/WPS COM 可用、pywin32 注册正常、LLM provider 可达或外部 HTTP 可达。
+- 修复方式： 保持 `/health` 进程探测语义；新增 readiness 检查时分项报告上传目录、COM、LLM provider、Qdrant/embedding 和外部 HTTP，不要把轻量探测当完整生成验收。
 
-**Retrieval config fallback 会读取 `.env`：**
-- Issue: `backend/retrieval/config.py` 在 `python-dotenv` 不可用时有手写 `.env` fallback loader。
-- Files: `backend/retrieval/config.py`
-- Impact: 运行时可用，但文档/诊断脚本执行时要避免打印真实 env 值；agent 扫描也不能读取 `.env` 内容。
-- Fix approach: 日志只记录变量名和缺失状态，不输出值；脚本文档写清敏感信息边界。
+**Retrieval `.env` fallback 是敏感配置边界：**
+- 问题： `backend/retrieval/config.py` 在 `python-dotenv` 未加载成功时会手写读取 `backend/.env` 并填充 `os.environ`。
+- 涉及文件： `backend/retrieval/config.py`, `backend/config/settings.py`
+- 影响： 运行时可用，但诊断、日志和文档生成必须避免输出真实 key；agent 扫描也不能读取 `.env` 内容。
+- 修复方式： 日志只记录变量名和缺失状态；文档只列 `EMBEDDING_API_KEY`、`DASHSCOPE_API_KEY`、`QDRANT_API_KEY` 等变量名；不要打印 env 值。
 
-## Known Bugs
+## 已知问题
+
+**`GET /api/generate/{task_id}` 完成态返回 shape 不匹配：**
+- 症状： `backend/api/generate.py` 在任务完成时把 `task_info.result` 直接赋给 `GenerateResponse.output_file`，而 `GenerateResponse.output_file` 是 `Optional[str]`；任务结果实际由 `DocumentService._build_task_result_payload()` 构造为 dict。
+- 涉及文件： `backend/api/generate.py`, `backend/models/generate.py`, `backend/services/document_service.py`, `backend/tests/api/test_generate_api.py`
+- 触发方式： 调用 `GET /api/generate/{task_id}` 查询已完成任务。
+- 临时处理： 使用 `GET /api/tasks/{task_id}` 获取完整 `TaskInfo.result`，或通过 SSE `done` 事件/下载卡获取文件信息。
 
 **Readiness 上传目录检查未真实执行：**
-- Symptoms: `/health/ready` 返回 `upload_dir_accessible: True`，但代码注释标记需要实际检查目录权限。
-- Files: `backend/main.py`
-- Trigger: 上传目录不存在、不可写或权限异常时请求 `/health/ready`。
-- Workaround: 使用真实上传、生成任务或专门诊断检查，不把 `/health/ready` 作为上传目录验收。
+- 症状： `/health/ready` 返回 `upload_dir_accessible: True`，但不检查 `settings.UPLOAD_DIR` 是否存在或可写。
+- 涉及文件： `backend/main.py`, `backend/config/settings.py`
+- 触发方式： 上传目录不存在、不可写或磁盘异常时请求 `/health/ready`。
+- 临时处理： 使用真实上传、实际生成任务或 `backend/scripts/diagnose_word.py`/人工 Word COM 闭环验证。
 
-## Security Considerations
+## 安全注意事项
 
-**Secret and customer data leakage:**
-- Risk: `.env`、LLM key、token、客户原文、私有路径、traceback 或下载路径进入文档、日志、agent workspace 或测试夹具。
-- Files: `backend/config/settings.py`, `backend/agents/task_context_assistant/logging.py`, `backend/util/log_util/`, `backend/prompts_log/`
-- Current mitigation: Agent run 审计有 scrub/白名单工具；项目规则禁止读取真实 `.env`。
-- Recommendations: 新日志和审计字段必须先定义白名单；用户可见进度只写摘要；文档只写 env var 名，不写值。
+**客户文本、路径、traceback 和 token 泄漏边界：**
+- 风险： `.env`、LLM key、token、客户原文、私有路径、traceback、下载路径或完整任务结果进入日志、prompt/retrieval 审计文件、agent workspace、测试夹具或用户可见事件。
+- 涉及文件： `backend/config/settings.py`, `backend/main.py`, `backend/services/document_service.py`, `backend/agents/task_context_assistant/logging.py`, `backend/agents/task_context_assistant/tools.py`, `backend/nodes/common_word_nodes/generate_comments.py`, `backend/nodes/common_word_nodes/comment_agent.py`, `backend/util/log_util/`
+- 当前缓解： Agent run 审计使用 `scrub_sensitive_text()`；只读摘要工具不返回完整结果和下载路径；retrieval 命中详情不进入 SSE、下载卡或 `agent_step`；全局异常响应对客户端返回泛化 500。
+- 建议： 新增日志、审计、agent run 事件或工具返回字段时先定义白名单；用户可见进度只写摘要；内部 prompt/retrieval 日志继续视为敏感产物。
 
-**Template candidate SSRF / unsafe download:**
-- Risk: 外部模板代理下载可能被滥用为 SSRF 或任意内容代理。
-- Files: `backend/api/template_candidates.py`, `backend/util/common_util/template_candidates.py`
-- Current mitigation: `TEMPLATE_CANDIDATE_ALLOWED_HOSTS` 主机白名单、URL 校验、年份阻断和上传区落盘。
-- Recommendations: 保留白名单和 URL parse；新增下载来源时补 API tests。
+**业务 API 未检测到统一认证/授权层：**
+- 风险： 业务 router 没有统一 `Depends()` 认证 gate；任务、上传文件、下载、agent run 和会话状态主要依赖调用方传入的会话/任务标识。
+- 涉及文件： `backend/main.py`, `backend/api/`, `backend/models/agent_run.py`, `backend/services/task_service.py`, `backend/api/download.py`
+- 当前缓解： 本地/受控环境假设；下载接口做 `UPLOAD_DIR` containment；agent run 公共摘要校验 `conversation_id` 与任务会话匹配。
+- 建议： 进入多用户或生产环境前定义认证、任务归属、文件归属、会话归属和下载授权；同步前端 API client、错误模型和测试。
 
-**File path traversal:**
-- Risk: 下载接口接收 URL 编码完整路径。
-- Files: `backend/api/download.py`
-- Current mitigation: `validate_file_path()` 将目标路径解析后强制 `relative_to(settings.UPLOAD_DIR)`。
-- Recommendations: 修改下载逻辑时保留 path containment tests；不要把 download path 暴露给 agent run 原始上下文。
+**下载接口路径遍历边界：**
+- 风险： 下载接口接收 URL 编码完整路径，任意改动可能破坏 containment。
+- 涉及文件： `backend/api/download.py`, `backend/config/settings.py`, `backend/tests/api/`
+- 当前缓解： `validate_file_path()` 对解码路径 `resolve()` 后强制 `relative_to(settings.UPLOAD_DIR)`；非文件和不存在路径返回错误。
+- 建议： 修改下载逻辑时保留 `relative_to(settings.UPLOAD_DIR)`；补充路径穿越、URL 编码、非文件、缺失文件和成功下载测试。
 
-**Unauthenticated API surface:**
-- Risk: 业务 routers 未检测到统一认证/权限依赖。
-- Files: `backend/main.py`, `backend/api/`
-- Current mitigation: 本地/受控环境假设；依赖中有 auth 包但未作为统一 API gate。
-- Recommendations: 引入认证时同步后端 dependencies、API errors、前端 client 和 tests；同时定义任务/文件多用户隔离。
+**模板候选代理 SSRF 边界：**
+- 风险： 外部模板下载代理如果放宽 URL 校验，可能变成 SSRF 或任意内容代理。
+- 涉及文件： `backend/api/template_candidates.py`, `backend/util/common_util/template_candidates.py`, `backend/config/settings.py`, `backend/tests/api/test_template_candidates.py`
+- 当前缓解： `validate_template_download_url()` 限制 `http/https` 和 `TEMPLATE_CANDIDATE_ALLOWED_HOSTS`；模板选择会先检查年份规则，再保存到上传区。
+- 建议： 新增下载来源或主机时同步白名单、URL parse、年份阻断和 API tests；不要让前端组件直接访问外部模板 URL。
 
-## Performance Bottlenecks
+**上传文件只做扩展名和大小校验：**
+- 风险： `persist_file_bytes()` 按文件名扩展名与字节大小判断，未检测实际 MIME/文件签名；恶意内容仍可落盘。
+- 涉及文件： `backend/api/upload.py`, `backend/util/common_util/upload_storage.py`, `backend/config/settings.py`
+- 当前缓解： `sanitize_filename()` 清洗文件名；`ALLOWED_EXTENSIONS` 和 `MAX_UPLOAD_SIZE` 限制类型与大小；保存路径由 `UPLOAD_DIR` 生成。
+- 建议： 需要生产安全边界时增加 magic bytes/文档解析安全检查、病毒扫描或隔离区；测试覆盖伪造扩展名和异常写入。
+
+## 性能瓶颈
 
 **Word COM 串行执行：**
-- Problem: Word COM 是全局临界资源，任务吞吐受串行锁限制。
-- Files: `backend/task/task_queue_manager.py`, `backend/graphs/base_graph.py`, `backend/util/word_util/word_com_manager.py`
-- Cause: Word COM 文档打开/写入不适合并发；需要任务队列、公平锁、文件锁和 COM lock。
-- Improvement path: 横向扩展前设计外部队列、单 worker Word 执行器和持久化任务状态；不要简单增加线程数。
+- 问题： `DocumentService` 使用 `ThreadPoolExecutor(max_workers=4)` 接收后台任务，但 graph 内仍通过 `TaskQueueManager` 公平队列和 `CrossProcessFileLock` 串行保护 Word COM 写入。
+- 涉及文件： `backend/services/document_service.py`, `backend/task/task_queue_manager.py`, `backend/graphs/base_graph.py`, `backend/util/word_util/word_com_manager.py`
+- 原因： Word/WPS COM 是稀缺临界资源，文档打开、写入、保存和关闭不适合并发。
+- 改进路径： 横向扩展前设计外部队列、专用 Windows worker、持久化任务状态和文件隔离；不要简单提高线程数。
 
-**LLM streaming and agent loops:**
-- Problem: 初次生成、rewrite、content agent、comment agent 和模板候选 AI 重排都有外部 LLM 延迟。
-- Files: `backend/util/common_util/llm_stream_utils.py`, `backend/agents/generation/content_agents.py`, `backend/agents/comments/comment_agent.py`, `backend/services/template_candidate_ranking_service.py`
-- Cause: 网络、模型推理、审核修订轮次和流式超时。
-- Improvement path: 保持 timeout 集中配置；对可选 AI 重排保持范围限制；过程事件只推摘要，避免 SSE payload 膨胀。
+**LLM 和 agent 循环延迟：**
+- 问题： 初次生成、rewrite、content agent、comment agent、模板候选 AI 重排和流式快照都依赖外部 LLM。
+- 涉及文件： `backend/util/common_util/llm_stream_utils.py`, `backend/agents/generation/content_agents.py`, `backend/agents/comments/comment_agent.py`, `backend/services/template_candidate_ranking_service.py`, `backend/services/document_service.py`
+- 原因： 网络、模型推理、审核修订轮次、流式超时和 JSON 修复都会增加长任务时延。
+- 改进路径： 保持 `LLM_STREAM_TIMEOUT_SECONDS` 集中配置；对可选 AI 重排保持范围限制；SSE/NDJSON 只发摘要和节流快照。
 
-**Large style writeback matching:**
-- Problem: 样式回填逻辑复杂且可能对文档片段进行大量匹配。
-- Files: `backend/helper/word_helper/inline_style_ops.py`
-- Cause: Word 文档结构、表格、编号、局部候选和 fallback 规则复杂。
-- Improvement path: 修改时使用 focused benchmark/fixture；保持 helper 层单测覆盖，不在节点中复制匹配逻辑。
+**Bad case retrieval hybrid 路径按条款调用外部向量层：**
+- 问题： `retrieve_bad_case_hits()` 会加载本地 bad case、拆分正文条款，并在 hybrid 模式下为每条 query 调用 embedding 和 Qdrant 搜索；失败时降级 `bm25_only`。
+- 涉及文件： `backend/retrieval/comment_bad_case_runtime.py`, `backend/retrieval/embeddings.py`, `backend/retrieval/qdrant_store.py`, `backend/nodes/common_word_nodes/generate_comments.py`, `backend/nodes/common_word_nodes/comment_agent.py`
+- 原因： 正文条款数量、embedding 网络延迟、Qdrant 健康检查和 vector search 都影响批注生成前置耗时。
+- 改进路径： 保持本地 BM25 降级；监控 retrieval warning；需要提速时考虑 per-task 缓存、top-k 限制和异步批量 embedding。
 
-## Fragile Areas
+**样式回填匹配复杂度高：**
+- 问题： `inline_style_ops.py` 负责编号、片段、本地候选、表格、字体等复杂匹配，单文件体量和分支数量都高。
+- 涉及文件： `backend/helper/word_helper/inline_style_ops.py`, `backend/tests/helper/test_inline_style_ops.py`, `backend/tests/nodes/test_update_word_inline_style_writeback.py`
+- 原因： Word 文档结构、表格、编号、局部候选和 fallback 规则复杂。
+- 改进路径： 修改时用 focused fixture 和单测覆盖；对真实 Word/WPS 行为再做人工或诊断闭环。
 
-**GNGK subtype inheritance and overrides:**
-- Files: `backend/graphs/gngk_hw_zc_tender_graph.py`, `backend/graphs/gngk_hw_cz_tender_graph.py`, `backend/graphs/gngk_fw_zc_tender_graph.py`, `backend/graphs/gngk_fw_cz_tender_graph.py`
-- Why fragile: `gngk_hw_cz` 继承货物自筹主干但覆写 direct-replace delete/update；`gngk_fw_zc` 覆写服务专属 delete/replacement/update；`gngk_fw_cz` 继承共享主干。
-- Safe modification: 改任一 `gngk_*` 时同步检查 graph class attribute、`backend/config/tender_config.py`、protected profile、content mode、前端 form type 分派和 tests。
-- Test coverage: `backend/tests/graphs/test_gngk_tender_graph.py`, `backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`, 各 `backend/tests/graphs/test_gngk_*_generation_mode_agent.py`
+## 脆弱区域
 
-**Generate-only fields leaking into rewrite:**
-- Files: `backend/models/generate.py`, `backend/services/document_service.py`, `backend/states/base_state.py`, `backend/skills/rewrite/SKILL.md`
-- Why fragile: `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 只适用于初次 generate；rewrite 混入这些字段会误触初次生成分支或污染 prompt。
-- Safe modification: rewrite 请求、skill state、prompt surface 均不接收这些字段；新增 generate option 时补模型和 service 初始 state 测试。
-- Test coverage: `backend/tests/models/test_generate_request_generation_style.py`, `backend/tests/services/test_document_service_initial_state.py`, `backend/tests/graphs/test_generation_mode_branching.py`
+**GNGK 子类型继承和覆写：**
+- 涉及文件： `backend/graphs/gngk_hw_zc_tender_graph.py`, `backend/graphs/gngk_hw_cz_tender_graph.py`, `backend/graphs/gngk_fw_zc_tender_graph.py`, `backend/graphs/gngk_fw_cz_tender_graph.py`, `backend/config/tender_config.py`
+- 脆弱原因： `gngk_hw_cz`、`gngk_fw_zc` 等子类型共享主干但覆写 delete/update/replacement；前端 `gngk` UI 类型还需由共享 helper 分派到具体后端 form type。
+- 安全修改： 改任一 `gngk_*` 时同步检查 graph class attributes、protected profile、content mode、form type、URL/注册表/转换器和测试。
+- 测试覆盖： `backend/tests/graphs/test_gngk_tender_graph.py`, `backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`, `backend/tests/graphs/test_gngk_*_generation_mode_agent.py`
 
-**Agent run as pre-task stream:**
-- Files: `backend/api/agent.py`, `backend/services/agent_run_service.py`, `backend/agents/task_context_assistant/tools.py`
-- Why fragile: agent run 只负责判断前置条件和创建任务；如果复制后台任务状态机会和 `TaskQueueManager` 分叉。
-- Safe modification: 成功只返回 `task_accepted`，后续进度交给 task/SSE；缺条件返回 `needs_input`。
-- Test coverage: `backend/tests/api/test_agent_run_api.py`, `backend/tests/services/test_agent_run_service.py`, `backend/tests/agents/test_task_context_assistant_tools.py`
+**Generate-only 字段边界：**
+- 涉及文件： `backend/models/generate.py`, `backend/services/document_service.py`, `backend/states/base_state.py`, `backend/skills/rewrite/SKILL.md`, `backend/prompts/types.py`, `backend/tests/services/test_document_service_initial_state.py`
+- 脆弱原因： `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 只属于初次 generate；rewrite 请求、skill state 和 prompt surface 不接收这些字段。`DocumentService._build_rewrite_state_snapshot()` 仍把 `generation_mode` 保存到会话快照，后续改动容易误复制到 rewrite skill state。
+- 安全修改： 新增 generate option 时只进入 generate request 和初始 state；rewrite tool input、skill state、rewrite prompt types 继续禁止 generate-only 字段。
+- 测试覆盖： `backend/tests/models/test_generate_request_generation_style.py`, `backend/tests/services/test_document_service_initial_state.py`, `backend/tests/graphs/test_generation_mode_branching.py`, `backend/tests/services/test_document_service_task_result.py`
 
-**Comment supplement latest-state dependency:**
-- Files: `backend/api/comment_supplement.py`, `backend/services/document_service.py`, `backend/graphs/comment_supplement_graph.py`, `backend/nodes/common_word_nodes/comment_supplement.py`
-- Why fragile: 任务必须基于会话 latest `rewrite_state.prepared_doc_path` 和 `polished_text`；过期 `source_file` 会写回错误副本。
-- Safe modification: 创建前校验 latest state、文件存在和路径匹配；成功后更新 latest `rewrite_state.prepared_doc_path`。
-- Test coverage: `backend/tests/api/test_comment_supplement_api.py`, `backend/tests/graphs/test_comment_supplement_graph.py`, `backend/tests/services/test_document_service_comment_supplement.py`
+**Agent run 只是任务创建前置流：**
+- 涉及文件： `backend/api/agent.py`, `backend/services/agent_run_service.py`, `backend/agents/task_context_assistant/tools.py`, `backend/models/agent_run.py`
+- 脆弱原因： agent run 只输出 `needs_input`、`task_accepted`、`done` 等 NDJSON 事件，不复制后台任务状态机；成功后必须交给 `TaskQueueManager`、SSE 和下载链路。
+- 安全修改： 新能力先定义受控 `context_snapshot` 和白名单工具；不要让 agent run 直接写 Word、暴露完整任务结果或返回下载路径。
+- 测试覆盖： `backend/tests/api/test_agent_run_api.py`, `backend/tests/services/test_agent_run_service.py`, `backend/tests/agents/test_task_context_assistant_tools.py`, `backend/tests/agents/test_task_context_assistant_logging.py`
 
-**SSE `agent_step` contract:**
-- Files: `backend/models/sse.py`, `backend/core/sse_manager.py`, `backend/services/document_service.py`, `backend/agents/generation/agent_step_events.py`
-- Why fragile: 前端依赖 named event、结构化 `content_agent` / `comment_agent` payload 和终态事件；随意改字段会断过程卡。
-- Safe modification: 新增字段保持向后兼容；同步前端类型和 tests。
-- Test coverage: `backend/tests/models/test_sse_agent_step.py`, `backend/tests/services/test_sse_manager_agent_step.py`, `backend/tests/services/test_document_service_agent_step.py`
+**补充批注依赖会话 latest state：**
+- 涉及文件： `backend/api/comment_supplement.py`, `backend/services/document_service.py`, `backend/graphs/comment_supplement_graph.py`, `backend/nodes/common_word_nodes/comment_supplement.py`
+- 脆弱原因： 补充批注必须基于当前会话 latest `rewrite_state.prepared_doc_path` 和 `polished_text`；source file 不匹配会写回错误副本。
+- 安全修改： 创建任务前继续校验 `conversation_id`、`source_file`、latest path、文件存在和路径匹配；成功后更新 latest `rewrite_state.prepared_doc_path`。
+- 测试覆盖： `backend/tests/api/test_comment_supplement_api.py`, `backend/tests/graphs/test_comment_supplement_graph.py`, `backend/tests/services/test_document_service_comment_supplement.py`
 
-**Prompt literals as contracts:**
-- Files: `backend/prompts/generate_prompt.py`, `backend/prompts/comment_prompt.py`, `backend/prompts/template_candidate_ranking_prompt.py`
-- Why fragile: prompt 示例、JSON 字段和机器标识符被 tests、agent parsing 或前端过程展示依赖。
-- Safe modification: 改 prompt 时跑 `backend/tests/prompts/` 和相关 agent tests。
-- Test coverage: `backend/tests/prompts/test_generate_prompt_routing.py`, `backend/tests/prompts/test_comment_prompt_reference_contract.py`
+**SSE `agent_step` 和终态契约：**
+- 涉及文件： `backend/models/sse.py`, `backend/core/sse_manager.py`, `backend/services/document_service.py`, `backend/agents/generation/agent_step_events.py`, `backend/nodes/common_word_nodes/comment_agent.py`
+- 脆弱原因： 前端依赖 named event、`agent_step` payload、`done`/`error` 终态和 `style_writeback`/`comment_writeback` 摘要；随意改字段会断过程卡或下载卡。
+- 安全修改： 新增字段保持向后兼容；新增 SSE event type 同步后端模型、发送方、前端 union/parser 和测试。
+- 测试覆盖： `backend/tests/models/test_sse_agent_step.py`, `backend/tests/services/test_sse_manager_agent_step.py`, `backend/tests/services/test_document_service_agent_step.py`
 
-## Scaling Limits
+**Bad case retrieval 正式接入但不对前端公开：**
+- 涉及文件： `backend/retrieval/`, `backend/nodes/common_word_nodes/generate_comments.py`, `backend/nodes/common_word_nodes/comment_agent.py`, `backend/prompts/comment_prompt.py`
+- 脆弱原因： retrieval JSON 是后端 prompt/retrieval 审计产物，prompt context 刻意排除 case id、score、chunk id 和匹配条款；命中详情不能进入 SSE、下载卡或 `agent_step`。
+- 安全修改： 保持 `comment_generation_mode=off` 不触发 retrieval；rewrite 不触发 retrieval；新增 retrieval 字段时只进入审计 JSON，前端展示仍用摘要。
+- 测试覆盖： `backend/tests/retrieval/test_comment_bad_case_runtime.py`, `backend/tests/nodes/test_generate_comments_bad_case.py`, `backend/tests/nodes/test_comment_agent_writeback_node.py`, `backend/tests/prompts/test_comment_prompt_bad_case_context.py`
 
-**Task/SSE/conversation memory state:**
-- Current capacity: 单进程内由内存和 `settings.SSE_MAX_EVENTS_PER_TASK` 限制。
-- Limit: 服务重启丢状态，多进程无法共享任务队列和 SSE buffer。
-- Scaling path: 外部任务队列、持久化任务状态、集中事件流和文件生命周期管理。
+**Prompt literal 和机器契约：**
+- 涉及文件： `backend/prompts/generate_prompt.py`, `backend/prompts/comment_prompt.py`, `backend/prompts/template_candidate_ranking_prompt.py`, `backend/prompts/rewrite_target_selection_prompt.py`, `backend/agents/generation/json_utils.py`
+- 脆弱原因： prompt 示例、JSON 字段、机器标识符和解析规则被 tests、agent parsing 或前端过程展示依赖。
+- 安全修改： 改 prompt 时同步 parser/validator 测试；不要翻译 `content_agent`、`comment_agent`、`agent_step`、tool names 等机器标识符。
+- 测试覆盖： `backend/tests/prompts/test_generate_prompt_routing.py`, `backend/tests/prompts/test_comment_prompt_reference_contract.py`, `backend/tests/agents/test_generation_content_agent.py`
 
-**Word COM worker:**
-- Current capacity: 串行 Word 执行路径。
-- Limit: 并发生成会排队，长 Word/LLM 任务阻塞后续任务。
-- Scaling path: 专用 Windows worker 池，但每个 worker 内仍需明确 COM 互斥和文件隔离。
+## 扩展限制
 
-**Local file storage:**
-- Current capacity: 受 `UPLOAD_DIR` 所在磁盘、日志清理和文件生命周期影响。
-- Limit: 多用户/长时间运行会积累上传和生成文件。
-- Scaling path: 引入文件保留策略、对象存储或 job artifact 管理，并同步下载安全契约。
+**Task/SSE/conversation 内存状态：**
+- 当前容量： 单进程内由内存、`SSE_MAX_EVENTS_PER_TASK`、`SSE_EVENT_TTL`、`MAX_REWRITE_MESSAGES` 和任务清理周期限制。
+- 限制： 服务重启丢任务、SSE 事件、会话 rewrite history 和取消状态；多进程无法共享当前队列。
+- 扩展路径： 外部队列、持久化 task store、集中事件流、会话状态存储和 artifact 生命周期管理。
 
-## Dependencies at Risk
+**后台 Word COM worker：**
+- 当前容量： 后台线程可排队多个任务，但 Word 写入路径仍通过 queue + graph lock + COM lock 串行。
+- 限制： 长 Word/LLM 任务会阻塞后续 Word 写入；Windows COM 注册或 Word/WPS 进程异常会影响整个生成链路。
+- 扩展路径： 专用 Windows worker 池；每个 worker 内仍需 COM 互斥、文件隔离、取消检查和诊断。
 
-**`pywin32` / Word COM:**
-- Risk: Windows-only，依赖本机 Office COM 注册。
-- Impact: WSL/Linux 或无 Office 环境无法完成真实 Word 写回。
-- Migration plan: 保持 no-COM 单测和 Windows COM 诊断分层；替代方案需重写 Word 操作层。
+**本地文件与日志产物：**
+- 当前容量： 上传文件、生成文件、agent workspace、prompt/retrieval 日志和运行日志依赖本地磁盘；启动时只清理 `backend/logs` 总量。
+- 限制： 多用户或长时间运行会积累 `UPLOAD_DIR`、`backend/prompts_log/`、agent/comment workspace 和 retrieval JSON。
+- 扩展路径： 定义上传/生成文件保留策略、对象存储、审计日志保留策略和下载授权。
 
-**`deepagents`:**
-- Risk: content agent 和 task context assistant 核心依赖，API 变化会影响 agent runtime。
-- Impact: 初次 `generation_mode=agent` 和 agent run 前置流可能失败。
-- Migration plan: 封装点在 `backend/agents/generation/content_agents.py` 和 `backend/agents/task_context_assistant/factory.py`；升级时优先补/跑 agent tests。
+**Retrieval cache 是进程内缓存：**
+- 当前容量： `load_bad_case_runtime_index()` 按 bad case 目录签名缓存 BM25 index；hybrid 层依赖外部 Qdrant/embedding。
+- 限制： 多进程重复建索引；bad case 文件变化只在本进程缓存签名检查后生效；外部向量层不可用会降级。
+- 扩展路径： 保持 BM25 fallback；需要跨进程一致性时引入显式索引刷新、共享缓存或服务化 retrieval。
 
-**Qdrant / Embedding service:**
-- Risk: 检索脚本依赖外部 Qdrant 和 embedding key。
-- Impact: 批注坏案例 hybrid retrieval 无法运行。
-- Migration plan: 保持 retrieval config 独立；当前只按诊断/实验入口维护，接入正式批注业务路径前先补可降级行为和 tests。
+## 依赖风险
 
-## Missing Critical Features
+**`pywin32` / Word/WPS COM / `msvcrt`：**
+- 风险： 完整 Word 写回依赖 Windows Python、本机 Word/WPS COM 注册、`pywin32` 和 Windows `msvcrt` 文件锁。
+- 影响： WSL/Linux pytest 只能验证 no-COM 逻辑，不能证明真实 `.doc/.docx` 写回。
+- 迁移计划： 保持 `backend/util/word_util/` 诊断分层；替代方案需重写 Word 操作层和锁策略。
 
-**Persistent task store:**
-- Problem: 任务、会话和 SSE 不持久化。
-- Blocks: 服务重启恢复、多进程部署、跨 worker 任务查询。
+**`deepagents` / LangChain agent runtime：**
+- 风险： content agent、comment agent 和 task context assistant 依赖 `deepagents`、LangChain model factory 和工具调用协议。
+- 影响： API 变化会影响 `generation_mode=agent`、补充批注和 agent run 前置流。
+- 迁移计划： 升级时优先跑 `backend/tests/agents/`、`backend/tests/services/test_agent_run_service.py`、`backend/tests/nodes/test_content_agent_generate.py` 和 `agent_step` 测试。
 
-**Unified authentication and authorization:**
-- Problem: 未检测到统一 API auth layer。
-- Blocks: 多用户隔离、生产权限控制、下载文件访问控制。
+**外部 LLM providers：**
+- 风险： DeepSeek、ARK/Doubao、DashScope/Qwen 的 key、base URL、模型名、超时或响应格式变化会影响生成、rewrite、批注和模板候选重排。
+- 影响： 长任务失败、流式中断、JSON 解析失败或 agent 输出异常。
+- 迁移计划： 通过 `backend/config/settings.py` 和 `backend/util/common_util/llm_stream_utils.py` 集中配置；mock 外部服务的单测继续覆盖错误分支。
 
-**Stable CI for Word COM:**
-- Problem: 未检测到可执行 Windows + Word COM CI。
-- Blocks: 自动证明真实 `.doc/.docx` 端到端写回。
+**向量检索 provider：**
+- 风险： Hybrid retrieval 依赖 `QDRANT_URL`、`QDRANT_API_KEY`、`EMBEDDING_*` 或 `DASHSCOPE_API_KEY`。
+- 影响： 批注 bad case hybrid retrieval 降级到 `bm25_only`；缺 key 或向量层失败会增加 warning 和降低语义检索质量。
+- 迁移计划： 保持 `bm25_only` fallback 和 retrieval JSON； live 诊断使用 `backend/scripts/test_comment_hybrid_retrieval.py`，不要把诊断脚本当 CI。
 
-## Test Coverage Gaps
+**外部招标详情/模板候选 HTTP 接口：**
+- 风险： ERP/外部接口 URL、返回字段、模板文件主机或网络状态变化会影响招标详情和模板候选。
+- 影响： `backend/api/tender.py`、`backend/api/template_candidates.py` 可能返回 502、候选格式错误或模板选择失败。
+- 迁移计划： 保持外部请求 timeout、格式归一化、host 白名单和 API tests；字段变化先更新后端模型/工具再同步前端。
 
-**Real Word COM E2E:**
-- What's not tested: 真实 Word/WPS COM 下的完整生成、rewrite、补充批注闭环。
-- Files: `backend/util/word_util/`, `backend/nodes/`, `backend/helper/word_helper/`
-- Risk: Fake object 单测通过但真实 COM range/table/comment 行为不同。
-- Priority: High for release validation.
+## 缺失关键能力
 
-**External services live behavior:**
-- What's not tested: 真实 LLM、外部招标详情、模板候选、Qdrant、embedding 服务状态；其中 Qdrant/embedding 当前只服务检索诊断/实验脚本。
-- Files: `backend/util/common_util/llm_stream_utils.py`, `backend/util/common_util/fetch_tender_data.py`, `backend/util/common_util/template_candidates.py`, `backend/retrieval/`
-- Risk: 配置、网络、接口字段变化导致运行时失败。
-- Priority: Medium; committed tests 应继续 mock 外部服务。
+**持久化任务存储：**
+- 问题： 任务、取消事件、任务结果和 SSE event buffer 不持久化。
+- 阻塞： 服务重启恢复、多进程部署、跨 worker 查询和历史任务审计。
 
-**Frontend-backend full flow:**
-- What's not tested: 从前端上传、创建任务、SSE、下载、补充批注、rewrite 的完整浏览器路径。
-- Files: Backend endpoints in `backend/api/`; frontend tests live outside backend.
-- Risk: 后端 API shape 和前端解析漂移。
-- Priority: High for cross-system changes.
+**统一认证与授权：**
+- 问题： 未检测到统一 API auth layer。
+- 阻塞： 多用户隔离、任务归属授权、文件下载授权和生产权限控制。
+
+**真实 readiness 诊断：**
+- 问题： `/health/ready` 不检查上传目录、Word COM、LLM provider、Qdrant/embedding 或外部接口。
+- 阻塞： 自动化运维判断真实生成能力。
+
+**产物保留策略：**
+- 问题： 上传目录、生成文件、prompt/retrieval 审计和 agent workspace 未形成统一保留/清理策略。
+- 阻塞： 长期运行磁盘容量控制、敏感产物生命周期管理和合规清理。
+
+**稳定的 Windows Word COM CI：**
+- 问题： 未检测到自动化 Windows + Word/WPS COM 端到端 CI。
+- 阻塞： 自动证明真实 `.doc/.docx` 生成、rewrite、批注和样式写回闭环。
+
+## 测试覆盖缺口
+
+**`GET /api/generate/{task_id}` 完成态：**
+- 未覆盖内容： 已完成任务的 `GenerateResponse` shape、`output_file` 字段类型和 result payload 映射。
+- 涉及文件： `backend/api/generate.py`, `backend/tests/api/test_generate_api.py`, `backend/services/document_service.py`
+- 风险： 完成态查询可能触发响应模型错误或返回非预期结构。
+- 优先级：高
+
+**真实 Word COM E2E：**
+- 未覆盖内容： 真实 Word/WPS COM 下完整生成、rewrite、补充批注、样式回填、批注写回和 `.doc/.docx` 保存。
+- 涉及文件： `backend/util/word_util/`, `backend/nodes/`, `backend/helper/word_helper/`, `backend/scripts/diagnose_word.py`
+- 风险： fake object 单测通过但真实 COM range/table/comment/save 行为不同。
+- 优先级：发布验收高
+
+**上传/下载安全边界用例：**
+- 未覆盖内容： 下载 path traversal、URL 编码绕过、非文件路径、伪造扩展名、MIME 不匹配和异常落盘。
+- 涉及文件： `backend/api/download.py`, `backend/api/upload.py`, `backend/util/common_util/upload_storage.py`
+- 风险： 安全边界在重构或扩展时被破坏。
+- 优先级：高
+
+**认证与归属隔离：**
+- 未覆盖内容： 任务、会话、上传文件、下载文件和 agent run 是否属于同一用户/会话的统一授权。
+- 涉及文件： `backend/api/`, `backend/services/task_service.py`, `backend/services/conversation_service.py`, `backend/agents/task_context_assistant/tools.py`
+- 风险： 引入多用户场景时出现越权查询、取消或下载。
+- 优先级：高，进入非本地受控环境时尤其需要补齐。
+
+**真实外部服务：**
+- 未覆盖内容： 真实 LLM、外部招标详情、模板候选接口、Qdrant 和 embedding 服务的 live 行为。
+- 涉及文件： `backend/util/common_util/llm_stream_utils.py`, `backend/util/common_util/fetch_tender_data.py`, `backend/util/common_util/template_candidates.py`, `backend/retrieval/`
+- 风险： 配置、网络、字段或 provider API 变化导致运行时失败。
+- 优先级：中；提交测试仍应继续 mock 外部服务。
+
+**前后端完整链路：**
+- 未覆盖内容： 浏览器端上传、agent run、任务创建、SSE、下载、补充批注和 rewrite 的完整闭环。
+- 涉及文件：后端入口在 `backend/api/`；前端 API client 和 UI 测试位于 `frontend/`。
+- 风险： 后端 API/SSE shape 与前端解析漂移。
+- 优先级：高，跨系统改动时必须验证。
 
 ---
 
-*后端风险审计：2026-06-08*
+*风险审计： 2026-06-08*

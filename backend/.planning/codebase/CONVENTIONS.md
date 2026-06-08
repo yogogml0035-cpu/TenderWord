@@ -1,162 +1,144 @@
-# 后端编码约定事实地图
+# 后端编码约定
 
 **分析日期：** 2026-06-08
 
-**范围：** `backend/` 源码、测试和项目级 agent 规则。
+**范围：** `backend/` 源码、`backend/tests/`、`backend/requirements.txt`、`docs/backend.md`、`docs/interfaces-runtime.md`、根级 `AGENTS.md` 和项目内 `.agents/skills/gsd-map-codebase/SKILL.md`。
 
-## Naming Patterns
+**关键事实来源：**
+- 后端入口与路由：`backend/main.py`、`backend/api/generate.py`、`backend/api/tasks.py`、`backend/api/agent.py`、`backend/api/template_candidates.py`、`backend/api/download.py`
+- 模型与配置：`backend/models/generate.py`、`backend/models/task.py`、`backend/models/agent_run.py`、`backend/config/settings.py`、`backend/config/tender_config.py`
+- 任务、Graph、节点：`backend/services/document_service.py`、`backend/services/task_service.py`、`backend/services/agent_run_service.py`、`backend/graphs/base_graph.py`、`backend/graphs/skill_graph.py`、`backend/graphs/task_skill_workflows.py`、`backend/nodes/skills_nodes/rewrite_nodes.py`
+- Word helper 与日志：`backend/helper/word_helper/protected_fields.py`、`backend/helper/word_helper/content_ops.py`、`backend/util/log_util/progress_log.py`、`backend/util/log_util/execution_log.py`、`backend/util/log_util/skill_audit_log.py`、`backend/agents/task_context_assistant/logging.py`
 
-**Files:**
-- 使用 `snake_case.py`，例如 `backend/services/document_service.py`、`backend/core/sse_manager.py`。
-- 测试文件使用 `test_*.py`，例如 `backend/tests/api/test_generate_api.py`。
+## 命名模式
+
+**文件：**
+- 后端 Python 文件使用 `snake_case.py`，例如 `backend/services/document_service.py`、`backend/core/sse_manager.py`、`backend/helper/word_helper/protected_fields.py`。
+- API、service、graph、node、helper、util 按职责目录放置；不要为单个功能新增平行目录结构。现有边界在 `backend/api/`、`backend/services/`、`backend/graphs/`、`backend/nodes/`、`backend/helper/`、`backend/util/`。
 - Graph 文件使用 `<runtime_type>_tender_graph.py`，例如 `backend/graphs/gngk_hw_cz_tender_graph.py`。
-- 类型节点文件使用 `<runtime_type>_<operation>.py`，例如 `backend/nodes/gngk_word_nodes/gngk_fw_zc_update_word.py`。
-- task skill 声明放 `backend/skills/<skill_id>/SKILL.md`。
+- 类型专属 Word 节点使用 `<runtime_type>_<operation>.py`，例如 `backend/nodes/gngk_word_nodes/gngk_fw_zc_update_word.py`。
+- task skill 指令放在 `backend/skills/<skill_id>/SKILL.md`，运行时注册逻辑在 `backend/skills/catalog.py` 和 `backend/graphs/task_skill_workflows.py`。
+- 测试文件统一使用 `test_*.py`，位于 `backend/tests/<scope>/`，例如 `backend/tests/api/test_generate_api.py`。
 
-**Functions:**
+**函数：**
 - 函数使用 `snake_case`，例如 `create_generate_task()`、`get_task_skill_workflow()`、`dispatch_tender_aware_update_word()`。
-- FastAPI endpoint 函数以动词或资源动作命名，例如 `create_comment_supplement_task()`、`download_file()`。
-- 单例 getter 使用 `get_*()`，例如 `get_document_service()`、`get_task_queue()`。
+- FastAPI endpoint 函数以资源动作命名，例如 `create_generate_task()`、`create_comment_supplement_task()`、`download_file()`。
+- 单例 getter 使用 `get_*()`，例如 `get_document_service()`、`get_task_queue()`、`get_agent_run_service()`。
+- Graph 节点函数使用节点名或业务动作名，例如 `content_agent_generate()`、`generate_comments()`、`rewrite_text()`。
 
-**Variables:**
-- Python 局部变量使用 `snake_case`。
-- 常量使用 `UPPER_SNAKE_CASE`，例如 `REWRITE_SKILL_ID`、`TRACKED_PROGRESS_NODES`、`DEFAULT_DEEPSEEK_MODEL`。
-- API 枚举值使用后端契约字符串，例如 `gngk_hw_cz_tender`、`agent_step`。
+**变量：**
+- 局部变量、参数和 dict key 使用 `snake_case`。
+- 模块常量使用 `UPPER_SNAKE_CASE`，例如 `REWRITE_SKILL_ID`、`TASK_KIND_TO_LLM_NODE`、`DEFAULT_DEEPSEEK_MODEL`。
+- 协议字符串保持后端契约值，例如 `gngk_hw_cz_tender`、`agent_step`、`uploaded_file`、`comment_supplement`。
 
-**Types:**
-- 类、Pydantic model、Graph class 使用 PascalCase，例如 `GenerateRequest`、`AgentRunStreamRequest`、`GngkHwCzTenderGraph`。
-- Enum class 使用 PascalCase，成员使用 UPPER_SNAKE_CASE，例如 `GenerationMode.AGENT`。
-- Graph state 类型位于 `backend/states/`，不要靠隐式 dict key 扩散。
+**类型：**
+- 类、Pydantic model、Graph class 使用 PascalCase，例如 `GenerateRequest`、`AgentRunStreamRequest`、`StandardTenderWorkflowGraph`、`SkillGraph`。
+- Enum class 使用 PascalCase，成员使用 `UPPER_SNAKE_CASE`，值使用稳定协议字符串；参考 `backend/models/generate.py` 和 `backend/models/task.py`。
+- Graph state 类型放在 `backend/states/`；不要在节点之间靠隐式 dict key 扩散新状态。
 
-## Code Style
+## 代码风格
 
-**Formatting:**
-- Tool used: 未检测到后端专用 Black/Ruff/Prettier 配置。
-- Key settings: 按现有 Python 风格，4 空格缩进，类型注解优先，局部最小改动。
-- 文档字符串和用户可见说明多为中文；代码标识符保持英文。
+**格式化：**
+- 未检测到后端专用 `pyproject.toml`、`pytest.ini`、`setup.cfg`、`ruff.toml`、`.flake8`、`mypy.ini`。
+- 使用现有 Python 风格：4 空格缩进、类型注解优先、Pydantic v2 模型、局部最小改动。
+- 后端文档字符串和用户可见文本多为中文，代码标识符保持英文。
+- 修改已有文件时匹配同文件风格；不要为了格式统一重排无关 import、注释或空行。
 
-**Linting:**
-- Tool used: 未检测到后端专用 lint 配置文件。
-- Key rules: 以现有测试和导入约定为准；文档型变更至少跑 `git diff --check`。
+**代码检查：**
+- 未检测到自动 lint 配置；文档型变更至少运行 `git diff --check`。
+- 后端代码改动以 `python -m pytest tests -v` 或更窄相关测试作为主要质量门禁，规则来自 `docs/backend.md`。
 
-## Import Organization
+## 导入组织
 
-**Order:**
-1. `from __future__ import annotations`。
-2. 标准库 imports。
-3. 第三方 imports，例如 `fastapi`、`pydantic`、`langgraph`、`langchain_*`。
+**顺序：**
+1. `from __future__ import annotations`，若文件已有该模式则保持在首个 import 前。
+2. 标准库 imports，例如 `json`、`logging`、`pathlib`、`typing`。
+3. 第三方 imports，例如 `fastapi`、`pydantic`、`langgraph`、`requests`、`deepagents`。
 4. `backend.*` 绝对导入。
-5. `TYPE_CHECKING` 下的类型导入或函数内延迟导入。
+5. `TYPE_CHECKING` 下的类型导入或函数内延迟导入，用于避免循环依赖。
 
-**Path Aliases:**
-- 新后端代码使用 `backend.*` 绝对导入，例如 `from backend.models import GenerateRequest`。
+**路径别名：**
+- 新后端代码使用 `backend.*` 包绝对导入，例如 `from backend.models import GenerateRequest`、`from backend.services.document_service import get_document_service`。
 - 不新增 `from services...`、`from models...`、`from util...` 这类脱离包根的短导入。
-- `backend/main.py` 和 `backend/__init__.py` 会把项目根加入 `sys.path`，用于支持 `backend.*` 导入解析。
+- `backend/main.py` 和 `backend/tests/conftest.py` 会把项目根加入 `sys.path`，用于支持 `backend.*` 导入解析。
 
-## Error Handling
+## 错误处理
 
-**Patterns:**
-- API 输入校验放 Pydantic 模型和 validator 中，例子在 `backend/models/generate.py`、`backend/models/agent_run.py`。
-- API 错误使用 `HTTPException`，`detail` 包含 `success`、`error.code`、`error.message`，例子在 `backend/api/template_candidates.py` 和 `backend/api/download.py`。
-- 长任务失败必须更新任务状态并发 SSE `error`；不要只写日志。
-- 业务缺条件在 agent run 中优先返回 `needs_input`，不要创建不完整任务。
-- Word 边界、受保护字段、direct-replace 非法范围应 fail-fast，相关逻辑在 `backend/helper/word_helper/protected_fields.py` 和类型 update 节点。
-- `progress_log` 不写 traceback、token、完整客户原文或私有路径；排障细节进入 `execution_log`。
+**模式：**
+- API 输入形状用 Pydantic model 和 validator 收口，参考 `backend/models/generate.py`、`backend/models/agent_run.py`。
+- API 错误使用 `HTTPException`，`detail` 保持结构化字段：`success`、`error.code`、`error.message`、可选 `details` 和 `timestamp`；参考 `backend/api/template_candidates.py`、`backend/api/tasks.py`、`backend/api/download.py`。
+- Service 层返回 `GenerateResponse` / `TaskResponse` 这类模型给 API 层；API 层只把已知失败映射为 HTTP 状态，参考 `backend/api/comment_supplement.py` 和 `backend/services/document_service.py`。
+- 长任务失败必须更新任务队列状态并推送 SSE `error`；不要只写日志。相关路径是 `backend/services/document_service.py`、`backend/task/task_queue_manager.py`、`backend/core/sse_manager.py`。
+- Graph 节点必须通过 `BaseGraph.wrap_node()` 接入取消检查和进度更新；不要绕过 `backend/graphs/base_graph.py` 直接执行 Word 写入。
+- Word 受保护字段、direct-replace 范围、上传 rewrite 必填上下文使用 fail-fast，参考 `backend/helper/word_helper/protected_fields.py`、`backend/nodes/skills_nodes/rewrite_nodes.py`、`backend/services/agent_run_service.py`。
+- Retrieval/embedding/Qdrant 失败降级为 `bm25_only` 并记录 warning，不阻塞批注生成；参考 `backend/retrieval/comment_bad_case_runtime.py` 和 `backend/tests/retrieval/test_comment_bad_case_runtime.py`。
 
-## Logging
+## 日志
 
-**Framework:** stdlib `logging` + 自有 log util；`structlog` 依赖存在但不是主要实现。
+**框架：** stdlib `logging` + 自有日志工具；`structlog` 在 `backend/requirements.txt` 中存在，但主要运行路径使用 stdlib logging。
 
-**Patterns:**
-- 应用启动配置 JSON stdout logging，文件 `backend/main.py`。
-- 用户进度日志走 `backend/util/log_util/progress_log.py`。
-- 排障执行日志走 `backend/util/log_util/execution_log.py`。
-- Prompt 记录走 `backend/util/log_util/prompt_log.py`。
-- Rewrite task skill 审计走 `backend/util/log_util/skill_audit_log.py`。
-- Agent run 审计 scrub 逻辑走 `backend/agents/task_context_assistant/logging.py`。
-- SSE 日志桥走 `backend/util/log_util/sse_log_handler.py`。
+**模式：**
+- 应用启动配置 JSON stdout logging，入口在 `backend/main.py`。
+- 用户可见进度日志走 `backend/util/log_util/progress_log.py`，使用 `QueueHandler` / `QueueListener` 和 `DailyFileHandler`。
+- 排障执行日志走 `backend/util/log_util/execution_log.py`，只记录生成成功审计消息。
+- Prompt 和 agent artifacts 写入 `backend/prompts_log/`，辅助函数在 `backend/util/log_util/prompt_log.py`。
+- Rewrite task audit JSON 走 `backend/util/log_util/skill_audit_log.py`，只写受控 stage：`skill_directory_route`、`skill_prompt_render`、`rewrite_target_selection`、`rewrite_text`。
+- SSE 日志桥只在 `task_log_context()` 中推送 INFO 及以上日志，参考 `backend/util/log_util/sse_log_handler.py`。
+- Agent run 审计只写白名单字段并 scrub 敏感内容，参考 `backend/agents/task_context_assistant/logging.py`。
+- 不把完整客户原文、真实密钥、私有路径、traceback、下载路径写入日志、文档或测试夹具。
 
-## Comments
+## 注释
 
-**When to Comment:**
-- 复杂跨线程、Word COM、graph 分支、任务取消和安全边界可以保留简短中文注释。
-- 不为自解释赋值或简单 wrapper 添加重复注释。
-- 修改代码时只补与本次改动直接相关的说明，不顺手重写旧注释。
+**注释时机：**
+- 复杂跨线程、Word COM、Graph 分支、任务取消、安全边界和协议约束可以保留简短中文注释。
+- 不为自解释赋值、简单 wrapper 或显然的字段映射添加重复注释。
+- 修改代码时只补与本次改动直接相关的说明，不重写旧注释和周边叙述。
 
-**JSDoc/TSDoc:**
-- 不适用。Python docstring 在 API、service、graph、helper 中较常见。
+**JSDoc/TSDoc 注释：**
+- 不适用。Python docstring 在 API、service、graph、helper 中较常见，例如 `backend/main.py`、`backend/services/task_service.py`、`backend/graphs/base_graph.py`。
 
-## Function Design
+## 函数设计
 
-**Size:**
-- API endpoint 保持短函数，复杂编排下沉到 `backend/services/`。
-- 共享 Word 业务逻辑从节点中抽到 `backend/helper/word_helper/`。
-- 大型 Word/样式逻辑集中在 `backend/helper/word_helper/inline_style_ops.py`，修改前优先定位现有 helper，而不是在节点中复制。
+**规模：**
+- API endpoint 保持薄入口，复杂编排下沉到 `backend/services/`、`backend/graphs/`、`backend/nodes/` 或 `backend/helper/`。
+- 两个以上招标类型复用的 Word 业务逻辑放到 `backend/helper/word_helper/`，底层 COM 生命周期和常量留在 `backend/util/word_util/`。
+- Graph 类型差异优先通过 class attribute、配置或 `backend/config/tender_config.py` 表达；不要在共享节点里铺满类型判断。
 
-**Parameters:**
-- API/request 参数用 Pydantic model。
+**参数：**
+- API/request 参数使用 Pydantic model，例如 `GenerateRequest`、`AgentRunStreamRequest`、`CommentSupplementRequest`。
 - Graph 节点遵循 `(state, config=None)` 或 LangGraph 可调用约定。
-- Service 对外方法接受模型或显式关键参数，例如 `DocumentService.create_task(request)`、`create_rewrite_task(...)`。
+- Service 对外方法使用模型或显式关键字参数，例如 `DocumentService.create_task(request)`、`DocumentService.create_rewrite_task(...)`。
 
-**Return Values:**
-- API 返回 Pydantic response model，例如 `GenerateResponse`。
-- Graph 节点返回 state patch dict。
-- Agent run stream 返回 NDJSON event data。
-- Helper 返回结构化 dataclass/model 或明确的 tuple/status，避免把多义字符串散落到调用方。
+**返回值：**
+- API 返回 Pydantic response model，例如 `GenerateResponse`、`TaskResponse`。
+- Graph 节点返回 state patch dict 或 state 类型实例，例如 `TenderGraphStateBase(...)`、`TaskSkillGraphState(...)`。
+- Agent run stream 返回 NDJSON 行，序列化辅助在 `backend/services/chat_stream_service.py`。
+- Helper 返回结构化 dict/dataclass/model 或明确状态，不用多义字符串跨层传递。
 
-## Module Design
+## 模块设计
 
-**Exports:**
-- 包级 `__init__.py` 用于稳定 re-export，例如 `backend/graphs/__init__.py`、`backend/agents/generation/__init__.py`。
-- 新增公开对象时保持导出路径稳定，避免调用方跨目录 import 私有 helper。
+**导出：**
+- 包级 `__init__.py` 用于稳定 re-export，例如 `backend/models/__init__.py`、`backend/graphs/__init__.py`、`backend/agents/generation/__init__.py`、`backend/nodes/common_word_nodes/__init__.py`。
+- 新增公开对象时同步相应 `__all__`，保持调用方导入路径稳定。
 
-**Barrel Files:**
-- 使用包级 barrel 统一导出 graph、node、agent runtime。
-- 不把易变内部 helper 暴露为跨层公共 API。
+**Barrel 文件：**
+- 使用 barrel 暴露稳定 API、Graph、Node、Agent runtime。
+- 不把易变内部 helper 暴露为跨层公共 API；调用方优先使用已有 service、graph registry 或 helper facade。
 
-## API and Model Rules
+## 后端专属边界
 
-- `backend/models/` 是 API 和运行态模型真源。
-- `GenerateRequest.form_type` 改动必须同步前端类型、gngk 分派 helper、service registry、graph 测试和 API 测试。
-- `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 是 generate-only 字段，不进入 rewrite 请求模型、skill state 或 prompt surface。
-- `TaskKind` 当前只有 `generate`、`rewrite`、`comment_supplement`，真源在 `backend/models/task.py` 和 `backend/task/task_queue_manager.py`。
-- `SSEEventType.AGENT_STEP` 是智能体过程事件，不替代任务终态。
-- Agent run 输入只接受受控 `context_snapshot`，真源在 `backend/models/agent_run.py`。
+- `backend/models/` 是 API 和运行态模型真源；API shape、任务状态、SSE 事件、`TaskKind`、`FormType` 变更必须同步前后端类型和测试。
+- `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 是 generate-only 字段；不要进入 rewrite 请求模型、skill state 或 prompt surface。事实来源：`backend/models/generate.py`、`docs/interfaces-runtime.md`。
+- Word COM 写入只能在后端任务 Graph 内发生，且必须经过任务队列、Graph 锁、取消检查和进度包装；事实来源：`docs/backend.md`、`backend/graphs/base_graph.py`。
+- `gngk` family 行为收敛使用 `backend/config/tender_config.py` 和类型 graph class attribute；不要新增独立重复流程来表达少量锚点或字段差异。
+- Prompt Layer 保持纯 prompt 渲染和机器契约解析；副作用、日志、SSE、Word COM、会话状态放到 service/node/helper 层。
 
-## Graph and Node Rules
+## 安全与隐私规则
 
-- 新 graph 优先继承 `StandardTenderWorkflowGraph`，只覆写必要节点。
-- `generation_mode` 分支只在 `StandardTenderWorkflowGraph` 维护：`workflow` 走 `generate_polished_text`，`agent` 走 `content_agent`。
-- `comment_generation_mode=off` 只跳过初次生成批注分支，不影响正文生成、Word 写回、下载和任务结果。
-- 节点必须尊重 `BaseGraph.wrap_node()` 的取消检查和进度包装。
-- 类型差异先放配置或 class attribute；不要在共享节点中铺满类型判断。
-- `gngk` family 行为收敛使用 `backend/config/tender_config.py` 中的 helper。
-
-## Word Helper Rules
-
-- `backend/helper/word_helper/` 是 Word 业务层；`backend/util/word_util/` 是底层 COM/技术工具层。
-- 两个以上类型复用的删除、正文写回、段落边界、表格、受保护字段、cleanup、样式回填逻辑放到 helper。
-- 受保护字段 profile 由 `backend/config/tender_config.py` 管理。
-- 受保护字段识别必须严格匹配，不用模糊 `keyword in text`。
-- direct-replace 类型通过 `content_update_mode` 和 `content_start_mode` 显式声明；不能误走 protected-fields profile。
-- Word 写入只能在后端任务 graph 中进行，不能从 API route、agent run、前端或随意脚本直接执行。
-
-## Prompt and Agent Rules
-
-- `backend/prompts/` 只做纯 prompt 渲染和机器契约解析。
-- LLM streaming timeout 使用 `settings.LLM_STREAM_TIMEOUT_SECONDS`。
-- Prompt 文案改动同步检查 `backend/tests/prompts/`。
-- `content_agent`、`content_generate_agent`、`content_verify_agent`、`content_revise_agent`、`comment_agent` 等机器标识符不能翻译或改名。
-- `content_verify_agent` 输出中“无问题/无需修改/实质一致”类无效 finding 要在解析层折叠为 `[]`，相关测试在 `backend/tests/agents/test_generation_content_agent.py`。
-- Agent run 审计只记录白名单字段和 scrub 摘要；不要记录完整用户原文、真实路径、下载路径、traceback 或 token。
-
-## Security and Privacy Rules
-
-- 不读取或引用 `backend/.env` 内容。
-- 不把真实 API key、token、客户原文、私有路径写入日志、文档或测试夹具。
-- 模板候选下载保留 `TEMPLATE_CANDIDATE_ALLOWED_HOSTS` 白名单。
-- 下载接口保留 `settings.UPLOAD_DIR` containment check。
-- Retrieval/embedding/Qdrant 配置只记录变量名，不记录值。
+- 不读取或引用 `backend/.env` 内容；`backend/config/settings.py` 从 `backend/.env` 加载环境变量，但文档和测试只记录变量名和行为，不记录值。
+- API key、token、完整客户原文、私有路径、traceback 和下载路径不得进入日志、文档、测试夹具或最终回复。
+- 模板候选下载保留 `TEMPLATE_CANDIDATE_ALLOWED_HOSTS` 白名单，相关校验在 `backend/util/common_util/template_candidates.py` 和 `backend/api/template_candidates.py`。
+- 下载接口保留 `settings.UPLOAD_DIR` containment check，相关逻辑在 `backend/api/download.py`。
 
 ---
 

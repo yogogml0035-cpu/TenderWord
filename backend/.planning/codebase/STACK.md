@@ -1,144 +1,141 @@
-# 后端技术栈事实地图
+# 后端技术栈
 
 **分析日期：** 2026-06-08
 
-**范围：** `backend/` 子项目、后端依赖、后端运行脚本入口和测试命令。`backend/.env` 文件存在但不读取内容。
+**范围：** 仅扫描 `backend/` 后端代码、后端配置、后端测试、根级 `README.md` 中的后端运行说明，以及必要的根级约定文档 `docs/backend.md`、`docs/interfaces-runtime.md`。`backend/.env` 与 `backend/.env.example` 只确认存在，不读取内容。
 
-## Languages
+## 语言
 
-**Primary:**
-- Python 3.10+ - FastAPI API、LangGraph、DeepAgents/LangChain agent、Word COM 自动化、任务队列、pytest 测试；证据在 `backend/requirements.txt`、`backend/main.py`、`backend/graphs/`。
+**主要语言：**
+- Python 3.10+ - FastAPI API、LangGraph 工作流、DeepAgents/LangChain agent、Word COM 自动化、任务队列、SSE、pytest 测试；证据在 `README.md`、`backend/requirements.txt`、`backend/main.py`、`backend/graphs/`、`backend/tests/`。
 
-**Secondary:**
-- Markdown - task skill 声明和 codebase facts；证据在 `backend/skills/rewrite/SKILL.md`、`backend/.planning/codebase/`。
-- PowerShell - Windows 开发启动脚本；证据在根级 `scripts/start-dev.ps1`。
-- Bash - WSL 开发启动脚本；证据在根级 `scripts/start-dev-wsl.sh`。
+**辅助语言：**
+- Markdown - rewrite skill、bad case 知识、codebase facts；证据在 `backend/skills/rewrite/SKILL.md`、`backend/retrieval/bad_cases/comment_bad_cases.md`、`backend/.planning/codebase/`。
+- PowerShell - Windows 后端启动与 Windows/WSL 协作入口由根级脚本承载；证据在 `README.md`、`scripts/start-dev-win.ps1`、`scripts/start-dev.ps1`。
+- Bash - WSL 协作启动入口；证据在 `README.md`、`scripts/start-dev-wsl.sh`。
 
-## Runtime
+## 运行时
 
-**Environment:**
-- Windows Python 是完整 Word 生成运行时；Word COM 依赖 `pywin32` 和本机 Word/WPS COM 注册，证据在 `backend/requirements.txt` 和 `backend/util/word_util/`。
-- WSL/Linux Python 可运行无 COM 单元测试；不要把 WSL 测试等同于真实 Word 写回闭环。
-- FastAPI/ASGI 本地端口默认来自 `backend/config/settings.py`，默认 `PORT=8000`。
+**环境：**
+- Windows Python 3.10+ 是完整后端运行时；真实 Word 生成依赖本机 Microsoft Word 或兼容 COM 的 Office 环境，证据在 `README.md`、`docs/backend.md`。
+- Word COM 能力依赖 `pywin32>=306; platform_system == "Windows"`，核心封装在 `backend/util/word_util/`。
+- WSL/Linux Python 可用于无 COM 单元测试；不要把 WSL 测试等同于 Word COM 写回闭环，证据在 `docs/backend.md`、`README.md`。
+- FastAPI/ASGI 入口是 `backend/main.py`，默认 `HOST=0.0.0.0`、`PORT=8000` 来自 `backend/config/settings.py`。
 
-**Package Manager:**
-- pip / venv - 依赖真源是 `backend/requirements.txt`。
-- Lockfile: 未检测到后端 lockfile。
-- Windows venv: `backend/.venv/`。
-- WSL/Linux venv: `backend/.venv-linux/`。
+**包管理器：**
+- pip / venv - 后端依赖真源是 `backend/requirements.txt`。
+- Lockfile： 未检测到后端 lockfile。
+- Windows venv： `backend/.venv/`。
+- WSL/Linux venv： `backend/.venv-linux/`。
 
-## Frameworks
+## 框架
 
-**Core:**
-- FastAPI `>=0.115.0` - HTTP API、SSE route、Pydantic 请求校验；证据在 `backend/main.py`、`backend/api/`。
-- Uvicorn `>=0.32.0` - ASGI 服务运行；证据在 `backend/requirements.txt` 和 `backend/main.py`。
-- Pydantic `>=2.9.0` - API models、field/model validators；证据在 `backend/models/`。
-- Pydantic Settings `>=2.6.0` - 环境配置加载；证据在 `backend/config/settings.py`。
-- LangGraph `>=0.2.0` - 生成、rewrite、补充批注 workflow；证据在 `backend/graphs/`。
-- LangChain Core / LangChain OpenAI / LangChain DeepSeek - LLM 和 agent 基础；证据在 `backend/requirements.txt`、`backend/agents/`。
-- DeepAgents `>=0.6.4` - content agent 和 task context assistant；证据在 `backend/agents/generation/content_agents.py`、`backend/agents/task_context_assistant/factory.py`。
+**核心：**
+- FastAPI `>=0.115.0` - HTTP API、文件上传、SSE/NDJSON stream endpoint、Pydantic 请求响应校验；证据在 `backend/main.py`、`backend/api/`。
+- Uvicorn `>=0.32.0` - ASGI 服务运行；证据在 `backend/requirements.txt`、`backend/main.py`。
+- Pydantic `>=2.9.0` - API model、状态 model、response model；证据在 `backend/models/`。
+- Pydantic Settings `>=2.6.0` - 环境变量和 `backend/.env` 配置加载；证据在 `backend/config/settings.py`。
+- LangGraph `>=0.2.0` - generate、rewrite、comment_supplement 工作流；证据在 `backend/graphs/base_graph.py`、`backend/graphs/skill_graph.py`、`backend/graphs/comment_supplement_graph.py`。
+- LangChain Core / LangChain OpenAI / LangChain DeepSeek - agent message/tool、`ChatOpenAI` model factory 和 LLM provider 适配；证据在 `backend/agents/`、`backend/agents/generation/model_factory.py`。
+- DeepAgents `>=0.6.4` - content generation agent 与 task context assistant；证据在 `backend/agents/generation/content_agents.py`、`backend/agents/task_context_assistant/factory.py`。
 
-**Testing:**
+**测试：**
 - pytest `>=8.3.0` - 后端测试 runner；证据在 `backend/tests/`。
-- pytest-asyncio `>=0.24.0` - async service/API 测试；证据在 `backend/requirements.txt` 和 async 测试文件。
+- pytest-asyncio `>=0.24.0` - async API/service/graph 测试；证据在 `backend/requirements.txt`、`backend/tests/api/`、`backend/tests/services/`。
 
-**Build/Dev:**
-- `python-multipart` - FastAPI 文件上传；证据在 `backend/api/upload.py`。
-- `python-dotenv` - `.env` 读取辅助；证据在 `backend/config/settings.py`、`backend/retrieval/config.py`。
-- `structlog` - 依赖已声明；主要日志实现使用 stdlib `logging` 和自有 log util，证据在 `backend/main.py`、`backend/util/log_util/`。
+**构建 / 开发：**
+- `python-multipart>=0.0.12` - FastAPI 上传文件解析；证据在 `backend/api/upload.py`、`backend/requirements.txt`。
+- `python-dotenv>=1.0.0` - retrieval 配置显式加载 `backend/.env`，Pydantic Settings 也配置 `env_file`；证据在 `backend/retrieval/config.py`、`backend/config/settings.py`。
+- `structlog>=24.4.0` - 依赖已声明；当前应用主日志实现主要使用 stdlib `logging` 和自有 log util，证据在 `backend/main.py`、`backend/util/log_util/`。
 
-## Key Dependencies
+## 关键依赖
 
-**Critical:**
-- `pywin32>=306; platform_system == "Windows"` - Word COM 自动化能力，核心路径 `backend/util/word_util/`。
-- `openai>=1.0.0` - OpenAI-compatible LLM streaming，核心路径 `backend/util/common_util/llm_stream_utils.py`。
-- `volcengine-python-sdk[ark]>=1.0.0` - Doubao/ARK provider 依赖，配置在 `backend/config/settings.py`。
-- `httpx>=0.27.0` - LLM streaming、Qdrant store、chat stream HTTP；证据在 `backend/util/common_util/llm_stream_utils.py`、`backend/retrieval/qdrant_store.py`。
-- `requests>=2.32.0` - 招标详情和模板候选外部 HTTP；证据在 `backend/util/common_util/fetch_tender_data.py`、`backend/util/common_util/template_candidates.py`。
-- `aiohttp>=3.11.0` - HTTP client 依赖已声明；具体调用以源码为准。
+**关键：**
+- `pywin32>=306; platform_system == "Windows"` - Word COM 自动化和诊断；使用点在 `backend/util/word_util/word_application_util.py`、`backend/util/word_util/word_diagnostics.py`。
+- `openai>=1.0.0` - OpenAI-compatible LLM streaming、embedding 调用；使用点在 `backend/util/common_util/llm_stream_utils.py`、`backend/services/chat_stream_service.py`、`backend/retrieval/embeddings.py`。
+- `httpx>=0.27.0` - LLM streaming timeout、chat stream、Qdrant HTTP client；使用点在 `backend/util/common_util/llm_stream_utils.py`、`backend/services/chat_stream_service.py`、`backend/retrieval/qdrant_store.py`。
+- `requests>=2.32.0` - 招标详情、模板候选列表和模板文件下载代理；使用点在 `backend/util/common_util/fetch_tender_data.py`、`backend/util/common_util/template_candidates.py`、`backend/api/template_candidates.py`。
+- `langgraph>=0.2.0` - `StateGraph` 工作流编排；使用点在 `backend/graphs/`。
+- `deepagents>=0.6.4` - content agent 和 task context assistant；使用点在 `backend/agents/generation/content_agents.py`、`backend/agents/task_context_assistant/factory.py`。
+- `volcengine-python-sdk[ark]>=1.0.0` - ARK/Doubao 依赖已声明；当前 provider 配置走 OpenAI-compatible base URL，配置在 `backend/config/settings.py`。
 
-**Infrastructure:**
-- `python-jose[cryptography]`、`passlib[bcrypt]` - 认证相关依赖已声明；`backend/main.py` 注册的业务 routers 未检测到统一认证层。
-- `langchain-openai` - `ChatOpenAI` model factory；证据在 `backend/agents/generation/model_factory.py`。
-- `deepagents` - content generation agent 和 task context assistant；证据在 `backend/agents/generation/`、`backend/agents/task_context_assistant/`。
+**基础设施：**
+- `langchain-openai>=1.2.0` - `ChatOpenAI` model factory；使用点在 `backend/agents/generation/model_factory.py`。
+- `langchain-core>=0.3.0` - LangChain message、tool、runnable 类型；使用点在 `backend/agents/comments/comment_agent.py`、`backend/agents/comments/tools.py`。
+- `python-jose[cryptography]>=3.3.0`、`passlib[bcrypt]>=1.7.4` - 认证相关依赖已声明；当前 `backend/main.py` 注册的业务 routers 未检测到统一认证 dependency。
+- `aiohttp>=3.11.0` - HTTP client 依赖已声明；当前扫描到的后端 HTTP 调用主要使用 `requests` 和 `httpx`。
 
-## Configuration
+## 配置
 
-**Environment:**
-- 配置类：`backend/config/settings.py`。
-- 示例文件：`backend/.env.example`。
-- 私有本地配置：`backend/.env` 存在，不能读取、打印或写入文档。
-- Pydantic settings 默认从 `backend/.env` 读取；`extra="ignore"`。
-- 招标类型配置不在 `.env`，真源是 `backend/config/tender_config.py`。
+**环境：**
+- 配置类真源：`backend/config/settings.py`。
+- 私有本地配置：`backend/.env` 文件存在；不得读取、打印或写入真实值。
+- 示例配置：`backend/.env.example` 文件存在；本次不读取内容。
+- `Settings.model_config` 指向 `backend/.env`，`case_sensitive=True`，`extra="ignore"`。
+- retrieval 运行时另有 `backend/retrieval/config.py`，会读取环境变量并在需要时加载 `backend/.env`。
 
-**Key Config Areas:**
-- App/server/CORS: `APP_NAME`、`APP_VERSION`、`DEBUG`、`HOST`、`PORT`、`CORS_*`。
-- LLM providers: `DEEPSEEK_*`、`ARK_*`、`DASHSCOPE_*`、`QWEN_MODEL`、`DOUBAO_MODEL`、`LLM_STREAM_TIMEOUT_SECONDS`。
-- Optional tracing: `LANGSMITH_*`，应用方法在 `Settings.apply_langsmith_environment()`。
-- File upload: `UPLOAD_DIR`、`MAX_UPLOAD_SIZE`、`ALLOWED_EXTENSIONS`。
-- External tender/template APIs: `TENDER_DATA_API_URL`、`TEMPLATE_CANDIDATE_API_URL`、`TEMPLATE_CANDIDATE_ALLOWED_HOSTS`、`EXTERNAL_REQUEST_TIMEOUT_SECONDS`。
-- Locks/tasks/SSE/logs: `LOCK_*`、`TASK_*`、`SSE_*`、`LOG_*`。
-- Retrieval: `QDRANT_URL`、`QDRANT_API_KEY`、`COMMENT_BAD_CASE_COLLECTION`、`EMBEDDING_*`，读取点在 `backend/retrieval/config.py`。
+**关键配置区域：**
+- App/server/CORS： `APP_NAME`、`APP_VERSION`、`DEBUG`、`HOST`、`PORT`、`CORS_*`。
+- LLM providers： `DEEPSEEK_BASE_URL`、`DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL`、`ARK_BASE_URL`、`ARK_API_KEY`、`DOUBAO_MODEL`、`DASHSCOPE_BASE_URL`、`DASHSCOPE_API_KEY`、`QWEN_MODEL`、`LLM_STREAM_TIMEOUT_SECONDS`。
+- 可选 tracing： `LANGSMITH_TRACING`、`LANGSMITH_ENDPOINT`、`LANGSMITH_API_KEY`、`LANGSMITH_PROJECT`；环境回写在 `Settings.apply_langsmith_environment()`。
+- 文件上传/下载： `UPLOAD_DIR`、`MAX_UPLOAD_SIZE`、`ALLOWED_EXTENSIONS`。
+- 外部招标/模板： `TENDER_DATA_API_URL`、`TEMPLATE_CANDIDATE_API_URL`、`TEMPLATE_CANDIDATE_ALLOWED_HOSTS`、`EXTERNAL_REQUEST_TIMEOUT_SECONDS`、`TEMPLATE_CANDIDATE_RANKING_LLM_PROVIDER`。
+- 锁/任务/SSE/日志： `LOCK_FILE_PATH`、`LOCK_TIMEOUT`、`LOCK_WAIT_TIMEOUT`、`TASK_*`、`SSE_*`、`LOG_*`。
+- 检索：`QDRANT_URL`、`QDRANT_API_KEY`、`COMMENT_BAD_CASE_COLLECTION`、`EMBEDDING_API_KEY`、`EMBEDDING_BASE_URL`、`SILICONFLOW_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_DIMENSIONS`。
+- 招标类型与受保护字段配置真源：`backend/config/tender_config.py`。
 
-**Build:**
-- Build config files: 未检测到后端专用 `pyproject.toml`、`pytest.ini`、`ruff.toml`、`mypy.ini`。
-- Formatting/linting config: 未检测到后端专用配置文件。
-- Test config: pytest 依赖存在，测试组织由 `backend/tests/` 结构体现。
+**构建：**
+- 构建配置文件： 未检测到后端专用 `pyproject.toml`、`pytest.ini`、`tox.ini`、`Dockerfile`。
+- 格式化/lint 配置： 未检测到后端专用 ruff/black/mypy 配置。
+- 测试配置： pytest 依赖存在，测试组织由 `backend/tests/` 目录体现。
 
-## Platform Requirements
+## 平台要求
 
-**Development:**
-- Windows 10/11 + Python 3.10+ + `backend/.venv/` 用于完整 Word COM。
-- WSL/Linux + `backend/.venv-linux/` 可跑无 COM 单测。
-- `backend/requirements.txt` 是安装依赖真源。
-- 本地运行入口：
+**开发：**
+- Windows 10/11、本机 Word/WPS COM、Windows Python 3.10+；证据在 `README.md`。
+- 后端安装命令以 `backend/requirements.txt` 为准：
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe main.py
+py -m venv .venv
+.\.venv\Scripts\pip.exe install -r requirements.txt
 ```
 
-或从仓库根目录：
+- Windows 后端启动可通过根级脚本，证据在 `README.md`：
 
 ```powershell
-.\scripts\start-dev.ps1
+cd <repo>
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-dev-win.ps1
 ```
 
-WSL 协作入口：
+- WSL 协作启动入口，后端仍由 Windows Python + Word COM 启动：
 
 ```bash
 ./scripts/start-dev-wsl.sh
 ```
 
-**Production:**
+**生产：**
 - 部署平台未检测到稳定配置。
-- 生产若需要真实生成 Word，必须提供 Windows Python、pywin32、Word/WPS COM、可写上传目录、LLM provider keys、外部招标/模板网络访问。
-- `/health` 和 `/health/ready` 只能表达应用进程层面就绪；`backend/main.py` 中 readiness 的 `upload_dir_accessible` 是 TODO 占位，不代表真实目录权限或 Word COM 可用。
+- 若生产需要真实 Word 生成，必须提供 Windows Python、pywin32、Word/WPS COM、可写 `UPLOAD_DIR`、至少一个 LLM provider key、外部招标/模板网络访问。
+- `/health`、`/health/ready`、`/health/live` 位于 `backend/main.py`，只表达应用进程层状态；`/health/ready` 中 `upload_dir_accessible` 当前是 TODO 占位，不代表真实目录权限或 Word COM 可用。
 
-## Verification Commands
+## 验证命令
 
-**Backend unit tests on Windows:**
+**后端测试：**
 
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe -m pytest tests -v
 ```
 
-**Word COM diagnostic on Windows:**
+**Word COM 诊断：**
 
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe scripts\diagnose_word.py
 ```
 
-**No-COM backend tests on WSL/Linux:**
-
-```bash
-cd backend
-TMPDIR=/tmp TMP=/tmp TEMP=/tmp .venv-linux/bin/python -m pytest tests -v
-```
-
-**Document-only checks:**
+**文档变更检查：**
 
 ```bash
 git diff --check
@@ -146,4 +143,4 @@ git diff --check
 
 ---
 
-*后端技术栈分析：2026-06-08*
+*技术栈分析： 2026-06-08*

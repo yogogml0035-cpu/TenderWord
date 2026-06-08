@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+
 from backend.config.tender_config import get_tender_type_family
 from backend.prompts.types import CommentPromptInput, RenderedPrompt
 
@@ -130,6 +132,29 @@ COMMENT_USER_PROMPT = """
 """
 
 
+COMMENT_BAD_CASE_CONTEXT_FIELDS = (
+    "risk_type",
+    "risk_pattern",
+    "recommended_comment_policy",
+    "applicability_boundary",
+    "anchor_policy",
+)
+
+COMMENT_BAD_CASE_CONTEXT_LABELS = {
+    "risk_type": "风险类型",
+    "risk_pattern": "风险模式",
+    "recommended_comment_policy": "推荐批注口径",
+    "applicability_boundary": "适用边界",
+    "anchor_policy": "锚点策略",
+}
+
+COMMENT_BAD_CASE_SYSTEM_PROMPT_SUFFIX = """
+# Optional Bad Case Reference Rules
+用户提示中可能包含【bad_case参考规则】。如果存在，该规则块只能作为风险判断、批注口径和锚点策略的优先参考。
+无论是否存在 bad case 规则块，`reference_text` 都必须且只能来自当前【待修订文本】/【修改文本】中的连续原文；严禁把 bad case 文本、风险模式或推荐口径当作 `reference_text`。
+""".strip()
+
+
 COMMENT_JSON_REPAIR_SYSTEM_PROMPT = """
 你是 JSON 修复助手。
 
@@ -177,3 +202,60 @@ def render_comment_prompt(data: CommentPromptInput) -> RenderedPrompt:
         system_prompt=system_prompt,
         user_prompt=user_prompt.format(polished_text=data.polished_text),
     )
+
+
+def render_comment_prompt_with_bad_case_context(
+    data: CommentPromptInput,
+    bad_case_context: Sequence[Mapping[str, object]] | None = None,
+) -> RenderedPrompt:
+    rendered = render_comment_prompt(data)
+    normalized_context = _normalize_bad_case_context(bad_case_context)
+    if not normalized_context:
+        return rendered
+
+    return RenderedPrompt(
+        system_prompt=(
+            rendered.system_prompt.rstrip()
+            + "\n\n"
+            + COMMENT_BAD_CASE_SYSTEM_PROMPT_SUFFIX
+        ),
+        user_prompt=(
+            rendered.user_prompt.rstrip()
+            + "\n\n"
+            + _render_bad_case_context_block(normalized_context)
+        ),
+    )
+
+
+def _normalize_bad_case_context(
+    bad_case_context: Sequence[Mapping[str, object]] | None,
+) -> list[dict[str, str]]:
+    if not bad_case_context:
+        return []
+
+    normalized_context: list[dict[str, str]] = []
+    for entry in bad_case_context:
+        normalized_entry = {
+            field: str(entry.get(field, "") or "").strip()
+            for field in COMMENT_BAD_CASE_CONTEXT_FIELDS
+        }
+        if any(normalized_entry.values()):
+            normalized_context.append(normalized_entry)
+    return normalized_context
+
+
+def _render_bad_case_context_block(
+    bad_case_context: Sequence[Mapping[str, str]],
+) -> str:
+    lines = [
+        "【bad_case参考规则】",
+        "以下规则来自历史 bad case 检索结果，只能辅助风险判断、批注口径和锚点策略。",
+        "严禁把 bad case 文本、风险模式或推荐口径作为当前正文锚点；`reference_text` 只能来自上方【修改文本】。",
+    ]
+    for index, entry in enumerate(bad_case_context, start=1):
+        lines.append("")
+        lines.append(f"{index}. bad_case规则")
+        for field in COMMENT_BAD_CASE_CONTEXT_FIELDS:
+            label = COMMENT_BAD_CASE_CONTEXT_LABELS[field]
+            lines.append(f"   - {label}: {entry.get(field, '')}")
+    return "\n".join(lines)

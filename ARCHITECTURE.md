@@ -1,6 +1,6 @@
 # TenderWord 架构地图
 
-**生成日期：** 2026-06-05
+**生成日期：** 2026-06-08
 
 本文件是根级系统架构地图，描述 TenderWord 的系统边界、子系统职责和推荐理解路径。实现细节仍以代码为准；子系统内部事实以 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 为准。
 
@@ -75,7 +75,7 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 
 ### 根级文档
 
-- `AGENTS.md`：仓库级执行规则、阅读顺序和维护红线。
+- `AGENTS.md`：仓库级执行规则、导航入口和维护红线。
 - `ARCHITECTURE.md`：系统边界和子系统职责。
 - `INTERFACES.md`：前后端接口、状态、事件和外部集成边界。
 - `coding_maps/SYSTEM_MAP.md`：跨子项目系统地图和按任务阅读指南。
@@ -208,45 +208,50 @@ backend/prompts/ 与 backend/skills/
 ### 第一次接手
 
 1. `AGENTS.md`
-2. `README.md`
-3. `coding_maps/SYSTEM_MAP.md`
-4. `INTERFACES.md`
-5. 相关子项目 `.planning/codebase/ARCHITECTURE.md`
+2. `docs/knowledge-validation.md`
+3. `README.md`
+4. `coding_maps/SYSTEM_MAP.md`
+5. `INTERFACES.md`
+6. 相关子项目 `.planning/codebase/ARCHITECTURE.md`
 
 ### 改后端
 
 1. `AGENTS.md`
-2. `backend/.planning/codebase/ARCHITECTURE.md`
-3. `backend/.planning/codebase/STRUCTURE.md`
-4. `backend/.planning/codebase/CONVENTIONS.md`
-5. `backend/.planning/codebase/TESTING.md`
-6. 相关 `asset/*.md`
+2. `docs/backend.md`
+3. `backend/.planning/codebase/ARCHITECTURE.md`
+4. `backend/.planning/codebase/STRUCTURE.md`
+5. `backend/.planning/codebase/CONVENTIONS.md`
+6. `backend/.planning/codebase/TESTING.md`
+7. 相关 `asset/*.md`
 
 ### 改前端
 
 1. `AGENTS.md`
-2. `frontend/.planning/codebase/ARCHITECTURE.md`
-3. `frontend/.planning/codebase/STRUCTURE.md`
-4. `frontend/.planning/codebase/CONVENTIONS.md`
-5. `frontend/.planning/codebase/TESTING.md`
+2. `docs/frontend.md`
+3. `frontend/.planning/codebase/ARCHITECTURE.md`
+4. `frontend/.planning/codebase/STRUCTURE.md`
+5. `frontend/.planning/codebase/CONVENTIONS.md`
+6. `frontend/.planning/codebase/TESTING.md`
 
 ### 改跨端接口
 
-1. `INTERFACES.md`
-2. `backend/api/`
-3. `backend/models/`
-4. `frontend/lib/api.ts`
-5. `frontend/types/api.ts`
-6. 相关前后端测试
+1. `docs/interfaces-runtime.md`
+2. `INTERFACES.md`
+3. `backend/api/`
+4. `backend/models/`
+5. `frontend/lib/api.ts`
+6. `frontend/types/api.ts`
+7. 相关前后端测试
 
 ### 改 Word 运行时或招标类型
 
 1. `AGENTS.md`
-2. `backend/.planning/codebase/ARCHITECTURE.md`
-3. `backend/.planning/codebase/CONVENTIONS.md`
-4. `asset/shared_runtime_word_skill_knowledge_pack.md`
-5. `asset/tender_type_identity_session_knowledge_pack.md`
-6. 相关 graph、node、helper、前端转换器、`gngkFormType` 和测试
+2. `docs/backend.md`
+3. `backend/.planning/codebase/ARCHITECTURE.md`
+4. `backend/.planning/codebase/CONVENTIONS.md`
+5. `asset/shared_runtime_word_skill_knowledge_pack.md`
+6. `asset/tender_type_identity_session_knowledge_pack.md`
+7. 相关 graph、node、helper、前端转换器、`gngkFormType` 和测试
 
 ## 维护建议
 
