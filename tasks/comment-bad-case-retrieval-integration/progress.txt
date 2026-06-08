@@ -11,3 +11,15 @@ Source: prd.json
 - `comment_agent` 只有在 `allow_comment_generation=True && initial_comments=[]` 时自主生成批注；已有候选时是锚点修复模式，不注入 bad case。
 - `backend/retrieval/` 当前仍被文档标记为实验入口，本任务将其中 bad case 检索提升为正式批注增强入口。
 - Ralph stories 已收窄为 15 个可独立验证切片，按 loader、目录、缓存、切分、BM25、hybrid、context、日志、prompt、节点、脚本、文档、回归的依赖顺序执行。
+- `backend/retrieval/bad_case_loader.py` 暴露正式 bad case 默认目录和主文件入口；v2 `---BEGIN_BAD_CASE---` 解析与旧格式解析需要保持兼容。
+
+## 2026-06-08 17:43 - US-001
+- 实现了正式 bad case loader 默认读取 `backend/retrieval/bad_cases/comment_bad_cases.md`，并解析 v2 `---BEGIN_BAD_CASE--- ... ---END_BAD_CASE---` 字段。
+- 保留旧格式 bad case 解析，v2 loader 生成的 `BadCaseChunk` 可继续被 `BM25Index` 和 `HybridHit` 消费。
+- 更改的文件：`backend/retrieval/bad_case_loader.py`、`backend/tests/retrieval/test_comment_bad_case_runtime.py`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/retrieval/bad_case_loader.py backend/tests/retrieval/test_comment_bad_case_runtime.py`；`backend/.venv-linux/bin/python -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -v`；`backend/.venv/Scripts/python.exe -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -v`
+- **未来迭代的学习：**
+  - 正式 bad case 主文件常量是 `DEFAULT_COMMENT_BAD_CASE_FILE`，目录常量是 `DEFAULT_BAD_CASE_DIR`。
+  - `build_bad_case_chunks()` 会根据字段自动区分 v2 和旧格式，后续 runtime 可以直接复用 `load_bad_case_chunks()`，不要复制实验脚本里的解析逻辑。
+  - 全仓 `git diff --check` 当前会被本轮前已存在的 CRLF 改动拦住；提交前应对本轮暂存文件跑 `git diff --cached --check`。
+---
