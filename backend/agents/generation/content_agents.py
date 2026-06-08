@@ -852,7 +852,11 @@ def run_content_agent_generation(
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     model_provider = str(configurable.get("model_provider") or "deepseek")
     task_id = _get_task_id(state, configurable)
-    workspace_dir = create_workspace_dir(task_id)
+    workspace_dir = create_workspace_dir(
+        task_id,
+        project_number=str(state.get("project_number") or ""),
+        project_name=str(state.get("project_name") or ""),
+    )
     backend = create_workspace_backend(workspace_dir)
     base_payload = _build_generation_payload(state, model_provider, task_id)
     step_emitter = ContentAgentStepEmitter(step_callback) if step_callback is not None else None

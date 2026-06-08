@@ -621,6 +621,8 @@ def run_comment_agent(
     runner: CommentAgentRunner | None = None,
     step_callback: Callable[[AgentStepPayload], None] | None = None,
     audit_log_path: str | Path | None = None,
+    project_number: str | None = None,
+    project_name: str | None = None,
     allow_comment_generation: bool = False,
     comment_generation_instruction: str | None = None,
 ) -> CommentAgentResult:
@@ -768,6 +770,8 @@ def run_comment_agent(
         audit_payload,
         task_id=task_id,
         path=audit_log_path,
+        project_number=project_number,
+        project_name=project_name,
     )
 
     _emit_final_snapshot(

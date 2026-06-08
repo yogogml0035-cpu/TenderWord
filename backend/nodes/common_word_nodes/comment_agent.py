@@ -321,6 +321,8 @@ def comment_agent_writeback(
             task_id=str(configurable.get("task_id") or state.get("task_id") or "comment-agent"),
             config=config,
             step_callback=_make_agent_step_callback(state, config),
+            project_number=str(state.get("project_number") or ""),
+            project_name=str(state.get("project_name") or ""),
             allow_comment_generation=allow_comment_generation,
             comment_generation_instruction=comment_generation_instruction,
         )

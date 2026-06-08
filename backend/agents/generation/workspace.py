@@ -10,6 +10,7 @@ from typing import Any
 from deepagents.backends import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol
 
+from backend.agents.log_naming import build_agent_log_stem, sanitize_agent_log_part
 from backend.agents.generation.types import GenerationAgentProtocolError
 
 
@@ -32,16 +33,25 @@ def revision_path(round_index: int) -> str:
 
 
 def sanitize_workspace_part(value: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return "content-agent"
-    return re.sub(r'[<>:"/\\|?*\s]+', "_", text).strip("._") or "content-agent"
+    return sanitize_agent_log_part(value, fallback="content-agent")
 
 
-def create_workspace_dir(task_id: str, *, now: float | None = None) -> Path:
+def create_workspace_dir(
+    task_id: str,
+    *,
+    project_number: str | None = None,
+    project_name: str | None = None,
+    now: float | None = None,
+) -> Path:
     CONTENT_AGENT_WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now or time.time()))
-    base = CONTENT_AGENT_WORKSPACE_ROOT / f"{sanitize_workspace_part(task_id)}_{timestamp}"
+    stem = build_agent_log_stem(
+        task_id,
+        project_number=project_number,
+        project_name=project_name,
+        fallback="content-agent",
+    )
+    base = CONTENT_AGENT_WORKSPACE_ROOT / f"{stem}_{timestamp}"
     if not base.exists():
         base.mkdir(parents=True, exist_ok=True)
         return base

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from types import SimpleNamespace
 from typing import Any
 
@@ -20,6 +21,7 @@ from backend.agents.comments import (
     write_validated_comment_candidates_to_word,
 )
 from backend.agents.comments import comment_agent as comment_agent_module
+from backend.agents.comments import workspace as comment_workspace
 
 class _FakeFind:
     def __init__(self, target_range: "_FakeRange") -> None:
@@ -41,6 +43,25 @@ class _FakeFind:
         self._target_range.Start = index
         self._target_range.End = index + len(str(self.Text))
         return True
+
+
+def test_create_comment_agent_audit_path_adds_project_metadata_to_name(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(comment_workspace, "COMMENT_AGENT_AUDIT_ROOT", tmp_path)
+
+    audit_path = comment_workspace.create_comment_agent_audit_path(
+        "task-1",
+        project_number="XJ/001",
+        project_name="测试 项目",
+    )
+
+    assert audit_path.parent == tmp_path
+    assert re.fullmatch(
+        r"task-1_XJ_001_测试_项目_\d{8}-\d{6}\.json",
+        audit_path.name,
+    )
 
 class _FakeRange:
     def __init__(self, doc: "_FakeDocument", start: int, end: int) -> None:

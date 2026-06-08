@@ -18,8 +18,10 @@ from backend.agents.generation import (
     set_generation_agent_runner,
 )
 from backend.agents.generation import content_agents as content_agent_module
+from backend.agents.generation import workspace as generation_workspace
 from backend.agents.generation import revise_agent_graph as revise_agent_graph_module
 from backend.agents.generation import verify_agent_graph as verify_agent_graph_module
+from backend.agents.log_naming import build_agent_log_stem
 from backend.agents.generation.model_factory import create_generation_chat_model
 from backend.agents.generation.workspace import (
     FINAL_POLISHED_TEXT_PATH,
@@ -32,8 +34,20 @@ from backend.prompts.types import GeneratePromptInput, RenderedPrompt
 @pytest.fixture(autouse=True)
 def _redirect_content_agent_workspace(tmp_path, monkeypatch) -> Path:
     workspace_root = tmp_path / "content_agent_workspace"
-    def fake_create_workspace_dir(task_id: str) -> Path:
-        workspace_dir = workspace_root / f"{task_id}_20260529-153000"
+    def fake_create_workspace_dir(
+        task_id: str,
+        *,
+        project_number: str | None = None,
+        project_name: str | None = None,
+        now: float | None = None,
+    ) -> Path:
+        stem = build_agent_log_stem(
+            task_id,
+            project_number=project_number,
+            project_name=project_name,
+            fallback="content-agent",
+        )
+        workspace_dir = workspace_root / f"{stem}_20260529-153000"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         return workspace_dir
 
@@ -47,6 +61,22 @@ def _redirect_content_agent_workspace(tmp_path, monkeypatch) -> Path:
         fake_create_workspace_dir,
     )
     return workspace_root
+
+
+def test_create_workspace_dir_adds_project_metadata_to_name(
+    _redirect_content_agent_workspace,
+) -> None:
+    workspace_dir = generation_workspace.create_workspace_dir(
+        "task-1",
+        project_number="NO/1",
+        project_name="测试 项目",
+    )
+
+    assert workspace_dir.parent == _redirect_content_agent_workspace
+    assert re.fullmatch(
+        r"task-1_NO_1_测试_项目_\d{8}-\d{6}",
+        workspace_dir.name,
+    )
 
 
 class FakeRunner:
@@ -646,6 +676,8 @@ def test_content_runner_creates_workspace_and_reads_final_file(
         {
             "tender_type": "xjcg",
             "generation_style": "template",
+            "project_number": "XJ-001",
+            "project_name": "测试 项目",
             "project_content": "project",
             "tender_params": "params",
             "template_reference_text": "origin",
@@ -656,7 +688,10 @@ def test_content_runner_creates_workspace_and_reads_final_file(
     )
 
     workspace_dir = result.workspace_dir
-    assert workspace_dir == _redirect_content_agent_workspace / "task-agent-42_20260529-153000"
+    assert workspace_dir == (
+        _redirect_content_agent_workspace
+        / "task-agent-42_XJ-001_测试_项目_20260529-153000"
+    )
     assert (workspace_dir / "inputs" / "generation_context.md").exists()
     assert (workspace_dir / "drafts" / "round-1.md").read_text(encoding="utf-8") == "draft text"
     assert (workspace_dir / "audits" / "round-1.json").exists()
