@@ -19,6 +19,7 @@ Source: prd.json
 - `retrieve_bad_case_hits_bm25_only()` 是正式 BM25-only 入口；它返回 `BadCaseRetrievalResult`，按 clause 保留 `pre_filter_hits` 和 `filtered_hits`，并统一标记 `retrieval_mode=bm25_only`。
 - `retrieve_bad_case_hits()` 是正式 hybrid-first 入口；它只查询 Qdrant，不 upsert、不 recreate，任一向量环节异常都会带 warning 回退到 BM25-only。
 - prompt 注入前先用 `select_injected_bad_case_hits()` 做 `case_id` 级去重和按 `(-score, case_id)` 稳定排序，再由 `build_bad_case_prompt_context()` 投影到 5 个可注入字段，避免把审计字段泄漏给模型。
+- `BadCaseRetrievalResult.to_log_payload()` 是 retrieval JSON payload 真源；后续节点只应序列化它，不要在 `generate_comments` 或 `comment_agent` 中重组检索细节。
 
 ## 2026-06-08 17:43 - US-001
 - 实现了正式 bad case loader 默认读取 `backend/retrieval/bad_cases/comment_bad_cases.md`，并解析 v2 `---BEGIN_BAD_CASE--- ... ---END_BAD_CASE---` 字段。
@@ -109,4 +110,16 @@ Source: prd.json
   - 后续 US-008 的 retrieval JSON 应直接复用 `select_injected_bad_case_hits()` 生成 `injected_bad_cases`，这样日志能保留 `case_id`/`score`，而 prompt 仍保持 5 字段收敛。
   - prompt context helper 只做字段投影，不做 markdown 渲染；US-009 应在 `backend/prompts/comment_prompt.py` 中消费这个结构，保持 prompt 真源单一。
   - 同分排序要按 `case_id` 稳定化，否则多文件目录和多条款命中会让最终 prompt 顺序抖动。
+---
+
+## 2026-06-08 19:52 - US-008
+- 扩展 `BadCaseRetrievalResult.to_log_payload()`，统一输出 `source_files`、`load_summary`、`clause_split_summary`、`retrieval_mode`、warnings、failure summary、每个 clause 的过滤前/后命中，以及最终 `injected_bad_cases`。
+- `injected_bad_cases` 复用 `select_injected_bad_case_hits()` 的去重和排序口径，保留 `case_id`、score、BM25/vector 分数和 5 个 prompt 字段，供后续节点写 JSON 时直接归档。
+- 补充 retrieval payload focused tests，覆盖有命中、无命中和目录不可用时 payload 都可写；本轮未接入 SSE、下载卡或 agent_step。
+- 更改的文件：`backend/retrieval/comment_bad_case_runtime.py`、`backend/tests/retrieval/test_comment_bad_case_runtime.py`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/retrieval/comment_bad_case_runtime.py backend/tests/retrieval/test_comment_bad_case_runtime.py`；`backend/.venv-linux/bin/python -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -k "payload or log" -v`；`backend/.venv-linux/bin/python -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -v`；`backend/.venv-linux/bin/python -m pytest backend/tests -q`；`backend/.venv/Scripts/python.exe -m py_compile backend/retrieval/comment_bad_case_runtime.py backend/tests/retrieval/test_comment_bad_case_runtime.py`；`backend/.venv/Scripts/python.exe -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -v`；`git diff --check -- backend/retrieval/comment_bad_case_runtime.py backend/tests/retrieval/test_comment_bad_case_runtime.py`
+- **未来迭代的学习：**
+  - US-011 写 `comments_bad_case_retrieval_file` 时应直接 `json.dump(result.to_log_payload())`，避免节点层重新拼 source、clause 和 injected bad case 结构。
+  - `to_log_payload()` 中的 `clauses` 已经包含完整 clause 正文和 `query_text`；后续只需要在节点层额外补充完整 `polished_text`。
+  - `injected_bad_cases` 是审计用结构，可以包含 `case_id` 和 score；prompt 注入仍必须继续使用 `build_bad_case_prompt_context()` 的 5 字段收敛结构。
 ---

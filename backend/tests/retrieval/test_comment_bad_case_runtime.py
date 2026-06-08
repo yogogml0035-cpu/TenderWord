@@ -389,6 +389,95 @@ def test_bm25_only_retrieval_returns_payload_when_directory_unavailable(
     assert payload["warnings"]
 
 
+def test_retrieval_log_payload_includes_sources_clauses_hits_and_injection(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    clear_bad_case_runtime_cache()
+    _write_v2_bad_case(tmp_path, "a.md", "TW_COMMENT_LOG_A", "心率小数精度")
+    _write_v2_bad_case(tmp_path, "b.md", "TW_COMMENT_LOG_B", "心率固定档位")
+    _write_v2_bad_case(tmp_path, "c.md", "TW_COMMENT_LOG_C", "心率宣传表述")
+    runtime_index = load_bad_case_runtime_index(tmp_path)
+    full_chunk_indexes = [
+        index
+        for index, chunk in enumerate(runtime_index.chunks)
+        if chunk.field == "full"
+    ]
+
+    def fake_score(query: str) -> list[BM25Hit]:
+        return [
+            BM25Hit(index=full_chunk_indexes[0], score=10.0),
+            BM25Hit(index=full_chunk_indexes[1], score=9.5),
+            BM25Hit(index=full_chunk_indexes[2], score=1.0),
+        ]
+
+    monkeypatch.setattr(runtime_index.bm25_index, "score", fake_score)
+
+    result = retrieve_bad_case_hits_bm25_only(
+        """
+一、技术需求
+1、心率指标应支持精确小数显示。
+2、心率指标应支持固定档位。
+""",
+        directory=tmp_path,
+    )
+    payload = result.to_log_payload()
+
+    assert [source["file_name"] for source in payload["source_files"]] == [
+        "a.md",
+        "b.md",
+        "c.md",
+    ]
+    assert payload["load_summary"]["successful_file_count"] == 3
+    assert payload["load_summary"]["failed_file_count"] == 0
+    assert payload["clause_split_summary"]["clause_split_mode"] == (
+        CLAUSE_SPLIT_MODE_CLAUSE_ONLY
+    )
+    assert payload["retrieval_mode"] == RETRIEVAL_MODE_BM25_ONLY
+    assert payload["failure_summary"] is None
+    assert len(payload["clauses"]) == 2
+    assert payload["clauses"][0]["clause"]["text"] == (
+        "1、心率指标应支持精确小数显示。"
+    )
+    assert [hit["case_id"] for hit in payload["clauses"][0]["pre_filter_hits"]] == [
+        "TW_COMMENT_LOG_A",
+        "TW_COMMENT_LOG_B",
+        "TW_COMMENT_LOG_C",
+    ]
+    assert [hit["case_id"] for hit in payload["clauses"][0]["filtered_hits"]] == [
+        "TW_COMMENT_LOG_A",
+        "TW_COMMENT_LOG_B",
+    ]
+    assert [
+        (entry["injection_rank"], entry["case_id"], round(entry["score"], 3))
+        for entry in payload["injected_bad_cases"]
+    ] == [
+        (1, "TW_COMMENT_LOG_A", 1.0),
+        (2, "TW_COMMENT_LOG_B", 0.944),
+    ]
+    assert payload["injected_bad_cases"][0]["risk_type"] == "参数指纹"
+    assert payload["injected_bad_cases"][0]["recommended_comment_policy"]
+
+
+def test_retrieval_log_payload_is_writable_when_no_hits(tmp_path: Path) -> None:
+    clear_bad_case_runtime_cache()
+    _write_v2_bad_case(tmp_path, "case.md", "TW_COMMENT_NO_HIT", "心率小数精度")
+
+    result = retrieve_bad_case_hits_bm25_only(
+        "一、技术需求\n1、普通交付条款。",
+        directory=tmp_path,
+        score_threshold=1.1,
+    )
+    payload = result.to_log_payload()
+
+    assert payload["source_files"][0]["file_name"] == "case.md"
+    assert payload["failure_summary"] is None
+    assert payload["clauses"][0]["clause"]["text"] == "1、普通交付条款。"
+    assert payload["clauses"][0]["pre_filter_hits"] == []
+    assert payload["clauses"][0]["filtered_hits"] == []
+    assert payload["injected_bad_cases"] == []
+
+
 def test_hybrid_retrieval_uses_embedding_and_qdrant_when_available(
     tmp_path: Path,
     monkeypatch,

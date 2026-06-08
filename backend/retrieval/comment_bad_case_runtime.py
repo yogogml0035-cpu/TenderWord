@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from threading import RLock
 from typing import Protocol
@@ -153,6 +153,8 @@ class BadCaseRetrievalResult:
     retrieval_mode: str
     warnings: list[str]
     failure_summary: dict[str, object] | None
+    source_files: list[dict[str, object]] = field(default_factory=list)
+    load_summary: dict[str, object] | None = None
 
     @property
     def filtered_hits(self) -> list[BadCaseRetrievalHit]:
@@ -164,6 +166,10 @@ class BadCaseRetrievalResult:
 
     def to_log_payload(self) -> dict[str, object]:
         return {
+            "source_files": [dict(source_file) for source_file in self.source_files],
+            "load_summary": (
+                dict(self.load_summary) if self.load_summary is not None else None
+            ),
             "clause_split_summary": self.split_result.to_log_payload(),
             "retrieval_mode": self.retrieval_mode,
             "warnings": list(self.warnings),
@@ -171,6 +177,10 @@ class BadCaseRetrievalResult:
             "clauses": [
                 clause_result.to_log_payload()
                 for clause_result in self.clause_results
+            ],
+            "injected_bad_cases": [
+                _build_injected_bad_case_log_entry(rank, hit)
+                for rank, hit in enumerate(select_injected_bad_case_hits(self), start=1)
             ],
         }
 
@@ -388,6 +398,8 @@ def retrieve_bad_case_hits_bm25_only(
         retrieval_mode=RETRIEVAL_MODE_BM25_ONLY,
         warnings=list(runtime_index.load_result.warnings),
         failure_summary=load_payload["failure_summary"],
+        source_files=load_payload["source_files"],
+        load_summary=load_payload["load_summary"],
     )
 
 
@@ -446,6 +458,8 @@ def retrieve_bad_case_hits(
         retrieval_mode=RETRIEVAL_MODE_HYBRID,
         warnings=list(runtime_index.load_result.warnings),
         failure_summary=load_payload["failure_summary"],
+        source_files=load_payload["source_files"],
+        load_summary=load_payload["load_summary"],
     )
 
 
@@ -575,6 +589,23 @@ def _build_bad_case_prompt_entry(hit: BadCaseRetrievalHit) -> dict[str, str]:
     return {
         field: str(metadata.get(field, "") or "")
         for field in BAD_CASE_PROMPT_CONTEXT_FIELDS
+    }
+
+
+def _build_injected_bad_case_log_entry(
+    injection_rank: int,
+    hit: BadCaseRetrievalHit,
+) -> dict[str, object]:
+    return {
+        "injection_rank": injection_rank,
+        "case_id": hit.case_id,
+        "score": hit.score,
+        "bm25_score": hit.bm25_score,
+        "vector_score": hit.vector_score,
+        "retrieval_mode": hit.retrieval_mode,
+        "chunk_id": hit.chunk.chunk_id,
+        "field": hit.chunk.field,
+        **_build_bad_case_prompt_entry(hit),
     }
 
 
