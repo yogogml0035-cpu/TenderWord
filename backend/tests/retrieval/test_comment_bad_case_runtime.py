@@ -16,8 +16,12 @@ from backend.retrieval.bad_case_loader import (
 )
 from backend.retrieval.bm25 import BM25Index
 from backend.retrieval.comment_bad_case_runtime import (
+    CLAUSE_SPLIT_MODE_CLAUSE_ONLY,
+    CLAUSE_SPLIT_MODE_FALLBACK_FULL_TEXT,
+    build_clause_only_query,
     clear_bad_case_runtime_cache,
     load_bad_case_runtime_index,
+    split_polished_text_into_clauses,
 )
 from backend.retrieval.hybrid import HybridHit
 
@@ -214,6 +218,75 @@ def test_bad_case_runtime_index_does_not_create_disk_cache_files(
 
     after = sorted(path.name for path in tmp_path.iterdir())
     assert after == before
+
+
+def test_split_polished_text_uses_clause_only_package_section_rules() -> None:
+    polished_text = """
+第1包：心率设备
+一、项目概述
+1、设备名称及数量：心率设备 壹套
+续行内容保留在同一条款。
+2、交付日期：接到通知后一周内交付
+二、技术需求
+1、★设备采用无线信号采集终端
+第2包：肌电设备
+一、项目概述
+1、设备名称及数量：肌电设备 壹套
+"""
+
+    split_result = split_polished_text_into_clauses(polished_text)
+    payload = split_result.to_log_payload()
+
+    assert split_result.clause_split_mode == CLAUSE_SPLIT_MODE_CLAUSE_ONLY
+    assert [clause.clause_id for clause in split_result.clauses] == [
+        "clause_001",
+        "clause_002",
+        "clause_003",
+        "clause_004",
+    ]
+    assert split_result.clauses[0].package == "第1包：心率设备"
+    assert split_result.clauses[0].section == "一、项目概述"
+    assert split_result.clauses[0].title == "1、设备名称及数量：心率设备 壹套"
+    assert split_result.clauses[0].text == (
+        "1、设备名称及数量：心率设备 壹套\n续行内容保留在同一条款。"
+    )
+    assert (
+        build_clause_only_query(split_result.clauses[0])
+        == split_result.clauses[0].text
+    )
+    assert "第1包" not in build_clause_only_query(split_result.clauses[0])
+    assert split_result.clauses[2].section == "二、技术需求"
+    assert split_result.clauses[3].package == "第2包：肌电设备"
+    assert payload["clause_split_mode"] == CLAUSE_SPLIT_MODE_CLAUSE_ONLY
+
+
+def test_split_polished_text_falls_back_to_full_text_when_no_numeric_clause() -> None:
+    polished_text = """
+一、项目概述
+（一）供应商资格要求
+1.1 具备医疗器械经营备案凭证
+表格单元格：质保期不少于五年
+"""
+
+    split_result = split_polished_text_into_clauses(polished_text)
+    clause = split_result.clauses[0]
+    payload = split_result.to_log_payload()
+
+    assert split_result.clause_split_mode == CLAUSE_SPLIT_MODE_FALLBACK_FULL_TEXT
+    assert len(split_result.clauses) == 1
+    assert clause.clause_id == "clause_001"
+    assert clause.title == CLAUSE_SPLIT_MODE_FALLBACK_FULL_TEXT
+    assert clause.text == polished_text.strip()
+    assert build_clause_only_query(clause) == polished_text.strip()
+    assert payload["clause_split_mode"] == CLAUSE_SPLIT_MODE_FALLBACK_FULL_TEXT
+    assert payload["clauses"][0]["query_text"] == polished_text.strip()
+
+
+def test_split_polished_text_returns_empty_fallback_for_blank_text() -> None:
+    split_result = split_polished_text_into_clauses("\n  \n")
+
+    assert split_result.clause_split_mode == CLAUSE_SPLIT_MODE_FALLBACK_FULL_TEXT
+    assert split_result.clauses == []
 
 
 def _write_v2_bad_case(

@@ -15,6 +15,7 @@ Source: prd.json
 - `load_bad_case_directory()` 是目录级 bad case runtime 入口；它按文件名扫描 `*.md`，坏文件只进入 warning/failure payload，不应阻断有效文件加载。
 - `frontend/package.json` 的开发验证入口当前固定为 `next dev --webpack -p 8502`；默认 Turbopack 在本仓库的 Tailwind 4/lightningcss 组合下会在 Linux/WSL 里卡在 native module 解析。
 - `load_bad_case_runtime_index()` 是 bad case chunks + BM25Index 的进程内缓存入口；后续 clause split、BM25-only 和 hybrid runtime 应复用它，不要直接重复构建索引。
+- `split_polished_text_into_clauses()` 是正式 clause_only 切分入口；只识别 `第N包：`、中文数字章节和数字顿号条款，不能在首版扩展到 `1.1`、`（一）` 或表格单元格。
 
 ## 2026-06-08 17:43 - US-001
 - 实现了正式 bad case loader 默认读取 `backend/retrieval/bad_cases/comment_bad_cases.md`，并解析 v2 `---BEGIN_BAD_CASE--- ... ---END_BAD_CASE---` 字段。
@@ -59,4 +60,16 @@ Source: prd.json
   - `comment_bad_case_runtime.py` 现在是正式检索 runtime 的承载模块，后续检索步骤应在这里继续扩展，而不是把逻辑塞回 loader。
   - 缓存只按 bad case 文件签名失效，不接收也不缓存 `polished_text` 级结果；正文检索仍应每次按当前输入实时计算。
   - 测试中需要调用 `clear_bad_case_runtime_cache()` 避免跨用例共享进程缓存影响断言。
+---
+
+## 2026-06-08 18:55 - US-004
+- 在正式 bad case runtime 中实现了 `clause_only` 条款切分，复用实验脚本的包标题、中文数字章节和数字顿号条款规则。
+- 增加了全文回退：当 `polished_text` 无法切出任何数字顿号条款时，以整篇正文作为单个查询单元继续后续检索；空正文返回空 fallback。
+- `ClauseSplitResult.to_log_payload()` 记录 `clause_split_mode`、条款数量和每个条款的 `query_text`，并确保查询文本只取条款正文。
+- 更改的文件：`backend/retrieval/comment_bad_case_runtime.py`、`backend/tests/retrieval/test_comment_bad_case_runtime.py`、`tasks/comment-bad-case-retrieval-integration/prd.json`、`tasks/comment-bad-case-retrieval-integration/progress.txt`
+- 验证：`backend/.venv-linux/bin/python -m py_compile backend/retrieval/comment_bad_case_runtime.py backend/tests/retrieval/test_comment_bad_case_runtime.py`；`backend/.venv-linux/bin/python -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -k "clause or fallback" -v`；`backend/.venv-linux/bin/python -m pytest backend/tests/retrieval/test_comment_bad_case_runtime.py -v`；`backend/.venv-linux/bin/python -m pytest backend/tests -q`；`git diff --check -- backend/retrieval/comment_bad_case_runtime.py backend/tests/retrieval/test_comment_bad_case_runtime.py`
+- **未来迭代的学习：**
+  - 后续 BM25-only 和 hybrid 检索应调用 `split_polished_text_into_clauses()`，再用 `build_clause_only_query()` 取查询文本，避免把 package/section 拼进 clause_only 查询。
+  - `ClauseSplitResult.to_log_payload()` 已有 `clause_split_mode` 和 clause 详情；后续 retrieval JSON payload 可以扩展它，不需要在节点层重新组织切分日志。
+  - 当前 splitter 故意不识别 `1.1`、`（一）` 和表格单元格；不要在 US-005/US-006 检索实现里顺手扩大切分范围。
 ---
