@@ -1,9 +1,9 @@
-<!-- refreshed: 2026-06-08 -->
+<!-- refreshed: 2026-06-09 -->
 # 后端架构事实地图
 
-**分析日期：** 2026-06-08
+**分析日期：** 2026-06-09
 
-**范围：** 仅覆盖 `backend/` 子项目。事实来源为 `backend/` 源码、`backend/tests/`、`backend/requirements.txt`、`docs/backend.md`、`docs/interfaces-runtime.md` 和 `.agents/skills/gsd-map-codebase/SKILL.md`。`backend/.env` 文件存在，但不得读取或引用内容。
+**范围：** 仅覆盖 `backend/` 子项目。事实来源为 `backend/` 源码、`backend/tests/`、`backend/requirements.txt`、`README.md`、`docs/backend.md`、`docs/interfaces-runtime.md` 和 `.agents/skills/gsd-map-codebase/SKILL.md`。`backend/.env` 文件存在，但不得读取或引用内容。
 
 ## 系统总览
 
@@ -58,7 +58,7 @@
 | CommentSupplementGraph | 补充批注独立 graph，复用任务队列、SSE、锁和 `comment_agent` 写回 | `backend/graphs/comment_supplement_graph.py:19`, `backend/graphs/comment_supplement_graph.py:60` |
 | Word nodes | 模板准备、抽参、删除、替换、正文生成、批注生成、写回、rewrite 节点 | `backend/nodes/` |
 | Word helper | Word 业务 helper：段落边界、受保护字段、正文写回、样式回填、range、删除、语义匹配 | `backend/helper/word_helper/` |
-| Word util | Word COM 技术层：COM lock/retry、Word 应用生命周期、锚点工具、常量、诊断 | `backend/util/word_util/word_com_manager.py:102`, `backend/util/word_util/word_application_util.py:132` |
+| Word util | Word COM 技术层：COM lock/retry、Word 应用生命周期、锚点工具、常量、诊断 | `backend/util/word_util/word_com_manager.py:100`, `backend/util/word_util/word_application_util.py:132` |
 | Generation agents | `generation_mode=agent` 的 DeepAgents 主/子智能体、workspace、协议解析和 `agent_step` | `backend/agents/generation/content_agents.py:845`, `backend/agents/generation/workspace.py:39` |
 | Comment agents | 批注生成/校验/写回 LangChain agent、工具门禁和审计日志 | `backend/agents/comments/comment_agent.py:611`, `backend/agents/comments/tools.py:478` |
 | Task context assistant | Agent run 前置流，读取白名单上下文并受控创建 rewrite 任务 | `backend/services/agent_run_service.py:306`, `backend/agents/task_context_assistant/tools.py:197` |
@@ -212,7 +212,7 @@
 - 模式：类型 graph 通过 class attribute 绑定 `NODE_*`，不要复制 `build_graph()`。
 
 **`TaskSkillWorkflow`:**
-- 用途：声明 task skill 的 state、节点、普通边、等待边、条件边和节点估算。
+- 用途：声明 task skill 的 state、节点、普通边、等待边、条件边和节点估算；当前跟踪源码中只注册 `rewrite`。
 - 示例：`backend/graphs/task_skill_workflows.py:27`, `backend/graphs/task_skill_types.py`
 - 模式：新 skill 先新增 `backend/skills/<skill_id>/SKILL.md` 和运行时节点，再在 `_TASK_SKILL_WORKFLOWS` 注册。
 
@@ -281,7 +281,7 @@
 ## 架构约束
 
 - **线程模型：** FastAPI 主事件循环负责 HTTP/SSE；`DocumentService` 用 `ThreadPoolExecutor(max_workers=4)` 提交任务；每个 graph 任务在线程中创建独立 asyncio loop (`backend/services/document_service.py:41`, `backend/services/document_service.py:993`)。
-- **Word 串行化：** 任务先通过 `TaskQueueManager.wait_for_turn()` 保证公平顺序，再通过 `CrossProcessFileLock` 保护 graph 执行，再通过 `com_lock()` 保护 COM 创建/关闭和底层操作 (`backend/graphs/base_graph.py:761`, `backend/graphs/base_graph.py:771`, `backend/util/word_util/word_com_manager.py:102`)。
+- **Word 串行化：** 任务先通过 `TaskQueueManager.wait_for_turn()` 保证公平顺序，再通过 `CrossProcessFileLock` 保护 graph 执行，再通过 `com_lock()` 保护 COM 创建/关闭和底层操作 (`backend/graphs/base_graph.py:761`, `backend/graphs/base_graph.py:771`, `backend/util/word_util/word_com_manager.py:100`)。
 - **全局状态：** 单例包括 `_task_queue`、`sse_manager`、`_conversation_service`、`_document_service`、`_agent_run_service`、`settings` 和 graph registry (`backend/task/task_queue_manager.py:942`, `backend/services/document_service.py:188`, `backend/config/settings.py:277`)。
 - **持久化：** 任务、SSE、会话都是进程内态，服务重启后不恢复；文档和日志是文件态。
 - **环境：** `backend/config/settings.py` 和 `backend/retrieval/config.py` 会读取 `backend/.env`，但代码地图、日志和回复不得输出真实值。
@@ -306,7 +306,13 @@
 
 **问题形态：** 将 `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 写入 rewrite request、skill state 或 rewrite prompt。
 **风险原因：** rewrite 是 task skill 链路，语义来源是会话 latest state 或上传文件上下文；generate-only 字段污染 rewrite prompt 和分支条件。
-**正确做法：** 只在 `GenerateRequest` 和 `_build_initial_state()` 使用这些字段，rewrite state 使用 `TaskSkillGraphState` 和 `rewrite_user_prompt`，参照 `backend/models/generate.py:117`、`backend/services/document_service.py:770`。
+**正确做法：** 只在 `GenerateRequest` 和 `_build_initial_state()` 使用这些字段，rewrite state 使用 `TaskSkillGraphState` 和 `rewrite_user_prompt`，参照 `backend/models/generate.py:117`、`backend/services/document_service.py:784`。
+
+### 恢复旧 edit 入口或平行 task skill 链路
+
+**问题形态：** 为上传文件修改重新创建 `/api/edit`、`edit` task kind、`backend/skills/edit/` 或绕过 `rewrite` 的第二套 graph。
+**风险原因：** 当前上传文件修改语义已经收敛到 `rewrite_source="uploaded_file"`，后台仍复用 `SkillGraph.for_skill("rewrite")`、任务队列、SSE 和下载链路；平行入口会绕开上下文 guard、类型感知写回和既有测试。
+**正确做法：** 上传文件和会话修改都进入 `DocumentService.create_rewrite_task()`，skill 源码落在 `backend/skills/rewrite/SKILL.md`、workflow 注册在 `backend/graphs/task_skill_workflows.py:27`，上传来源状态由 `backend/services/document_service.py:849` 设置。
 
 ### 前端或 agent 暴露完整运行态敏感信息
 
@@ -337,4 +343,4 @@
 
 ---
 
-*架构分析：2026-06-08*
+*架构分析：2026-06-09*

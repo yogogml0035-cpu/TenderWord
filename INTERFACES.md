@@ -1,8 +1,8 @@
 # TenderWord 接口边界
 
-**生成日期：** 2026-06-08
+**生成日期：** 2026-06-09
 
-本文件记录 TenderWord 当前已确认的系统级接口边界。具体模型和行为以 `backend/api/`、`backend/models/`、`frontend/types/api.ts` 和 `frontend/lib/api.ts` 为准。
+本文件记录 TenderWord 当前已确认的系统级接口边界。具体模型和行为以代码真源为准，并参考 2026-06-09 刷新的 `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 事实层。
 
 ## 已确认接口边界
 

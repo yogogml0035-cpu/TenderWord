@@ -1,42 +1,44 @@
-# 前端测试事实地图
+# 前端测试约定
 
-**分析日期：** 2026-06-08
+**分析日期：** 2026-06-09
 
-**范围：** `frontend/__tests__/`、`frontend/e2e/`、`frontend/mocks/`、`frontend/jest.config.ts`、`frontend/playwright.config.ts` 和前端验证脚本。
+**范围：** `frontend/__tests__/`、`frontend/e2e/`、`frontend/mocks/`、`frontend/test-shims/`、`frontend/jest.config.ts`、`frontend/playwright.config.ts`、`frontend/package.json`、`frontend/tsconfig.typecheck.json` 和前端事实文档。`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc` 仅确认存在，不读取内容。
 
 ## 测试框架
 
 **运行器：**
-- Jest `^29.7.0` - 单元/集成测试。
-- 配置： `frontend/jest.config.ts`。
-- 环境： `jsdom`。
-- 设置： `setupFiles` 使用 `frontend/polyfills.js`，`setupFilesAfterEnv` 使用 `frontend/jest.setup.js`。
-- 注意：`frontend/jest.setup.ts` 存在，但当前 Jest 配置实际引用的是 `frontend/jest.setup.js`。
+- Jest `^29.7.0` 用于单元测试和 Testing Library 集成测试。
+- 配置：`frontend/jest.config.ts`。
+- 环境：`jsdom`。
+- `setupFiles`: `frontend/polyfills.js`。
+- `setupFilesAfterEnv`: `frontend/jest.setup.js`。
+- `frontend/jest.setup.ts` 存在，但当前 Jest 配置实际引用 `frontend/jest.setup.js`；修改全局 setup 时先确认实际入口。
 
 **断言库：**
-- Jest expect。
-- `@testing-library/jest-dom`，见 `frontend/jest.setup.js`。
-- Testing Library React 和 user-event，见 `frontend/__tests__/unit/components/`。
+- Jest `expect`。
+- `@testing-library/jest-dom`，由 `frontend/jest.setup.js` 注册。
+- React 组件测试使用 `@testing-library/react` 和 `@testing-library/user-event`。
 
 **E2E 运行器：**
-- Playwright `@playwright/test`。
-- 配置： `frontend/playwright.config.ts`。
-- 浏览器项目： Chromium，非 CI 默认可使用系统 Chrome channel。
+- Playwright `@playwright/test` 用于浏览器契约测试。
+- 配置：`frontend/playwright.config.ts`。
+- `testDir` 为 `frontend/e2e/`。
+- 浏览器项目为 `chromium`；非 CI 且 `PLAYWRIGHT_USE_SYSTEM_CHROME` 未设为 `0` 时使用系统 Chrome channel。
 
 **运行命令：**
-
 ```bash
 cd frontend
-npm run lint           # ESLint
+npm run lint           # ESLint flat config
 npm run type-check     # tsc -p tsconfig.typecheck.json --noEmit
 npm run test           # Jest 全量测试
-npm run test:watch     # Jest 监听模式
-npm run test:coverage  # Jest 覆盖率
+npm run test:watch     # Jest watch
+npm run test:coverage  # Jest coverage
 npm run test:e2e       # Playwright E2E
+npm run test:e2e:ui    # Playwright UI
+npm run test:e2e:debug # Playwright debug
 ```
 
-WSL 或跨 Windows 环境运行前端测试时优先使用：
-
+**WSL / 跨平台临时目录模式：**
 ```bash
 cd frontend
 TMPDIR=/tmp TMP=/tmp TEMP=/tmp npm run type-check
@@ -48,15 +50,16 @@ TMPDIR=/tmp TMP=/tmp TEMP=/tmp CI=1 npm test -- --runInBand
 **位置：**
 - Jest 测试集中在 `frontend/__tests__/`，不与源码文件并排。
 - Playwright 测试集中在 `frontend/e2e/`。
-- MSW mock 集中在 `frontend/mocks/`。
+- MSW mock server 和 handlers 位于 `frontend/mocks/`。
+- 测试数据工厂和 SSE mock 位于 `frontend/__tests__/mocks/`。
+- Testing Library helper 位于 `frontend/__tests__/utils/test-utils.tsx`。
 
 **命名：**
-- Jest 测试文件：`test_*.test.ts` 或 `test_*.test.tsx`。
-- Playwright 测试文件：`test_*.spec.ts`。
-- 测试工具/fixture 不一定以 `test_` 开头，例如 `frontend/__tests__/mocks/data-factories.ts`。
+- Jest 测试文件使用 `test_*.test.ts` 或 `test_*.test.tsx`。
+- Playwright 测试文件使用 `test_*.spec.ts`。
+- 测试工具、fixture、mock 文件不使用 `test_` 前缀，例如 `frontend/__tests__/mocks/data-factories.ts`。
 
 **结构：**
-
 ```text
 frontend/__tests__/
 ├── integration/
@@ -85,8 +88,7 @@ frontend/e2e/
 
 ## 测试结构
 
-**测试套件组织：**
-
+**套件组织：**
 ```typescript
 describe('API Client', () => {
   beforeEach(() => {
@@ -94,19 +96,17 @@ describe('API Client', () => {
   });
 
   describe('createGenerateTask', () => {
-    it('成功时返回任务信息', async () => {
-      // 准备 fetch mock
-      // 执行动作
-      // 断言返回的任务字段和请求体
+    it('returns task data for wrapped success response', async () => {
+      const result = await createGenerateTask(validGenerateRequest);
+      expect(result.task_id).toBe('task-123');
     });
   });
 });
 ```
 
-实际示例见 `frontend/__tests__/unit/lib/test_api.test.ts`。
+实际模式见 `frontend/__tests__/unit/lib/test_api.test.ts`。
 
 **Hook 测试模式：**
-
 ```typescript
 jest.mock('@/hooks/useSSE', () => ({ useSSE: jest.fn() }));
 jest.mock('@/lib/api', () => ({ getTaskStatus: jest.fn() }));
@@ -119,24 +119,38 @@ renderHook(() =>
 );
 ```
 
-实际示例见 `frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`。
+实际模式见 `frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`。
+
+**组件测试模式：**
+```typescript
+render(<ChatPanel />);
+
+await user.type(screen.getByTestId('chat-input'), '请帮我改写这一段内容');
+await user.click(screen.getByTestId('chat-send-button'));
+
+expect(mockStreamAgentRun).toHaveBeenCalledWith(
+  expect.objectContaining({ selected_skills: ['rewrite'] }),
+  expect.any(Object)
+);
+```
+
+实际模式见 `frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`。
 
 **模式：**
 - 每个 store/hook 测试先清理 `window.localStorage` 和 `window.sessionStorage`。
-- Zustand store 测试使用 `useXxxStore.setState()` 构造状态。
-- API client 测试直接 mock `globalThis.fetch` 并验证 request body、错误码和返回值。
-- 组件测试使用 Testing Library 的 role/text/testid，必要时用 `userEvent`。
-- Playwright 测试用 `page.route` mock 后端时，把不依赖 Word COM 的浏览器契约固化为 E2E。
+- Zustand store 测试使用 `useXxxStore.setState()` 构造状态，再调用 action 并断言 state。
+- API client 测试直接 mock `globalThis.fetch`，断言 endpoint、request body、错误码和返回值。
+- 组件测试优先使用 role、label、text、testid 和 `userEvent`，避免依赖视觉 class。
+- Playwright 测试用 `page.route()` mock `/api/*`，把不依赖 Word COM 的浏览器契约固定下来。
 
 ## Mock 方式
 
 **框架：**
-- Jest mocks。
-- MSW 用于 API mock server。
-- Playwright route mocks 用于浏览器测试。
+- Jest mock function / module mock。
+- MSW `setupServer()`。
+- Playwright `page.route()`。
 
 **MSW 模式：**
-
 ```typescript
 import { setupServer } from 'msw/node';
 import { handlers } from './handlers';
@@ -147,35 +161,55 @@ export const server = setupServer(...handlers);
 实际文件：`frontend/mocks/server.ts`、`frontend/mocks/handlers.ts`。
 
 **Fetch Mock 模式：**
-
 ```typescript
 globalThis.fetch = jest.fn().mockResolvedValue({
   ok: true,
   status: 200,
-  json: async () => ({ success: true, data: {} }),
+  json: async () => ({ success: true, data: { task_id: 'task-123' } }),
 } as unknown as Response) as unknown as typeof fetch;
 ```
 
 实际文件：`frontend/__tests__/unit/lib/test_api.test.ts`。
 
-**需要 Mock：**
-- 后端 API response、fetch stream、SSE hook、task status、sessionStorage/localStorage。
-- Word COM、真实后端队列、真实下载文件内容和外部模板文件 URL。
+**SSE Mock 模式：**
+```typescript
+act(() => {
+  latestOptions?.onMessage?.({
+    event: 'done',
+    id: '4',
+    data: {
+      task_id: 'task-1',
+      task_kind: 'generate',
+      success: true,
+      message: '生成完成',
+    },
+  });
+});
+```
 
-**不要 Mock：**
-- 纯转换/解析 helper 的核心逻辑，例如 `frontend/lib/formDataConverter.ts`、`frontend/lib/gngkFormType.ts`、`frontend/utils/tenderTypeMapper.ts`。
-- Store reducer/action 的状态迁移本身，除非测试目标是 UI 组件且 store 行为已在 store 测试覆盖。
+实际文件：`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`。
+
+**需要 Mock 的内容：**
+- 后端 API response、fetch stream、SSE hook、task status、heartbeat、sessionStorage/localStorage。
+- Agent run NDJSON：`run_started`、`thinking_stage`、`task_accepted`、`needs_input`、`done`、`error`。
+- Playwright 中的 `/api/generate`、`/api/agent/runs/stream`、`/api/stream/{taskId}`、`/api/tasks/{taskId}`、conversation heartbeat。
+- Word COM、真实后端队列、真实下载文件内容、真实模板候选外部 URL。
+
+**不要 Mock 的内容：**
+- 纯转换逻辑：`frontend/lib/formDataConverter.ts`、`frontend/lib/gngkFormType.ts`、`frontend/utils/tenderTypeMapper.ts`。
+- Store action 的状态迁移本身；组件测试可 mock API，但 store 测试要直接覆盖 action。
+- API client 的 request body 关键字段；测试应断言真实 payload shape。
 
 ## 夹具与工厂
 
 **测试数据：**
-
 ```typescript
 export class ConversationFactory {
   static create(overrides?: Partial<Conversation>): Conversation {
     const now = Date.now();
+    const id = generateId('conv');
     return {
-      id: generateId('conv'),
+      id,
       title: 'Test Conversation',
       tenderType: 'xjcg',
       messages: [],
@@ -192,18 +226,18 @@ export class ConversationFactory {
 **位置：**
 - 通用数据工厂：`frontend/__tests__/mocks/data-factories.ts`。
 - SSE mock：`frontend/__tests__/mocks/sse-mock.ts`。
-- Testing Library 渲染 helper：`frontend/__tests__/utils/test-utils.tsx`。
+- Testing Library helper：`frontend/__tests__/utils/test-utils.tsx`。
 - MSW handlers：`frontend/mocks/handlers.ts`。
+- Playwright session seed 使用 `page.addInitScript()` 写入 `sessionStorage`，见 `frontend/e2e/test_agent_run_chat_panel.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`。
 
 ## 覆盖率
 
-**覆盖率门槛：**
-- `frontend/jest.config.ts` 配置全局 coverage threshold：branches/functions/lines/statements 均为 50。
+**要求：**
+- `frontend/jest.config.ts` 配置全局 coverage threshold：`branches`、`functions`、`lines`、`statements` 均为 `50`。
 - 覆盖率收集范围：`components/`、`hooks/`、`lib/`、`stores/`。
 - 覆盖率排除：`.d.ts`、`node_modules`、`.next`、`frontend/mocks/`。
 
 **查看覆盖率：**
-
 ```bash
 cd frontend
 npm run test:coverage
@@ -212,36 +246,38 @@ npm run test:coverage
 ## 测试类型
 
 **单元测试：**
-- 范围： API client、pure helper、stores、hooks、组件细节和类型守卫。
-- 示例： `frontend/__tests__/unit/lib/test_api.test.ts`、`frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`、`frontend/__tests__/unit/utils/test_tender_type_mapper.test.ts`。
+- API client：`frontend/__tests__/unit/lib/test_api.test.ts`。
+- API base URL：`frontend/__tests__/unit/lib/test_api_base_url.test.ts`。
+- SSE wrapper：`frontend/__tests__/unit/lib/test_sse.test.ts`。
+- 表单 converter / gngk 分派：`frontend/__tests__/unit/lib/test_form_data_converter.test.ts`。
+- tender type / canonical URL：`frontend/__tests__/unit/utils/test_tender_type_mapper.test.ts`。
+- stores：`frontend/__tests__/unit/stores/`。
+- hooks：`frontend/__tests__/unit/hooks/`。
+- 组件：`frontend/__tests__/unit/components/`。
+- 类型守卫 / SSE 类型：`frontend/__tests__/unit/types/test_api_sse_agent_step.test.ts`。
 
 **集成测试：**
-- 范围： Testing Library provider/render 示例和跨小模块行为。
-- 示例： `frontend/__tests__/integration/examples/test_example_component.test.tsx`。
+- Testing Library provider/render 示例位于 `frontend/__tests__/integration/examples/test_example_component.test.tsx`。
+- 当前集成测试更多是模式样例；业务跨模块行为主要由 unit suites 和 Playwright specs 覆盖。
 
 **E2E 测试：**
-- 框架： Playwright。
-- 范围： `/tender` 页面、URL 会话行为、agent run 聊天面板、生成模式、补充批注、上传槽位等浏览器契约。
-- 示例： `frontend/e2e/test_home.spec.ts`、`frontend/e2e/test_url_conversation.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`、`frontend/e2e/test_comment_supplement.spec.ts`。
+- Playwright specs 位于 `frontend/e2e/`。
+- 覆盖 `/tender` 页面、URL 会话行为、agent run 聊天面板、生成方式切换、补充批注、上传槽位等浏览器契约。
+- 示例：`frontend/e2e/test_home.spec.ts`、`frontend/e2e/test_url_conversation.spec.ts`、`frontend/e2e/test_agent_run_chat_panel.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`、`frontend/e2e/test_comment_supplement.spec.ts`、`frontend/e2e/test_tender_form_upload_slots.spec.ts`。
+- Playwright 配置的 `baseURL` 是 `http://localhost:8502`，`webServer.command` 是 `npm run dev -- --webpack`。
 
 ## 常见模式
 
 **异步测试：**
-
 ```typescript
 await waitFor(() => {
   expect(mockGetTaskStatus).toHaveBeenCalledWith('task-1');
-});
-
-act(() => {
-  latestOptions?.onMessage?.({ event: 'llm', data: payload });
 });
 ```
 
 实际文件：`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`。
 
 **错误测试：**
-
 ```typescript
 await expect(createGenerateTask(validGenerateRequest)).rejects.toBeInstanceOf(ApiError);
 await expect(createGenerateTask(validGenerateRequest)).rejects.toMatchObject({
@@ -254,34 +290,92 @@ await expect(createGenerateTask(validGenerateRequest)).rejects.toMatchObject({
 
 **Store 测试：**
 - 清空 browser storage。
-- `useChatStore.setState()` 建立 conversations、currentConversationId、activeTaskIds、taskMessageMap。
+- 使用 `useChatStore.setState()` 建立 `conversations`、`currentConversationId`、`conversationDrafts`、`taskSummaries`、`taskMessageMap`。
 - 调用 store action。
-- 断言 conversation messages、task summary、stream store 或 storage key。
+- 断言 conversation messages、task summary、stream store 或 persisted storage key。
 
-**Playwright 模式：**
-- Playwright config 的 baseURL 是 `http://localhost:8502`。
-- `webServer.command` 是 `npm run dev -- --webpack`。
-- locator 优先使用 role、accessible name、`data-testid` 或限定容器。
-- 对不依赖真实后端/Word COM 的流程，使用 `page.route` mock `/api/*`。
+实际文件：`frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`、`frontend/__tests__/unit/stores/test_chat_store_conversation_scope.test.ts`。
 
-## 按变更类型选择测试
+**Playwright 测试：**
+```typescript
+await page.route('**/api/generate', async (route) => {
+  const payload = await route.request().postDataJSON();
+  await route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, data: { task_id: 'task-1' } }),
+  });
+});
+```
 
-- API client：`frontend/__tests__/unit/lib/test_api.test.ts`。
-- API base URL / Next rewrite 相关：`frontend/__tests__/unit/lib/test_api_base_url.test.ts`，必要时人工检查 `frontend/next.config.ts`。
+实际文件：`frontend/e2e/test_generation_mode_agent.spec.ts`。
+
+## API Client 测试入口
+
+- 新增或修改 API helper 时，先补 `frontend/__tests__/unit/lib/test_api.test.ts`。
+- 必须覆盖 success response、wrapped/flat response 兼容、error response、network error、request body 和 endpoint。
+- 上传文件类型变化必须断言 `FormData.file_type`，例如 `rewrite_source` 在 `frontend/__tests__/unit/lib/test_api.test.ts` 和 `frontend/__tests__/unit/components/forms/test_file_uploader.test.tsx` 中覆盖。
+- 模板候选变化覆盖 `fetchTemplateCandidates()`、`selectTemplateCandidate()`、`getTemplateCandidateDownloadUrl()`。
+- `NEXT_PUBLIC_API_URL` 或 rewrite/base URL 行为变化覆盖 `frontend/__tests__/unit/lib/test_api_base_url.test.ts`，并人工检查 `frontend/next.config.ts`。
+
+## 类型同步测试入口
+
+- API/SSE 类型变化覆盖 `frontend/__tests__/unit/types/test_api_sse_agent_step.test.ts`、`frontend/__tests__/unit/lib/test_sse.test.ts`、`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`。
+- `TaskKind`、`TaskStatus`、`SSEDoneEvent`、`TaskResult`、写回摘要字段变化要覆盖任务消息和下载卡：`frontend/__tests__/unit/components/chat/test_message_list.test.tsx`、`frontend/__tests__/unit/components/chat/test_task_content_message.test.tsx`、`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`。
+- Agent run NDJSON 事件变化覆盖 `frontend/__tests__/unit/lib/test_api.test.ts` 的 `streamAgentRun` 相关 suites 和 `frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`。
+
+## 表单、状态与上传测试入口
+
+- 表单 UI 和 draft 同步：`frontend/__tests__/unit/components/forms/test_tender_form_shared.test.tsx`。
+- 表单 wrapper：`frontend/__tests__/unit/components/forms/test_xjcg_tender_form.test.tsx`、`frontend/__tests__/unit/components/forms/test_gngk_tender_form.test.tsx`。
+- 上传控件：`frontend/__tests__/unit/components/forms/test_file_uploader.test.tsx`。
+- 表单 converter：`frontend/__tests__/unit/lib/test_form_data_converter.test.ts`。
+- 表单注册表：`frontend/__tests__/unit/components/chat/test_tender_form_registry.test.tsx`。
 - URL / 会话 identity：`frontend/__tests__/unit/utils/test_tender_type_mapper.test.ts`、`frontend/__tests__/unit/stores/test_chat_store_conversation_scope.test.ts`、`frontend/e2e/test_url_conversation.spec.ts`。
-- 表单和 converter：`frontend/__tests__/unit/components/forms/`、`frontend/__tests__/unit/lib/test_form_data_converter.test.ts`、`frontend/__tests__/unit/components/chat/test_tender_form_registry.test.tsx`。
-- `gngk` 分派：`frontend/__tests__/unit/lib/test_form_data_converter.test.ts`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`。
-- SSE / task：`frontend/__tests__/unit/lib/test_sse.test.ts`、`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/types/test_api_sse_agent_step.test.ts`。
-- Agent run / rewrite：`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`、`frontend/e2e/test_agent_run_chat_panel.spec.ts`。
-- 补充批注：`frontend/__tests__/unit/lib/test_api.test.ts`、`frontend/__tests__/unit/components/chat/test_message_list.test.tsx`、`frontend/e2e/test_comment_supplement.spec.ts`。
+- 上传槽位浏览器契约：`frontend/e2e/test_tender_form_upload_slots.spec.ts`。
+
+## Generate-only 字段测试入口
+
+- `generation_mode`、`comment_generation_mode`、`style_writeback_mode` 进入 generate payload：`frontend/__tests__/unit/lib/test_form_data_converter.test.ts`、`frontend/__tests__/unit/components/chat/test_tender_form_registry.test.tsx`、`frontend/e2e/test_generation_mode_agent.spec.ts`。
+- 这些字段不得进入 agent run / rewrite payload：`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx` 断言 `streamAgentRun` payload 不含 `generation_mode` 和 `comment_generation_mode`。
+- `comment_generation_mode=off` 的浏览器行为由 `frontend/e2e/test_generation_mode_agent.spec.ts` 覆盖。
+- `style_writeback_mode` 的 draft UI 行为由 `frontend/__tests__/unit/components/forms/test_tender_form_shared.test.tsx` 覆盖。
+
+## Agent Run、Rewrite 与补充批注测试入口
+
+- `$skill` / slash skill 输入和 `selected_skills` 解析：`frontend/__tests__/unit/components/chat/test_chat_input.test.tsx`。
+- Agent run payload、thinking card、fake task、rewrite 文件链路：`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`。
+- 上传文件 rewrite 必须覆盖 `uploadFile(file, 'rewrite_source')`、`uploaded_files`、`rewrite_context` 和 `selected_skills: ['rewrite']`。
+- Agent run 浏览器契约：`frontend/e2e/test_agent_run_chat_panel.spec.ts`。
+- 补充批注任务创建和 `comment_agent` 展示：`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`、`frontend/__tests__/unit/components/chat/test_message_list.test.tsx`、`frontend/e2e/test_comment_supplement.spec.ts`。
+- rewrite 和 `comment_supplement` 下载卡不得再次显示补充批注动作，覆盖在 `frontend/components/chat/TaskDownloadMessage.tsx` 相关组件测试和 message list 测试。
+
+## Playwright 约定
+
+- 使用 `page.route()` mock 后端，不依赖真实 FastAPI、Word COM 或真实文件下载。
+- 使用 `page.addInitScript()` 预置 `sessionStorage`，保持 `/tender` 页面进入指定会话状态。
+- locator 优先使用 role、accessible name、`data-testid` 和限定容器。
+- 收集 `console` error 和 `pageerror`，测试末尾断言为空。
+- 需要落地 evidence 的 specs 可以写入 `tasks/<requirement-slug>/screenshots/` 和 `tasks/<requirement-slug>/logs/`，现有示例位于 `frontend/e2e/test_generation_mode_agent.spec.ts`。
+
+## 验证选择矩阵
+
+- 纯文档变更：运行 `git diff --check`，并扫描改动文档中是否出现密钥/token 模式。
+- API client 变更：运行 `npm run type-check`、`npm test -- --runTestsByPath __tests__/unit/lib/test_api.test.ts`。
+- API base URL / Next rewrite 变更：运行 `npm run type-check`、`npm test -- --runTestsByPath __tests__/unit/lib/test_api_base_url.test.ts`，必要时跑 `npm run test:e2e`。
+- 表单 / converter / `gngk` 分派变更：运行 `npm test -- --runTestsByPath __tests__/unit/lib/test_form_data_converter.test.ts __tests__/unit/components/forms/test_tender_form_shared.test.tsx __tests__/unit/components/chat/test_tender_form_registry.test.tsx`。
+- 上传 rewrite / agent run 变更：运行 `npm test -- --runTestsByPath __tests__/unit/components/chat/test_chat_panel.test.tsx __tests__/unit/lib/test_api.test.ts`，并按风险跑 `npm run test:e2e -- test_agent_run_chat_panel.spec.ts`。
+- SSE / task 消息变更：运行 `npm test -- --runTestsByPath __tests__/unit/lib/test_sse.test.ts __tests__/unit/hooks/test_use_chat_sse.test.tsx __tests__/unit/types/test_api_sse_agent_step.test.ts`。
+- URL / 会话变更：运行 `npm test -- --runTestsByPath __tests__/unit/utils/test_tender_type_mapper.test.ts __tests__/unit/stores/test_chat_store_conversation_scope.test.ts`，并跑 `npm run test:e2e -- test_url_conversation.spec.ts`。
+- 浏览器交互变更：至少运行相关 Playwright spec；跨工作台改动再运行 `npm run test:e2e`。
 
 ## 测试覆盖缺口
 
-- 真实后端 + Word COM 生成闭环不属于常规前端 Jest 覆盖；需要 Windows Python、pywin32 和 Word/WPS COM 环境。
-- Playwright 当前更适合验证 mock 后端下的前端契约，不能证明生成文件内容正确。
-- `frontend/jest.setup.ts` 与 `frontend/jest.setup.js` 并存，当前配置只使用 `.js`，修改测试 setup 时要同步确认实际入口。
-- `frontend/mocks/handlers.ts` 的基础 mock 覆盖有限，复杂任务事件更多依赖单测内 mock 或 Playwright route。
+- 真实后端 + Word COM 生成闭环不属于常规前端 Jest / Playwright 覆盖，需要 Windows Python、pywin32 和本机 Word/WPS COM 环境。
+- Playwright 当前主要验证 mock 后端下的前端契约，不能证明生成 `.docx` 内容正确。
+- `frontend/mocks/handlers.ts` 的 MSW 基础 mock 覆盖有限，复杂 agent run、SSE 和任务事件更多依赖单测内 mock 或 Playwright route。
+- `frontend/jest.setup.ts` 与 `frontend/jest.setup.js` 并存，实际生效入口是 `frontend/jest.setup.js`。
 
 ---
 
-*前端测试分析：2026-06-08*
+*测试分析：2026-06-09*

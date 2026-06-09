@@ -21,6 +21,7 @@
 ## 验证门槛
 
 - 文档型变更至少运行 `git diff --check`，并扫描本轮改动文档中的密钥/token 模式；仅文档变更不需要跑代码测试或 E2E。
+- 长期文档说明性正文必须保持简体中文；代码标识符、文件路径、命令、配置键和 API 名称保留原文。
 - 前端改动至少运行 `npm run lint`、`npm run type-check` 和相关 `npm run test`。
 - 后端改动至少运行 `python -m pytest tests -v`。
 - Word COM 真实闭环需要 Windows + Word COM，WSL 只能作为无 COM 替代验证。

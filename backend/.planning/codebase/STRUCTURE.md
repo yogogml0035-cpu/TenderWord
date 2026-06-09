@@ -1,6 +1,6 @@
 # 后端结构事实地图
 
-**分析日期：** 2026-06-08
+**分析日期：** 2026-06-09
 
 **范围：** 仅覆盖 `backend/` 子项目。输出限定为 `backend/.planning/codebase/ARCHITECTURE.md` 和 `backend/.planning/codebase/STRUCTURE.md`。`backend/.env` 文件存在，但不得读取或引用内容。
 
@@ -30,7 +30,7 @@ backend/
 ├── scripts/                    # Word 诊断和检索调试脚本
 ├── services/                   # API 与 graph/task/agent 之间的业务编排
 ├── skills/
-│   └── rewrite/                # rewrite task skill 声明与 runtime helper
+│   └── rewrite/                # 当前被跟踪的 rewrite task skill 声明与 runtime helper
 ├── states/                     # LangGraph state TypedDict
 ├── task/                       # 任务队列、进度、取消、心跳
 ├── tests/                      # pytest 测试
@@ -118,7 +118,7 @@ backend/
 **`backend/util/word_util/`:**
 - 用途： Word COM 技术工具层。
 - 包含： COM app 生命周期、COM lock/retry、Word 常量、锚点工具、底层插入、文档检查、诊断。
-- 关键文件： `backend/util/word_util/word_application_util.py:132`, `backend/util/word_util/word_com_manager.py:102`, `backend/util/word_util/anchor_utils.py`, `backend/util/word_util/word_diagnostics.py`
+- 关键文件： `backend/util/word_util/word_application_util.py:132`, `backend/util/word_util/word_com_manager.py:100`, `backend/util/word_util/anchor_utils.py`, `backend/util/word_util/word_diagnostics.py`
 
 **`backend/agents/generation/`:**
 - 用途： `generation_mode=agent` 的正文生成智能体运行时。
@@ -159,6 +159,7 @@ backend/
 - 用途： task skill 声明和 loader。
 - 包含： `catalog.py`、`rewrite/SKILL.md`、`rewrite/scripts/runtime.py`
 - 关键文件： `backend/skills/catalog.py`, `backend/skills/rewrite/SKILL.md`, `backend/skills/rewrite/scripts/runtime.py`
+- 约束： 当前被 Git 跟踪的 task skill 源码只有 `backend/skills/rewrite/`；不要把本地 `__pycache__` 或旧缓存目录当作可用 skill 来源。
 
 **`backend/tests/`:**
 - 用途： 后端 pytest 测试。
@@ -291,6 +292,7 @@ backend/
 - Workflow 元数据： `backend/graphs/task_skill_workflows.py`
 - Graph 执行：使用 `SkillGraph.for_skill("<skill_id>")`
 - 测试： `backend/tests/skills/`、`backend/tests/graphs/`、`backend/tests/nodes/`
+- 兼容约束：不要恢复旧 `/api/edit`、`edit` task kind 或独立 `edit` skill；上传文件修改应继续复用 `backend/skills/rewrite/` 和 `rewrite_source="uploaded_file"`。
 
 **新增智能体能力：**
 - 生成智能体： `backend/agents/generation/`
@@ -328,6 +330,12 @@ backend/
 - 是否提交：否
 - 映射规则： 不扫描、不引用其中实现作为项目代码。
 
+**`backend/**/__pycache__/`:**
+- 用途： Python 运行时缓存。
+- 是否生成：是
+- 是否提交：否
+- 映射规则： 不扫描、不把缓存目录反推为架构模块或已支持功能。
+
 **`backend/logs/`:**
 - 用途： 后端运行日志、进度日志、execution log、agent run audit 等。
 - 是否生成：是
@@ -359,4 +367,4 @@ backend/
 
 ---
 
-*结构分析： 2026-06-08*
+*结构分析： 2026-06-09*

@@ -1,8 +1,8 @@
 # TenderWord 架构地图
 
-**生成日期：** 2026-06-08
+**生成日期：** 2026-06-09
 
-本文件是根级系统架构地图，描述 TenderWord 的系统边界、子系统职责和推荐理解路径。实现细节仍以代码为准；子系统内部事实以 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 为准。
+本文件是根级系统架构地图，描述 TenderWord 的系统边界、子系统职责和推荐理解路径。实现细节仍以代码为准；子系统内部事实以 2026-06-09 刷新的 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 为准。
 
 ## 系统边界
 

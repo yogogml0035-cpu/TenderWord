@@ -1,21 +1,21 @@
 # 前端结构事实地图
 
-**分析日期：** 2026-06-08
+**分析日期：** 2026-06-09
 
-**范围：** `frontend/` 源码、测试、前端配置、`frontend/.planning/codebase/` 文档目录，以及必要的根级约定文件 `README.md`、`docs/frontend.md`、`docs/interfaces-runtime.md`、`INTERFACES.md`。跳过 `frontend/node_modules/`、`frontend/node_modules-wsl/`、`frontend/.next/`、`frontend/playwright-report/`、`frontend/test-results/`、`frontend/.swc/`。`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc` 仅记录存在，不读取内容。
+**范围：** `frontend/` 源码、测试、前端配置、`README.md` 和 `frontend/.planning/codebase/` 文档目录。跳过 `frontend/node_modules/`、`frontend/node_modules-wsl/`、`frontend/.next/`、`frontend/playwright-report/`、`frontend/test-results/`、`frontend/.swc/`。未读取 `frontend/.env.local`、`backend/.env`、`.npmrc` 或真实密钥文件。
 
 ## 目录布局
 
 ```text
 frontend/
 ├── app/                     # Next.js App Router 页面、layout 和全局样式
-│   └── tender/              # `/tender` 工作台页面
+│   └── tender/              # `/tender` 三栏招标工作台页面
 ├── components/
-│   ├── chat/                # 三栏工作台中的类型侧栏、表单面板、聊天面板和任务消息
-│   ├── forms/               # 招标表单、上传控件、模板候选、共享表单控件
-│   └── layout/              # Header、Sidebar、MainLayout、HistorySection
-├── hooks/                   # URL、hydration、SSE、任务状态、任务心跳 hooks
-├── lib/                     # API client、SSE wrapper、表单转换、URL/API base helper
+│   ├── chat/                # 类型侧栏、表单面板、聊天面板、消息卡、agent run UI
+│   ├── forms/               # 招标表单、上传控件、模板候选、模型选择、共享字段
+│   └── layout/              # 通用 Header、Sidebar、MainLayout、HistorySection
+├── hooks/                   # URL、hydration、SSE、任务状态、任务 heartbeat hooks
+├── lib/                     # API client、SSE runtime、表单转换、URL/API base helper
 ├── stores/                  # Zustand stores
 ├── types/                   # API、聊天和全局招标类型
 ├── utils/                   # 招标类型和 canonical URL 映射
@@ -25,7 +25,7 @@ frontend/
 ├── test-shims/              # Jest moduleNameMapper shim
 ├── tasks/                   # 前端任务工作区资料，不是 runtime 源码层
 ├── .planning/codebase/      # 前端事实文档
-├── package.json             # npm 脚本、依赖、Node engine
+├── package.json             # npm scripts、依赖、Node engine
 ├── package-lock.json        # npm lockfile
 ├── next.config.ts           # Next rewrite/header/dev origin/image 配置
 ├── tsconfig.json            # TypeScript 主配置
@@ -41,47 +41,47 @@ frontend/
 **`frontend/app/`：**
 - 用途：Next.js App Router 页面边界和全局样式。
 - 包含：`layout.tsx`、`page.tsx`、`globals.css`、`tender/page.tsx`。
-- 关键文件：`frontend/app/page.tsx` 重定向到 `/tender`；`frontend/app/tender/page.tsx` 是工作台入口；`frontend/app/layout.tsx` 定义中文 HTML lang 和 metadata。
+- 关键文件：`frontend/app/page.tsx` 进入 `/tender`；`frontend/app/tender/page.tsx` 是工作台入口；`frontend/app/layout.tsx` 定义中文 HTML lang 和 metadata。
 
 **`frontend/components/chat/`：**
-- 用途：工作台三栏中的类型侧栏、表单挂载、聊天交互、任务消息和智能体过程卡。
-- 包含：`ChatPanel.tsx`、`FormPanel.tsx`、`TenderTypeSidebar.tsx`、`MessageList.tsx`、`TaskLogMessage.tsx`、`TaskContentMessage.tsx`、`TaskDownloadMessage.tsx`、`AgentThinkingMessage.tsx`、`tenderFormRegistry.ts`。
-- 关键文件：`frontend/components/chat/ChatPanel.tsx` 处理 agent run、rewrite、上传文件 rewrite、补充批注和下载；`frontend/components/chat/FormPanel.tsx` 处理 generate task；`frontend/components/chat/tenderFormRegistry.ts` 集中管理表单注册和 converter。
+- 用途：工作台三栏中的类型侧栏、表单挂载、聊天交互、任务消息、agent run 和上传文件 rewrite UI。
+- 包含：`ChatPanel.tsx`、`ChatInput.tsx`、`FormPanel.tsx`、`TenderTypeSidebar.tsx`、`MessageList.tsx`、`TaskLogMessage.tsx`、`TaskContentMessage.tsx`、`TaskDownloadMessage.tsx`、`AgentThinkingMessage.tsx`、`tenderFormRegistry.ts`。
+- 关键文件：`frontend/components/chat/ChatPanel.tsx` 处理 agent run、rewrite、上传文件 rewrite、补充批注和下载；`frontend/components/chat/FormPanel.tsx` 处理 generate task；`frontend/components/chat/ChatInput.tsx` 处理 rewrite skill 和 Word 文件选择；`frontend/components/chat/tenderFormRegistry.ts` 管理表单注册和 converter。
 
 **`frontend/components/forms/`：**
 - 用途：招标表单 wrapper、共享表单主体、上传、模板候选、模型选择和共享字段组件。
 - 包含：`XjcgTenderForm.tsx`、`GngkTenderForm.tsx`、`GjgkTenderForm.tsx`、`TenderFormShared.tsx`、`FileUploader.tsx`、`TemplateCandidateDialog.tsx`、`ModelSelector.tsx`、`TenderNoInput.tsx`、`tenderFormConfig.ts`、`shared/`。
-- 关键文件：`frontend/components/forms/TenderFormShared.tsx` 是表单状态、上传、候选、生成选项和 draft 同步的主要实现；`frontend/components/forms/tenderFormConfig.ts` 定义各 tender type 的默认插入锚点。
+- 关键文件：`frontend/components/forms/TenderFormShared.tsx` 是表单状态、上传、候选、生成选项和 draft 同步的主要实现；`frontend/components/forms/FileUploader.tsx` 调用上传 API；`frontend/components/forms/TemplateCandidateDialog.tsx` 展示模板候选。
 
 **`frontend/components/forms/shared/`：**
-- 用途：表单内部复用的低层 UI building blocks。
+- 用途：表单内部复用的低层 UI 构件。
 - 包含：`FormSection.tsx`、`FormField.tsx`、`ErrorDisplay.tsx`、`InfoCard.tsx`、`buttonStyles.ts`、`index.ts`。
-- 关键文件：`frontend/components/forms/shared/index.ts` 是该目录 barrel export。
+- 关键文件：`frontend/components/forms/shared/index.ts` 是该目录的聚合导出入口。
 
 **`frontend/components/layout/`：**
 - 用途：通用布局和历史侧栏组件。
 - 包含：`Header.tsx`、`HistorySection.tsx`、`MainLayout.tsx`、`Sidebar.tsx`。
-- 关键文件：`frontend/components/layout/MainLayout.tsx` 组合 layout 组件；当前 `/tender` 工作台直接使用 `components/chat` 三栏布局。
+- 关键文件：`frontend/components/layout/MainLayout.tsx` 组合 layout 组件；`frontend/app/tender/page.tsx` 的工作台使用 `frontend/components/chat/` 三栏组件。
 
 **`frontend/hooks/`：**
-- 用途：封装 hydration、URL 参数、SSE、任务状态轮询/确认、任务心跳和活跃任务摘要。
+- 用途：封装 hydration、URL 参数、SSE、任务状态轮询/确认、任务 heartbeat 和活跃任务摘要。
 - 包含：`useUrlParams.ts`、`useHydrated.ts`、`useSSE.ts`、`useChatSSE.ts`、`useCurrentConversationTaskStatus.ts`、`useTaskHeartbeat.ts`、`useLatestActiveTaskSummary.ts`。
 - 关键文件：`frontend/hooks/useChatSSE.ts` 是后端任务 SSE 到 store/UI 的核心映射；`frontend/hooks/useCurrentConversationTaskStatus.ts` 管理当前会话 task status polling；`frontend/hooks/useTaskHeartbeat.ts` 管理活跃 task heartbeat。
 
 **`frontend/lib/`：**
 - 用途：无 UI 依赖的 API client、SSE runtime、表单 payload 转换、数据同步和工具。
 - 包含：`api.ts`、`apiBaseUrl.ts`、`sse.ts`、`formDataConverter.ts`、`gngkFormType.ts`、`tenderFetch.ts`、`chat-utils.ts`、`agentThinking.ts`、`utils.ts`。
-- 关键文件：`frontend/lib/api.ts` 是后端调用边界；`frontend/lib/gngkFormType.ts` 是 `gngk` form type 分派真源；`frontend/lib/formDataConverter.ts` 是表单到 `GenerateRequest` 的转换边界；`frontend/lib/apiBaseUrl.ts` 同时服务 API client 和 `next.config.ts`。
+- 关键文件：`frontend/lib/api.ts` 是后端调用边界；`frontend/lib/gngkFormType.ts` 是 `gngk` form type 分派真源；`frontend/lib/formDataConverter.ts` 是表单到 `GenerateRequest` 的转换边界；`frontend/lib/apiBaseUrl.ts` 同时服务 API client 和 `frontend/next.config.ts`。
 
 **`frontend/stores/`：**
 - 用途：Zustand 状态层。
 - 包含：`chatStore.ts`、`chatStreamStore.ts`、`chatTaskSessionStore.ts`、`historyStore.ts`、`useAppStore.ts`。
-- 关键文件：`frontend/stores/chatStore.ts` 是最大状态模块，负责会话、草稿、task summary、任务消息、URL 同步和后端重启收敛；`frontend/stores/chatStreamStore.ts` 保存运行中 stream；`frontend/stores/chatTaskSessionStore.ts` 保存 task resume 元数据。
+- 关键文件：`frontend/stores/chatStore.ts` 负责会话、草稿、task summary、任务消息、URL 同步和后端重启收敛；`frontend/stores/chatStreamStore.ts` 保存运行中 SSE stream；`frontend/stores/chatTaskSessionStore.ts` 保存 task resume 元数据。
 
 **`frontend/types/`：**
 - 用途：跨层 TypeScript 契约。
 - 包含：`api.ts`、`chat.ts`、`index.ts`。
-- 关键文件：`frontend/types/api.ts` 镜像后端 API/SSE/agent run；`frontend/types/chat.ts` 定义会话消息和过程卡 metadata；`frontend/types/index.ts` 定义前端 `TenderType` 并 re-export API 类型。
+- 关键文件：`frontend/types/api.ts` 镜像后端 API/SSE/agent run；`frontend/types/chat.ts` 定义会话消息、任务消息和过程卡 metadata；`frontend/types/index.ts` 定义前端 `TenderType` 并 re-export API 类型。
 
 **`frontend/utils/`：**
 - 用途：非 React 的共享映射工具。
@@ -101,14 +101,14 @@ frontend/
 **`frontend/e2e/`：**
 - 用途：Playwright 浏览器契约测试。
 - 包含：`test_*.spec.ts`。
-- 关键文件：`frontend/e2e/test_url_conversation.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`、`frontend/e2e/test_comment_supplement.spec.ts`、`frontend/e2e/test_agent_run_chat_panel.spec.ts`。
+- 关键文件：`frontend/e2e/test_url_conversation.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`、`frontend/e2e/test_comment_supplement.spec.ts`、`frontend/e2e/test_agent_run_chat_panel.spec.ts`、`frontend/e2e/test_tender_form_upload_slots.spec.ts`。
 
 ## 关键文件位置
 
 **入口点：**
-- `frontend/app/page.tsx`: 根路径重定向到 `/tender`。
+- `frontend/app/page.tsx`: 根路径进入 `/tender`。
 - `frontend/app/layout.tsx`: 全局 metadata 和 `<html lang="zh-CN">`。
-- `frontend/app/tender/page.tsx`: 工作台入口、URL 参数接入、会话心跳、招标数据预取。
+- `frontend/app/tender/page.tsx`: 工作台入口、URL 参数接入、会话 heartbeat、招标数据预取。
 - `frontend/lib/api.ts`: 后端 API、上传下载、agent run、任务 API 和模板候选入口。
 - `frontend/hooks/useChatSSE.ts`: 任务 SSE 入口。
 
@@ -125,9 +125,12 @@ frontend/
 
 **核心逻辑：**
 - `frontend/components/chat/ChatPanel.tsx`: 聊天、agent run、rewrite、上传文件 rewrite、补充批注、下载和重试。
+- `frontend/components/chat/ChatInput.tsx`: 聊天输入、`/rewrite` skill、上传文件 rewrite 文件卡。
 - `frontend/components/chat/FormPanel.tsx`: generate task 创建、当前任务状态、取消、表单挂载。
 - `frontend/components/chat/TenderTypeSidebar.tsx`: 招标类型分组、会话列表和 URL 同步入口。
 - `frontend/components/chat/MessageList.tsx`: 消息渲染分派和用户消息操作。
+- `frontend/components/chat/TaskContentMessage.tsx`: AI 正文、rewrite 正文、`content_agent` 和 `comment_agent` 过程展示。
+- `frontend/components/chat/TaskDownloadMessage.tsx`: 任务产物下载卡和补充批注入口。
 - `frontend/components/forms/TenderFormShared.tsx`: 表单主体、模板候选、上传、生成选项和 draft 同步。
 - `frontend/components/forms/TemplateCandidateDialog.tsx`: 模板候选表格和选择/下载 UI。
 - `frontend/stores/chatStore.ts`: 会话和任务状态主 store。
@@ -135,12 +138,8 @@ frontend/
 - `frontend/stores/chatTaskSessionStore.ts`: task resume session 状态。
 - `frontend/lib/formDataConverter.ts`: 表单到 `GenerateRequest` 转换。
 - `frontend/lib/gngkFormType.ts`: `gngk` form type 分派。
+- `frontend/lib/tenderFetch.ts`: 招标详情预取和 draft 写入。
 - `frontend/utils/tenderTypeMapper.ts`: URL 与 tender type 映射。
-
-**类型与契约：**
-- `frontend/types/index.ts`: 前端 `TenderType`、`TenderLx`、`FundLx` 和基础任务类型。
-- `frontend/types/api.ts`: `GenerateRequest`、`AgentRunStreamRequest`、`AgentRunEvent`、SSE event、任务结果、模板候选、错误码。
-- `frontend/types/chat.ts`: `Message`、`Conversation`、`TaskMessageKind`、`AgentThinkingCardState` 和 message metadata。
 
 **测试：**
 - `frontend/__tests__/unit/`: 模块级单元测试。
@@ -154,9 +153,7 @@ frontend/
 **文档：**
 - `frontend/.planning/codebase/ARCHITECTURE.md`: 前端架构事实地图。
 - `frontend/.planning/codebase/STRUCTURE.md`: 前端结构事实地图。
-- `docs/frontend.md`: 前端稳定约定。
-- `docs/interfaces-runtime.md`: 跨前后端运行时契约。
-- `INTERFACES.md`: 系统级接口边界。
+- `README.md`: 根级安装、启动和运行入口说明。
 
 ## 命名约定
 
@@ -175,23 +172,26 @@ frontend/
 - 表单低层复用控件放在 `frontend/components/forms/shared/`。
 - 测试目录按测试类型和源码作用域分层：`frontend/__tests__/unit/components/chat/`、`frontend/__tests__/unit/lib/`、`frontend/__tests__/unit/stores/`。
 
-## 新代码放置位置
+## 新代码落位
 
 **新功能：**
-- 页面级入口：`frontend/app/`。
+- 工作台页面编排：`frontend/app/tender/page.tsx`。
 - 工作台交互：`frontend/components/chat/`。
 - 表单、字段、上传、模板候选：`frontend/components/forms/` 或 `frontend/components/forms/shared/`。
+- API 请求：`frontend/lib/api.ts`，同步 `frontend/types/api.ts`。
 - 状态：优先扩展 `frontend/stores/chatStore.ts`；纯 stream runtime 放 `frontend/stores/chatStreamStore.ts`；task resume 元数据放 `frontend/stores/chatTaskSessionStore.ts`。
-- 测试： 按模块放到 `frontend/__tests__/unit/<scope>/test_*.test.ts(x)`；跨浏览器契约放到 `frontend/e2e/test_*.spec.ts`。
+- 测试：按模块放到 `frontend/__tests__/unit/<scope>/test_*.test.ts(x)`；跨浏览器契约放到 `frontend/e2e/test_*.spec.ts`。
 
 **新组件或模块：**
 - 聊天消息或任务 UI：`frontend/components/chat/`。
+- 聊天输入能力：`frontend/components/chat/ChatInput.tsx`，能力请求同步 `frontend/components/chat/ChatPanel.tsx` 和 `frontend/types/api.ts`。
+- 任务产物展示：`frontend/components/chat/TaskDownloadMessage.tsx` 和 `frontend/components/chat/MessageList.tsx`。
+- 智能体过程展示：`frontend/components/chat/TaskContentMessage.tsx`、`frontend/stores/chatStore.ts`、`frontend/hooks/useChatSSE.ts`。
 - 表单控件：`frontend/components/forms/shared/`。
-- 招标表单 wrapper：`frontend/components/forms/<Type>TenderForm.tsx`，并同步 `frontend/components/chat/tenderFormRegistry.ts`。
-- 模型/选择控件：参照 `frontend/components/forms/ModelSelector.tsx` 和 `frontend/components/chat/ChatModelPicker.tsx` 的边界。
+- 招标表单 wrapper：`frontend/components/forms/<Type>TenderForm.tsx`，同步 `frontend/components/chat/tenderFormRegistry.ts`。
 
 **工具：**
-- 后端请求：只放 `frontend/lib/api.ts`，类型同步 `frontend/types/api.ts`。
+- 后端请求：`frontend/lib/api.ts`。
 - API base URL 或 Next rewrite 相关：`frontend/lib/apiBaseUrl.ts` 和 `frontend/next.config.ts` 一起检查。
 - SSE 底层能力：`frontend/lib/sse.ts`。
 - 任务 SSE 到 UI/store 映射：`frontend/hooks/useChatSSE.ts`。
@@ -203,8 +203,10 @@ frontend/
 **契约：**
 - API shape 变化：同步 `frontend/types/api.ts`、`frontend/lib/api.ts`、相关调用组件、store 和测试。
 - SSE 事件变化：同步 `frontend/types/api.ts`、`frontend/lib/sse.ts`、`frontend/hooks/useChatSSE.ts`、`frontend/__tests__/unit/lib/test_sse.test.ts`、`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`。
-- `TenderType` 或 `FormType` 变化：同步 `frontend/types/index.ts`、`frontend/types/api.ts`、`frontend/components/chat/tenderFormRegistry.ts`、`frontend/lib/formDataConverter.ts`、`frontend/lib/gngkFormType.ts`、`frontend/utils/tenderTypeMapper.ts`。
-- Agent run / rewrite 变化：同步 `frontend/types/api.ts`、`frontend/lib/api.ts`、`frontend/components/chat/ChatPanel.tsx`、`frontend/stores/chatStore.ts`。
+- `TenderType` 或 `form_type` 变化：同步 `frontend/types/index.ts`、`frontend/types/api.ts`、`frontend/components/chat/tenderFormRegistry.ts`、`frontend/lib/formDataConverter.ts`、`frontend/lib/gngkFormType.ts`、`frontend/utils/tenderTypeMapper.ts`。
+- Agent run / rewrite 变化：同步 `frontend/types/api.ts`、`frontend/lib/api.ts`、`frontend/components/chat/ChatPanel.tsx`、`frontend/components/chat/ChatInput.tsx`、`frontend/stores/chatStore.ts`。
+- 上传文件 rewrite 变化：同步 `frontend/types/api.ts` 的 `FileType` / agent context、`frontend/components/chat/ChatInput.tsx`、`frontend/components/chat/ChatPanel.tsx` 和相关测试。
+- 任务产物展示变化：同步 `frontend/types/chat.ts`、`frontend/stores/chatStore.ts`、`frontend/hooks/useChatSSE.ts`、`frontend/components/chat/MessageList.tsx`、`frontend/components/chat/TaskDownloadMessage.tsx`。
 
 ## 特殊目录
 
@@ -222,7 +224,7 @@ frontend/
 - 用途：平台依赖目录。
 - 是否生成：是。
 - 是否提交：否。
-- 注意：Windows 与 WSL 原生依赖不可混用；`README.md` 记录两套目录切换策略。
+- 注意：Windows 与 WSL 原生依赖目录分离，相关运行约束记录在 `README.md`。
 
 **`frontend/playwright-report/` 与 `frontend/test-results/`：**
 - 用途：Playwright 测试报告和失败证据。
@@ -249,12 +251,12 @@ frontend/
 - 是否生成：否。
 - 是否提交：是。
 
-**`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc`：**
-- 用途：环境和包管理配置文件。
+**环境配置文件：**
+- 用途：本地运行配置。
 - 是否生成：混合。
-- 是否提交：`.env.local` 不应提交；`.env.local.example` 和 `.npmrc` 按仓库策略处理。
-- 注意：不要在文档、日志、测试或最终回复中读取或记录实际内容。
+- 是否提交：真实环境文件不应提交。
+- 注意：文档、日志、测试夹具和最终回复不得读取或记录 `frontend/.env.local`、`backend/.env` 或真实密钥内容。
 
 ---
 
-*前端结构分析：2026-06-08*
+*结构分析：2026-06-09*
