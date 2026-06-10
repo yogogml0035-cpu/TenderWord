@@ -40,7 +40,7 @@ def test_generate_polished_text_uses_generate_prompt_and_stream_llm(
     )
     monkeypatch.setattr(
         node_module,
-        "get_generate_prompt_log_dir",
+        "get_generate_context_log_dir",
         lambda _anchor_file: tmp_path,
     )
 

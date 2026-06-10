@@ -8,7 +8,7 @@ from typing import Any, Mapping
 from backend.agents.log_naming import build_agent_log_stem, sanitize_agent_log_part
 
 COMMENT_AGENT_AUDIT_ROOT = (
-    Path(__file__).resolve().parents[2] / "prompts_log" / "comment_agent_audit"
+    Path(__file__).resolve().parents[2] / "context_log" / "comment_agent_audit"
 )
 
 def sanitize_audit_part(value: str) -> str:

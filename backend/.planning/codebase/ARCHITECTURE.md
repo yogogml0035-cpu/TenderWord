@@ -33,7 +33,7 @@
                 ▼                                 ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ 本地上传/生成文件、会话内存态、日志、agent workspace、外部 HTTP/LLM │
-│ `settings.UPLOAD_DIR`, `backend/logs/`, `backend/prompts_log/` │
+│ `settings.UPLOAD_DIR`, `backend/logs/`, `backend/context_log/` │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -192,7 +192,7 @@
 - 会话 rewrite history：进程内 `ConversationService`，最多保留 `MAX_REWRITE_MESSAGES`，路径 `backend/services/conversation_service.py:12`。
 - graph state：TypedDict state 在节点之间传递，路径 `backend/states/base_state.py` 和 `backend/states/skill_state.py`。
 - 文档产物：本地文件，根目录来自 `settings.UPLOAD_DIR`，路径安全由 `backend/api/download.py:25` 和 `backend/util/common_util/upload_storage.py:38` 维护。
-- Agent workspace 和审计日志：本地 `backend/prompts_log/`、`backend/logs/` 相关目录，命名清洗复用 `backend/agents/log_naming.py:15`。
+- Agent workspace 和审计日志：本地 `backend/context_log/`、`backend/logs/` 相关目录，命名清洗复用 `backend/agents/log_naming.py:15`。
 
 ## 核心抽象
 

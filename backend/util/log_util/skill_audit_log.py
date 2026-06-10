@@ -34,7 +34,7 @@ REWRITE_AUDIT_STAGES = TASK_AUDIT_STAGES
 def _get_task_audit_dir(prefix: str = "rewrite") -> Path:
     safe_prefix = _sanitize_filename_part(prefix)
     subdir = "rewrite_log"
-    target = Path(__file__).resolve().parents[2] / "prompts_log" / subdir
+    target = Path(__file__).resolve().parents[2] / "context_log" / subdir
     target.mkdir(parents=True, exist_ok=True)
     return target
 

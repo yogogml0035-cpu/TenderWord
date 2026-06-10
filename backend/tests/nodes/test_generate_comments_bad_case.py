@@ -58,7 +58,7 @@ def test_generate_comments_injects_bad_case_context_before_llm_call(
         return "[]"
 
     monkeypatch.setattr(
-        generate_comments_module, "get_generate_prompt_log_dir", lambda _anchor: tmp_path
+        generate_comments_module, "get_generate_context_log_dir", lambda _anchor: tmp_path
     )
     monkeypatch.setattr(
         generate_comments_module,
@@ -103,7 +103,7 @@ def test_generate_comments_uses_base_prompt_when_bad_case_has_no_hits(
         return "[]"
 
     monkeypatch.setattr(
-        generate_comments_module, "get_generate_prompt_log_dir", lambda _anchor: tmp_path
+        generate_comments_module, "get_generate_context_log_dir", lambda _anchor: tmp_path
     )
     monkeypatch.setattr(
         generate_comments_module,
@@ -142,7 +142,7 @@ def test_generate_comments_warns_and_continues_when_bad_case_retrieval_fails(
         raise RuntimeError("vector search unavailable")
 
     monkeypatch.setattr(
-        generate_comments_module, "get_generate_prompt_log_dir", lambda _anchor: tmp_path
+        generate_comments_module, "get_generate_context_log_dir", lambda _anchor: tmp_path
     )
     monkeypatch.setattr(
         generate_comments_module,
@@ -179,7 +179,7 @@ def test_generate_comments_logs_retrieval_warnings_without_blocking_llm(
         return "[]"
 
     monkeypatch.setattr(
-        generate_comments_module, "get_generate_prompt_log_dir", lambda _anchor: tmp_path
+        generate_comments_module, "get_generate_context_log_dir", lambda _anchor: tmp_path
     )
     monkeypatch.setattr(
         generate_comments_module,
@@ -282,7 +282,7 @@ def test_generate_comments_writes_bad_case_retrieval_json_file(
         return "[]"
 
     monkeypatch.setattr(
-        generate_comments_module, "get_generate_prompt_log_dir", lambda _anchor: tmp_path
+        generate_comments_module, "get_generate_context_log_dir", lambda _anchor: tmp_path
     )
     monkeypatch.setattr(
         generate_comments_module,
@@ -328,7 +328,7 @@ def test_generate_comments_writes_failure_payload_when_bad_case_retrieval_raises
         raise RuntimeError("vector search unavailable")
 
     monkeypatch.setattr(
-        generate_comments_module, "get_generate_prompt_log_dir", lambda _anchor: tmp_path
+        generate_comments_module, "get_generate_context_log_dir", lambda _anchor: tmp_path
     )
     monkeypatch.setattr(
         generate_comments_module,

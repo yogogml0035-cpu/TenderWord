@@ -35,7 +35,7 @@ from backend.util.common_util import (
     StreamCallbacks,
     stream_llm_completion,
 )
-from backend.util.log_util.prompt_log import get_generate_prompt_log_dir
+from backend.util.log_util.context_log import get_generate_context_log_dir
 from backend.util.log_util.progress_log import progress_log
 
 # 模块级常量
@@ -327,14 +327,14 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
     system_prompt = rendered_prompt.system_prompt
     formatted_user_prompt = rendered_prompt.user_prompt
 
-    # 准备 prompts_log/generate_log 输出路径：保存大模型生成的批注内容，使用 new_comments 后缀区分
+    # 准备 context_log/generate_log 输出路径：保存大模型生成的批注内容，使用 new_comments 后缀区分
     new_comments_file = None
     comments_prompt_file = None
     raw_comments_file = None
     repaired_comments_file = None
     comments_bad_case_retrieval_file = None
     try:
-        prompts_log_dir = get_generate_prompt_log_dir(__file__)
+        context_log_dir = get_generate_context_log_dir(__file__)
 
         project_number = str(state.get("project_number", "") or "").strip()
         project_name = str(state.get("project_name", "") or "").strip()
@@ -344,20 +344,20 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
         timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
         prompt_base = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
         comments_prompt_file = (
-            prompts_log_dir / f"prompt_{prompt_base}_comments_prompt_{timestamp}.txt"
+            context_log_dir / f"prompt_{prompt_base}_comments_prompt_{timestamp}.txt"
         )
         raw_comments_file = (
-            prompts_log_dir / f"prompt_{prompt_base}_comments_raw_output_{timestamp}.txt"
+            context_log_dir / f"prompt_{prompt_base}_comments_raw_output_{timestamp}.txt"
         )
         repaired_comments_file = (
-            prompts_log_dir
+            context_log_dir
             / f"prompt_{prompt_base}_comments_repaired_output_{timestamp}.txt"
         )
         new_comments_file = (
-            prompts_log_dir / f"prompt_{prompt_base}_new_comments_{timestamp}.txt"
+            context_log_dir / f"prompt_{prompt_base}_new_comments_{timestamp}.txt"
         )
         comments_bad_case_retrieval_file = (
-            prompts_log_dir
+            context_log_dir
             / f"prompt_{prompt_base}_comments_bad_case_retrieval_{timestamp}.json"
         )
 

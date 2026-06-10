@@ -62,7 +62,7 @@
 - 风险：LLM key、token、客户原文、私有路径、traceback、下载路径、完整 prompt 或 retrieval payload 进入日志、SSE、agent workspace、测试夹具或用户可见事件。
 - 涉及文件：`backend/main.py`, `backend/services/document_service.py`, `backend/agents/task_context_assistant/logging.py`, `backend/agents/task_context_assistant/tools.py`, `backend/util/log_util/`, `backend/nodes/common_word_nodes/generate_comments.py`, `backend/nodes/common_word_nodes/comment_agent.py`, `backend/agents/generation/workspace.py`, `backend/agents/comments/workspace.py`
 - 当前缓解：agent run 审计使用 `scrub_sensitive_text()`；只读摘要工具不返回完整结果和下载路径；retrieval 命中详情不进入 SSE 或 `agent_step`；全局异常响应对客户端返回泛化 500。
-- 建议：新增日志、审计、agent run 事件或工具返回字段时先定义白名单；进度/SSE 日志只写摘要；内部 `backend/prompts_log/` 和 `backend/logs/` 继续视为敏感产物。
+- 建议：新增日志、审计、agent run 事件或工具返回字段时先定义白名单；进度/SSE 日志只写摘要；内部 `backend/context_log/` 和 `backend/logs/` 继续视为敏感产物。
 
 **进度日志与执行日志没有统一 scrub 层：**
 - 风险：`progress_log` 会经 `SSELogHandler` 推送 INFO 及以上日志到前端，`execution_log` 会记录项目经办人、项目编号和项目名称；多个 Word/agent 节点会记录文件路径或业务摘要。
@@ -190,7 +190,7 @@
 
 **本地文件与日志产物：**
 - 当前容量：上传文件、生成文件、agent workspace、prompt/retrieval 日志和运行日志依赖本地磁盘；启动时只清理 `backend/logs` 总量。
-- 限制：多用户或长时间运行会积累 `UPLOAD_DIR`、`backend/prompts_log/`、agent/comment workspace 和 retrieval JSON。
+- 限制：多用户或长时间运行会积累 `UPLOAD_DIR`、`backend/context_log/`、agent/comment workspace 和 retrieval JSON。
 - 扩展路径：定义上传/生成文件保留策略、对象存储、审计日志保留策略、敏感产物清理和下载授权。
 
 **Retrieval cache 是进程内缓存：**

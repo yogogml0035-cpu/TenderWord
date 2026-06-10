@@ -16,7 +16,7 @@ Source: prd.json
 - Prompt builders should expose the smallest contract needed by the current node; `generate_comments` now forwards only `tender_type` and `polished_text`, and legacy plan fields should be treated as inert state if they still appear in fixtures.
 - `comment_agent` autonomous generation reuses `render_comment_prompt()` for both agent generate and comment_supplement; do not reintroduce separate `comment_no_reference` prompt modules or exports.
 - Template candidate selection is single-file and all-or-nothing: backend returns `selected_file`, frontend fills only `files.template`, and failures surface as `TEMPLATE_SELECT_FAILED` without `partial_success`.
-- 旧生成/批注契约清理要同时做 active-path `rg` 回归搜索；嵌套运行时 `prompts_log` 应被 `.gitignore` 排除，避免历史日志污染字段搜索结果。
+- 旧生成/批注契约清理要同时做 active-path `rg` 回归搜索；嵌套运行时 `context_log` 应被 `.gitignore` 排除，避免历史日志污染字段搜索结果。
 
 ## 2026-05-31 07:37 - US-010
 - 完成全链路回归验证：前端 `npm run lint`、`npm run type-check`、`npm run test -- --runInBand`、`npm run test:e2e` 通过；后端 `python -m pytest tests -v` 通过；并完成一次真实 Windows + Word COM 生成冒烟，任务到达 `completed` 且下载端点可用
@@ -201,7 +201,7 @@ Source: prd.json
 ## 2026-05-31 06:58 - US-009
 - 清理旧送审稿生成/批注契约：删除标准生成旧批注提取/复制节点，将生成参考正文统一命名为 `template_reference_text`，将 rewrite/edit/comment_supplement 源文档路径统一到 `source_document_path`
 - 更新共享批注、生成 agent、rewrite/edit、任务结果快照、前端持久化和相关测试，使活跃代码不再依赖旧计划字段或旧上传槽位
-- 更新知识包和索引，记录统一批注 prompt、template+tender_params 输入契约，并排除嵌套 `prompts_log` 运行时日志
+- 更新知识包和索引，记录统一批注 prompt、template+tender_params 输入契约，并排除嵌套 `context_log` 运行时日志
 - 更改的文件：
   - `.gitignore`
   - `asset/README.md`

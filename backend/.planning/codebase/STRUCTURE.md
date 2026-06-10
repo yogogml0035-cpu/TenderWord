@@ -342,8 +342,8 @@ backend/
 - 是否提交：否
 - 映射规则： 不读取真实运行日志内容，避免泄露客户文本、路径或异常细节。
 
-**`backend/prompts_log/`:**
-- 用途： prompt、LLM 输出、agent workspace 和 retrieval 审计输出。
+**`backend/context_log/`:**
+- 用途： context、prompt、LLM 输出、agent workspace 和 retrieval 审计输出。
 - 是否生成：是
 - 是否提交：否
 - 映射规则： 不读取真实生成日志内容，文档中只引用代码里的写入路径和机制。

@@ -50,7 +50,7 @@ def test_generate_comments_parses_valid_json_once(tmp_path, monkeypatch) -> None
         )
 
     monkeypatch.setattr(
-        generate_comments_module, "get_generate_prompt_log_dir", lambda _anchor: tmp_path
+        generate_comments_module, "get_generate_context_log_dir", lambda _anchor: tmp_path
     )
     monkeypatch.setattr(
         generate_comments_module, "stream_llm_completion", _fake_stream_llm_completion
@@ -81,7 +81,7 @@ def test_generate_comments_accepts_empty_json_array(tmp_path: Path, monkeypatch)
         return "[]"
 
     monkeypatch.setattr(
-        generate_comments_module, "get_generate_prompt_log_dir", lambda _anchor: tmp_path
+        generate_comments_module, "get_generate_context_log_dir", lambda _anchor: tmp_path
     )
     monkeypatch.setattr(
         generate_comments_module, "stream_llm_completion", _fake_stream_llm_completion
@@ -108,7 +108,7 @@ def test_generate_comments_repairs_invalid_escape_without_retry(
         )
 
     monkeypatch.setattr(
-        generate_comments_module, "get_generate_prompt_log_dir", lambda _anchor: tmp_path
+        generate_comments_module, "get_generate_context_log_dir", lambda _anchor: tmp_path
     )
     monkeypatch.setattr(
         generate_comments_module, "stream_llm_completion", _fake_stream_llm_completion
@@ -139,7 +139,7 @@ def test_generate_comments_retries_with_json_repair_prompt(
         )
 
     monkeypatch.setattr(
-        generate_comments_module, "get_generate_prompt_log_dir", lambda _anchor: tmp_path
+        generate_comments_module, "get_generate_context_log_dir", lambda _anchor: tmp_path
     )
     monkeypatch.setattr(
         generate_comments_module, "stream_llm_completion", _fake_stream_llm_completion

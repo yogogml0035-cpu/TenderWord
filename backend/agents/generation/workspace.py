@@ -16,7 +16,7 @@ from backend.agents.generation.types import GenerationAgentProtocolError
 
 MAX_REVISION_ROUNDS = 3
 CONTENT_AGENT_WORKSPACE_ROOT = (
-    Path(__file__).resolve().parents[2] / "prompts_log" / "content_agent_workspace"
+    Path(__file__).resolve().parents[2] / "context_log" / "content_agent_workspace"
 )
 
 GENERATION_CONTEXT_PATH = "/inputs/generation_context.md"

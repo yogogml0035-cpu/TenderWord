@@ -19,7 +19,7 @@ from backend.util.common_util import (
     StreamCallbacks,
     stream_llm_completion,
 )
-from backend.util.log_util.prompt_log import get_generate_prompt_log_dir
+from backend.util.log_util.context_log import get_generate_context_log_dir
 from backend.util.log_util.progress_log import progress_log
 from backend.util.log_util.skill_audit_log import (
     REWRITE_STAGE_SKILL_PROMPT_RENDER,
@@ -107,13 +107,13 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
         )
     
     # 保存提示词到文件
-    prompts_dir = get_generate_prompt_log_dir(__file__)
+    context_log_dir = get_generate_context_log_dir(__file__)
     project_number = str(state.get("project_number", "") or "").strip()
     project_name = str(state.get("project_name", "") or "").strip()
     filename_parts = [_sanitize_filename(part) for part in (project_number, project_name) if part]
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
     prompt_file = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
-    prompt_file = prompts_dir / f"prompt_{prompt_file}_polish_prompt_{timestamp}.txt"
+    prompt_file = context_log_dir / f"prompt_{prompt_file}_polish_prompt_{timestamp}.txt"
     try:
         with open(prompt_file, "w", encoding="utf-8") as f:
             f.write(system_prompt + "\n" + user_prompt)
@@ -190,11 +190,13 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
 
     try:
         output_file_base = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"
-        polished_output_file = prompts_dir / f"prompt_{output_file_base}_polished_text_{timestamp}.txt"
+        polished_output_file = (
+            context_log_dir / f"prompt_{output_file_base}_polished_text_{timestamp}.txt"
+        )
         with open(polished_output_file, "w", encoding="utf-8") as f:
             f.write(str(content))
     except Exception as e:
-        progress_log.debug(f"警告: 保存修改结果到 prompts_log/generate_log 失败: {e}")
+        progress_log.debug(f"警告: 保存修改结果到 context_log/generate_log 失败: {e}")
 
     # 将大模型生成的内容写入 txt 文件，命名：项目编号-项目名称-初稿.txt
     project_number = str(state.get("project_number", "") or "").strip()

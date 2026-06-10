@@ -175,7 +175,7 @@ Source: prd.json
 - **未来迭代的学习：**
   - `comment_agent` 节点层负责构造自主生成 instruction；`backend/agents/comments/comment_agent.py` 的工具门禁和锚点修复语义无需为 bad case 检索改动。
   - 纯修复模式要通过 `initial_comments` 是否为空隔离，不能只看 `generation_mode=agent`。
-  - 自主生成模式的日志根目录应复用 `COMMENT_AGENT_AUDIT_ROOT`，测试中需要 monkeypatch 到临时目录避免污染真实 prompts_log。
+  - 自主生成模式的日志根目录应复用 `COMMENT_AGENT_AUDIT_ROOT`，测试中需要 monkeypatch 到临时目录避免污染真实 context_log。
 ---
 
 ## 2026-06-08 21:18 - US-013

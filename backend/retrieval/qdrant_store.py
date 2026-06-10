@@ -33,13 +33,20 @@ class QdrantBadCaseStore:
         self.headers = {"api-key": api_key} if api_key else {}
         self.timeout = timeout
 
+    def _client(self) -> httpx.Client:
+        return httpx.Client(
+            timeout=self.timeout,
+            headers=self.headers,
+            trust_env=False,
+        )
+
     def healthcheck(self) -> None:
-        with httpx.Client(timeout=self.timeout, headers=self.headers) as client:
+        with self._client() as client:
             response = client.get(f"{self.url}/")
             response.raise_for_status()
 
     def recreate_collection(self, *, vector_size: int) -> None:
-        with httpx.Client(timeout=self.timeout, headers=self.headers) as client:
+        with self._client() as client:
             client.delete(f"{self.url}/collections/{self.collection_name}")
             response = client.put(
                 f"{self.url}/collections/{self.collection_name}",
@@ -48,7 +55,7 @@ class QdrantBadCaseStore:
             response.raise_for_status()
 
     def ensure_collection(self, *, vector_size: int) -> None:
-        with httpx.Client(timeout=self.timeout, headers=self.headers) as client:
+        with self._client() as client:
             response = client.get(f"{self.url}/collections/{self.collection_name}")
             if response.status_code == 200:
                 return
@@ -85,7 +92,7 @@ class QdrantBadCaseStore:
                 }
             )
 
-        with httpx.Client(timeout=self.timeout, headers=self.headers) as client:
+        with self._client() as client:
             for start in range(0, len(points), 64):
                 response = client.put(
                     f"{self.url}/collections/{self.collection_name}/points",
@@ -95,7 +102,7 @@ class QdrantBadCaseStore:
                 response.raise_for_status()
 
     def search(self, *, query_vector: Sequence[float], limit: int = 50) -> list[VectorHit]:
-        with httpx.Client(timeout=self.timeout, headers=self.headers) as client:
+        with self._client() as client:
             response = client.post(
                 f"{self.url}/collections/{self.collection_name}/points/search",
                 json={

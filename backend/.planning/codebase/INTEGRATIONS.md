@@ -110,8 +110,8 @@
 - 上传文件、模板选择结果、生成产物和下载文件位于 `settings.UPLOAD_DIR`。
   - 配置：`UPLOAD_DIR`、`MAX_UPLOAD_SIZE`、`ALLOWED_EXTENSIONS`
   - 使用路径：`backend/config/settings.py`、`backend/util/common_util/upload_storage.py`、`backend/api/upload.py`、`backend/api/download.py`
-- Content agent workspace 位于 `backend/prompts_log/content_agent_workspace/`，由 `backend/agents/generation/workspace.py` 管理。
-- Comment agent audit 位于 `backend/prompts_log/comment_agent_audit/`，由 `backend/agents/comments/workspace.py` 管理。
+- Content agent workspace 位于 `backend/context_log/content_agent_workspace/`，由 `backend/agents/generation/workspace.py` 管理。
+- Comment agent audit 位于 `backend/context_log/comment_agent_audit/`，由 `backend/agents/comments/workspace.py` 管理。
 - 批注 bad case 源文件位于 `backend/retrieval/bad_cases/`，加载器在 `backend/retrieval/bad_case_loader.py`。
 - 进度、执行、prompt、skill audit、SSE 日志由 `backend/util/log_util/` 管理，默认日志根与 `LOG_DIR` 和 `backend/logs/` 相关。
 
@@ -147,7 +147,7 @@
 - JSON stdout logging：`backend/main.py`
 - 用户进度日志：`backend/util/log_util/progress_log.py`
 - 执行诊断：`backend/util/log_util/execution_log.py`
-- Prompt 日志：`backend/util/log_util/prompt_log.py`
+- Context 日志：`backend/util/log_util/context_log.py`
 - Skill 审计日志：`backend/util/log_util/skill_audit_log.py`
 - SSE 日志桥：`backend/util/log_util/sse_log_handler.py`
 - 日志清理：`backend/util/log_util/log_cleanup.py`
