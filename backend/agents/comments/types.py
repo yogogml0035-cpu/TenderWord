@@ -55,6 +55,7 @@ class CommentAgentToolSnapshot(BaseModel):
 
 class CommentAgentAuditPayload(TypedDict, total=False):
     task_id: str
+    notice: str
     initial_comments: list[dict[str, str]]
     ai_messages: list[str]
     validation_results: list[dict[str, Any]]

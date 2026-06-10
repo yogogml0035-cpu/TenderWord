@@ -500,6 +500,46 @@ def test_run_comment_agent_can_generate_candidates_in_generation_mode(tmp_path) 
     assert audit["initial_comments"][0]["reference_text"] == "投标人须提供原厂授权函"
     assert audit["final_proposed_comments"][0]["reference_text"] == "投标人须提供原厂授权函"
 
+def test_run_comment_agent_reports_missing_generation_tool_candidates(tmp_path) -> None:
+    doc = _FakeDocument("投标人须提供原厂授权函，并承诺售后。")
+    audit_path = tmp_path / "comment-agent-audit.json"
+    raw_candidate_text = (
+        '[{"reference_text":"投标人须提供原厂授权函",'
+        '"comment_text":"建议提示：不得要求原厂授权函。"}]'
+    )
+
+    class FakeRunner:
+        def stream(self, _payload, _config, **_kwargs):
+            yield AIMessage(content=raw_candidate_text)
+
+    events = []
+    result = run_comment_agent(
+        initial_comments=[],
+        polished_text=doc.text,
+        doc=doc,
+        bound_start=0,
+        bound_end=len(doc.text),
+        task_id="task-no-tool",
+        runner=FakeRunner(),
+        step_callback=events.append,
+        audit_log_path=audit_path,
+        allow_comment_generation=True,
+        comment_generation_instruction="请仅依据修改文本生成纯净 JSON 数组。",
+    )
+
+    assert result.ai_messages == [raw_candidate_text]
+    assert result.final_proposed_comments == []
+    assert result.writeback_result["attempted"] == 0
+    assert result.writeback_result["added"] == 0
+    assert doc.Comments.Count == 0
+    assert events[-1].comment_agent["notice"] == comment_agent_module.NO_VALID_GENERATED_COMMENTS_NOTICE
+    assert comment_agent_module.NO_VALID_GENERATED_COMMENTS_NOTICE in str(events[-1].content)
+
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert audit["notice"] == comment_agent_module.NO_VALID_GENERATED_COMMENTS_NOTICE
+    assert audit["ai_messages"] == [raw_candidate_text]
+    assert audit["final_proposed_comments"] == []
+
 def test_run_comment_agent_shows_two_validation_rounds_and_silent_final_recheck(tmp_path) -> None:
     doc = _FakeDocument("7.投标人须提供售后服务承诺。")
     audit_path = tmp_path / "comment-agent-audit.json"

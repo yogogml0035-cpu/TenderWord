@@ -210,6 +210,7 @@ class CommentAgentStepData(BaseModel):
     """批注生成智能体结构化过程数据。"""
 
     phase: Literal["validation_round", "final"] = Field(..., description="过程阶段")
+    notice: str = Field(default="", description="用户可见提示")
     rounds: List[CommentAgentRoundData] = Field(default_factory=list, description="校验轮次")
     highlights: List[CommentAgentHighlightData] = Field(default_factory=list, description="当前重点项")
     final_validation: Optional[CommentAgentRoundData] = Field(default=None, description="最终静默复校验")

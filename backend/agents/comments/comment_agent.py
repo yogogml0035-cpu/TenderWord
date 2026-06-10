@@ -47,14 +47,19 @@ COMMENT_AGENT_GENERATION_SYSTEM_PROMPT = """
 你是批注生成智能体 comment_agent，负责先生成批注候选，再校验锚点并提交写回。
 
 硬性规则：
-1. 先基于 polished_text 和批注生成规则生成 proposed_comments，元素只能包含 reference_text 与 comment_text。
-2. 必须调用 validate_comment_references，输入 proposed_comments。
-3. 你最多可以根据校验反馈修复 reference_text 并再次调用校验工具；校验工具最多 2 次。
-4. 第一次校验后的同 index comment_text 不得改写、润色、删减或新增；后续只能修改 reference_text。
-5. 每条 reference_text 必须精确来自 polished_text，连续、逐字、原标点一致，不得跨段拼接。
-6. 完成校验后最多调用 1 次 write_validated_comments_to_word 提交最终候选；该工具不直接写 Word，真正写入由运行时在 graph 节点线程执行。
-7. 最终只输出简短中文结果摘要，不展示工具消息或排障细节。
+1. 先在内部基于 polished_text 和批注生成规则生成 proposed_comments，元素只能包含 reference_text 与 comment_text。
+2. 严禁把 proposed_comments、JSON 数组、候选清单或推理过程写在普通回复正文里；候选只能作为工具参数提交。
+3. 生成首版候选后，下一步必须调用 validate_comment_references，并把完整 proposed_comments 放入工具参数；如果未发现任何候选，也必须用 proposed_comments=[] 调用该工具。
+4. 你最多可以根据校验反馈修复 reference_text 并再次调用校验工具；校验工具最多 2 次。
+5. 第一次校验后的同 index comment_text 不得改写、润色、删减或新增；后续只能修改 reference_text。
+6. 每条 reference_text 必须精确来自 polished_text，连续、逐字、原标点一致，不得跨段拼接。
+7. 完成校验后必须调用 1 次 write_validated_comments_to_word，把最终 proposed_comments 作为工具参数提交；该工具不直接写 Word，真正写入由运行时在 graph 节点线程执行。
+8. 工具提交完成后，最终只输出简短中文结果摘要，不展示工具消息、候选 JSON 或排障细节。
 """.strip()
+
+NO_VALID_GENERATED_COMMENTS_NOTICE = (
+    "模型未通过工具提交有效批注候选，已跳过 Word 批注写入。"
+)
 
 class CommentAgentRunner(Protocol):
     def invoke(
@@ -299,6 +304,7 @@ def _build_comment_agent_payload(
     writeback_result: CommentWritebackResult | None = None,
     snapshots: list[CommentAgentToolSnapshot] | None = None,
     current_snapshot: CommentAgentToolSnapshot | None = None,
+    notice: str | None = None,
 ) -> dict[str, Any]:
     visible_snapshots = list(snapshots or [])
     if current_snapshot is not None:
@@ -323,6 +329,8 @@ def _build_comment_agent_payload(
         "rounds": rounds,
         "highlights": current_round["highlights"] if current_round else [],
     }
+    if notice:
+        payload["notice"] = notice
     if validation is not None:
         payload["final_validation"] = _validation_to_round(validation)
     if writeback_result is not None:
@@ -459,6 +467,7 @@ def _emit_final_snapshot(
                 validation=validation,
                 writeback_result=writeback_result,
                 snapshots=snapshots,
+                notice=error,
             ),
             is_complete=True,
         )
@@ -550,6 +559,8 @@ def _build_user_prompt(
         )
         return (
             "请直接接手批注生成任务：先生成批注候选 proposed_comments，"
+            "但不要在普通回复正文中输出候选、JSON 或推理过程；"
+            "必须把完整 proposed_comments 作为 validate_comment_references 的工具参数提交，"
             "再调用工具完成锚点校验、必要修复和最终候选提交。"
             "Word 写入由运行时完成，工具线程不会直接操作 Word。\n\n"
             f"{instruction_block}"
@@ -587,6 +598,7 @@ def _default_writeback_result(validation: CommentValidationResult) -> CommentWri
 def _build_audit_payload(
     *,
     task_id: str,
+    notice: str | None = None,
     initial_comments: list[dict[str, str]],
     ai_messages: list[str],
     validation: CommentValidationResult,
@@ -595,7 +607,7 @@ def _build_audit_payload(
     final_proposed_comments: list[dict[str, str]],
     writeback_result: CommentWritebackResult,
 ) -> CommentAgentAuditPayload:
-    return {
+    payload: CommentAgentAuditPayload = {
         "task_id": task_id,
         "initial_comments": initial_comments,
         "ai_messages": ai_messages,
@@ -607,6 +619,9 @@ def _build_audit_payload(
         "final_skipped": [item.model_dump(mode="json") for item in validation.skipped],
         "writeback_result": writeback_result,
     }
+    if notice:
+        payload["notice"] = notice
+    return payload
 
 def run_comment_agent(
     *,
@@ -700,6 +715,54 @@ def run_comment_agent(
             pass
         raise
 
+    if (
+        context.allow_comment_generation
+        and not context.validation_results
+        and not context.final_proposed_comments
+        and not context.initial_comments
+    ):
+        validation = CommentValidationResult()
+        writeback_result = _default_writeback_result(validation)
+        audit_payload = _build_audit_payload(
+            task_id=task_id,
+            notice=NO_VALID_GENERATED_COMMENTS_NOTICE,
+            initial_comments=[],
+            ai_messages=ai_messages,
+            validation=validation,
+            validation_results=context.validation_results,
+            tool_snapshots=[
+                snapshot.model_dump(mode="json") for snapshot in context.tool_snapshots
+            ],
+            final_proposed_comments=[],
+            writeback_result=writeback_result,
+        )
+        audit_path = write_comment_agent_audit_log(
+            audit_payload,
+            task_id=task_id,
+            path=audit_log_path,
+            project_number=project_number,
+            project_name=project_name,
+        )
+        _emit_final_snapshot(
+            validation=validation,
+            writeback_result=writeback_result,
+            snapshots=context.tool_snapshots,
+            step_callback=step_callback,
+            round_number=len(context.tool_snapshots) or 1,
+            error=NO_VALID_GENERATED_COMMENTS_NOTICE,
+        )
+        progress_log.warning(
+            "[comment_agent] 未生成有效批注候选: task_id=%s",
+            task_id,
+        )
+        return CommentAgentResult(
+            validation=validation,
+            writeback_result=writeback_result,
+            audit_log_path=audit_path,
+            ai_messages=ai_messages,
+            final_proposed_comments=[],
+        )
+
     if context.validation_results:
         validation = CommentValidationResult.model_validate(context.validation_results[-1])
     else:
@@ -756,6 +819,7 @@ def run_comment_agent(
 
     audit_payload = _build_audit_payload(
         task_id=task_id,
+        notice=None,
         initial_comments=effective_initial_comments,
         ai_messages=ai_messages,
         validation=validation,

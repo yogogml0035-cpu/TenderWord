@@ -409,13 +409,18 @@ def test_content_verify_agent_reads_current_text_from_config(monkeypatch) -> Non
     system_prompt = str(calls[0]["system_prompt"])
     assert "【生成风格】\nparam" in user_prompt
     assert "【项目基础信息】\nconfig project info" in user_prompt
-    assert "【参考内容（格式真源；旧事实不得继承）】\nconfig origin params" in user_prompt
+    assert "【参考内容（仅外层格式线索；旧事实和旧参数不得继承）】\nconfig origin params" in user_prompt
     assert "【技术参数（原材料，事实真源）】\nconfig tender params" in user_prompt
     assert "【待审核正文】\nconfig draft text" in user_prompt
     assert "如果比对结论是“实质一致、无问题、无需修改”，必须输出 []" in user_prompt
-    assert "template 和 param 都必须校验基础模板格式一致" in user_prompt
-    assert "param 模式下，参数章节是否符合参数优先生成提示词" in user_prompt
+    assert "template 和 param 都不能降低【技术参数】对参数本体" in user_prompt
+    assert "不能用参考内容审核参数本体" in user_prompt
+    assert "参数章节是否符合当前生成风格" in user_prompt
     assert "★、▲ 指标" in user_prompt
+    assert "符号类型、指标归属、核心文字、数值和单位必须完全一致" in user_prompt
+    assert "建立 ★/▲ 白名单" in user_prompt
+    assert "不要直接按参考内容槽位或旧序号匹配" in user_prompt
+    assert "只是格式差异" in user_prompt
     assert "多个包件/标段/采购包/独立设备组" in user_prompt
     assert "项目概述/项目基本情况/项目概况/总体需求" in user_prompt
     assert "逐项比对该章节的模板字段列表、字段顺序和字段行/字段表容器" in user_prompt
@@ -423,17 +428,22 @@ def test_content_verify_agent_reads_current_text_from_config(monkeypatch) -> Non
     assert "不得把字段改写成段落、合并成散文句、拆到其他章节或换容器" in user_prompt
     assert "模板有字段但当前项目材料无新事实时，应保留模板字段壳和占位/固定表达" in user_prompt
     assert "`项目预算` 等字段只有在模板基础信息章节本来存在时才纳入该章节审核" in user_prompt
+    assert "参考内容中的技术/服务/商务/售后旧参数、旧表格、旧 ★/▲ 不得作为 finding 依据" in user_prompt
     assert "只能输出严格合法的 JSON 数组本身" in system_prompt
     assert "Few-shots" in system_prompt
     assert "禁止输出“第 1 轮审核”" in system_prompt
     assert "不要用技术参数中的设备标题覆盖项目基础信息" in system_prompt
-    assert "所有生成风格下，待审核正文都必须继承参考内容的基础非事实格式" in system_prompt
+    assert "所有生成风格下，待审核正文只能继承参考内容的基础非参数格式" in system_prompt
     assert "基础信息章节格式镜像规则" in system_prompt
     assert "项目概述/项目基本情况/项目概况/总体需求" in system_prompt
-    assert "字段名、编号、冒号、固定提示语、占位符、方括号和表格/文本容器可以继承" in system_prompt
+    assert "基础信息字段名、编号、冒号、固定提示语、占位符、方括号和字段容器可以继承" in system_prompt
     assert "不允许建议删除字段、拆章或编造值" in system_prompt
     assert "禁止把字段改写成散文句、合并成一段、拆到其它章节、换成另一套编号" in system_prompt
-    assert "param 生成风格下，参数章节内部必须按参数优先生成提示词审核" in system_prompt
+    assert "技术/服务/商务/售后条款由技术参数按物理顺序" in system_prompt
+    assert "参考内容里的 ★/▲ 是旧模板脏标记" in system_prompt
+    assert "★/▲ 审核流程" in system_prompt
+    assert "把【技术参数】按物理换行、表格行、显式编号和冒号挂载列表拆成原子条款" in system_prompt
+    assert "该行是否带 ★/▲ 只能看对应技术参数原子条款" in system_prompt
     assert "禁止输出 evidence 写“两者一致/无问题”且 fix_hint 写“无需修改”" in system_prompt
 
 
@@ -488,6 +498,53 @@ def test_content_verify_agent_prompt_covers_basic_info_shell_mirroring(monkeypat
     assert "按纯文本字段行排列" in system_prompt
     assert "恢复 `1、项目预算：[以最终批复为准]` 这类模板字段行" in system_prompt
     assert "不要删除该字段或编造预算金额" in system_prompt
+
+
+def test_content_verify_agent_prompt_blocks_reference_parameter_restoration(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fake_stream_llm_completion(**kwargs):
+        calls.append(kwargs)
+        return "[]"
+
+    monkeypatch.setattr(
+        verify_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    result = verify_agent_graph_module.create_verify_agent_graph().invoke(
+        {
+            "generation_style": "param",
+            "project_info": "项目名称：新项目",
+            "template_reference_text": (
+                "六、售后服务要求\n"
+                "★质量保证期≥5年\n"
+                "★投标人必须免费提供 HIS、PACS 接口服务\n"
+            ),
+            "tender_params": (
+                "三、售后服务要求\n"
+                "3. 质量保证期≥5年\n"
+                "4. 质保期为全保服务\n"
+            ),
+            "current_text": (
+                "三、售后服务要求\n"
+                "3. 质量保证期≥5年\n"
+                "4. 质保期为全保服务\n"
+            ),
+            "model_provider": "deepseek",
+        }
+    )
+
+    assert result["structured_response"] == []
+    assert len(calls) == 1
+    user_prompt = str(calls[0]["user_prompt"])
+    system_prompt = str(calls[0]["system_prompt"])
+
+    assert "参考内容中的技术/服务/商务/售后旧参数、旧表格、旧 ★/▲ 不得作为 finding 依据" in user_prompt
+    assert "参考内容里的 ★/▲ 是旧模板脏标记" in system_prompt
+    assert "参考内容含 `★质量保证期≥5年`" in system_prompt
+    assert "待审核正文写成 `3. 质量保证期≥5年`" in system_prompt
 
 
 def test_content_verify_agent_drops_noop_findings(monkeypatch) -> None:

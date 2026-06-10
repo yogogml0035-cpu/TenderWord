@@ -213,6 +213,7 @@ function CommentAgentWritebackBlock({ writeback }: { writeback: SSECommentAgentW
 function CommentAgentProcessView({ commentAgent }: { commentAgent: SSECommentAgentStep }) {
   const overview = getOverviewRound(commentAgent);
   const writeback = commentAgent.writeback || null;
+  const notice = typeof commentAgent.notice === 'string' ? commentAgent.notice.trim() : '';
 
   return (
     <div className="space-y-3 text-sm text-gray-700">
@@ -228,6 +229,13 @@ function CommentAgentProcessView({ commentAgent }: { commentAgent: SSECommentAge
           </p>
         )}
       </div>
+
+      {notice && (
+        <div className="flex items-start gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+          <span>{notice}</span>
+        </div>
+      )}
 
       {commentAgent.rounds.map((round) => (
         <CommentAgentRoundBlock key={round.round} round={round} />

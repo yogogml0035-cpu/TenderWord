@@ -145,6 +145,7 @@ describe('SSE agent_step API types', () => {
   it('models structured comment_agent process payloads', () => {
     const commentAgent: SSECommentAgentStep = {
       phase: 'final',
+      notice: '模型未通过工具提交有效批注候选，已跳过 Word 批注写入。',
       rounds: [
         {
           round: 1,
@@ -214,6 +215,7 @@ describe('SSE agent_step API types', () => {
     expect(event.comment_agent?.rounds).toHaveLength(2);
     expect(event.comment_agent?.rounds[1].highlights[0].status).toBe('已修复');
     expect(event.comment_agent?.writeback?.added).toBe(7);
+    expect(event.comment_agent?.notice).toContain('模型未通过工具提交有效批注候选');
   });
 
   it('allows comment_supplement task kind and comment_writeback payloads', () => {

@@ -341,6 +341,47 @@ describe('TaskContentMessage', () => {
     expect(screen.queryByText('fallback text should not be primary')).not.toBeInTheDocument();
   });
 
+  it('renders structured comment_agent notice', () => {
+    const notice = '模型未通过工具提交有效批注候选，已跳过 Word 批注写入。';
+
+    render(
+      <TaskContentMessage
+        message={createMessage({
+          metadata: {
+            messageKind: 'agent-step',
+            taskKind: 'generate',
+            agentStepType: 'final',
+            agentStepNode: 'comment_agent',
+            agentStepRound: 1,
+            commentAgent: {
+              phase: 'final',
+              notice,
+              rounds: [],
+              highlights: [],
+              final_validation: {
+                round: 0,
+                label: '最终静默复校验',
+                passed: 0,
+                failed: 0,
+                skipped: 0,
+                highlights: [],
+              },
+              writeback: {
+                attempted: 0,
+                added: 0,
+                failed: 0,
+                skipped: 0,
+                issues: [],
+              },
+            },
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByText(notice)).toBeInTheDocument();
+  });
+
   it('uses paragraph wrapping for agent-step content', () => {
     const { container } = render(
       <TaskContentMessage

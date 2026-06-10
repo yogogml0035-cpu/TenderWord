@@ -582,6 +582,7 @@ export interface SSECommentAgentWriteback {
 
 export interface SSECommentAgentStep {
   phase: 'validation_round' | 'final';
+  notice?: string;
   rounds: SSECommentAgentRound[];
   highlights: SSECommentAgentHighlight[];
   final_validation?: SSECommentAgentRound | null;
