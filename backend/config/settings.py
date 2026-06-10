@@ -118,7 +118,7 @@ class Settings(BaseSettings):
         description="DashScope API 密钥",
     )
     QWEN_MODEL: str = Field(
-        default="qwen-plus",
+        default="Qwen/Qwen3.6-35B-A3B",
         description="Qwen 默认模型",
     )
     LLM_STREAM_TIMEOUT_SECONDS: int = Field(

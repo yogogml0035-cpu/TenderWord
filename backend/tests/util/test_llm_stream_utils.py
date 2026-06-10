@@ -20,6 +20,12 @@ def test_deepseek_model_config_disables_thinking() -> None:
     }
 
 
+def test_qwen_model_config_disables_thinking() -> None:
+    assert llm_stream_utils.MODEL_CONFIGS["qwen"].extra_body == {
+        "enable_thinking": False
+    }
+
+
 def test_get_llm_timeout_seconds_uses_settings_by_default(monkeypatch):
     monkeypatch.setattr(llm_stream_utils.settings, "LLM_STREAM_TIMEOUT_SECONDS", 20)
 
