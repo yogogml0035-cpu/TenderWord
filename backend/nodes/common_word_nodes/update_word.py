@@ -196,6 +196,33 @@ def split_polished_text_into_blocks(
     }
 
 
+def _merge_adjacent_text_items(
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    合并连续文本写入，避免字段前重复逐行落笔时游标贴回受保护边界。
+    """
+
+    merged: list[dict[str, Any]] = []
+    pending_lines: list[str] = []
+
+    def flush_pending() -> None:
+        if not pending_lines:
+            return
+        merged.append({"type": "text", "line": "\n".join(pending_lines)})
+        pending_lines.clear()
+
+    for item in items:
+        if item.get("type") == "text":
+            pending_lines.append(str(item.get("line", "")))
+            continue
+        flush_pending()
+        merged.append(item)
+
+    flush_pending()
+    return merged
+
+
 # ---- 向后兼容别名 ----
 # gngk_fw_zc_update_word 之前从本文件 import _parse_table_block / _apply_standard_insert_format；
 # 重构后已迁移到 helper，保留别名。
@@ -1032,6 +1059,13 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                     prepare_delivery_pre_field_cursor()
 
                 block1_items = convert_lines_to_items(block1)
+                if flow["has_delivery"] and block1_items:
+                    merged_block1_items = _merge_adjacent_text_items(block1_items)
+                    if len(merged_block1_items) != len(block1_items):
+                        insertion_log_parts.append(
+                            "    块1连续正文已合并为批量写入，避免字段前逐行插入漏写。"
+                        )
+                    block1_items = merged_block1_items
                 for item in block1_items:
                     try:
                         if flow["has_delivery"]:

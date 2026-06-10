@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from backend.nodes.common_word_nodes.update_word import (
+    _merge_adjacent_text_items,
     _resolve_pre_field_insert_pos,
     split_polished_text_into_blocks,
 )
@@ -68,6 +69,34 @@ def test_split_polished_text_into_blocks_preserves_explicit_blank_lines() -> Non
     assert result["block1"] == ["一、补充说明"]
     assert result["block2"] == [""]
     assert result["block3"] == ["", "", "二、售后服务要求"]
+
+
+def test_merge_adjacent_text_items_batches_pre_field_text_without_crossing_tables() -> None:
+    items = [
+        {"type": "text", "line": "第1包：射频治疗仪采购"},
+        {"type": "text", "line": "1、设备名称及数量：射频治疗仪/壹套"},
+        {"type": "table", "rows": [["列1", "列2"]]},
+        {"type": "text", "line": "交付日期：合同签订后30天内交货"},
+        {"type": "text", "line": "3、交付地点：采购人指定地点"},
+        {"type": "text", "line": ""},
+        {"type": "text", "line": "4、付款方式：设备验收合格后采购人支付合同金额的100%"},
+    ]
+
+    assert _merge_adjacent_text_items(items) == [
+        {
+            "type": "text",
+            "line": "第1包：射频治疗仪采购\n1、设备名称及数量：射频治疗仪/壹套",
+        },
+        {"type": "table", "rows": [["列1", "列2"]]},
+        {
+            "type": "text",
+            "line": (
+                "交付日期：合同签订后30天内交货\n"
+                "3、交付地点：采购人指定地点\n\n"
+                "4、付款方式：设备验收合格后采购人支付合同金额的100%"
+            ),
+        },
+    ]
 
 
 def test_resolve_pre_field_insert_pos_repairs_then_rescans_before_field() -> None:
