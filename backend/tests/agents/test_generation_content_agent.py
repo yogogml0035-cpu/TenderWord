@@ -23,6 +23,7 @@ from backend.agents.generation import revise_agent_graph as revise_agent_graph_m
 from backend.agents.generation import verify_agent_graph as verify_agent_graph_module
 from backend.agents.log_naming import build_agent_log_stem
 from backend.agents.generation.model_factory import create_generation_chat_model
+from backend.agents.generation.types import AuditFinding
 from backend.agents.generation.workspace import (
     FINAL_POLISHED_TEXT_PATH,
     GENERATION_CONTEXT_PATH,
@@ -416,13 +417,77 @@ def test_content_verify_agent_reads_current_text_from_config(monkeypatch) -> Non
     assert "param 模式下，参数章节是否符合参数优先生成提示词" in user_prompt
     assert "★、▲ 指标" in user_prompt
     assert "多个包件/标段/采购包/独立设备组" in user_prompt
+    assert "项目概述/项目基本情况/项目概况/总体需求" in user_prompt
+    assert "逐项比对该章节的模板字段列表、字段顺序和字段行/字段表容器" in user_prompt
+    assert "字段值是否仍与字段名保持模板中的同一行或同一单元格关系" in user_prompt
+    assert "不得把字段改写成段落、合并成散文句、拆到其他章节或换容器" in user_prompt
+    assert "模板有字段但当前项目材料无新事实时，应保留模板字段壳和占位/固定表达" in user_prompt
+    assert "`项目预算` 等字段只有在模板基础信息章节本来存在时才纳入该章节审核" in user_prompt
     assert "只能输出严格合法的 JSON 数组本身" in system_prompt
     assert "Few-shots" in system_prompt
     assert "禁止输出“第 1 轮审核”" in system_prompt
     assert "不要用技术参数中的设备标题覆盖项目基础信息" in system_prompt
     assert "所有生成风格下，待审核正文都必须继承参考内容的基础非事实格式" in system_prompt
+    assert "基础信息章节格式镜像规则" in system_prompt
+    assert "项目概述/项目基本情况/项目概况/总体需求" in system_prompt
+    assert "字段名、编号、冒号、固定提示语、占位符、方括号和表格/文本容器可以继承" in system_prompt
+    assert "不允许建议删除字段、拆章或编造值" in system_prompt
+    assert "禁止把字段改写成散文句、合并成一段、拆到其它章节、换成另一套编号" in system_prompt
     assert "param 生成风格下，参数章节内部必须按参数优先生成提示词审核" in system_prompt
     assert "禁止输出 evidence 写“两者一致/无问题”且 fix_hint 写“无需修改”" in system_prompt
+
+
+def test_content_verify_agent_prompt_covers_basic_info_shell_mirroring(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fake_stream_llm_completion(**kwargs):
+        calls.append(kwargs)
+        return "[]"
+
+    monkeypatch.setattr(
+        verify_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    result = verify_agent_graph_module.create_verify_agent_graph().invoke(
+        {
+            "generation_style": "template",
+            "project_info": "项目名称：新项目\n交付地点：新院区",
+            "template_reference_text": (
+                "一、项目概述\n"
+                "1、设备名称及数量：[待填写]\n"
+                "2、交付日期：[待定]\n"
+                "3、付款方式：按合同约定\n"
+                "4、项目预算：[以最终批复为准]\n"
+            ),
+            "tender_params": "技术参数：设备A",
+            "current_text": (
+                "一、技术参数\n"
+                "1、设备A参数如下。\n"
+                "二、交付日期\n"
+                "合同签订后30日内。\n"
+            ),
+            "model_provider": "deepseek",
+        }
+    )
+
+    assert result["structured_response"] == []
+    assert len(calls) == 1
+    user_prompt = str(calls[0]["user_prompt"])
+    system_prompt = str(calls[0]["system_prompt"])
+
+    assert "字段行/字段表格式壳必须继承模板" in user_prompt
+    assert "字段值是否仍与字段名保持模板中的同一行或同一单元格关系" in user_prompt
+    assert "不得把字段改写成段落、合并成散文句、拆到其他章节或换容器" in user_prompt
+    assert "模板有字段但当前项目材料无新事实时，应保留模板字段壳和占位/固定表达" in user_prompt
+    assert "`项目预算` 等字段只有在模板基础信息章节本来存在时才纳入该章节审核" in user_prompt
+
+    assert "基础信息章节必须按模板原格式壳生成" in system_prompt
+    assert "模板里出现哪些字段，就审核哪些字段" in system_prompt
+    assert "按纯文本字段行排列" in system_prompt
+    assert "恢复 `1、项目预算：[以最终批复为准]` 这类模板字段行" in system_prompt
+    assert "不要删除该字段或编造预算金额" in system_prompt
 
 
 def test_content_verify_agent_drops_noop_findings(monkeypatch) -> None:
@@ -840,6 +905,105 @@ def test_content_runner_rejects_round_four_artifacts() -> None:
 
     with pytest.raises(GenerationAgentProtocolError, match="超出协议轮次"):
         run_content_agent_generation({}, runner=runner)
+
+
+def test_content_runner_rechecks_final_text_when_last_audit_has_findings(monkeypatch) -> None:
+    runner = FakeRunner(
+        [
+            {"draft": "draft"},
+            {"audit": [{"evidence": "多余 ▲", "fix_hint": "删除多余 ▲"}], "round": 1},
+            {"revision": "revision 1", "round": 1},
+            {"audit": [{"evidence": "仍有旧事实", "fix_hint": "替换旧事实"}], "round": 2},
+            {"revision": "revision 2", "round": 2},
+            {"audit": [{"evidence": "仍有旧事实", "fix_hint": "替换旧事实"}], "round": 3},
+            {"revision": "fixed final", "round": 3},
+            {"final": "fixed final"},
+        ]
+    )
+    calls = []
+
+    def fake_verify_final_text_findings(*, final_text, generation_context, model_provider):
+        calls.append((final_text, generation_context, model_provider))
+        return []
+
+    monkeypatch.setattr(
+        content_agent_module,
+        "verify_final_text_findings",
+        fake_verify_final_text_findings,
+    )
+
+    result = run_content_agent_generation(
+        {
+            "generation_style": "param",
+            "project_content": "project",
+            "tender_params": "params",
+            "template_reference_text": "origin",
+        },
+        {"configurable": {"model_provider": "deepseek", "task_id": "task-final-clean"}},
+        runner=runner,
+    )
+
+    assert result.polished_text == "fixed final"
+    assert result.audit_findings == []
+    assert calls == [
+        (
+            "fixed final",
+            {
+                "task_id": "task-final-clean",
+                "tender_type": "xjcg",
+                "generation_style": "param",
+                "project_info": "project",
+                "template_reference_text": "origin",
+                "tender_params": "params",
+                "model_provider": "deepseek",
+            },
+            "deepseek",
+        )
+    ]
+
+
+def test_content_runner_returns_warning_findings_when_final_recheck_still_has_findings(
+    monkeypatch,
+) -> None:
+    runner = FakeRunner(
+        [
+            {"draft": "draft"},
+            {"audit": [{"evidence": "多余 ▲", "fix_hint": "删除多余 ▲"}], "round": 3},
+            {"revision": "bad ▲ final", "round": 3},
+            {"final": "bad ▲ final"},
+        ]
+    )
+    warnings: list[str] = []
+
+    monkeypatch.setattr(
+        content_agent_module,
+        "verify_final_text_findings",
+        lambda **_kwargs: [
+            AuditFinding(evidence="正文仍有多余 ▲ 指标", fix_hint="删除多余 ▲ 指标")
+        ],
+    )
+    monkeypatch.setattr(
+        content_agent_module.progress_log,
+        "warning",
+        lambda message, *args: warnings.append(str(message) % args if args else str(message)),
+    )
+
+    result = run_content_agent_generation(
+        {
+            "generation_style": "param",
+            "project_content": "project",
+            "tender_params": "params",
+            "template_reference_text": "origin",
+        },
+        {"configurable": {"model_provider": "deepseek", "task_id": "task-final-bad"}},
+        runner=runner,
+    )
+
+    assert result.polished_text == "bad ▲ final"
+    assert result.audit_findings == [
+        AuditFinding(evidence="正文仍有多余 ▲ 指标", fix_hint="删除多余 ▲ 指标")
+    ]
+    assert any("最终复核未通过，按降级 warning 继续交付" in message for message in warnings)
 
 
 def test_content_runner_accepts_invoke_only_test_runner() -> None:

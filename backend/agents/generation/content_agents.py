@@ -24,7 +24,10 @@ from backend.agents.generation.types import (
     GenerationAgentProtocolError,
     GenerationAgentToolCallUnsupportedError,
 )
-from backend.agents.generation.verify_agent_graph import create_verify_agent_graph
+from backend.agents.generation.verify_agent_graph import (
+    create_verify_agent_graph,
+    verify_final_text_findings,
+)
 from backend.models import (
     ContentAgentFinalData,
     ContentAgentRoundData,
@@ -68,7 +71,7 @@ CONTENT_AGENT_SYSTEM_PROMPT = f"""
 3. 如果审核 JSON 是 []，不要调用 content_revise_agent，直接把当前正文完整写入 {FINAL_POLISHED_TEXT_PATH}。
 4. 如果审核 JSON 非空，调用 content_revise_agent 写 /revisions/round-N.md，然后继续下一轮审核；修订路径只能是 /revisions/round-1.md 到 /revisions/round-3.md。
 5. 只有 content_agent 可以写 {FINAL_POLISHED_TEXT_PATH}；子智能体不得写 final。
-6. 第 3 轮修订后必须停止返修，并把当前修订正文写入 {FINAL_POLISHED_TEXT_PATH}。
+6. 第 3 轮修订后必须停止返修；修订时必须逐条解决第 3 轮审核问题，再把当前修订正文写入 {FINAL_POLISHED_TEXT_PATH}。
 7. 最终回复只输出简短验收说明，不要重复最终正文，不要展示隐藏 reasoning。
 8. 不得要求用户补充信息，不得自动回退 workflow。
 """.strip()
@@ -307,7 +310,7 @@ def _build_main_agent_user_prompt() -> str:
 3. 第 N 轮审核时调用 content_verify_agent，让它读取当前正文文件并写 /audits/round-N.json。
 4. 如果审核 JSON 为 []，由你读取当前正文并写入 {FINAL_POLISHED_TEXT_PATH}。
 5. 如果审核 JSON 非空且 N <= 3，调用 content_revise_agent 写 /revisions/round-N.md；然后继续下一轮审核。
-6. 第 3 轮修订后直接把 /revisions/round-3.md 写入 {FINAL_POLISHED_TEXT_PATH}。
+6. 第 3 轮修订后必须逐条解决第 3 轮审核问题，再把 /revisions/round-3.md 写入 {FINAL_POLISHED_TEXT_PATH}。
 7. 最终只回复简短验收说明，不重复正文。
 """.strip()
 
@@ -830,6 +833,35 @@ def _read_optional_audit_findings(backend: BackendProtocol) -> tuple[list[AuditF
     return last_findings, last_round
 
 
+def _final_recheck_findings(
+    *,
+    final_text: str,
+    pending_findings: list[AuditFinding],
+    generation_context: dict[str, Any],
+    model_provider: str,
+) -> list[AuditFinding]:
+    if not pending_findings:
+        return []
+
+    final_findings = verify_final_text_findings(
+        final_text=final_text,
+        generation_context=generation_context,
+        model_provider=model_provider,
+    )
+    if not final_findings:
+        return []
+
+    evidence = "；".join(finding.evidence for finding in final_findings[:3])
+    if len(final_findings) > 3:
+        evidence += f"；等 {len(final_findings)} 个问题"
+    progress_log.warning(
+        "[content_agent] 最终复核未通过，按降级 warning 继续交付: remaining_issues=%d, evidence=%s",
+        len(final_findings),
+        evidence,
+    )
+    return final_findings
+
+
 def _count_revision_rounds(workspace_dir: Path) -> int:
     rounds = []
     revisions_dir = workspace_dir / "revisions"
@@ -900,6 +932,12 @@ def run_content_agent_generation(
         raw_final_text = read_backend_text(backend, FINAL_POLISHED_TEXT_PATH)
     final_text = _validate_final_text(raw_final_text)
     findings, last_audit_round = _read_optional_audit_findings(backend)
+    findings = _final_recheck_findings(
+        final_text=final_text,
+        pending_findings=findings,
+        generation_context=base_payload,
+        model_provider=model_provider,
+    )
     revision_rounds = _count_revision_rounds(workspace_dir)
 
     if step_emitter is not None:

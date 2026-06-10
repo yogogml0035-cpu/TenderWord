@@ -53,6 +53,18 @@ def test_render_generate_by_param_prompt_limits_reference_tables_and_business_sh
     assert "空白单元格续行合并" in rendered.system_prompt
     assert "不得重复生成商务章节" in rendered.system_prompt
 
+
+def test_render_generate_by_param_prompt_preserves_basic_info_shells() -> None:
+    rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    assert "基础信息章节镜像铁律" in rendered.system_prompt
+    assert "基础信息字段镜像优先" in rendered.system_prompt
+    assert "不能改写成 `1、设备名称及数量`、`2、项目预算`" in rendered.system_prompt
+    assert "基础信息章节不参与技术重组" in rendered.system_prompt
+    assert "预算金额、最高限价等只能填入模板里本来就存在的预算/限价类槽位" in rendered.system_prompt
+
 def test_render_generate_by_template_prompt_preserves_colon_attached_lists() -> None:
     rendered = render_generate_by_template_prompt(build_prompt_input())
 
