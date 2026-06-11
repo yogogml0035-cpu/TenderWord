@@ -24,6 +24,7 @@ from backend.retrieval.comment_bad_case_runtime import (
     CLAUSE_SPLIT_MODE_CLAUSE_ONLY,
     CLAUSE_SPLIT_MODE_FALLBACK_FULL_TEXT,
     DEFAULT_BAD_CASE_PROMPT_CONTEXT_LIMIT,
+    DEFAULT_EMBEDDING_QUERY_CHAR_LIMIT,
     RETRIEVAL_MODE_BM25_ONLY,
     RETRIEVAL_MODE_HYBRID,
     BadCaseRetrievalHit,
@@ -552,6 +553,45 @@ def test_hybrid_retrieval_uses_embedding_and_qdrant_when_available(
             for hit in clause_result.filtered_hits
         )
     assert result.to_log_payload()["retrieval_mode"] == RETRIEVAL_MODE_HYBRID
+
+
+def test_hybrid_retrieval_truncates_embedding_query_but_keeps_full_bm25_query(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    clear_bad_case_runtime_cache()
+    _write_v2_bad_case(tmp_path, "case.md", "TW_COMMENT_HYBRID_LONG", "长条款")
+    runtime_index = load_bad_case_runtime_index(tmp_path)
+    full_chunk_index = next(
+        index
+        for index, chunk in enumerate(runtime_index.chunks)
+        if chunk.field == "full"
+    )
+    query_texts: list[str] = []
+
+    def fake_score(query: str) -> list[BM25Hit]:
+        query_texts.append(query)
+        return [BM25Hit(index=full_chunk_index, score=10.0)]
+
+    monkeypatch.setattr(runtime_index.bm25_index, "score", fake_score)
+    embedder = _FakeEmbeddingClient()
+    store = _FakeQdrantStore(
+        vector_hits=[VectorHit(index=full_chunk_index, score=1.0, payload={})]
+    )
+    long_clause = "1、" + ("长条款" * 220)
+
+    result = retrieve_bad_case_hits(
+        f"一、技术需求\n{long_clause}",
+        directory=tmp_path,
+        config_loader=_fake_retrieval_config,
+        embedding_client_factory=lambda config: embedder,
+        qdrant_store_factory=lambda config: store,
+    )
+
+    assert result.retrieval_mode == RETRIEVAL_MODE_HYBRID
+    assert query_texts == [long_clause]
+    assert embedder.queries == [long_clause[:DEFAULT_EMBEDDING_QUERY_CHAR_LIMIT]]
+    assert len(embedder.queries[0]) == DEFAULT_EMBEDDING_QUERY_CHAR_LIMIT
 
 
 @pytest.mark.parametrize(

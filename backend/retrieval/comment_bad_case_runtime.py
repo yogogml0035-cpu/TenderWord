@@ -28,6 +28,7 @@ RETRIEVAL_MODE_HYBRID = "hybrid"
 DEFAULT_BM25_ONLY_TOP_K = 3
 DEFAULT_BM25_ONLY_SCORE_THRESHOLD = 0.8
 DEFAULT_HYBRID_VECTOR_LIMIT = 50
+DEFAULT_EMBEDDING_QUERY_CHAR_LIMIT = 500
 DEFAULT_BAD_CASE_PROMPT_CONTEXT_LIMIT = 12
 BAD_CASE_PROMPT_CONTEXT_FIELDS = (
     "risk_type",
@@ -551,7 +552,7 @@ def _retrieve_clause_hits_hybrid(
     score_threshold: float,
 ) -> ClauseRetrievalResult:
     query = build_clause_only_query(clause)
-    query_vector = embedder.embed_query(query)
+    query_vector = embedder.embed_query(_build_embedding_query(query))
     hybrid_hits = hybrid_search(
         query=query,
         chunks=runtime_index.chunks,
@@ -582,6 +583,10 @@ def _retrieve_clause_hits_hybrid(
         pre_filter_hits=pre_filter_hits,
         filtered_hits=_rerank_hits(filtered_hits),
     )
+
+
+def _build_embedding_query(query: str) -> str:
+    return query[:DEFAULT_EMBEDDING_QUERY_CHAR_LIMIT]
 
 
 def _normalize_scores(scores: dict[int, float]) -> dict[int, float]:
