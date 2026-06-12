@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
@@ -30,6 +31,7 @@ DEFAULT_BM25_ONLY_SCORE_THRESHOLD = 0.8
 DEFAULT_HYBRID_VECTOR_LIMIT = 50
 DEFAULT_EMBEDDING_QUERY_CHAR_LIMIT = 500
 DEFAULT_BAD_CASE_PROMPT_CONTEXT_LIMIT = 12
+HYBRID_FALLBACK_PROGRESS_WARNING = "bad case 混合检索暂不可用，已自动回退为 BM25 检索"
 BAD_CASE_PROMPT_CONTEXT_FIELDS = (
     "risk_type",
     "risk_pattern",
@@ -447,32 +449,54 @@ def retrieve_bad_case_hits(
         store.healthcheck()
 
         split_result = split_polished_text_into_clauses(polished_text)
-        clause_results = [
-            _retrieve_clause_hits_hybrid(
-                clause=clause,
-                runtime_index=runtime_index,
-                embedder=embedder,
-                store=store,
-                top_k=max(0, top_k),
-                score_threshold=score_threshold,
-            )
-            for clause in split_result.clauses
-        ]
+        clause_results: list[ClauseRetrievalResult] = []
+        hybrid_used = False
+        hybrid_fallback_used = False
+        for clause in split_result.clauses:
+            try:
+                clause_results.append(
+                    _retrieve_clause_hits_hybrid(
+                        clause=clause,
+                        runtime_index=runtime_index,
+                        embedder=embedder,
+                        store=store,
+                        top_k=max(0, top_k),
+                        score_threshold=score_threshold,
+                    )
+                )
+                hybrid_used = True
+            except Exception as exc:
+                hybrid_fallback_used = True
+                _log_hybrid_fallback_detail(exc)
+                clause_results.append(
+                    _retrieve_clause_hits_bm25_only(
+                        clause=clause,
+                        runtime_index=runtime_index,
+                        top_k=max(0, top_k),
+                        score_threshold=score_threshold,
+                    )
+                )
     except Exception as exc:
         return _fallback_to_bm25_only(
             polished_text=polished_text,
             directory=directory,
             top_k=top_k,
             score_threshold=score_threshold,
-            warning=_format_hybrid_warning(exc),
+            warning=_format_hybrid_progress_warning(),
+            detail=_format_hybrid_warning(exc),
         )
 
     load_payload = runtime_index.load_result.to_log_payload()
+    warnings = list(runtime_index.load_result.warnings)
+    if hybrid_fallback_used:
+        warnings.append(_format_hybrid_progress_warning())
     return BadCaseRetrievalResult(
         split_result=split_result,
         clause_results=clause_results,
-        retrieval_mode=RETRIEVAL_MODE_HYBRID,
-        warnings=list(runtime_index.load_result.warnings),
+        retrieval_mode=(
+            RETRIEVAL_MODE_HYBRID if hybrid_used else RETRIEVAL_MODE_BM25_ONLY
+        ),
+        warnings=warnings,
         failure_summary=load_payload["failure_summary"],
         source_files=load_payload["source_files"],
         load_summary=load_payload["load_summary"],
@@ -647,7 +671,10 @@ def _fallback_to_bm25_only(
     top_k: int,
     score_threshold: float,
     warning: str,
+    detail: str | None = None,
 ) -> BadCaseRetrievalResult:
+    if detail:
+        _log_hybrid_fallback_detail(detail)
     result = retrieve_bad_case_hits_bm25_only(
         polished_text,
         directory=directory,
@@ -660,6 +687,17 @@ def _fallback_to_bm25_only(
 def _format_hybrid_warning(exc: Exception) -> str:
     message = _format_failure_message(exc)
     return f"hybrid retrieval unavailable; falling back to bm25_only: {message}"
+
+
+def _format_hybrid_progress_warning() -> str:
+    return HYBRID_FALLBACK_PROGRESS_WARNING
+
+
+def _log_hybrid_fallback_detail(detail: str | Exception) -> None:
+    logging.getLogger("TenderWord").warning(
+        "[comment_bad_case_runtime] %s",
+        detail if isinstance(detail, str) else _format_hybrid_warning(detail),
+    )
 
 
 def _format_failure_message(exc: Exception) -> str:

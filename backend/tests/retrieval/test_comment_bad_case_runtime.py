@@ -595,7 +595,7 @@ def test_hybrid_retrieval_truncates_embedding_query_but_keeps_full_bm25_query(
 
 
 @pytest.mark.parametrize(
-    ("failure_kind", "expected_warning"),
+    ("failure_kind", "expected_detail"),
     [
         ("config", "Missing embedding API key"),
         ("embedding", "embedding failed"),
@@ -607,7 +607,7 @@ def test_hybrid_retrieval_falls_back_to_bm25_when_vector_layer_fails(
     tmp_path: Path,
     monkeypatch,
     failure_kind: str,
-    expected_warning: str,
+    expected_detail: str,
 ) -> None:
     clear_bad_case_runtime_cache()
     _write_v2_bad_case(tmp_path, "case.md", "TW_COMMENT_FALLBACK", "心率小数精度")
@@ -648,9 +648,48 @@ def test_hybrid_retrieval_falls_back_to_bm25_when_vector_layer_fails(
     assert len(result.filtered_hits) == 1
     assert result.filtered_hits[0].vector_score == 0.0
     assert result.filtered_hits[0].retrieval_mode == RETRIEVAL_MODE_BM25_ONLY
-    assert any(expected_warning in warning for warning in result.warnings)
-    assert any("falling back to bm25_only" in warning for warning in result.warnings)
+    assert result.warnings[-1] == "bad case 混合检索暂不可用，已自动回退为 BM25 检索"
+    assert all(expected_detail not in warning for warning in result.warnings)
     assert result.to_log_payload()["retrieval_mode"] == RETRIEVAL_MODE_BM25_ONLY
+
+
+def test_hybrid_retrieval_falls_back_per_clause_without_downgrading_all_queries(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    clear_bad_case_runtime_cache()
+    _write_v2_bad_case(tmp_path, "case.md", "TW_COMMENT_PARTIAL_FALLBACK", "心率小数精度")
+    runtime_index = load_bad_case_runtime_index(tmp_path)
+    full_chunk_index = next(
+        index
+        for index, chunk in enumerate(runtime_index.chunks)
+        if chunk.field == "full"
+    )
+
+    def fake_score(_query: str) -> list[BM25Hit]:
+        return [BM25Hit(index=full_chunk_index, score=10.0)]
+
+    monkeypatch.setattr(runtime_index.bm25_index, "score", fake_score)
+    embedder = _FailFirstEmbeddingClient()
+    store = _FakeQdrantStore(
+        vector_hits=[VectorHit(index=full_chunk_index, score=1.0, payload={})]
+    )
+
+    result = retrieve_bad_case_hits(
+        "一、技术需求\n1、第一条款。\n2、第二条款。",
+        directory=tmp_path,
+        config_loader=_fake_retrieval_config,
+        embedding_client_factory=lambda config: embedder,
+        qdrant_store_factory=lambda config: store,
+    )
+
+    assert result.retrieval_mode == RETRIEVAL_MODE_HYBRID
+    assert result.warnings[-1] == "bad case 混合检索暂不可用，已自动回退为 BM25 检索"
+    assert len(result.clause_results) == 2
+    assert result.clause_results[0].filtered_hits[0].retrieval_mode == RETRIEVAL_MODE_BM25_ONLY
+    assert result.clause_results[1].filtered_hits[0].retrieval_mode == RETRIEVAL_MODE_HYBRID
+    assert result.clause_results[0].filtered_hits[0].vector_score == 0.0
+    assert result.clause_results[1].filtered_hits[0].vector_score > 0.0
 
 
 def test_bad_case_prompt_context_dedupes_keeps_highest_score_and_sorts() -> None:
@@ -836,6 +875,17 @@ class _FakeEmbeddingClient:
         self.queries.append(text)
         if self.fail_on_embed:
             raise RuntimeError("embedding failed")
+        return [0.1, 0.2]
+
+
+class _FailFirstEmbeddingClient:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def embed_query(self, text: str) -> list[float]:
+        self.queries.append(text)
+        if len(self.queries) == 1:
+            raise RuntimeError("embedding failed once")
         return [0.1, 0.2]
 
 
