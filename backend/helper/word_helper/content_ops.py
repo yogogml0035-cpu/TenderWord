@@ -302,6 +302,72 @@ def _apply_table_format_compensation(
             pass
 
 
+def _range_is_in_table(range_obj) -> bool:
+    try:
+        return bool(range_obj.Information(wdWithInTable))
+    except Exception:
+        return False
+
+
+def _position_is_after_table(doc, pos: int) -> bool:
+    pos = int(pos)
+    if pos <= 0:
+        return False
+    try:
+        prev_char_range = doc.Range(pos - 1, pos)
+    except Exception:
+        return False
+    return _range_is_in_table(prev_char_range)
+
+
+def _move_insert_range_after_host_table(
+    insert_range,
+    *,
+    get_bound_end: Optional[Callable[[], int]] = None,
+) -> None:
+    if not _range_is_in_table(insert_range):
+        return
+
+    parent_tables = insert_range.Tables
+    if parent_tables.Count <= 0:
+        return
+
+    host_table = parent_tables(1)
+    end_pos = int(host_table.Range.End)
+    if get_bound_end is not None:
+        bound_end = int(get_bound_end())
+        if end_pos > bound_end:
+            end_pos = bound_end
+    insert_range.SetRange(end_pos, end_pos)
+    insert_range.Collapse(wdCollapseStart)
+
+
+def _ensure_insert_range_separated_from_previous_table(
+    doc,
+    insert_range,
+    *,
+    log_parts: Optional[List[str]] = None,
+) -> None:
+    if _range_is_in_table(insert_range):
+        return
+
+    insert_pos = int(getattr(insert_range, "End", getattr(insert_range, "Start", 0)))
+    if not _position_is_after_table(doc, insert_pos):
+        return
+
+    try:
+        insert_range.InsertAfter("\r")
+        separator_end = int(getattr(insert_range, "End", insert_pos + 1))
+        if separator_end <= insert_pos:
+            separator_end = insert_pos + 1
+        insert_range.SetRange(separator_end, separator_end)
+        insert_range.Collapse(wdCollapseStart)
+    except Exception as exc:
+        if log_parts is not None:
+            log_parts.append(f"    警告: 表格间分隔段创建失败: {exc}")
+        raise
+
+
 def insert_table_with_formatting(
     doc,
     insert_range,
@@ -339,21 +405,18 @@ def insert_table_with_formatting(
     if not rows:
         return None
 
-    # 如果 insert_range 在表格内，先跳出
     try:
-        if insert_range.Information(wdWithInTable):
-            parent_tables = insert_range.Tables
-            if parent_tables.Count > 0:
-                host_table = parent_tables(1)
-                end_pos = int(host_table.Range.End)
-                if get_bound_end is not None:
-                    bound_end = int(get_bound_end())
-                    if end_pos > bound_end:
-                        end_pos = bound_end
-                insert_range.SetRange(end_pos, end_pos)
-                insert_range.Collapse(wdCollapseStart)
+        _move_insert_range_after_host_table(
+            insert_range,
+            get_bound_end=get_bound_end,
+        )
     except Exception:
         pass
+    _ensure_insert_range_separated_from_previous_table(
+        doc,
+        insert_range,
+        log_parts=log_parts,
+    )
 
     cols = table_model["cols"] if table_model is not None else max(len(r) for r in rows)
     start_pos = insert_range.End

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 import backend.helper.word_helper.content_ops as content_ops_module
 
+from backend.util.word_util import wdWithInTable
 from backend.helper.word_helper.content_ops import (
     apply_standard_insert_format,
     ensure_following_body_paragraph_insert_pos,
@@ -157,15 +158,18 @@ class _FakeFormatRange:
         *,
         text: str = "",
         fail_font_attrs: set[str] | None = None,
+        in_table: bool = False,
+        tables=None,
     ):
         self.doc = doc
         self.Start = int(start)
         self.End = int(end)
         self.Text = text
+        self._in_table = bool(in_table)
         self.Font = _FakeFont(fail_attrs=fail_font_attrs)
         self.HighlightColorIndex = 7
         self.ParagraphFormat = _FakeParagraphFormat()
-        self.Tables = _EmptyCollection()
+        self.Tables = tables if tables is not None else _EmptyCollection()
 
     def InsertAfter(self, value: str) -> None:
         self.doc.inserted.append((int(self.End), str(value)))
@@ -178,7 +182,11 @@ class _FakeFormatRange:
         self.Start = int(start)
         self.End = int(end)
 
-    def Information(self, *_args) -> int:
+    def Information(self, code: int) -> int:
+        if code == wdWithInTable:
+            if hasattr(self.doc, "range_is_in_table"):
+                return -1 if self.doc.range_is_in_table(self.Start, self.End) else 0
+            return -1 if self._in_table else 0
         return 0
 
 
@@ -189,11 +197,19 @@ class _FakeFormatDoc:
         self.inserted: list[tuple[int, str]] = []
 
     def Range(self, start: int, end: int) -> _FakeFormatRange:
+        in_table = False
+        tables = None
+        if hasattr(self, "range_is_in_table"):
+            in_table = bool(self.range_is_in_table(start, end))
+        if hasattr(self, "tables_for_range"):
+            tables = self.tables_for_range(start, end)
         range_obj = _FakeFormatRange(
             self,
             start,
             end,
             fail_font_attrs=self.fail_font_attrs,
+            in_table=in_table,
+            tables=tables,
         )
         self.created_ranges.append(range_obj)
         return range_obj
@@ -239,6 +255,8 @@ class _FakeTable:
         rows: int,
         cols: int,
         *,
+        range_start: int = 0,
+        range_end: int = 999,
         merge_failures: set[tuple[int, int]] | None = None,
     ):
         self.rows = int(rows)
@@ -246,7 +264,11 @@ class _FakeTable:
         self.merge_failures = set(merge_failures or set())
         self.merge_attempts: list[tuple[int, int, int, int]] = []
         self.Borders = _FakeBorders()
-        self.Range = type("_FakeTableRange", (), {"End": 999})()
+        self.Range = type(
+            "_FakeTableRange",
+            (),
+            {"Start": int(range_start), "End": int(range_end)},
+        )()
         self.cells = {
             (row, col): _FakeCell(row, col, self)
             for row in range(1, rows + 1)
@@ -278,9 +300,74 @@ class _FakeTableDoc(_FakeFormatDoc):
     def Range(self, start: int, end: int):
         if int(end) < int(start):
             end = start
-        range_obj = _FakeFormatRange(self, start, end)
+        in_table = False
+        tables = None
+        if hasattr(self, "range_is_in_table"):
+            in_table = bool(self.range_is_in_table(start, end))
+        if hasattr(self, "tables_for_range"):
+            tables = self.tables_for_range(start, end)
+        range_obj = _FakeFormatRange(self, start, end, in_table=in_table, tables=tables)
         range_obj.Delete = lambda: self.deleted_ranges.append((int(start), int(end)))
         return range_obj
+
+
+class _SingleTableCollection:
+    def __init__(self, table: _FakeTable | None):
+        self._table = table
+        self.Count = 1 if table is not None else 0
+
+    def __call__(self, index: int) -> _FakeTable:
+        if index != 1 or self._table is None:
+            raise IndexError(index)
+        return self._table
+
+
+class _FakeBoundaryTablesCollection:
+    def __init__(self, owner: "_FakeBoundaryTableDoc"):
+        self.owner = owner
+
+    def Add(self, table_range, rows: int, cols: int) -> _FakeTable:
+        start = int(getattr(table_range, "Start", getattr(table_range, "End", 0)))
+        end = start + 10
+        table = _FakeTable(
+            rows,
+            cols,
+            range_start=start,
+            range_end=end,
+            merge_failures=self.owner.merge_failures,
+        )
+        self.owner.created_tables.append(table)
+        self.owner.table_spans.append((start, end, table))
+        return table
+
+
+class _FakeBoundaryTableDoc(_FakeTableDoc):
+    def __init__(self):
+        super().__init__()
+        self.table_spans: list[tuple[int, int, _FakeTable]] = []
+        self.Tables = _FakeBoundaryTablesCollection(self)
+
+    def range_is_in_table(self, start: int, end: int) -> bool:
+        start_i = int(start)
+        end_i = int(end)
+        for table_start, table_end, _table in self.table_spans:
+            if start_i == end_i:
+                if table_start <= start_i < table_end:
+                    return True
+            elif start_i < table_end and end_i > table_start:
+                return True
+        return False
+
+    def tables_for_range(self, start: int, end: int) -> _SingleTableCollection:
+        start_i = int(start)
+        end_i = int(end)
+        for table_start, table_end, table in self.table_spans:
+            if start_i == end_i:
+                if table_start <= start_i < table_end:
+                    return _SingleTableCollection(table)
+            elif start_i < table_end and end_i > table_start:
+                return _SingleTableCollection(table)
+        return _SingleTableCollection(None)
 
 
 def assert_clean_generated_font(font: _FakeFont, *, name: str = "宋体", size: int = 12) -> None:
@@ -426,6 +513,95 @@ def test_insert_items_inline_structured_table_fallback_sanitizes_text_rows(monke
 
     assert inserted == 1
     assert_clean_generated_format(doc.created_ranges[-1])
+
+
+def test_insert_table_with_formatting_separates_consecutive_plain_tables() -> None:
+    doc = _FakeBoundaryTableDoc()
+    insert_range = doc.Range(10, 10)
+
+    first = insert_table_with_formatting(
+        doc,
+        insert_range,
+        [["序号", "名称"], ["1", "服务"]],
+        get_bound_end=lambda: 200,
+    )
+    second = insert_table_with_formatting(
+        doc,
+        insert_range,
+        [["附件", "数量"], ["A", "1"]],
+        get_bound_end=lambda: 200,
+    )
+
+    assert first is doc.created_tables[0]
+    assert second is doc.created_tables[1]
+    assert [(table.Range.Start, table.Range.End) for table in doc.created_tables] == [
+        (10, 20),
+        (21, 31),
+    ]
+    assert doc.inserted == [(20, "\r")]
+
+
+def test_insert_table_with_formatting_separates_consecutive_structured_tables() -> None:
+    doc = _FakeBoundaryTableDoc()
+    insert_range = doc.Range(10, 10)
+
+    first = insert_table_with_formatting(
+        doc,
+        insert_range,
+        structured_table={
+            "table_id": "TP1_1",
+            "rows": 1,
+            "cols": 1,
+            "cells": [
+                {"row": 1, "col": 1, "row_span": 1, "col_span": 1, "text": "1"},
+            ],
+        },
+        get_bound_end=lambda: 200,
+    )
+    second = insert_table_with_formatting(
+        doc,
+        insert_range,
+        structured_table={
+            "table_id": "TP1_2",
+            "rows": 1,
+            "cols": 1,
+            "cells": [
+                {"row": 1, "col": 1, "row_span": 1, "col_span": 1, "text": "附件"},
+            ],
+        },
+        get_bound_end=lambda: 200,
+    )
+
+    assert first.Cell(1, 1).Range.inserted_text == "1"
+    assert second.Cell(1, 1).Range.inserted_text == "附件"
+    assert [(table.Range.Start, table.Range.End) for table in doc.created_tables] == [
+        (10, 20),
+        (21, 31),
+    ]
+    assert doc.inserted == [(20, "\r")]
+
+
+def test_insert_table_with_formatting_moves_out_of_host_table_before_inserting() -> None:
+    doc = _FakeBoundaryTableDoc()
+    initial_range = doc.Range(10, 10)
+    host_table = insert_table_with_formatting(
+        doc,
+        initial_range,
+        [["序号"], ["1"]],
+        get_bound_end=lambda: 200,
+    )
+    inside_host_table = doc.Range(host_table.Range.Start + 1, host_table.Range.Start + 1)
+
+    inserted_table = insert_table_with_formatting(
+        doc,
+        inside_host_table,
+        [["附件"], ["A"]],
+        get_bound_end=lambda: 200,
+    )
+
+    assert inserted_table is doc.created_tables[1]
+    assert (inserted_table.Range.Start, inserted_table.Range.End) == (21, 31)
+    assert doc.inserted == [(20, "\r")]
 
 
 def test_insert_table_with_formatting_restores_structured_merge_topology() -> None:

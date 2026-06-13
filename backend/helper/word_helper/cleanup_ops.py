@@ -66,6 +66,45 @@ def is_effectively_empty_text(text: str) -> bool:
     return normalize_cleanup_text(text) == ""
 
 
+def _range_is_in_table(range_obj) -> bool:
+    try:
+        return bool(range_obj.Information(wdWithInTable))
+    except Exception:
+        return False
+
+
+def _doc_range_is_in_table(doc, start: int, end: int) -> bool:
+    try:
+        return _range_is_in_table(doc.Range(int(start), int(end)))
+    except Exception:
+        return False
+
+
+def _position_is_at_table(doc, pos: int) -> bool:
+    pos = int(pos)
+    if _doc_range_is_in_table(doc, pos, pos):
+        return True
+    return _doc_range_is_in_table(doc, pos, pos + 1)
+
+
+def _is_table_separator_blank_paragraph(doc, paragraph_range) -> bool:
+    try:
+        if _range_is_in_table(paragraph_range):
+            return False
+        if not is_effectively_empty_text(paragraph_range.Text):
+            return False
+        start = int(paragraph_range.Start)
+        end = int(paragraph_range.End)
+    except Exception:
+        return False
+
+    if start <= 0:
+        return False
+    if not _doc_range_is_in_table(doc, start - 1, start):
+        return False
+    return _position_is_at_table(doc, end)
+
+
 # ---------------------------------------------------------------------------
 # 表格修剪
 # ---------------------------------------------------------------------------
@@ -144,6 +183,8 @@ def cleanup_blank_paragraphs(
             if is_protected_fn is not None and is_protected_fn(para.Range):
                 continue
             if is_effectively_empty_text(para.Range.Text):
+                if _is_table_separator_blank_paragraph(doc, para.Range):
+                    continue
                 para.Range.Delete()
                 deleted += 1
         except Exception:
