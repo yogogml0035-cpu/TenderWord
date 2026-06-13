@@ -5,15 +5,21 @@ Word 文档提取工具函数
 
 import re
 import logging
+import xml.etree.ElementTree as ET
 
 logger = logging.getLogger(__name__)
 import pathlib
 import time
+from typing import Any, Optional
 
 from backend.util.word_util.word_application_util import (
     create_word_application,
     close_word_application,
     open_document_with_retry,
+)
+from backend.util.word_util.table_models import (
+    StructuredTableModel,
+    render_structured_table_markdown,
 )
 
 
@@ -60,6 +66,274 @@ SUBSCRIPT_MAP = {
     "x": "ₓ",
 }
 
+WORD_XML_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+
+def _xml_unescape(text):
+    return (
+        text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", '"')
+        .replace("&apos;", "'")
+    )
+
+
+def _strip_xml_comments(xml_content: str) -> str:
+    try:
+        xml_content = re.sub(
+            r"<w:comments\b[^\u003e]*>.*?</w:comments>",
+            "",
+            xml_content,
+            flags=re.DOTALL,
+        )
+        xml_content = re.sub(
+            r"<w:comment\b[^\u003e]*>.*?</w:comment>",
+            "",
+            xml_content,
+            flags=re.DOTALL,
+        )
+        xml_content = re.sub(
+            r"<w:annotation\b[^\u003e]*>.*?</w:annotation>",
+            "",
+            xml_content,
+            flags=re.DOTALL,
+        )
+    except Exception as e:
+        logger.debug(f"[_strip_xml_comments] 清理注释标签失败（可忽略）: {e}")
+    return xml_content
+
+
+def _build_xml_run_patterns():
+    run_pattern = re.compile(r"<w:r\b[^\u003e]*>(.*?)</w:r>", re.DOTALL)
+    align_pattern = re.compile(
+        r'<w:vertAlign\s+w:val=["\'](superscript|subscript)["\']\s*/>'
+    )
+    position_pattern = re.compile(r'<w:position\s+w:val=["\'](-?\d+)["\']\s*/>')
+    text_pattern = re.compile(r"<w:t\b[^\u003e]*>(.*?)</w:t>", re.DOTALL)
+    return run_pattern, align_pattern, position_pattern, text_pattern
+
+
+def _process_run_text(run_content, align_pattern, position_pattern, text_pattern):
+    if (
+        "<w:commentReference" in run_content
+        or "<w:commentRangeStart" in run_content
+        or "<w:commentRangeEnd" in run_content
+        or "<w:annotationRef" in run_content
+    ):
+        return ""
+
+    is_superscript = False
+    is_subscript = False
+
+    align_match = align_pattern.search(run_content)
+    if align_match:
+        val = align_match.group(1)
+        if val == "superscript":
+            is_superscript = True
+        elif val == "subscript":
+            is_subscript = True
+
+    if not is_superscript and not is_subscript:
+        pos_match = position_pattern.search(run_content)
+        if pos_match:
+            try:
+                val = int(pos_match.group(1))
+                if val >= 4:
+                    is_superscript = True
+                elif val <= -4:
+                    is_subscript = True
+            except Exception as e:
+                logger.debug(f"[_process_run_text] 解析position偏移失败（可忽略）: {e}")
+
+    run_texts = []
+    text_matches = text_pattern.finditer(run_content)
+    for tm in text_matches:
+        raw_text = tm.group(1)
+        text = _xml_unescape(raw_text)
+
+        if is_superscript:
+            run_texts.append("".join(SUPERSCRIPT_MAP.get(char, char) for char in text))
+        elif is_subscript:
+            run_texts.append("".join(SUBSCRIPT_MAP.get(char, char) for char in text))
+        else:
+            run_texts.append(text)
+
+    return "".join(run_texts)
+
+
+def _iter_paragraph_texts_from_xml(
+    parent,
+) -> list[str]:
+    para_texts: list[str] = []
+    for para in parent.findall(".//w:p", WORD_XML_NS):
+        run_texts = []
+        for run in para.findall(".//w:r", WORD_XML_NS):
+            if (
+                run.find(".//w:commentReference", WORD_XML_NS) is not None
+                or run.find(".//w:commentRangeStart", WORD_XML_NS) is not None
+                or run.find(".//w:commentRangeEnd", WORD_XML_NS) is not None
+                or run.find(".//w:annotationRef", WORD_XML_NS) is not None
+            ):
+                continue
+
+            is_superscript = False
+            is_subscript = False
+            vert_align = run.find(".//w:vertAlign", WORD_XML_NS)
+            if vert_align is not None:
+                val = (
+                    vert_align.attrib.get(f"{{{WORD_XML_NS['w']}}}val", "").strip().lower()
+                )
+                if val == "superscript":
+                    is_superscript = True
+                elif val == "subscript":
+                    is_subscript = True
+
+            if not is_superscript and not is_subscript:
+                position = run.find(".//w:position", WORD_XML_NS)
+                if position is not None:
+                    try:
+                        pos_val = int(position.attrib.get(f"{{{WORD_XML_NS['w']}}}val", "0") or 0)
+                        if pos_val >= 4:
+                            is_superscript = True
+                        elif pos_val <= -4:
+                            is_subscript = True
+                    except Exception as e:
+                        logger.debug(f"[_iter_paragraph_texts_from_xml] 解析position失败（可忽略）: {e}")
+
+            texts = []
+            for text_node in run.findall(".//w:t", WORD_XML_NS):
+                text_value = _xml_unescape(text_node.text or "")
+                if is_superscript:
+                    texts.append("".join(SUPERSCRIPT_MAP.get(char, char) for char in text_value))
+                elif is_subscript:
+                    texts.append("".join(SUBSCRIPT_MAP.get(char, char) for char in text_value))
+                else:
+                    texts.append(text_value)
+            if texts:
+                run_texts.append("".join(texts))
+        if run_texts:
+            para_texts.append("".join(run_texts))
+    return para_texts
+
+
+def _parse_table_model_from_table_xml(
+    table_xml: str,
+    *,
+    table_id: str,
+) -> Optional[StructuredTableModel]:
+    try:
+        table_root = ET.fromstring(table_xml)
+    except ET.ParseError as exc:
+        logger.debug(f"[_parse_table_model_from_table_xml] 解析表格 XML 失败（可忽略）: {exc}")
+        return None
+
+    rows = table_root.findall("./w:tr", WORD_XML_NS)
+    if not rows:
+        return None
+
+    cells: list[dict[str, Any]] = []
+    max_cols = 0
+
+    for row_index, row in enumerate(rows, start=1):
+        col_cursor = 1
+        tc_elements = row.findall("./w:tc", WORD_XML_NS)
+        if not tc_elements:
+            continue
+
+        for cell_elem in tc_elements:
+            tc_pr = cell_elem.find("./w:tcPr", WORD_XML_NS)
+            col_span = 1
+            row_span = 1
+            vmerge_kind: str | None = None
+
+            if tc_pr is not None:
+                grid_span = tc_pr.find("./w:gridSpan", WORD_XML_NS)
+                if grid_span is not None:
+                    raw_val = grid_span.attrib.get(f"{{{WORD_XML_NS['w']}}}val")
+                    try:
+                        col_span = max(1, int(raw_val or 1))
+                    except Exception:
+                        col_span = 1
+
+                vmerge = tc_pr.find("./w:vMerge", WORD_XML_NS)
+                if vmerge is not None:
+                    raw_vmerge = vmerge.attrib.get(f"{{{WORD_XML_NS['w']}}}val")
+                    vmerge_kind = str(raw_vmerge or "continue").strip().lower() or "continue"
+
+            if vmerge_kind == "continue":
+                col_cursor += col_span
+                max_cols = max(max_cols, col_cursor - 1)
+                continue
+
+            cell_texts = _iter_paragraph_texts_from_xml(
+                cell_elem,
+            )
+            cell_text = " ".join(text.strip() for text in cell_texts if text.strip()).strip()
+
+            if vmerge_kind in {"restart", None}:
+                lookahead_span = 1
+                if vmerge_kind == "restart":
+                    next_rows = rows[row_index:]
+                    for next_row in next_rows:
+                        next_col_cursor = 1
+                        continued = False
+                        for next_cell in next_row.findall("./w:tc", WORD_XML_NS):
+                            next_tc_pr = next_cell.find("./w:tcPr", WORD_XML_NS)
+                            next_col_span = 1
+                            next_vmerge_kind: str | None = None
+                            if next_tc_pr is not None:
+                                next_grid_span = next_tc_pr.find("./w:gridSpan", WORD_XML_NS)
+                                if next_grid_span is not None:
+                                    raw_next_span = next_grid_span.attrib.get(
+                                        f"{{{WORD_XML_NS['w']}}}val"
+                                    )
+                                    try:
+                                        next_col_span = max(1, int(raw_next_span or 1))
+                                    except Exception:
+                                        next_col_span = 1
+                                next_vmerge = next_tc_pr.find("./w:vMerge", WORD_XML_NS)
+                                if next_vmerge is not None:
+                                    raw_next_vmerge = next_vmerge.attrib.get(
+                                        f"{{{WORD_XML_NS['w']}}}val"
+                                    )
+                                    next_vmerge_kind = (
+                                        str(raw_next_vmerge or "continue").strip().lower()
+                                        or "continue"
+                                    )
+
+                            if next_col_cursor == col_cursor:
+                                if (
+                                    next_col_span == col_span
+                                    and next_vmerge_kind == "continue"
+                                ):
+                                    lookahead_span += 1
+                                    continued = True
+                                break
+                            next_col_cursor += next_col_span
+                        if not continued:
+                            break
+                row_span = lookahead_span
+
+            cells.append(
+                {
+                    "row": row_index,
+                    "col": col_cursor,
+                    "row_span": row_span,
+                    "col_span": col_span,
+                    "text": cell_text,
+                }
+            )
+            col_cursor += col_span
+            max_cols = max(max_cols, col_cursor - 1)
+
+    return StructuredTableModel(
+        table_id=table_id,
+        rows=len(rows),
+        cols=max(1, max_cols),
+        cells=cells,
+    )
+
 
 def extract_text_from_xml(xml_content, preserve_structure=False):
     """
@@ -75,112 +349,11 @@ def extract_text_from_xml(xml_content, preserve_structure=False):
         str: 提取的文本，上标/下标字符已转换为Unicode上标/下标字符
     """
     try:
-        try:
-            xml_content = re.sub(
-                r"<w:comments\b[^\u003e]*>.*?</w:comments>",
-                "",
-                xml_content,
-                flags=re.DOTALL,
-            )
-            xml_content = re.sub(
-                r"<w:comment\b[^\u003e]*>.*?</w:comment>",
-                "",
-                xml_content,
-                flags=re.DOTALL,
-            )
-            xml_content = re.sub(
-                r"<w:annotation\b[^\u003e]*>.*?</w:annotation>",
-                "",
-                xml_content,
-                flags=re.DOTALL,
-            )
-        except Exception as e:
-            logger.debug(f"[extract_text_from_xml] 清理注释标签失败（可忽略）: {e}")
+        xml_content = _strip_xml_comments(xml_content)
 
-        # 简单的 XML 实体解码
-        def _xml_unescape(text):
-            return (
-                text.replace("&lt;", "<")
-                .replace("&gt;", ">")
-                .replace("&amp;", "&")
-                .replace("&quot;", '"')
-                .replace("&apos;", "'")
-            )
-
-        def _process_run(run_content, align_pattern, position_pattern, text_pattern):
-            """处理单个 run，返回处理后的文本"""
-            if (
-                "<w:commentReference" in run_content
-                or "<w:commentRangeStart" in run_content
-                or "<w:commentRangeEnd" in run_content
-                or "<w:annotationRef" in run_content
-            ):
-                return ""
-
-            # --- 判别上标/下标 ---
-            is_superscript = False
-            is_subscript = False
-
-            # 检查 vertAlign
-            align_match = align_pattern.search(run_content)
-            if align_match:
-                val = align_match.group(1)
-                if val == "superscript":
-                    is_superscript = True
-                elif val == "subscript":
-                    is_subscript = True
-
-            # 如果没有 vertAlign，检查 position
-            if not is_superscript and not is_subscript:
-                pos_match = position_pattern.search(run_content)
-                if pos_match:
-                    try:
-                        # 单位是半磅 (1/144 英寸)
-                        val = int(pos_match.group(1))
-                        if val >= 4:  # 偏移 >= 2磅 视为上标
-                            is_superscript = True
-                        elif val <= -4:  # 偏移 <= -2磅 视为下标
-                            is_subscript = True
-                    except Exception as e:
-                        logger.debug(f"[_process_run] 解析position偏移失败（可忽略）: {e}")
-
-            # --- 提取文本并转换 ---
-            run_texts = []
-            text_matches = text_pattern.finditer(run_content)
-            for tm in text_matches:
-                raw_text = tm.group(1)
-                text = _xml_unescape(raw_text)
-
-                if is_superscript:
-                    converted = []
-                    for char in text:
-                        converted.append(SUPERSCRIPT_MAP.get(char, char))
-                    run_texts.append("".join(converted))
-                elif is_subscript:
-                    converted = []
-                    for char in text:
-                        converted.append(SUBSCRIPT_MAP.get(char, char))
-                    run_texts.append("".join(converted))
-                else:
-                    run_texts.append(text)
-
-            return "".join(run_texts)
-
-        # 查找所有的 run (<w:r>...</w:r>)
-        # 使用 DOTALL 模式让 . 匹配换行符
-        run_pattern = re.compile(r"<w:r\b[^\u003e]*>(.*?)</w:r>", re.DOTALL)
-
-        # 1. 查找标准上标/下标属性 <w:vertAlign w:val="superscript"/>
-        align_pattern = re.compile(
-            r'<w:vertAlign\s+w:val=["\'](superscript|subscript)["\']\s*/>'
+        run_pattern, align_pattern, position_pattern, text_pattern = (
+            _build_xml_run_patterns()
         )
-
-        # 2. 查找位置偏移 <w:position w:val="6"/> (val 单位是半磅)
-        # 阈值设为 3 (1.5磅)，通常上标偏移量会大于这个值
-        position_pattern = re.compile(r'<w:position\s+w:val=["\'](-?\d+)["\']\s*/>')
-
-        # 查找文本 <w:t>...</w:t>
-        text_pattern = re.compile(r"<w:t\b[^\u003e]*>(.*?)</w:t>", re.DOTALL)
 
         if not preserve_structure:
             # 原始逻辑：不保留结构，适用于单个段落或单元格
@@ -194,7 +367,7 @@ def extract_text_from_xml(xml_content, preserve_structure=False):
                 run_content = match.group(1)
                 pos = match.end()
 
-                run_text = _process_run(
+                run_text = _process_run_text(
                     run_content, align_pattern, position_pattern, text_pattern
                 )
                 if run_text:
@@ -243,7 +416,7 @@ def extract_text_from_xml(xml_content, preserve_structure=False):
                     para_texts = []
                     for run_match in run_pattern.finditer(content):
                         run_content = run_match.group(1)
-                        run_text = _process_run(
+                        run_text = _process_run_text(
                             run_content, align_pattern, position_pattern, text_pattern
                         )
                         if run_text:
@@ -254,57 +427,14 @@ def extract_text_from_xml(xml_content, preserve_structure=False):
                         result_parts.append(para_text)
 
                 elif elem_type == "table":
-                    # 处理表格：转换为 Markdown 格式
-                    table_rows = []
-                    for row_match in row_pattern.finditer(content):
-                        row_content = row_match.group(1)
-                        row_cells = []
-                        for cell_match in cell_pattern.finditer(row_content):
-                            cell_content = cell_match.group(1)
-                            # 提取单元格中所有段落的文本
-                            cell_texts = []
-                            for para_match in para_pattern.finditer(cell_content):
-                                para_content = para_match.group(1)
-                                para_texts = []
-                                for run_match in run_pattern.finditer(para_content):
-                                    run_content = run_match.group(1)
-                                    run_text = _process_run(
-                                        run_content,
-                                        align_pattern,
-                                        position_pattern,
-                                        text_pattern,
-                                    )
-                                    if run_text:
-                                        para_texts.append(run_text)
-                                if para_texts:
-                                    cell_texts.append("".join(para_texts))
-
-                            # 单元格内多个段落用空格连接，避免破坏 Markdown 表格
-                            cell_text = " ".join(cell_texts).strip()
-                            # 转义管道符号
-                            cell_text = cell_text.replace("|", "\\|")
-                            row_cells.append(cell_text)
-
-                        if row_cells:
-                            table_rows.append(row_cells)
-
-                    # 生成 Markdown 表格
-                    if table_rows:
-                        md_lines = []
-                        # 表头
-                        header = table_rows[0]
-                        md_lines.append("| " + " | ".join(header) + " |")
-                        # 分隔行
-                        md_lines.append("| " + " | ".join(["---"] * len(header)) + " |")
-                        # 数据行
-                        for row in table_rows[1:]:
-                            # 确保列数一致
-                            while len(row) < len(header):
-                                row.append("")
-                            row = row[: len(header)]
-                            md_lines.append("| " + " | ".join(row) + " |")
-
-                        result_parts.append("\n".join(md_lines))
+                    table_model = _parse_table_model_from_table_xml(
+                        f"<w:tbl xmlns:w=\"{WORD_XML_NS['w']}\">{content}</w:tbl>",
+                        table_id="XML_TABLE",
+                    )
+                    if table_model is not None:
+                        table_markdown = render_structured_table_markdown(table_model)
+                        if table_markdown:
+                            result_parts.append(table_markdown)
 
             # 用换行符连接所有部分
             return "\n".join(result_parts)
@@ -814,6 +944,97 @@ def extract_content_with_tables(range_obj):
                 # 如果连文本都无法获取，返回空字符串
                 logger.warning(f"[extract_content_with_tables] 无法提取任何内容: {fallback_e2}")
                 return ""
+
+
+def extract_content_with_table_models(
+    range_obj,
+    *,
+    table_id_prefix: str = "TP",
+) -> tuple[str, list[StructuredTableModel]]:
+    """
+    提取范围中的文本与结构化表格模型。
+
+    返回:
+        (content_text, table_models)
+    """
+    try:
+        try:
+            xml_content = range_obj.WordOpenXML
+        except Exception as exc:
+            logger.debug(
+                f"[extract_content_with_table_models] 获取WordOpenXML失败，回退纯文本提取: {exc}"
+            )
+            return extract_content_with_tables(range_obj), []
+
+        if not xml_content or not isinstance(xml_content, str):
+            return extract_content_with_tables(range_obj), []
+
+        xml_content = _strip_xml_comments(xml_content)
+        run_pattern, align_pattern, position_pattern, text_pattern = (
+            _build_xml_run_patterns()
+        )
+        para_pattern = re.compile(r"<w:p\b[^\u003e]*>(.*?)</w:p>", re.DOTALL)
+        table_pattern = re.compile(r"<w:tbl\b[^\u003e]*>(.*?)</w:tbl>", re.DOTALL)
+
+        result_parts: list[str] = []
+        table_models: list[StructuredTableModel] = []
+        elements: list[tuple[str, int, str]] = []
+
+        for match in para_pattern.finditer(xml_content):
+            para_start = match.start()
+            before_content = xml_content[:para_start]
+            last_tbl_open = before_content.rfind("<w:tbl")
+            last_tbl_close = before_content.rfind("</w:tbl>")
+            if last_tbl_open > last_tbl_close:
+                continue
+            elements.append(("para", match.start(), match.group(1)))
+
+        for match in table_pattern.finditer(xml_content):
+            elements.append(("table", match.start(), match.group(1)))
+
+        elements.sort(key=lambda value: value[1])
+        table_index = 0
+        for elem_type, _, content in elements:
+            if elem_type == "para":
+                para_texts = []
+                for run_match in run_pattern.finditer(content):
+                    run_content = run_match.group(1)
+                    run_text = _process_run_text(
+                        run_content,
+                        align_pattern,
+                        position_pattern,
+                        text_pattern,
+                    )
+                    if run_text:
+                        para_texts.append(run_text)
+                para_text = "".join(para_texts)
+                if para_text.strip():
+                    result_parts.append(para_text)
+                continue
+
+            table_index += 1
+            table_model = _parse_table_model_from_table_xml(
+                f"<w:tbl xmlns:w=\"{WORD_XML_NS['w']}\">{content}</w:tbl>",
+                table_id=f"{table_id_prefix}{table_index}",
+            )
+            if table_model is None:
+                continue
+            table_models.append(table_model)
+            placeholder = f"[[TABLE:{table_model['table_id']}]]"
+            table_markdown = render_structured_table_markdown(table_model)
+            if table_markdown:
+                result_parts.append(table_markdown)
+                result_parts.append(placeholder)
+            else:
+                result_parts.append(placeholder)
+
+        rendered = "\n".join(part for part in result_parts if part is not None)
+        return rendered, table_models
+    except Exception as exc:
+        logger.warning(
+            f"[extract_content_with_table_models] 结构化表格提取失败，回退纯文本提取: {exc}"
+        )
+        return extract_content_with_tables(range_obj), []
 
 
 def extract_text_from_word_file(file_path: str) -> str:

@@ -33,6 +33,7 @@ from backend.util.word_util import (
     open_document_with_retry,
     unprotect_document,
     extract_content_with_tables,
+    extract_content_with_table_models,
     extract_text_from_word_file,
     wdGoToPage,
     wdGoToAbsolute,
@@ -41,6 +42,42 @@ from backend.util.word_util.anchor_utils import find_anchor_range
 from backend.util.word_util.anchor_utils import resolve_anchor_content_range
 
 NODE_NAME = "extract_tender_params"
+
+
+def _extract_structured_tender_param_file(
+    file_path_obj: pathlib.Path,
+    *,
+    file_index: int,
+) -> tuple[str, List[Dict[str, Any]]]:
+    word = None
+    tender_doc = None
+    tender_com_initialized = False
+    try:
+        word, tender_com_initialized = create_word_application(
+            initial_delay=0.2,
+            post_init_delay=0.2,
+            use_existing=False,
+            verify=False,
+            node_name="extract_tender_params_file",
+        )
+        tender_doc = open_document_with_retry(
+            word_app=word,
+            file_path=str(file_path_obj.resolve()),
+            read_only=True,
+            node_name="extract_tender_params_file",
+        )
+        return extract_content_with_table_models(
+            tender_doc.Content,
+            table_id_prefix=f"TP{file_index}_",
+        )
+    finally:
+        close_word_application(
+            word_app=word,
+            doc=tender_doc,
+            com_initialized=tender_com_initialized,
+            wait_time=0.2,
+            node_name="extract_tender_params_file",
+        )
 
 
 def _visible_log(message: str) -> None:
@@ -273,8 +310,9 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
         print(f"[extract_tender_params] 检测到技术参数文件，开始提取...")
         _visible_log(f"开始提取 {len(tender_param_paths)} 份技术参数文件")
         tender_params_parts: List[str] = []
+        tender_param_table_models: List[Dict[str, Any]] = []
 
-        for tender_param_file_path in tender_param_paths:
+        for file_index, tender_param_file_path in enumerate(tender_param_paths, start=1):
             if not tender_param_file_path:
                 continue
 
@@ -284,15 +322,33 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
             if not file_path_obj.is_file():
                 raise ValueError(f"技术参数路径不是文件: {file_path_obj}")
 
-            file_text = extract_text_from_word_file(str(file_path_obj))
+            file_text = ""
+            file_table_models: List[Dict[str, Any]] = []
+            if file_path_obj.suffix.lower() in (".docx", ".doc"):
+                try:
+                    file_text, file_table_models = _extract_structured_tender_param_file(
+                        file_path_obj,
+                        file_index=file_index,
+                    )
+                except Exception as table_model_error:
+                    progress_log.debug(
+                        f"[{NODE_NAME}] 技术参数结构化提取失败，回退纯文本: {table_model_error}",
+                        exc_info=True,
+                    )
+                    file_text = extract_text_from_word_file(str(file_path_obj))
+                    file_table_models = []
+            else:
+                file_text = extract_text_from_word_file(str(file_path_obj))
             print(
                 f"[extract_tender_params] 从文件提取完成: {file_path_obj.name}，长度: {len(file_text)}"
             )
             _visible_log(f"技术参数文件提取完成: {file_path_obj.name}")
             tender_params_parts.append(file_text)
+            tender_param_table_models.extend(file_table_models)
 
         tender_params = "\n\n".join([p for p in tender_params_parts if p]).strip()
         updates["tender_params"] = tender_params
+        updates["tender_param_table_models"] = tender_param_table_models
 
     end_time = time.time()
     elapsed_time = end_time - start_time

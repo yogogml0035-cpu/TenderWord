@@ -241,18 +241,15 @@ def split_polished_text_into_blocks(
     }
 
 
-def _convert_lines_to_items(lines: list[str]) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    index = 0
-    while index < len(lines):
-        maybe_table, next_index = parse_table_block(lines, index)
-        if maybe_table:
-            items.append({"type": "table", "rows": maybe_table})
-            index = next_index
-        else:
-            items.append({"type": "text", "line": lines[index]})
-            index += 1
-    return items
+def _convert_lines_to_items(
+    lines: list[str],
+    *,
+    structured_table_models: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    return convert_lines_to_items(
+        lines,
+        structured_table_models=structured_table_models,
+    )
 
 
 def gngk_fw_zc_update_word(
@@ -271,6 +268,7 @@ def gngk_fw_zc_update_word(
     verbose_style_progress_logs = bool(state.get("verbose_style_progress_logs"))
     suppress_comment_progress_logs = bool(state.get("suppress_comment_progress_logs"))
     suppress_ai_comment_writeback = bool(state.get("suppress_ai_comment_writeback"))
+    tender_param_table_models = state.get("tender_param_table_models") or []
 
     if not prepared_doc_path:
         raise ValueError("需要 prepared_doc_path 来插入内容到 Word 文档")
@@ -775,11 +773,12 @@ def gngk_fw_zc_update_word(
                         log_parts=insertion_log_parts,
                     )
 
-                def insert_table_with_formatting(insert_range, rows):
+                def insert_table_with_formatting(insert_range, rows=None, structured_table=None):
                     return helper_insert_table_with_formatting(
                         doc,
                         insert_range,
                         rows,
+                        structured_table=structured_table,
                         get_bound_end=get_insertion_bound_end,
                         font_name=insert_font_name,
                         font_size=insert_font_size,
@@ -803,6 +802,14 @@ def gngk_fw_zc_update_word(
                                 insert_table_with_formatting(insert_range, item["rows"])
                                 insertion_log_parts.append(
                                     f"    {label} 已插入表格，行数 {len(item['rows'])}。"
+                                )
+                            elif item["type"] == "structured_table":
+                                insert_table_with_formatting(
+                                    insert_range,
+                                    structured_table=item["table_model"],
+                                )
+                                insertion_log_parts.append(
+                                    f"    {label} 已插入结构化表格 {item['table_id']}。"
                                 )
                         except Exception as error:
                             insertion_log_parts.append(f"    {label} 插入项出错: {error}")
@@ -832,7 +839,10 @@ def gngk_fw_zc_update_word(
                 insert_rng = selection.Range
                 insert_rng.Collapse(wdCollapseStart)
 
-                block1_items = _convert_lines_to_items(block1)
+                block1_items = _convert_lines_to_items(
+                    block1,
+                    structured_table_models=tender_param_table_models,
+                )
                 insertion_log_parts.append("  正在插入块1...")
                 if block1_items:
                     service_location_rng = protected_fields[SERVICE_LOCATION_MARKER]
@@ -860,7 +870,10 @@ def gngk_fw_zc_update_word(
                 )
                 update_protected_field(SERVICE_LOCATION_MARKER, service_location_value)
 
-                block2_items = _convert_lines_to_items(block2)
+                block2_items = _convert_lines_to_items(
+                    block2,
+                    structured_table_models=tender_param_table_models,
+                )
                 insertion_log_parts.append("  正在插入块2...")
                 protected_fields[SERVICE_LOCATION_MARKER] = (
                     refind_field(SERVICE_LOCATION_MARKER)
@@ -901,7 +914,10 @@ def gngk_fw_zc_update_word(
                 )
                 update_protected_field(SERVICE_TERM_MARKER, service_term_value)
 
-                block3_items = _convert_lines_to_items(block3)
+                block3_items = _convert_lines_to_items(
+                    block3,
+                    structured_table_models=tender_param_table_models,
+                )
                 insertion_log_parts.append("  正在插入块3...")
                 protected_fields[SERVICE_TERM_MARKER] = (
                     refind_field(SERVICE_TERM_MARKER)
@@ -942,7 +958,10 @@ def gngk_fw_zc_update_word(
                 )
                 update_protected_field(PAYMENT_METHOD_MARKER, payment_value)
 
-                block4_items = _convert_lines_to_items(block4)
+                block4_items = _convert_lines_to_items(
+                    block4,
+                    structured_table_models=tender_param_table_models,
+                )
                 insertion_log_parts.append(f"  插入块4（{len(block4_items)} 条）...")
                 if len(block4_items) == 0:
                     insertion_log_parts.append("    提示：块4为空，无需插入")
@@ -997,6 +1016,16 @@ def gngk_fw_zc_update_word(
                                     inserted_count += 1
                                     insertion_log_parts.append(
                                         f"    [{inserted_count}/{len(block4_items)}] 已插入表格，行数 {len(item['rows'])}。"
+                                    )
+                                    break
+                                if item["type"] == "structured_table":
+                                    insert_table_with_formatting(
+                                        insert_rng,
+                                        structured_table=item["table_model"],
+                                    )
+                                    inserted_count += 1
+                                    insertion_log_parts.append(
+                                        f"    [{inserted_count}/{len(block4_items)}] 已插入结构化表格 {item['table_id']}。"
                                     )
                                     break
                             except Exception as error:

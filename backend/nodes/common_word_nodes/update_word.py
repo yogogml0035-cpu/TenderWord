@@ -60,7 +60,7 @@ from backend.helper.word_helper.range_utils import (
 )
 from backend.helper.word_helper.text_parsing import (
     parse_table_block,
-    convert_lines_to_items,
+    convert_lines_to_items as helper_convert_lines_to_items,
     split_text_by_keywords,
 )
 from backend.helper.word_helper.protected_fields import (
@@ -851,20 +851,13 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                 # 格式设置
                 insert_font_name = "宋体"
                 insert_font_size = 12
+                tender_param_table_models = state.get("tender_param_table_models") or []
 
                 def convert_lines_to_items(lines):
-                    items = []
-                    idx = 0
-                    while idx < len(lines):
-                        line = lines[idx]
-                        maybe_table, next_idx = _parse_table_block(lines, idx)
-                        if maybe_table:
-                            items.append({"type": "table", "rows": maybe_table})
-                            idx = next_idx
-                        else:
-                            items.append({"type": "text", "line": line})
-                            idx += 1
-                    return items
+                    return helper_convert_lines_to_items(
+                        lines,
+                        structured_table_models=tender_param_table_models,
+                    )
 
                 def insert_content_with_formatting(insert_range, line):
                     return helper_insert_content_with_formatting(
@@ -878,11 +871,12 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         log_parts=insertion_log_parts,
                     )
 
-                def insert_table_with_formatting(insert_range, rows):
+                def insert_table_with_formatting(insert_range, rows=None, structured_table=None):
                     return helper_insert_table_with_formatting(
                         doc,
                         insert_range,
                         rows,
+                        structured_table=structured_table,
                         get_bound_end=get_insertion_bound_end,
                         font_name=insert_font_name,
                         font_size=insert_font_size,
@@ -1021,12 +1015,13 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         )
                         return insert_text_directly_before_delivery(line)
 
-                def insert_pre_field_table_with_formatting(insert_range, rows):
+                def insert_pre_field_table_with_formatting(insert_range, rows=None, structured_table=None):
                     try:
                         return helper_insert_table_with_formatting(
                             doc,
                             insert_range,
                             rows,
+                            structured_table=structured_table,
                             get_bound_end=get_delivery_pre_field_bound_end,
                             font_name=insert_font_name,
                             font_size=insert_font_size,
@@ -1036,7 +1031,12 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                         insertion_log_parts.append(
                             f"    字段前表格插入失败，改按文本表格插入: {exc}"
                         )
-                        for row in rows:
+                        fallback_rows = rows or []
+                        if structured_table is not None:
+                            from backend.util.word_util import render_structured_table_grid
+
+                            fallback_rows = render_structured_table_grid(structured_table)
+                        for row in fallback_rows:
                             line = "| " + " | ".join(str(cell) for cell in row) + " |"
                             insert_text_directly_before_delivery(line)
                         return None
@@ -1092,6 +1092,20 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                             insertion_log_parts.append(
                                 f"    已插入表格，行数 {len(item['rows'])}。"
                             )
+                        elif item["type"] == "structured_table":
+                            if flow["has_delivery"]:
+                                insert_pre_field_table_with_formatting(
+                                    insert_rng,
+                                    structured_table=item["table_model"],
+                                )
+                            else:
+                                insert_table_with_formatting(
+                                    insert_rng,
+                                    structured_table=item["table_model"],
+                                )
+                            insertion_log_parts.append(
+                                f"    已插入结构化表格 {item['table_id']}。"
+                            )
                     except Exception as e:
                         insertion_log_parts.append(f"    插入项出错: {e}")
 
@@ -1143,6 +1157,14 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                                     insertion_log_parts.append(
                                         f"    已插入表格，行数 {len(item['rows'])}。"
                                     )
+                                elif item["type"] == "structured_table":
+                                    insert_table_with_formatting(
+                                        insert_rng,
+                                        structured_table=item["table_model"],
+                                    )
+                                    insertion_log_parts.append(
+                                        f"    已插入结构化表格 {item['table_id']}。"
+                                    )
                             except Exception as e:
                                 insertion_log_parts.append(f"    插入项出错: {e}")
                     elif flow["block2_mode"] == "after_delivery":
@@ -1166,6 +1188,14 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                                     insert_table_with_formatting(insert_rng, item["rows"])
                                     insertion_log_parts.append(
                                         f"    已插入表格，行数 {len(item['rows'])}。"
+                                    )
+                                elif item["type"] == "structured_table":
+                                    insert_table_with_formatting(
+                                        insert_rng,
+                                        structured_table=item["table_model"],
+                                    )
+                                    insertion_log_parts.append(
+                                        f"    已插入结构化表格 {item['table_id']}。"
                                     )
                             except Exception as e:
                                 insertion_log_parts.append(f"    插入项出错: {e}")
@@ -1251,6 +1281,16 @@ def update_word(state: TenderGraphStateBase, config) -> TenderGraphStateBase:
                                     inserted_count += 1
                                     insertion_log_parts.append(
                                         f"    [{inserted_count}/{len(block3_items)}] 已插入表格，行数 {len(item['rows'])}。"
+                                    )
+                                    break
+                                elif item["type"] == "structured_table":
+                                    insert_table_with_formatting(
+                                        insert_rng,
+                                        structured_table=item["table_model"],
+                                    )
+                                    inserted_count += 1
+                                    insertion_log_parts.append(
+                                        f"    [{inserted_count}/{len(block3_items)}] 已插入结构化表格 {item['table_id']}。"
                                     )
                                     break
                             except Exception as e:

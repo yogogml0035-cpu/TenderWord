@@ -17,6 +17,11 @@ from backend.helper.word_helper.protected_fields import (
     normalize_protected_field_markers,
     normalize_protected_field_text,
 )
+from backend.util.word_util.table_models import (
+    build_structured_table_model_index,
+    match_table_placeholder,
+    render_structured_table_grid,
+)
 
 # ---------------------------------------------------------------------------
 # Markdown 表格解析
@@ -83,7 +88,52 @@ def parse_table_block(
 # ---------------------------------------------------------------------------
 
 
-def convert_lines_to_items(lines: List[str]) -> List[Dict[str, Any]]:
+def _normalize_table_cell_for_match(value: Any) -> str:
+    text = str(value or "")
+    text = text.replace("\\|", "|")
+    text = text.replace("\\n", "\n")
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _table_rows_match(left: List[List[str]], right: List[List[str]]) -> bool:
+    if len(left) != len(right):
+        return False
+    for left_row, right_row in zip(left, right):
+        if len(left_row) != len(right_row):
+            return False
+        for left_cell, right_cell in zip(left_row, right_row):
+            if _normalize_table_cell_for_match(left_cell) != _normalize_table_cell_for_match(
+                right_cell
+            ):
+                return False
+    return True
+
+
+def _structured_table_item(table_id: str, table_model: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "type": "structured_table",
+        "table_id": table_id,
+        "table_model": table_model,
+    }
+
+
+def _find_matching_structured_table(
+    rows: List[List[str]],
+    table_model_index: Dict[str, Dict[str, Any]],
+) -> tuple[str, Dict[str, Any]] | None:
+    for table_id, table_model in table_model_index.items():
+        model_rows = render_structured_table_grid(table_model, repeat_merged_text=True)
+        if _table_rows_match(rows, model_rows):
+            return table_id, table_model
+    return None
+
+
+def convert_lines_to_items(
+    lines: List[str],
+    *,
+    structured_table_models: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     """
     将文本行列表转换为插入 item 列表。
 
@@ -92,12 +142,43 @@ def convert_lines_to_items(lines: List[str]) -> List[Dict[str, Any]]:
     - {"type": "table", "rows": [[...]]} — 表格
     """
     items: List[Dict[str, Any]] = []
+    table_model_index = build_structured_table_model_index(structured_table_models)
     idx = 0
     while idx < len(lines):
         line = lines[idx]
+        table_id = match_table_placeholder(line)
+        if table_id is not None:
+            table_model = table_model_index.get(table_id)
+            if table_model is not None:
+                items.append(_structured_table_item(table_id, table_model))
+            else:
+                items.append({"type": "text", "line": line})
+            idx += 1
+            continue
         maybe_table, next_idx = parse_table_block(lines, idx)
         if maybe_table:
-            items.append({"type": "table", "rows": maybe_table})
+            next_table_id = (
+                match_table_placeholder(lines[next_idx]) if next_idx < len(lines) else None
+            )
+            if next_table_id is not None and next_table_id in table_model_index:
+                items.append(
+                    _structured_table_item(
+                        next_table_id,
+                        table_model_index[next_table_id],
+                    )
+                )
+                idx = next_idx + 1
+                continue
+
+            matched_model = _find_matching_structured_table(
+                maybe_table,
+                table_model_index,
+            )
+            if matched_model is not None:
+                matched_table_id, table_model = matched_model
+                items.append(_structured_table_item(matched_table_id, table_model))
+            else:
+                items.append({"type": "table", "rows": maybe_table})
             idx = next_idx
         else:
             items.append({"type": "text", "line": line})

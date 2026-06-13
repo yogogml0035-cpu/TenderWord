@@ -8,6 +8,7 @@ from backend.helper.word_helper.content_ops import (
     ensure_following_body_paragraph_insert_pos,
     insert_content_with_formatting,
     insert_items_inline_at_end_of_paragraph,
+    insert_table_with_formatting,
     reset_generated_text_font_format,
     resolve_following_insert_pos,
 )
@@ -198,6 +199,76 @@ class _FakeFormatDoc:
         return range_obj
 
 
+class _FakeCellRange:
+    def __init__(self, start: int = 0, end: int = 2):
+        self.Start = int(start)
+        self.End = int(end)
+        self.Font = _FakeFont()
+        self.HighlightColorIndex = 0
+        self.ParagraphFormat = _FakeParagraphFormat()
+
+    def InsertBefore(self, value: str) -> None:
+        self.inserted_text = str(value)
+
+
+class _FakeCell:
+    def __init__(self, row: int, col: int):
+        self.row = int(row)
+        self.col = int(col)
+        self.Range = _FakeCellRange()
+        self.VerticalAlignment = None
+        self.merge_calls: list[tuple[int, int, int, int]] = []
+
+    def Merge(self, other: "_FakeCell") -> None:
+        self.merge_calls.append((self.row, self.col, other.row, other.col))
+
+
+class _FakeBorders:
+    def __init__(self):
+        self.Enable = False
+
+
+class _FakeTable:
+    def __init__(self, rows: int, cols: int):
+        self.rows = int(rows)
+        self.cols = int(cols)
+        self.Borders = _FakeBorders()
+        self.Range = type("_FakeTableRange", (), {"End": 999})()
+        self.cells = {
+            (row, col): _FakeCell(row, col)
+            for row in range(1, rows + 1)
+            for col in range(1, cols + 1)
+        }
+
+    def Cell(self, row: int, col: int) -> _FakeCell:
+        return self.cells[(int(row), int(col))]
+
+
+class _FakeTablesCollection:
+    def __init__(self, owner: "_FakeTableDoc"):
+        self.owner = owner
+
+    def Add(self, _table_range, rows: int, cols: int) -> _FakeTable:
+        table = _FakeTable(rows, cols)
+        self.owner.created_tables.append(table)
+        return table
+
+
+class _FakeTableDoc(_FakeFormatDoc):
+    def __init__(self):
+        super().__init__()
+        self.created_tables: list[_FakeTable] = []
+        self.Tables = _FakeTablesCollection(self)
+        self.deleted_ranges: list[tuple[int, int]] = []
+
+    def Range(self, start: int, end: int):
+        if int(end) < int(start):
+            end = start
+        range_obj = _FakeFormatRange(self, start, end)
+        range_obj.Delete = lambda: self.deleted_ranges.append((int(start), int(end)))
+        return range_obj
+
+
 def assert_clean_generated_font(font: _FakeFont, *, name: str = "宋体", size: int = 12) -> None:
     assert font.Name == name
     assert font.Size == size
@@ -307,6 +378,68 @@ def test_insert_items_inline_table_fallback_sanitizes_text_rows(monkeypatch) -> 
     assert inserted == 1
     assert seen["log_parts"] is log_parts
     assert_clean_generated_format(doc.created_ranges[-1])
+
+
+def test_insert_items_inline_structured_table_fallback_sanitizes_text_rows(monkeypatch) -> None:
+    doc = _FakeFormatDoc()
+    paragraph = _FakeParagraphRange(20, "付款方式：旧值\r")
+
+    monkeypatch.setattr(
+        content_ops_module,
+        "insert_table_with_formatting",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("structured insert failed")),
+    )
+
+    inserted = insert_items_inline_at_end_of_paragraph(
+        doc,
+        paragraph,
+        [
+            {
+                "type": "structured_table",
+                "table_id": "TP1",
+                "table_model": {
+                    "table_id": "TP1",
+                    "rows": 1,
+                    "cols": 2,
+                    "cells": [
+                        {"row": 1, "col": 1, "row_span": 1, "col_span": 2, "text": "合计"}
+                    ],
+                },
+            }
+        ],
+        get_bound_end=lambda: 100,
+    )
+
+    assert inserted == 1
+    assert_clean_generated_format(doc.created_ranges[-1])
+
+
+def test_insert_table_with_formatting_restores_structured_merge_topology() -> None:
+    doc = _FakeTableDoc()
+    insert_range = doc.Range(10, 10)
+
+    table = insert_table_with_formatting(
+        doc,
+        insert_range,
+        structured_table={
+            "table_id": "TP1",
+            "rows": 3,
+            "cols": 3,
+            "cells": [
+                {"row": 1, "col": 1, "row_span": 2, "col_span": 2, "text": "楼宇"},
+                {"row": 1, "col": 3, "row_span": 1, "col_span": 1, "text": "岗位"},
+                {"row": 2, "col": 3, "row_span": 1, "col_span": 1, "text": "安保"},
+                {"row": 3, "col": 1, "row_span": 1, "col_span": 3, "text": "合计"},
+            ],
+        },
+        get_bound_end=lambda: 100,
+    )
+
+    assert table is doc.created_tables[0]
+    assert table.Cell(1, 1).merge_calls == [(1, 1, 2, 2)]
+    assert table.Cell(3, 1).merge_calls == [(3, 1, 3, 3)]
+    assert table.Cell(1, 1).Range.inserted_text == "楼宇"
+    assert table.Cell(3, 1).Range.inserted_text == "合计"
 
 
 def test_ensure_following_body_paragraph_insert_pos_creates_new_paragraph_when_gap_missing(

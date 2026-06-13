@@ -13,6 +13,7 @@
 
 - `GenerateRequest.file_paths` 当前只接受 `template` 与 `tender_params`。
 - 生成节点只消费 `template_path` 与 `tender_param_paths`，不要重新引入旧文件槽位。
+- 合并单元格表格拓扑是后端内部运行时状态：结构化 sidecar 字段 `tender_param_table_models`、表格文本投影和正文中的 `[[TABLE:table_id]]` 占位符只在生成/写回运行时内部使用，不进入前端 API、SSE 契约或 rewrite 请求模型。
 - `generation_style`、`generation_mode`、`comment_generation_mode` 和 `style_writeback_mode` 都是 generate-only 字段，不得进入 rewrite 请求模型、skill state 或 prompt surface。
 - `generation_mode=workflow` 走旧 `generate_polished_text`，`generation_mode=agent` 走公共 `content_agent`。
 - `comment_generation_mode=off` 时 workflow 与 agent 生成都跳过 AI 批注生成和 bad case 检索增强，不进入 rewrite 链路。

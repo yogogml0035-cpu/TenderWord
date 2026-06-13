@@ -39,7 +39,6 @@ from backend.util.word_util import (  # noqa: E402
     close_word_application,
     create_word_application,
     normalize_word_body_text,
-    normalize_word_cell_text,
     open_document_with_retry,
     save_document_with_retry,
     unprotect_document,
@@ -58,10 +57,11 @@ from backend.helper.word_helper.range_utils import (  # noqa: E402
     range_overlaps,
 )
 from backend.helper.word_helper.text_parsing import (  # noqa: E402
-    parse_table_block,
+    convert_lines_to_items as helper_convert_lines_to_items,
 )
 from backend.helper.word_helper.content_ops import (  # noqa: E402
     apply_standard_insert_format,
+    insert_table_with_formatting as helper_insert_table_with_formatting,
 )
 from backend.helper.word_helper.cleanup_ops import (  # noqa: E402
     normalize_cleanup_text,
@@ -109,26 +109,20 @@ def _visible_log(message: str) -> None:
     progress_log.info(f"[{NODE_NAME}] {message}")
 
 
-def _build_insert_items(polished_text: str) -> List[Dict[str, Any]]:
+def _build_insert_items(
+    polished_text: str,
+    *,
+    structured_table_models: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     normalized_text = polished_text.replace("\r\n", "\n").replace("\r", "\n")
     raw_lines = [line.rstrip() for line in normalized_text.split("\n")]
-
-    items: List[Dict[str, Any]] = []
-    idx = 0
-    while idx < len(raw_lines):
-        if not raw_lines[idx].strip():
-            items.append({"type": "text", "line": ""})
-            idx += 1
-            continue
-
-        maybe_table, next_idx = parse_table_block(raw_lines, idx)
-        if maybe_table:
-            items.append({"type": "table", "rows": maybe_table})
-            idx = next_idx
-            continue
-
-        items.append({"type": "text", "line": raw_lines[idx].strip()})
-        idx += 1
+    items: List[Dict[str, Any]] = helper_convert_lines_to_items(
+        raw_lines,
+        structured_table_models=structured_table_models,
+    )
+    for item in items:
+        if item.get("type") == "text":
+            item["line"] = str(item.get("line") or "").strip()
 
     while items and items[-1].get("type") == "text" and items[-1].get("line") == "":
         items.pop()
@@ -714,83 +708,23 @@ def _insert_text_line(
 def _insert_table(
     doc,
     insert_range,
-    rows: List[List[str]],
+    rows: Optional[List[List[str]]] = None,
     *,
+    structured_table: Optional[Dict[str, Any]] = None,
     bound_start: int,
     get_bound_end: Callable[[], int],
     log_parts: Optional[List[str]] = None,
 ):
-    if not rows:
-        return None
-
-    _ensure_insert_range(
+    table = helper_insert_table_with_formatting(
         doc,
         insert_range,
-        bound_start=bound_start,
+        rows,
+        structured_table=structured_table,
         get_bound_end=get_bound_end,
+        log_parts=log_parts,
     )
-    if log_parts is not None:
-        log_parts.append(_describe_range_state(doc, insert_range, label="表格插入前"))
-    try:
-        if _is_within_table(insert_range):
-            moved_after_table = _move_insert_range_after_current_table(
-                doc,
-                insert_range,
-                bound_start=bound_start,
-                get_bound_end=get_bound_end,
-            )
-            if not moved_after_table:
-                parent_tables = insert_range.Tables
-                if int(getattr(parent_tables, "Count", 0)) > 0:
-                    host_table = parent_tables(1)
-                    end_pos = int(host_table.Range.End)
-                    bound_end = int(get_bound_end())
-                    if end_pos > bound_end:
-                        end_pos = bound_end
-                    _set_collapsed_range(insert_range, end_pos)
-    except Exception:
-        pass
-
-    cols = max(len(row) for row in rows)
-    start_pos = int(insert_range.End)
-    table_range = doc.Range(start_pos, start_pos)
-    table = doc.Tables.Add(table_range, len(rows), cols)
-
-    try:
-        table.Borders.Enable = True
-    except Exception:
-        pass
-
-    for row_idx, row in enumerate(rows):
-        for col_idx in range(cols):
-            cell_value = row[col_idx] if col_idx < len(row) else ""
-            try:
-                cell = table.Cell(row_idx + 1, col_idx + 1)
-                cell_range = cell.Range
-                if cell_range.End > cell_range.Start + 1:
-                    doc.Range(cell_range.Start, cell_range.End - 1).Delete()
-
-                cell_range = cell.Range
-                cell_text = normalize_word_cell_text(str(cell_value or ""))
-                cell_range.InsertBefore(cell_text)
-
-                cell_range = cell.Range
-                apply_standard_insert_format(cell_range, log_parts=log_parts)
-                cell_range.ParagraphFormat.Alignment = 0
-                cell.VerticalAlignment = 1
-            except Exception as exc:
-                if log_parts is not None:
-                    log_parts.append(
-                        f"表格单元格格式化失败 r={row_idx + 1}, c={col_idx + 1}: {exc}"
-                    )
-                continue
-
-    try:
-        insert_range.SetRange(table.Range.End, table.Range.End)
-    except Exception:
-        insert_range.Collapse(wdCollapseEnd)
-        insert_range.Start = table.Range.End
-        insert_range.End = table.Range.End
+    if table is None:
+        return None
 
     # Word COM 在表尾位置经常仍判定为表内，下一项若继续写入会把新文本/新表格灌进宿主表。
     moved_after_table = False
@@ -806,14 +740,19 @@ def _insert_table(
         moved_after_table = False
 
     if not moved_after_table:
+        try:
+            table_end = int(table.Range.End)
+        except Exception:
+            table_end = int(getattr(insert_range, "Start", bound_start))
         _ensure_insert_range(
             doc,
             insert_range,
             bound_start=bound_start,
             get_bound_end=lambda: max(
                 int(get_bound_end()),
-                int(getattr(insert_range, "Start", start_pos)),
-                int(getattr(insert_range, "End", start_pos)),
+                table_end,
+                int(getattr(insert_range, "Start", table_end)),
+                int(getattr(insert_range, "End", table_end)),
             ),
         )
     return table
@@ -1086,7 +1025,15 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
         raise ValueError("gjgk 插入必须提供 insertion_before_text 和 insertion_after_text")
 
     before_size, after_size = get_anchor_target_sizes("gjgk")
-    items = _build_insert_items(polished_text)
+    try:
+        items = _build_insert_items(
+            polished_text,
+            structured_table_models=state.get("tender_param_table_models") or [],
+        )
+    except TypeError as exc:
+        if "structured_table_models" not in str(exc):
+            raise
+        items = _build_insert_items(polished_text)
     if not items:
         raise ValueError("gjgk 插入内容为空，无法执行更新")
 
@@ -1263,19 +1210,33 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
                         )
                         break
 
-                    log_parts.append(
-                        f"准备插入[{item_idx}/{len(items)}] 表格, attempt={attempts}, "
-                        f"cursor={int(insert_range.Start)}, bound_end={int(get_insertion_bound_end())}, "
-                        f"rows={len(item.get('rows', []))}"
-                    )
-                    _insert_table(
-                        doc,
-                        insert_range,
-                        item["rows"],
-                        bound_start=insert_start,
-                        get_bound_end=get_insertion_bound_end,
-                        log_parts=log_parts,
-                    )
+                    if item_type == "structured_table":
+                        log_parts.append(
+                            f"准备插入[{item_idx}/{len(items)}] 结构化表格 {item.get('table_id')}, attempt={attempts}, "
+                            f"cursor={int(insert_range.Start)}, bound_end={int(get_insertion_bound_end())}"
+                        )
+                        _insert_table(
+                            doc,
+                            insert_range,
+                            structured_table=item["table_model"],
+                            bound_start=insert_start,
+                            get_bound_end=get_insertion_bound_end,
+                            log_parts=log_parts,
+                        )
+                    else:
+                        log_parts.append(
+                            f"准备插入[{item_idx}/{len(items)}] 表格, attempt={attempts}, "
+                            f"cursor={int(insert_range.Start)}, bound_end={int(get_insertion_bound_end())}, "
+                            f"rows={len(item.get('rows', []))}"
+                        )
+                        _insert_table(
+                            doc,
+                            insert_range,
+                            item["rows"],
+                            bound_start=insert_start,
+                            get_bound_end=get_insertion_bound_end,
+                            log_parts=log_parts,
+                        )
                     insert_cursor_bound_end[0] = max(
                         int(insert_cursor_bound_end[0] or insert_start),
                         int(insert_range.Start),
@@ -1295,10 +1256,16 @@ def gjgk_update_word(state: GjgkTenderGraphState, config) -> GjgkTenderGraphStat
                         int(insert_range.End),
                     )
                     inserted_count += 1
-                    log_parts.append(
-                        f"[{inserted_count}/{len(items)}] 已插入表格，行数 {len(item['rows'])} "
-                        f"(游标 {int(insert_range.Start)} / 上界 {int(get_insertion_bound_end())})"
-                    )
+                    if item_type == "structured_table":
+                        log_parts.append(
+                            f"[{inserted_count}/{len(items)}] 已插入结构化表格 {item['table_id']} "
+                            f"(游标 {int(insert_range.Start)} / 上界 {int(get_insertion_bound_end())})"
+                        )
+                    else:
+                        log_parts.append(
+                            f"[{inserted_count}/{len(items)}] 已插入表格，行数 {len(item['rows'])} "
+                            f"(游标 {int(insert_range.Start)} / 上界 {int(get_insertion_bound_end())})"
+                        )
                     break
                 except Exception as exc:
                     try:

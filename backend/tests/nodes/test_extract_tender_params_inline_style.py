@@ -231,19 +231,55 @@ def test_extract_tender_params_joins_multiple_tender_param_paths(
         progress_warnings=progress_warnings,
         debug_messages=debug_messages,
     )
+    structured_extract_calls: list[str] = []
+
+    def _fake_extract_content_with_table_models(_range, *, table_id_prefix: str = "TP"):
+        structured_extract_calls.append(table_id_prefix)
+        return (
+            "技术参数:param-one\n[[TABLE:TP1_1]]",
+            [
+                {
+                    "table_id": "TP1_1",
+                    "rows": 1,
+                    "cols": 2,
+                    "cells": [
+                        {"row": 1, "col": 1, "row_span": 1, "col_span": 2, "text": "合计"}
+                    ],
+                }
+            ],
+        )
+
+    monkeypatch.setattr(
+        extract_module,
+        "_extract_structured_tender_param_file",
+        lambda file_path_obj, *, file_index: _fake_extract_content_with_table_models(
+            file_path_obj,
+            table_id_prefix=f"TP{file_index}_",
+        ),
+    )
 
     result = extract_module.extract_tender_params(
         {
             **_build_state(doc_path),
-            "tender_param_paths": [str(param_one), str(param_two)],
+            "tender_param_paths": [str(param_one)],
         },
         config=None,
     )
 
     assert result["template_reference_text"] == "原始采购需求"
-    assert result["tender_params"] == "技术参数:param-one\n\n技术参数:param-two"
+    assert result["tender_params"] == "技术参数:param-one\n[[TABLE:TP1_1]]"
+    assert result["tender_param_table_models"] == [
+        {
+            "table_id": "TP1_1",
+            "rows": 1,
+            "cols": 2,
+            "cells": [
+                {"row": 1, "col": 1, "row_span": 1, "col_span": 2, "text": "合计"}
+            ],
+        }
+    ]
     assert style_call["opened_file_path"] == str(doc_path)
-    assert style_call["tender_param_paths"] == [str(param_one), str(param_two)]
+    assert structured_extract_calls == ["TP1_"]
 
 
 def test_extract_tender_params_style_extraction_failure_is_best_effort(

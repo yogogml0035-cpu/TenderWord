@@ -177,6 +177,83 @@ def test_convert_lines_to_items_keeps_blank_text_rows() -> None:
     ]
 
 
+def test_convert_lines_to_items_recognizes_structured_table_placeholder() -> None:
+    items = _convert_lines_to_items(
+        ["第一段", "[[TABLE:TP1]]", "第二段"],
+        structured_table_models=[
+            {
+                "table_id": "TP1",
+                "rows": 1,
+                "cols": 2,
+                "cells": [
+                    {"row": 1, "col": 1, "row_span": 1, "col_span": 2, "text": "合计"}
+                ],
+            }
+        ],
+    )
+
+    assert items[0] == {"type": "text", "line": "第一段"}
+    assert items[1]["type"] == "structured_table"
+    assert items[1]["table_id"] == "TP1"
+    assert items[1]["table_model"]["cells"][0]["col_span"] == 2
+    assert items[2] == {"type": "text", "line": "第二段"}
+
+
+def test_convert_lines_to_items_deduplicates_table_projection_before_placeholder() -> None:
+    table_model = {
+        "table_id": "TP1",
+        "rows": 2,
+        "cols": 3,
+        "cells": [
+            {"row": 1, "col": 1, "row_span": 1, "col_span": 1, "text": "A"},
+            {"row": 1, "col": 2, "row_span": 1, "col_span": 1, "text": "B"},
+            {"row": 1, "col": 3, "row_span": 1, "col_span": 1, "text": "C"},
+            {"row": 2, "col": 1, "row_span": 1, "col_span": 2, "text": "合计"},
+            {"row": 2, "col": 3, "row_span": 1, "col_span": 1, "text": "3"},
+        ],
+    }
+
+    items = _convert_lines_to_items(
+        [
+            "| A | B | C |",
+            "| 合计 | 合计 | 3 |",
+            "[[TABLE:TP1]]",
+        ],
+        structured_table_models=[table_model],
+    )
+
+    assert items == [
+        {"type": "structured_table", "table_id": "TP1", "table_model": table_model}
+    ]
+
+
+def test_convert_lines_to_items_restores_projection_only_table_from_sidecar() -> None:
+    table_model = {
+        "table_id": "TP1",
+        "rows": 2,
+        "cols": 3,
+        "cells": [
+            {"row": 1, "col": 1, "row_span": 1, "col_span": 1, "text": "A"},
+            {"row": 1, "col": 2, "row_span": 1, "col_span": 1, "text": "B"},
+            {"row": 1, "col": 3, "row_span": 1, "col_span": 1, "text": "C"},
+            {"row": 2, "col": 1, "row_span": 1, "col_span": 2, "text": "合计"},
+            {"row": 2, "col": 3, "row_span": 1, "col_span": 1, "text": "3"},
+        ],
+    }
+
+    items = _convert_lines_to_items(
+        [
+            "| A | B | C |",
+            "| 合计 | 合计 | 3 |",
+        ],
+        structured_table_models=[table_model],
+    )
+
+    assert items == [
+        {"type": "structured_table", "table_id": "TP1", "table_model": table_model}
+    ]
+
+
 def test_strict_block_helpers_reject_invalid_windows_and_after_anchor_overflow() -> None:
     with pytest.raises(ValueError, match="服务期限与付款方式之间字段区间非法"):
         _validate_block_window(20, 10, label="服务期限与付款方式之间")

@@ -30,9 +30,19 @@ from backend.util.word_util.word_com_manager import (
 from backend.util.word_util.word_extraction_utils import (
     extract_text_from_word_file,
     extract_content_with_tables,
+    extract_content_with_table_models,
     extract_table_as_text,
     extract_text_with_list_numbers,
     extract_text_with_superscript_subscript,
+)
+from backend.util.word_util.table_models import (
+    StructuredTableModel,
+    TableCellModel,
+    build_structured_table_model_index,
+    match_table_placeholder,
+    normalize_structured_table_model,
+    render_structured_table_grid,
+    render_structured_table_markdown,
 )
 
 from backend.util.word_util.word_document_inspector import (
@@ -96,9 +106,17 @@ __all__ = [
     # word_extraction_utils
     "extract_text_from_word_file",
     "extract_content_with_tables",
+    "extract_content_with_table_models",
     "extract_table_as_text",
     "extract_text_with_list_numbers",
     "extract_text_with_superscript_subscript",
+    "StructuredTableModel",
+    "TableCellModel",
+    "build_structured_table_model_index",
+    "match_table_placeholder",
+    "normalize_structured_table_model",
+    "render_structured_table_grid",
+    "render_structured_table_markdown",
     # word_document_inspector
     "CommentInfo",
     "StrikethroughInfo",

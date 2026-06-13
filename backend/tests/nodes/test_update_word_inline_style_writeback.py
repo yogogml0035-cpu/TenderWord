@@ -292,6 +292,49 @@ def _patch_gjgk_update_runtime(
     monkeypatch.setattr(gjgk_update_module, "close_word_application", lambda **_kwargs: None)
 
 
+def test_gjgk_insert_table_keeps_after_table_cursor_guard(monkeypatch) -> None:
+    fake_doc = _FakeDoc()
+    insert_range = fake_doc.Range(20, 20)
+    calls: list[str] = []
+
+    def _fake_insert_table_helper(*_args, **_kwargs):
+        calls.append("helper")
+        insert_range.Start = 50
+        insert_range.End = 50
+        return SimpleNamespace(Range=SimpleNamespace(End=50))
+
+    def _fake_move_after_table(*_args, **_kwargs):
+        calls.append("move_after_table")
+        return True
+
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "helper_insert_table_with_formatting",
+        _fake_insert_table_helper,
+    )
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "_move_insert_range_after_current_table",
+        _fake_move_after_table,
+    )
+    monkeypatch.setattr(
+        gjgk_update_module,
+        "_ensure_insert_range",
+        lambda *_args, **_kwargs: calls.append("ensure"),
+    )
+
+    table = gjgk_update_module._insert_table(
+        fake_doc,
+        insert_range,
+        [["A", "B"]],
+        bound_start=20,
+        get_bound_end=lambda: 100,
+    )
+
+    assert table.Range.End == 50
+    assert calls == ["helper", "move_after_table"]
+
+
 @pytest.mark.parametrize(
     ("module", "function_name", "polished_text", "marker_ranges", "expected_step"),
     [

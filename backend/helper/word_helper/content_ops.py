@@ -25,6 +25,11 @@ from backend.helper.word_helper.paragraph_boundary_ops import (
     ensure_paragraph_break_after_paragraph,
     is_writable_body_paragraph_pos,
 )
+from backend.util.word_util.table_models import (
+    StructuredTableModel,
+    normalize_structured_table_model,
+    render_structured_table_grid,
+)
 
 GENERATED_TEXT_FONT_RESET_VERSION = "font_sanitize_v1"
 GENERATED_TEXT_DEFAULT_COLOR = 0
@@ -187,8 +192,9 @@ def insert_content_with_formatting(
 def insert_table_with_formatting(
     doc,
     insert_range,
-    rows: List[List[str]],
+    rows: Optional[List[List[str]]] = None,
     *,
+    structured_table: Optional[StructuredTableModel | Dict[str, Any]] = None,
     get_bound_end: Optional[Callable[[], int]] = None,
     font_name: str = "宋体",
     font_size: int = 12,
@@ -201,6 +207,7 @@ def insert_table_with_formatting(
         doc: Word Document COM 对象
         insert_range: 当前插入游标 Range
         rows: 二维列表 [[cell, cell, ...], ...]
+        structured_table: 结构化表格模型（含合并拓扑）
         get_bound_end: 可选，获取当前插入边界末尾位置的回调
         font_name: 字体名称
         font_size: 字号
@@ -208,6 +215,14 @@ def insert_table_with_formatting(
     Returns:
         创建的 Table 对象，如果 rows 为空则返回 None
     """
+    table_model = (
+        normalize_structured_table_model(structured_table)
+        if structured_table is not None
+        else None
+    )
+    if table_model is not None:
+        rows = render_structured_table_grid(table_model, repeat_merged_text=False)
+
     if not rows:
         return None
 
@@ -227,28 +242,42 @@ def insert_table_with_formatting(
     except Exception:
         pass
 
-    cols = max(len(r) for r in rows)
+    cols = table_model["cols"] if table_model is not None else max(len(r) for r in rows)
     start_pos = insert_range.End
     table_range = doc.Range(start_pos, start_pos)
-    table = doc.Tables.Add(table_range, len(rows), cols)
+    row_count = table_model["rows"] if table_model is not None else len(rows)
+    table = doc.Tables.Add(table_range, row_count, cols)
     try:
         table.Borders.Enable = True
     except Exception:
         pass
 
-    # 填充所有行的所有单元格
-    for r_idx, row in enumerate(rows):
-        for c_idx in range(cols):
-            val = row[c_idx] if c_idx < len(row) else ""
+    # 优先按结构化拓扑恢复合并，然后填 anchor 单元格
+    if table_model is not None:
+        try:
+            for cell_model in table_model["cells"]:
+                row_start = int(cell_model["row"])
+                col_start = int(cell_model["col"])
+                row_end = row_start + int(cell_model["row_span"]) - 1
+                col_end = col_start + int(cell_model["col_span"]) - 1
+                if row_end > row_start or col_end > col_start:
+                    anchor_cell = table.Cell(row_start, col_start)
+                    target_cell = table.Cell(row_end, col_end)
+                    anchor_cell.Merge(target_cell)
+        except Exception as exc:
+            if log_parts is not None:
+                log_parts.append(f"    警告: 结构化表格合并恢复失败: {exc}")
+
+        for cell_model in table_model["cells"]:
             try:
-                cell = table.Cell(r_idx + 1, c_idx + 1)
+                cell = table.Cell(int(cell_model["row"]), int(cell_model["col"]))
                 cell_range = cell.Range
                 if cell_range.End > cell_range.Start + 1:
                     delete_range = doc.Range(cell_range.Start, cell_range.End - 1)
                     delete_range.Delete()
 
                 cell_range = cell.Range
-                cell_text = "" if val is None else str(val)
+                cell_text = "" if cell_model["text"] is None else str(cell_model["text"])
                 cell_text = normalize_word_cell_text(cell_text)
                 cell_range.InsertBefore(cell_text)
 
@@ -265,8 +294,40 @@ def insert_table_with_formatting(
                 if log_parts is not None:
                     log_parts.append(
                         f"    警告: 表格单元格格式化失败 "
-                        f"r={r_idx + 1}, c={c_idx + 1}: {exc}"
+                        f"r={cell_model['row']}, c={cell_model['col']}: {exc}"
                     )
+    else:
+        # 填充所有行的所有单元格
+        for r_idx, row in enumerate(rows):
+            for c_idx in range(cols):
+                val = row[c_idx] if c_idx < len(row) else ""
+                try:
+                    cell = table.Cell(r_idx + 1, c_idx + 1)
+                    cell_range = cell.Range
+                    if cell_range.End > cell_range.Start + 1:
+                        delete_range = doc.Range(cell_range.Start, cell_range.End - 1)
+                        delete_range.Delete()
+
+                    cell_range = cell.Range
+                    cell_text = "" if val is None else str(val)
+                    cell_text = normalize_word_cell_text(cell_text)
+                    cell_range.InsertBefore(cell_text)
+
+                    cell_range = cell.Range
+                    apply_standard_insert_format(
+                        cell_range,
+                        font_name=font_name,
+                        font_size=font_size,
+                        log_parts=log_parts,
+                    )
+                    cell_range.ParagraphFormat.Alignment = 0
+                    cell.VerticalAlignment = 1
+                except Exception as exc:
+                    if log_parts is not None:
+                        log_parts.append(
+                            f"    警告: 表格单元格格式化失败 "
+                            f"r={r_idx + 1}, c={c_idx + 1}: {exc}"
+                        )
 
     try:
         insert_range.SetRange(table.Range.End, table.Range.End)
@@ -569,6 +630,35 @@ def insert_items_inline_at_end_of_paragraph(
             )
             rng.Collapse(wdCollapseEnd)
             inserted += 1
+        elif item["type"] == "structured_table":
+            try:
+                insert_table_with_formatting(
+                    doc,
+                    rng,
+                    structured_table=item["table_model"],
+                    get_bound_end=get_bound_end,
+                    font_name=font_name,
+                    font_size=font_size,
+                    log_parts=log_parts,
+                )
+                inserted += 1
+            except Exception as e:
+                if log_parts is not None:
+                    log_parts.append(f"    警告: 内联插入结构化表格失败，改为文本: {e}")
+                for row in render_structured_table_grid(item["table_model"]):
+                    s = "\r" + normalize_word_body_text(" | ".join(row))
+                    st = int(rng.Start)
+                    rng.InsertAfter(s)
+                    ed = int(rng.End)
+                    ins = doc.Range(st, ed)
+                    reset_generated_text_font_format(
+                        ins,
+                        font_name=font_name,
+                        font_size=font_size,
+                        log_parts=log_parts,
+                    )
+                    rng.Collapse(wdCollapseEnd)
+                    inserted += 1
         elif item["type"] == "table":
             try:
                 insert_table_with_formatting(

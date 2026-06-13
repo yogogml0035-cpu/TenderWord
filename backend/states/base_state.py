@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
+from backend.util.word_util.table_models import StructuredTableModel
+
 
 class BaseState(TypedDict, total=False):
     """
@@ -54,6 +56,7 @@ class TenderGraphStateBase(BaseState, total=False):
 
     template_reference_text: str
     tender_params: str
+    tender_param_table_models: List[StructuredTableModel]
     inline_style_fragments: List[Dict[str, Any]]
     verbose_style_progress_logs: bool
     suppress_comment_progress_logs: bool
