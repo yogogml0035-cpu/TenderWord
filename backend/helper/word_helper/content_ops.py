@@ -189,6 +189,119 @@ def insert_content_with_formatting(
 # 表格插入
 # ---------------------------------------------------------------------------
 
+def _write_table_cell_text(
+    doc,
+    table,
+    row: int,
+    col: int,
+    value: Any,
+    *,
+    font_name: str,
+    font_size: int,
+    log_parts: Optional[List[str]] = None,
+) -> None:
+    cell = table.Cell(row, col)
+    cell_range = cell.Range
+    if cell_range.End > cell_range.Start + 1:
+        delete_range = doc.Range(cell_range.Start, cell_range.End - 1)
+        delete_range.Delete()
+
+    cell_range = cell.Range
+    cell_text = "" if value is None else str(value)
+    cell_text = normalize_word_cell_text(cell_text)
+    cell_range.InsertBefore(cell_text)
+
+    cell_range = cell.Range
+    apply_standard_insert_format(
+        cell_range,
+        font_name=font_name,
+        font_size=font_size,
+        log_parts=log_parts,
+    )
+    cell_range.ParagraphFormat.Alignment = 0
+    cell.VerticalAlignment = 1
+
+
+def _sorted_structured_merge_cells(table_model: StructuredTableModel) -> list[Dict[str, Any]]:
+    merge_cells: list[Dict[str, Any]] = []
+    for cell_model in table_model["cells"]:
+        row_span = int(cell_model["row_span"])
+        col_span = int(cell_model["col_span"])
+        if row_span > 1 or col_span > 1:
+            merge_cells.append(cell_model)
+
+    return sorted(
+        merge_cells,
+        key=lambda cell_model: (
+            -int(cell_model["row"]),
+            -int(cell_model["col"]),
+        ),
+    )
+
+
+def _restore_structured_table_merges(
+    table,
+    table_model: StructuredTableModel,
+    *,
+    log_parts: Optional[List[str]] = None,
+) -> None:
+    table_id = table_model["table_id"]
+    for cell_model in _sorted_structured_merge_cells(table_model):
+        row_start = int(cell_model["row"])
+        col_start = int(cell_model["col"])
+        row_span = int(cell_model["row_span"])
+        col_span = int(cell_model["col_span"])
+        row_end = row_start + row_span - 1
+        col_end = col_start + col_span - 1
+        try:
+            anchor_cell = table.Cell(row_start, col_start)
+            target_cell = table.Cell(row_end, col_end)
+            anchor_cell.Merge(target_cell)
+        except Exception as exc:
+            if log_parts is not None:
+                log_parts.append(
+                    "    警告: 结构化表格合并恢复失败 "
+                    f"table_id={table_id}, row={row_start}, col={col_start}, "
+                    f"row_span={row_span}, col_span={col_span}: {exc}"
+                )
+
+
+def _apply_table_format_compensation(
+    table,
+    *,
+    font_name: str,
+    font_size: int,
+    log_parts: Optional[List[str]] = None,
+) -> None:
+    try:
+        table.Borders.Enable = True
+    except Exception:
+        pass
+
+    try:
+        table_range = table.Range
+    except Exception:
+        return
+
+    if hasattr(table_range, "Font") and hasattr(table_range, "ParagraphFormat"):
+        try:
+            apply_standard_insert_format(
+                table_range,
+                font_name=font_name,
+                font_size=font_size,
+                log_parts=log_parts,
+            )
+            table_range.ParagraphFormat.Alignment = 0
+        except Exception:
+            pass
+
+    if hasattr(table_range, "Cells"):
+        try:
+            table_range.Cells.VerticalAlignment = 1
+        except Exception:
+            pass
+
+
 def insert_table_with_formatting(
     doc,
     insert_range,
@@ -252,50 +365,36 @@ def insert_table_with_formatting(
     except Exception:
         pass
 
-    # 优先按结构化拓扑恢复合并，然后填 anchor 单元格
     if table_model is not None:
-        try:
-            for cell_model in table_model["cells"]:
-                row_start = int(cell_model["row"])
-                col_start = int(cell_model["col"])
-                row_end = row_start + int(cell_model["row_span"]) - 1
-                col_end = col_start + int(cell_model["col_span"]) - 1
-                if row_end > row_start or col_end > col_start:
-                    anchor_cell = table.Cell(row_start, col_start)
-                    target_cell = table.Cell(row_end, col_end)
-                    anchor_cell.Merge(target_cell)
-        except Exception as exc:
-            if log_parts is not None:
-                log_parts.append(f"    警告: 结构化表格合并恢复失败: {exc}")
-
-        for cell_model in table_model["cells"]:
-            try:
-                cell = table.Cell(int(cell_model["row"]), int(cell_model["col"]))
-                cell_range = cell.Range
-                if cell_range.End > cell_range.Start + 1:
-                    delete_range = doc.Range(cell_range.Start, cell_range.End - 1)
-                    delete_range.Delete()
-
-                cell_range = cell.Range
-                cell_text = "" if cell_model["text"] is None else str(cell_model["text"])
-                cell_text = normalize_word_cell_text(cell_text)
-                cell_range.InsertBefore(cell_text)
-
-                cell_range = cell.Range
-                apply_standard_insert_format(
-                    cell_range,
-                    font_name=font_name,
-                    font_size=font_size,
-                    log_parts=log_parts,
-                )
-                cell_range.ParagraphFormat.Alignment = 0
-                cell.VerticalAlignment = 1
-            except Exception as exc:
-                if log_parts is not None:
-                    log_parts.append(
-                        f"    警告: 表格单元格格式化失败 "
-                        f"r={cell_model['row']}, c={cell_model['col']}: {exc}"
+        for r_idx in range(row_count):
+            row = rows[r_idx] if r_idx < len(rows) else []
+            for c_idx in range(cols):
+                val = row[c_idx] if c_idx < len(row) else ""
+                try:
+                    _write_table_cell_text(
+                        doc,
+                        table,
+                        r_idx + 1,
+                        c_idx + 1,
+                        val,
+                        font_name=font_name,
+                        font_size=font_size,
+                        log_parts=log_parts,
                     )
+                except Exception as exc:
+                    if log_parts is not None:
+                        log_parts.append(
+                            f"    警告: 表格单元格格式化失败 "
+                            f"r={r_idx + 1}, c={c_idx + 1}: {exc}"
+                        )
+
+        _restore_structured_table_merges(table, table_model, log_parts=log_parts)
+        _apply_table_format_compensation(
+            table,
+            font_name=font_name,
+            font_size=font_size,
+            log_parts=log_parts,
+        )
     else:
         # 填充所有行的所有单元格
         for r_idx, row in enumerate(rows):

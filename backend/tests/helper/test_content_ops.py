@@ -212,15 +212,20 @@ class _FakeCellRange:
 
 
 class _FakeCell:
-    def __init__(self, row: int, col: int):
+    def __init__(self, row: int, col: int, table: "_FakeTable"):
         self.row = int(row)
         self.col = int(col)
+        self.table = table
         self.Range = _FakeCellRange()
         self.VerticalAlignment = None
         self.merge_calls: list[tuple[int, int, int, int]] = []
 
     def Merge(self, other: "_FakeCell") -> None:
-        self.merge_calls.append((self.row, self.col, other.row, other.col))
+        merge_call = (self.row, self.col, other.row, other.col)
+        self.table.merge_attempts.append(merge_call)
+        if (self.row, self.col) in self.table.merge_failures:
+            raise RuntimeError("merge failed")
+        self.merge_calls.append(merge_call)
 
 
 class _FakeBorders:
@@ -229,13 +234,21 @@ class _FakeBorders:
 
 
 class _FakeTable:
-    def __init__(self, rows: int, cols: int):
+    def __init__(
+        self,
+        rows: int,
+        cols: int,
+        *,
+        merge_failures: set[tuple[int, int]] | None = None,
+    ):
         self.rows = int(rows)
         self.cols = int(cols)
+        self.merge_failures = set(merge_failures or set())
+        self.merge_attempts: list[tuple[int, int, int, int]] = []
         self.Borders = _FakeBorders()
         self.Range = type("_FakeTableRange", (), {"End": 999})()
         self.cells = {
-            (row, col): _FakeCell(row, col)
+            (row, col): _FakeCell(row, col, self)
             for row in range(1, rows + 1)
             for col in range(1, cols + 1)
         }
@@ -249,14 +262,15 @@ class _FakeTablesCollection:
         self.owner = owner
 
     def Add(self, _table_range, rows: int, cols: int) -> _FakeTable:
-        table = _FakeTable(rows, cols)
+        table = _FakeTable(rows, cols, merge_failures=self.owner.merge_failures)
         self.owner.created_tables.append(table)
         return table
 
 
 class _FakeTableDoc(_FakeFormatDoc):
-    def __init__(self):
+    def __init__(self, *, merge_failures: set[tuple[int, int]] | None = None):
         super().__init__()
+        self.merge_failures = set(merge_failures or set())
         self.created_tables: list[_FakeTable] = []
         self.Tables = _FakeTablesCollection(self)
         self.deleted_ranges: list[tuple[int, int]] = []
@@ -440,6 +454,97 @@ def test_insert_table_with_formatting_restores_structured_merge_topology() -> No
     assert table.Cell(3, 1).merge_calls == [(3, 1, 3, 3)]
     assert table.Cell(1, 1).Range.inserted_text == "楼宇"
     assert table.Cell(3, 1).Range.inserted_text == "合计"
+
+
+def test_insert_table_with_formatting_continues_after_structured_merge_failure() -> None:
+    doc = _FakeTableDoc()
+    insert_range = doc.Range(10, 10)
+    log_parts: list[str] = []
+
+    table = insert_table_with_formatting(
+        doc,
+        insert_range,
+        structured_table={
+            "table_id": "TP1_1",
+            "rows": 4,
+            "cols": 7,
+            "cells": [
+                {"row": 4, "col": 7, "row_span": 2, "col_span": 1, "text": "前置纵向合并"},
+                {"row": 4, "col": 1, "row_span": 1, "col_span": 5, "text": "合计"},
+                {"row": 4, "col": 6, "row_span": 1, "col_span": 1, "text": "183"},
+            ],
+        },
+        get_bound_end=lambda: 100,
+        log_parts=log_parts,
+    )
+
+    assert table.Cell(4, 1).merge_calls == [(4, 1, 4, 5)]
+    assert table.Cell(4, 1).Range.inserted_text == "合计"
+    assert table.Cell(4, 6).Range.inserted_text == "183"
+    assert any(
+        "table_id=TP1_1, row=4, col=7, row_span=2, col_span=1" in item
+        for item in log_parts
+    )
+
+
+def test_structured_merge_sort_prioritizes_tp1_1_bottom_total() -> None:
+    doc = _FakeTableDoc()
+    insert_range = doc.Range(10, 10)
+
+    table = insert_table_with_formatting(
+        doc,
+        insert_range,
+        structured_table={
+            "table_id": "TP1_1",
+            "rows": 53,
+            "cols": 7,
+            "cells": [
+                {"row": 2, "col": 1, "row_span": 52, "col_span": 1, "text": "复杂纵向合并"},
+                {"row": 53, "col": 1, "row_span": 1, "col_span": 5, "text": "合计"},
+                {"row": 53, "col": 6, "row_span": 1, "col_span": 1, "text": "183"},
+                {"row": 53, "col": 7, "row_span": 1, "col_span": 1, "text": "206"},
+            ],
+        },
+        get_bound_end=lambda: 100,
+    )
+
+    assert table.merge_attempts[0] == (53, 1, 53, 5)
+    assert table.merge_attempts[1] == (2, 1, 53, 1)
+    assert table.Cell(53, 1).Range.inserted_text == "合计"
+    assert table.Cell(53, 6).Range.inserted_text == "183"
+    assert table.Cell(53, 7).Range.inserted_text == "206"
+
+
+def test_insert_table_with_formatting_restores_attachment_title_and_total_merges() -> None:
+    doc = _FakeTableDoc()
+    insert_range = doc.Range(10, 10)
+
+    table = insert_table_with_formatting(
+        doc,
+        insert_range,
+        structured_table={
+            "table_id": "TP1_5",
+            "rows": 4,
+            "cols": 3,
+            "cells": [
+                {"row": 1, "col": 1, "row_span": 1, "col_span": 3, "text": "附件表"},
+                {"row": 2, "col": 1, "row_span": 1, "col_span": 1, "text": "名称"},
+                {"row": 2, "col": 2, "row_span": 1, "col_span": 1, "text": "数量"},
+                {"row": 2, "col": 3, "row_span": 1, "col_span": 1, "text": "备注"},
+                {"row": 3, "col": 1, "row_span": 1, "col_span": 1, "text": "A"},
+                {"row": 3, "col": 2, "row_span": 1, "col_span": 1, "text": "1"},
+                {"row": 3, "col": 3, "row_span": 1, "col_span": 1, "text": ""},
+                {"row": 4, "col": 1, "row_span": 1, "col_span": 2, "text": "合计"},
+                {"row": 4, "col": 3, "row_span": 1, "col_span": 1, "text": "1"},
+            ],
+        },
+        get_bound_end=lambda: 100,
+    )
+
+    assert table.Cell(1, 1).merge_calls == [(1, 1, 1, 3)]
+    assert table.Cell(4, 1).merge_calls == [(4, 1, 4, 2)]
+    assert table.Cell(1, 1).Range.inserted_text == "附件表"
+    assert table.Cell(4, 1).Range.inserted_text == "合计"
 
 
 def test_ensure_following_body_paragraph_insert_pos_creates_new_paragraph_when_gap_missing(
