@@ -77,8 +77,7 @@ frontend/temp-e2e-results*/
 frontend/test-results*/
 
 scripts/ralph/
-tasks/*/screenshots/
-tasks/*/logs/
+tasks/
 .agents/
 .playwright-mcp/
 .playwright-cli/
