@@ -82,3 +82,6 @@ tasks/
 .playwright-mcp/
 .playwright-cli/
 frontend/.playwright-cli/
+
+.opencode/
+.omo/
