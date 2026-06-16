@@ -161,7 +161,7 @@
 2. `AgentRunService.stream()` 先发 `run_started` 和 `thinking_stage`，再执行上下文 guard 或 DeepAgents runner (`backend/services/agent_run_service.py:329`, `backend/services/agent_run_service.py:410`)。
 3. 需要更多上下文时返回 `needs_input`；条件满足时由 `create_rewrite_task_tool()` 受控调用 `DocumentService.create_rewrite_task()` (`backend/services/agent_run_service.py:438`, `backend/agents/task_context_assistant/tools.py:197`)。
 4. 上传文件 rewrite 必须具备 `form_type`、`insertion_config`、`tender_lx`、`fund_source_lx`；会话 rewrite 必须已有 latest rewrite history (`backend/services/document_service.py:466`)。
-5. `SkillGraph.for_skill("rewrite")` 根据 `TaskSkillWorkflow` 元数据执行 `resolve_rewrite_target`、`extract_rewrite_context`、`get_rewrite_comments`、`delete_section`、`rewrite_text`、`update_word` (`backend/graphs/skill_graph.py:15`, `backend/graphs/task_skill_workflows.py:27`)。
+5. `RewriteSkillGraph` 显式执行 `resolve_rewrite_target`、`extract_rewrite_context`、`get_rewrite_comments`、`delete_section`、`rewrite_text`、`update_word` (`backend/graphs/skill_graph.py:54`)。
 6. rewrite 后台任务复用 task/SSE/download 链路；agent run 只输出 `task_accepted` 和 `done` (`backend/services/agent_run_service.py:490`, `backend/services/agent_run_service.py:499`)。
 
 ### 补充批注路径
@@ -311,8 +311,8 @@
 ### 恢复旧 edit 入口或平行 task skill 链路
 
 **问题形态：** 为上传文件修改重新创建 `/api/edit`、`edit` task kind、`backend/skills/edit/` 或绕过 `rewrite` 的第二套 graph。
-**风险原因：** 当前上传文件修改语义已经收敛到 `rewrite_source="uploaded_file"`，后台仍复用 `SkillGraph.for_skill("rewrite")`、任务队列、SSE 和下载链路；平行入口会绕开上下文 guard、类型感知写回和既有测试。
-**正确做法：** 上传文件和会话修改都进入 `DocumentService.create_rewrite_task()`，skill 源码落在 `backend/skills/rewrite/SKILL.md`、workflow 注册在 `backend/graphs/task_skill_workflows.py:27`，上传来源状态由 `backend/services/document_service.py:849` 设置。
+**风险原因：** 当前上传文件修改语义已经收敛到 `rewrite_source="uploaded_file"`，后台仍复用 `RewriteSkillGraph`、任务队列、SSE 和下载链路；平行入口会绕开上下文 guard、类型感知写回和既有测试。
+**正确做法：** 上传文件和会话修改都进入 `DocumentService.create_rewrite_task()`，skill 源码落在 `backend/skills/rewrite/SKILL.md`、workflow 注册在 `backend/graphs/skill_graph.py`，上传来源状态由 `backend/services/document_service.py:849` 设置。
 
 ### 前端或 agent 暴露完整运行态敏感信息
 

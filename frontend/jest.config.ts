@@ -15,23 +15,12 @@ const config: Config = {
   testMatch: ['**/?(*.)+(spec|test).[jt]s?(x)'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
-    '^until-async$': '<rootDir>/test-shims/until-async.ts',
-    '^msw/node$': '<rootDir>/node_modules/msw/lib/node/index.js',
-    '^@mswjs/interceptors/ClientRequest$':
-      '<rootDir>/node_modules/@mswjs/interceptors/lib/node/interceptors/ClientRequest/index.cjs',
-    '^@mswjs/interceptors/fetch$':
-      '<rootDir>/node_modules/@mswjs/interceptors/lib/node/interceptors/fetch/index.cjs',
-    '^@mswjs/interceptors/XMLHttpRequest$':
-      '<rootDir>/node_modules/@mswjs/interceptors/lib/node/interceptors/XMLHttpRequest/index.cjs',
-    '^@mswjs/interceptors$': '<rootDir>/node_modules/@mswjs/interceptors/lib/node/index.cjs',
   },
   testPathIgnorePatterns: [
     '<rootDir>/node_modules/',
     '<rootDir>/node_modules-wsl/',
     '<rootDir>/.next/',
     '<rootDir>/e2e/',
-    '<rootDir>/__tests__/mocks/',
-    '<rootDir>/__tests__/utils/',
   ],
   modulePathIgnorePatterns: ['<rootDir>/node_modules-wsl/'],
   collectCoverageFrom: [
@@ -51,9 +40,6 @@ const config: Config = {
       statements: 50,
     },
   },
-  transformIgnorePatterns: ['node_modules/(?!(msw|@mswjs|until-async|outvariant|graphql-ws|ws))/'],
-  // Exclude mocks directory from coverage
-  coveragePathIgnorePatterns: ['<rootDir>/mocks/'],
 };
 
 // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async

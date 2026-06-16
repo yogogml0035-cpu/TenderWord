@@ -289,8 +289,7 @@ backend/
 - Skill 声明： `backend/skills/<skill_id>/SKILL.md`
 - Runtime helper： `backend/skills/<skill_id>/scripts/runtime.py`
 - 节点： `backend/nodes/skills_nodes/<skill_id>_nodes.py`
-- Workflow 元数据： `backend/graphs/task_skill_workflows.py`
-- Graph 执行：使用 `SkillGraph.for_skill("<skill_id>")`
+- Graph 执行：显式 `RewriteSkillGraph`（`backend/graphs/skill_graph.py`）
 - 测试： `backend/tests/skills/`、`backend/tests/graphs/`、`backend/tests/nodes/`
 - 兼容约束：不要恢复旧 `/api/edit`、`edit` task kind 或独立 `edit` skill；上传文件修改应继续复用 `backend/skills/rewrite/` 和 `rewrite_source="uploaded_file"`。
 

@@ -1,79 +1,91 @@
-"""Generic task-skill graph driven by skill workflow metadata."""
+"""Rewrite skill graph.
+
+显式实现 rewrite 任务流程的 LangGraph，取代原先 SkillGraph.for_skill +
+TaskSkillWorkflow 的元数据驱动框架。当前只服务 rewrite 一种 skill，
+节点、边、条件分支直接写在这里，便于阅读和维护。
+"""
 
 from __future__ import annotations
-
-from typing import Optional
 
 from langgraph.graph import END, START, StateGraph
 
 from backend.graphs.base_graph import BaseGraph
+from backend.nodes.common_word_nodes import get_rewrite_comments
+from backend.nodes.skills_nodes.rewrite_nodes import (
+    extract_rewrite_context,
+    resolve_rewrite_target,
+    rewrite_text,
+)
+from backend.nodes.skills_nodes.tender_aware_word_dispatch import (
+    dispatch_tender_aware_delete_section,
+    dispatch_tender_aware_update_word,
+)
+from backend.skills.rewrite.scripts.runtime import (
+    estimate_total_nodes as estimate_rewrite_nodes,
+)
+from backend.skills.rewrite.scripts.runtime import select_comment_branch, select_resolve_branch
+from backend.states import TaskSkillGraphState
 
-from .task_skill_types import TaskSkillWorkflow
-from .task_skill_workflows import get_task_skill_workflow
+
+# rewrite 流程的节点名称顺序，供测试与诊断引用
+REWRITE_NODE_NAMES = (
+    "resolve_rewrite_target",
+    "extract_rewrite_context",
+    "get_rewrite_comments",
+    "delete_section",
+    "rewrite_text",
+    "update_word",
+)
+
+REWRITE_START_NODE = "resolve_rewrite_target"
+REWRITE_END_NODE = "update_word"
+
+# 节点名称 -> 处理函数
+REWRITE_NODE_HANDLERS = {
+    "resolve_rewrite_target": resolve_rewrite_target,
+    "extract_rewrite_context": extract_rewrite_context,
+    "get_rewrite_comments": get_rewrite_comments,
+    "delete_section": dispatch_tender_aware_delete_section,
+    "rewrite_text": rewrite_text,
+    "update_word": dispatch_tender_aware_update_word,
+}
 
 
-class SkillGraph(BaseGraph):
-    SKILL_ID: Optional[str] = None
-
-    def __init__(self, *, skill_id: Optional[str] = None):
-        super().__init__()
-        self._skill_id = str(skill_id or getattr(type(self), "SKILL_ID", "")).strip()
-        if not self._skill_id:
-            raise ValueError("SkillGraph 缺少 skill_id")
-        self._workflow: Optional[TaskSkillWorkflow] = None
-
-    @classmethod
-    def for_skill(cls, skill_id: str) -> type["SkillGraph"]:
-        normalized_skill_id = str(skill_id or "").strip()
-        if not normalized_skill_id:
-            raise ValueError("skill_id 不能为空")
-        class_name = (
-            "".join(part.capitalize() for part in normalized_skill_id.split("_"))
-            + "SkillGraph"
-        )
-        return type(class_name, (cls,), {"SKILL_ID": normalized_skill_id})
-
-    def _get_workflow(self) -> TaskSkillWorkflow:
-        if self._workflow is None:
-            self._workflow = get_task_skill_workflow(self._skill_id)
-        return self._workflow
+class RewriteSkillGraph(BaseGraph):
+    """rewrite 任务的显式 graph 实现。"""
 
     def get_state_class(self):
-        return self._get_workflow().state_cls
+        return TaskSkillGraphState
 
     def estimate_total_nodes(self, initial_state: dict) -> int:
-        workflow = self._get_workflow()
-        if workflow.total_nodes_estimator is None:
-            return super().estimate_total_nodes(initial_state)
-        return max(1, int(workflow.total_nodes_estimator(initial_state)))
+        return max(1, int(estimate_rewrite_nodes(initial_state)))
 
     def build_graph(self) -> StateGraph:
-        workflow = self._get_workflow()
-        builder = StateGraph(workflow.state_cls)
+        builder = StateGraph(TaskSkillGraphState)
 
-        node_names = {node.name for node in workflow.nodes}
-        if workflow.start_node not in node_names:
-            raise ValueError(
-                f"skill workflow start_node 未注册: skill={workflow.skill_id}, node={workflow.start_node}"
-            )
-        if workflow.end_node not in node_names:
-            raise ValueError(
-                f"skill workflow end_node 未注册: skill={workflow.skill_id}, node={workflow.end_node}"
-            )
+        for node_name in REWRITE_NODE_NAMES:
+            builder.add_node(node_name, self.wrap_node(node_name, REWRITE_NODE_HANDLERS[node_name]))
 
-        for node in workflow.nodes:
-            builder.add_node(node.name, self.wrap_node(node.name, node.handler))
+        builder.add_edge(START, REWRITE_START_NODE)
+        builder.add_edge("get_rewrite_comments", "delete_section")
+        builder.add_edge("extract_rewrite_context", "rewrite_text")
+        builder.add_edge(["delete_section", "rewrite_text"], "update_word")
 
-        builder.add_edge(START, workflow.start_node)
-        for start, end in workflow.edges:
-            builder.add_edge(start, end)
-        for starts, end in workflow.waiting_edges:
-            builder.add_edge(list(starts), end)
-        for conditional_edge in workflow.conditional_edges:
-            builder.add_conditional_edges(
-                conditional_edge.start,
-                conditional_edge.condition,
-                dict(conditional_edge.mapping),
-            )
-        builder.add_edge(workflow.end_node, END)
+        builder.add_conditional_edges(
+            "resolve_rewrite_target",
+            select_resolve_branch,
+            {
+                "extract_rewrite_context": "extract_rewrite_context",
+                "rewrite_text": "rewrite_text",
+            },
+        )
+        builder.add_conditional_edges(
+            "rewrite_text",
+            select_comment_branch,
+            {
+                "get_rewrite_comments": "get_rewrite_comments",
+                "delete_section": "delete_section",
+            },
+        )
+        builder.add_edge(REWRITE_END_NODE, END)
         return builder

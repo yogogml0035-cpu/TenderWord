@@ -28,7 +28,7 @@ from .base_graph import (
     invoke_with_timing,
     invoke_with_timing_async,
 )
-from .skill_graph import SkillGraph
+from .skill_graph import RewriteSkillGraph
 from .comment_supplement_graph import CommentSupplementGraph
 from .xjcg_tender_graph import XjcgTenderGraph
 from .gngk_hw_zc_tender_graph import GngkHwZcTenderGraph
@@ -44,7 +44,7 @@ __all__ = [
     "wrap_node_with_progress",
     "invoke_with_timing",
     "invoke_with_timing_async",
-    "SkillGraph",
+    "RewriteSkillGraph",
     "CommentSupplementGraph",
     "XjcgTenderGraph",
     "GngkHwZcTenderGraph",

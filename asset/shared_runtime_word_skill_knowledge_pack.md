@@ -37,7 +37,7 @@
 
 - generate 任务通过 `DocumentService.create_task()` 进入 `GRAPH_REGISTRY`，按 `GenerateRequest.form_type` 选择具体 graph。
 - `GET /api/generate/{task_id}` 必须通过 `backend.services.task_service` 查询任务状态；API 路由中的函数内延迟导入也要使用 `backend.*` 包绝对路径，避免在不同启动/测试入口下退化为 `ModuleNotFoundError`。
-- rewrite 走 `SkillGraph.for_skill(...)` 返回的 task graph，但图结构真源已经收敛到 `backend/graphs/task_skill_workflows.py`；`backend/skills/rewrite/SKILL.md` 只保留 DeepAgents guide 和后台正文改写指令，不再承担 task workflow 装配。
+- rewrite 走 `backend/graphs/skill_graph.py` 中的显式 `RewriteSkillGraph`；图结构（节点、边、条件分支、节点数估算）真源就在 `skill_graph.py`，`backend/skills/rewrite/SKILL.md` 只保留 DeepAgents guide 和后台正文改写指令，不再承担 task workflow 装配。
 - `POST /api/agent/runs/stream` 默认由 `backend/services/agent_run_service.py` 构造 `TaskContextDeepAgentsRunner`，再调用 `backend/agents/task_context_assistant/factory.py#create_task_context_assistant()`；生产路径的语义选择属于 DeepAgents + rewrite skill，不应在 service 层用关键词 `_select_skill()` 判断。service 层只做客观不可执行条件 preflight、NDJSON 事件映射和审计落盘。
 - task-context assistant 创建 rewrite 任务只能通过 `backend/agents/task_context_assistant/tools.py` 中的 `create_rewrite_task_tool` 复用 `DocumentService.create_rewrite_task()`；guard 先检查上传 Word 文件链路，其次检查 `rewrite history`，缺条件时返回 `needs_input`，不能直接操作 Word COM。
 - `POST /api/agent/runs/stream` 必须先流出 `run_started` 和 `thinking_stage: understand completed`，再等待 `create_rewrite_task_tool` 创建 rewrite 任务；任务创建慢时前端过程卡应推进到上下文检查阶段，不能卡在“理解需求”。
@@ -85,8 +85,8 @@
 ### Skill 声明
 
 - skill guide 解析的真源是 `backend/skills/catalog.py`：这里只允许 `name/description` frontmatter，读取出的正文同时供 DeepAgents 和后台 task prompt 复用。
-- rewrite task workflow 的真源是 `backend/graphs/task_skill_workflows.py` 与 `backend/graphs/task_skill_types.py`；不要再从 `SKILL.md` 推导 workflow，也不要恢复旧 workflow 入口文件。
-- 修改 skill guide、task workflow、dispatch 路由或 audit log 时，必须同时检查 `backend/skills/rewrite/`、`backend/graphs/task_skill_workflows.py`、`backend/graphs/skill_graph.py`、`backend/services/document_service.py` 和对应 tests。
+- rewrite task workflow 的真源是 `backend/graphs/skill_graph.py` 中的 `RewriteSkillGraph`（含 `REWRITE_NODE_NAMES`、`REWRITE_NODE_HANDLERS`、`REWRITE_START_NODE`、`REWRITE_END_NODE`）；不要再从 `SKILL.md` 推导 workflow，也不要恢复 `task_skill_workflows.py` / `task_skill_types.py` 元数据入口。
+- 修改 skill guide、task workflow、dispatch 路由或 audit log 时，必须同时检查 `backend/skills/rewrite/`、`backend/graphs/skill_graph.py`、`backend/services/document_service.py` 和对应 tests。
 - rewrite 的 LLM 输出会作为当前文档内容或当前锚点区正文的完整替换载荷；skill instruction 必须明确“输出范围守恒”。分包名、章节名、锚点、`从……起` 等用户表述默认只定位修改范围，不能让模型把局部定位误解为只输出该局部，否则写回会丢失未修改分包或章节。
 - `backend/skills/rewrite/SKILL.md` 同时承载两层指令：任务上下文助手阶段只做前置条件检查和 `create_rewrite_task_tool` 任务创建；后台 `rewrite_text` 节点只抽取“后台 rewrite 任务正文改写指令”段作为 LLM runtime prompt，恢复“先复制全文，再局部修改”的完整输出契约，并显式要求受保护字段行的字段名、冒号和相对顺序不得丢失。
 - `backend/nodes/skills_nodes/rewrite_nodes.py` 的 rewrite 正文生成不再复用 `generate_polished_text`；当前闭环为 `rewrite_generate_agent` 生成完整正文、`rewrite_verify_agent` 审核 JSON、必要时 `rewrite_revise_agent` 最小修订，再由 `rewrite_agent` 发送最终摘要。受保护字段 profile 由 `tender_config.py` 决定，direct-replace 类型跳过；protected-fields 类型会做确定性字段缺失/顺序审核，最终仍缺字段必须在写回前失败。

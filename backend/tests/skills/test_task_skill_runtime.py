@@ -1,7 +1,12 @@
 from langgraph.graph import END, START, StateGraph
 
-from backend.graphs.skill_graph import SkillGraph
-from backend.graphs.task_skill_workflows import get_task_skill_workflow
+from backend.graphs.skill_graph import (
+    REWRITE_END_NODE,
+    REWRITE_NODE_HANDLERS,
+    REWRITE_NODE_NAMES,
+    REWRITE_START_NODE,
+    RewriteSkillGraph,
+)
 from backend.skills import get_skill_guide
 from backend.skills.rewrite.scripts.runtime import select_resolve_branch
 from backend.states import TaskSkillGraphState
@@ -16,11 +21,9 @@ def test_rewrite_skill_guide_exposes_runtime_instruction() -> None:
 
 
 def test_rewrite_skill_graph_compiles_from_direct_workflow_registry() -> None:
-    workflow = get_task_skill_workflow("rewrite")
-
-    assert workflow.start_node == "resolve_rewrite_target"
-    assert workflow.end_node == "update_word"
-    assert SkillGraph.for_skill("rewrite")().compile() is not None
+    assert REWRITE_START_NODE == "resolve_rewrite_target"
+    assert REWRITE_END_NODE == "update_word"
+    assert RewriteSkillGraph().compile() is not None
 
 
 def test_uploaded_rewrite_source_survives_task_skill_graph_state() -> None:
@@ -47,8 +50,7 @@ def test_uploaded_rewrite_source_survives_task_skill_graph_state() -> None:
     assert observed_branches == ["extract_rewrite_context"]
 
 
-def test_uploaded_rewrite_workflow_deletes_section_once_after_rewrite_text() -> None:
-    workflow = get_task_skill_workflow("rewrite")
+def test_uploaded_rewrite_workflow_deletes_section_once_after_rewrite_text(monkeypatch) -> None:
     visited_nodes: list[str] = []
 
     def make_node(node_name: str):
@@ -58,23 +60,12 @@ def test_uploaded_rewrite_workflow_deletes_section_once_after_rewrite_text() -> 
 
         return node
 
-    builder = StateGraph(workflow.state_cls)
-    for workflow_node in workflow.nodes:
-        builder.add_node(workflow_node.name, make_node(workflow_node.name))
-    builder.add_edge(START, workflow.start_node)
-    for start, end in workflow.edges:
-        builder.add_edge(start, end)
-    for starts, end in workflow.waiting_edges:
-        builder.add_edge(list(starts), end)
-    for conditional_edge in workflow.conditional_edges:
-        builder.add_conditional_edges(
-            conditional_edge.start,
-            conditional_edge.condition,
-            dict(conditional_edge.mapping),
-        )
-    builder.add_edge(workflow.end_node, END)
+    monkeypatch.setattr(
+        "backend.graphs.skill_graph.REWRITE_NODE_HANDLERS",
+        {node_name: make_node(node_name) for node_name in REWRITE_NODE_NAMES},
+    )
 
-    builder.compile().invoke(
+    RewriteSkillGraph().compile().invoke(
         {
             "conversation_id": "conv-1",
             "rewrite_user_prompt": "请修改已上传文件",

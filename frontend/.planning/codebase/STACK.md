@@ -58,9 +58,6 @@
 
 **基础设施：**
 - `@playwright/test` `^1.58.2` - E2E runner 与 Chromium 项目配置，见 `frontend/playwright.config.ts`。
-- `msw` `^2.12.10` - Jest API mock 和错误场景模拟，见 `frontend/mocks/handlers.ts`。
-- `jest-fetch-mock` `^3.0.3` - fetch mock 支持，见 `frontend/package.json`。
-- `undici` `^7.22.0` / `und` `^2.13.0` - Node/fetch 兼容依赖，见 `frontend/package.json`。
 - `ts-node` `^10.9.2` - TypeScript 配置执行支持，见 `frontend/package.json`。
 
 ## 配置

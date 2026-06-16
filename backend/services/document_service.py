@@ -186,7 +186,6 @@ class _LLMSnapshotRelay:
 
 # Graph 注册表：表单类型 -> Graph 类
 GRAPH_REGISTRY: Dict[str, type] = {}
-TASK_SKILL_GRAPH_CLASSES: Dict[str, type] = {}
 REWRITE_SKILL_ID = "rewrite"
 REWRITE_SKILL_GRAPH_CLASS: Optional[type] = None
 COMMENT_SUPPLEMENT_GRAPH_CLASS: Optional[type] = None
@@ -194,7 +193,7 @@ COMMENT_SUPPLEMENT_GRAPH_CLASS: Optional[type] = None
 
 def _init_graph_registry():
     """初始化 Graph 注册表（延迟加载）."""
-    global GRAPH_REGISTRY, TASK_SKILL_GRAPH_CLASSES, REWRITE_SKILL_GRAPH_CLASS, COMMENT_SUPPLEMENT_GRAPH_CLASS
+    global GRAPH_REGISTRY, REWRITE_SKILL_GRAPH_CLASS, COMMENT_SUPPLEMENT_GRAPH_CLASS
     if (
         GRAPH_REGISTRY
         and REWRITE_SKILL_GRAPH_CLASS is not None
@@ -210,7 +209,7 @@ def _init_graph_registry():
             GngkFwZcTenderGraph,
             GngkHwCzTenderGraph,
             GngkHwZcTenderGraph,
-            SkillGraph,
+            RewriteSkillGraph,
             XjcgTenderGraph,
         )
 
@@ -220,8 +219,7 @@ def _init_graph_registry():
         GRAPH_REGISTRY["gngk_fw_zc_tender"] = GngkFwZcTenderGraph
         GRAPH_REGISTRY["gngk_fw_cz_tender"] = GngkFwCzTenderGraph
         GRAPH_REGISTRY["gjgk_tender"] = GjgkTenderGraph
-        TASK_SKILL_GRAPH_CLASSES[REWRITE_SKILL_ID] = SkillGraph.for_skill(REWRITE_SKILL_ID)
-        REWRITE_SKILL_GRAPH_CLASS = TASK_SKILL_GRAPH_CLASSES[REWRITE_SKILL_ID]
+        REWRITE_SKILL_GRAPH_CLASS = RewriteSkillGraph
         COMMENT_SUPPLEMENT_GRAPH_CLASS = CommentSupplementGraph
         logger.info("Graph 注册表初始化完成")
     except ImportError as e:

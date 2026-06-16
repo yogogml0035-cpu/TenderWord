@@ -61,8 +61,68 @@
 
 **路径别名：**
 - `@/*` 映射到 `frontend/*`，配置在 `frontend/tsconfig.json`。
-- Jest 中同样映射 `^@/(.*)$` 到 `<rootDir>/$1`，配置在 `frontend/jest.config.ts`。
-- MSW / undici 兼容映射只放在 `frontend/jest.config.ts` 的 `moduleNameMapper`，不要在测试里手写深层 node_modules 路径。
+- Jest 中同样映射 `^@/(.*)# 前端编码约定
+
+**分析日期：** 2026-06-09
+
+**范围：** `frontend/` 源码、类型、测试、配置、`README.md`、`docs/frontend.md`、`docs/interfaces-runtime.md` 和既有 `frontend/.planning/codebase/` 事实文档。`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc` 仅确认存在，不读取内容。
+
+## 命名模式
+
+**文件：**
+- React 组件文件使用 PascalCase：`frontend/components/chat/ChatPanel.tsx`、`frontend/components/forms/TenderFormShared.tsx`、`frontend/components/forms/FileUploader.tsx`。
+- hooks 使用 `useXxx.ts`：`frontend/hooks/useChatSSE.ts`、`frontend/hooks/useCurrentConversationTaskStatus.ts`、`frontend/hooks/useTaskHeartbeat.ts`。
+- Zustand store 使用语义化 camelCase：`frontend/stores/chatStore.ts`、`frontend/stores/chatStreamStore.ts`、`frontend/stores/chatTaskSessionStore.ts`。
+- 纯 helper 使用 camelCase 或领域名：`frontend/lib/formDataConverter.ts`、`frontend/lib/gngkFormType.ts`、`frontend/lib/apiBaseUrl.ts`、`frontend/utils/tenderTypeMapper.ts`。
+- Jest 测试文件放在 `frontend/__tests__/`，文件名使用 `test_*.test.ts` 或 `test_*.test.tsx`：`frontend/__tests__/unit/lib/test_api.test.ts`。
+- Playwright 测试文件放在 `frontend/e2e/`，文件名使用 `test_*.spec.ts`：`frontend/e2e/test_generation_mode_agent.spec.ts`。
+
+**函数：**
+- React component 使用 PascalCase：`ChatPanel`、`TenderFormShared`、`FileUploader`。
+- hooks 使用 `use` 前缀：`useChatSSE()`、`useSSE()`、`useUrlParams()`。
+- React 事件 handler 使用 `handleXxx`：`handleSendMessage`、`handleRewriteFileUpload`、`handleTemplateCandidateSelect`。
+- 表单转换函数使用 `convertXxxFormToApiRequest`：`convertXjcgFormToApiRequest()`、`convertGngkFormToApiRequest()`、`convertGjgkFormToApiRequest()`。
+- 解析、归一化、构造函数使用 `parseXxx`、`normalizeXxx`、`resolveXxx`、`buildXxx`：`parseTenderUrlParams()`、`normalizeApiBaseUrl()`、`resolveGngkFormType()`、`buildCanonicalSearchParams()`。
+
+**变量：**
+- 前端本地变量使用 camelCase：`conversationId`、`taskId`、`templateDialogOpen`、`selectedSkillsForRequest`。
+- 后端 payload 字段保持 snake_case，不在前端契约层强行改名：`form_type`、`tender_lx`、`fund_lx`、`file_paths`、`generation_mode`，见 `frontend/types/api.ts`。
+- task / conversation 的后端字段保持 `task_id`、`conversation_id`；UI 和 store 方法参数可使用 `taskId`、`conversationId`。
+- UI 类型固定使用 `TenderType` 的 `xjcg`、`gngk`、`gjgk`，不要把后端 `FormType` 字符串当作前端页面类型。
+
+**类型：**
+- 类型、接口、union 使用 PascalCase：`GenerateRequest`、`AgentRunStreamRequest`、`ConversationFormDraft`、`SSEAgentStepEvent`。
+- 后端 API/SSE/agent run 契约类型集中在 `frontend/types/api.ts`；聊天消息和会话类型集中在 `frontend/types/chat.ts`；前端全局 UI 类型在 `frontend/types/index.ts`。
+- `frontend/types/index.ts` 可以 re-export `./api`，但新增 API 字段的真源位置仍是 `frontend/types/api.ts`。
+
+## 代码风格
+
+**格式化：**
+- 使用 Prettier 3，配置在 `frontend/.prettierrc`。
+- 保持 `semi: true`、`singleQuote: true`、`printWidth: 100`、`tabWidth: 2`、`trailingComma: es5`。
+- Tailwind class 排序由 `prettier-plugin-tailwindcss` 处理。
+- 格式化跳过项在 `frontend/.prettierignore`，包括 `node_modules`、`.next`、`out`、`dist`、`*.log`。
+
+**Lint：**
+- 使用 ESLint 9 flat config，配置在 `frontend/eslint.config.mjs`。
+- 继承 `eslint-config-next/core-web-vitals` 和 `eslint-config-next/typescript`。
+- 启用 `eslint-plugin-react-hooks`，`react-hooks/set-state-in-effect` 为 `warn`。
+- ESLint 忽略 `.next/**`、`out/**`、`build/**`、`next-env.d.ts`、`node_modules-*/**`、`coverage/**`、`playwright-report/**`、`test-results/**`。
+
+**TypeScript:**
+- 主配置是 `frontend/tsconfig.json`，启用 `strict: true`、`jsx: react-jsx`、`moduleResolution: bundler`、`@/*` alias。
+- 类型检查入口是 `frontend/tsconfig.typecheck.json`，命令为 `npm run type-check`。
+- Next 构建不忽略类型错误，`frontend/next.config.ts` 中 `typescript.ignoreBuildErrors` 为 `false`。
+
+## 导入组织
+
+**顺序：**
+1. React、Next、Node 或第三方库，例如 `react`、`next/navigation`、`lucide-react`、`@playwright/test`。
+2. 项目绝对路径导入，使用 `@/*` alias，例如 `@/lib/api`、`@/stores/chatStore`、`@/types/api`。
+3. 同目录相对导入，例如 `./MessageList`、`./shared`。
+4. 类型导入使用 `import type`，尤其是 `frontend/types/api.ts`、`frontend/types/chat.ts` 和组件 props 类型。
+
+ 到 `<rootDir>/$1`，配置在 `frontend/jest.config.ts`。
 
 **模式：**
 ```typescript

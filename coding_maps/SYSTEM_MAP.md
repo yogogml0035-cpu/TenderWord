@@ -44,7 +44,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - 右侧聊天统一从 `frontend/components/chat/ChatPanel.tsx` 发起，通过 `frontend/lib/api.ts` 调用 `POST /api/agent/runs/stream`。
 - 后端 `backend/api/agent.py` 返回 NDJSON agent run 事件，编排真源是 `backend/services/agent_run_service.py`；NDJSON 行序列化复用 service 层共享辅助。这里负责显式 `selected_skills`、自然语言兜底、guard、`needs_input`、`task_accepted` 和 JSONL 审计日志。
 - task-context assistant 运行时与 tool 真源在 `backend/agents/task_context_assistant/`：它只暴露受控 rewrite skill、受控上下文读取工具、公共摘要工具，以及复用 `DocumentService.create_rewrite_task()` 的 `create_rewrite_task_tool`。
-- rewrite 真正进入队列后，仍走既有 task runtime：声明和 guide 在 `backend/skills/rewrite/`，执行图在 `backend/graphs/skill_graph.py` 与 `backend/graphs/task_skill_workflows.py`，后续 SSE、取消、下载和结果卡继续复用同一任务主链路。
+- rewrite 真正进入队列后，仍走既有 task runtime：声明和 guide 在 `backend/skills/rewrite/`，执行图在 `backend/graphs/skill_graph.py`（显式 `RewriteSkillGraph`），后续 SSE、取消、下载和结果卡继续复用同一任务主链路。
 - 上传 Word 文件后的修改统一走 rewrite：前端上传文件类型是 `rewrite_source`，agent run payload 由 `uploaded_files` 提供文件摘要、由 `context_snapshot.rewrite_context` 提供当前页面 `form_type`、锚点、`tender_lx`、`fund_source_lx` 和可选招标数据快照；后端 task skill state 内部用 `rewrite_source="uploaded_file"` 标记上传来源。
 - `/api/edit`、edit skill 和 edit task kind 已删除；不要把旧 edit 入口重新写回前端或后端文档。
 - agent run 审计日志只写白名单结构化字段并 scrub token、`.env`、私有绝对路径和 traceback；只读工具只返回 rewrite 可用性、公共进度和摘要，不暴露完整结果或下载路径。

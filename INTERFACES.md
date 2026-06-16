@@ -80,7 +80,7 @@
 | 后端路由 | `backend/api/agent.py` 中的 `POST /api/agent/runs/stream` |
 | 路由 service | `backend/services/agent_run_service.py` |
 | Agent / tool runtime | `backend/agents/task_context_assistant/` |
-| 后续 task runtime | `backend/graphs/skill_graph.py`, `backend/graphs/task_skill_workflows.py`, `backend/skills/rewrite/` |
+| 后续 task runtime | `backend/graphs/skill_graph.py`, `backend/skills/rewrite/` |
 
 同步要求：
 - NDJSON event shape 变化必须同步 `frontend/types/api.ts` 和 `ChatPanel`。

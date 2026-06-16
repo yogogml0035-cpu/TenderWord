@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from backend.graphs.task_skill_workflows import get_task_skill_workflow
 from backend.nodes.skills_nodes import tender_aware_word_dispatch
 
 
@@ -103,12 +102,16 @@ def test_dispatch_tender_aware_update_word_routes_gngk_fw_zc_to_service_handler(
 
 
 def test_rewrite_workflow_keeps_public_node_names_and_uses_shared_dispatch_handlers() -> None:
-    workflow = get_task_skill_workflow("rewrite")
-    node_map = {node.name: node.handler for node in workflow.nodes}
+    from backend.graphs.skill_graph import (
+        REWRITE_END_NODE,
+        REWRITE_NODE_HANDLERS,
+        REWRITE_NODE_NAMES,
+        REWRITE_START_NODE,
+    )
 
-    assert workflow.start_node == "resolve_rewrite_target"
-    assert workflow.end_node == "update_word"
-    assert list(node_map) == [
+    assert REWRITE_START_NODE == "resolve_rewrite_target"
+    assert REWRITE_END_NODE == "update_word"
+    assert list(REWRITE_NODE_NAMES) == [
         "resolve_rewrite_target",
         "extract_rewrite_context",
         "get_rewrite_comments",
@@ -116,5 +119,5 @@ def test_rewrite_workflow_keeps_public_node_names_and_uses_shared_dispatch_handl
         "rewrite_text",
         "update_word",
     ]
-    assert node_map["delete_section"] is tender_aware_word_dispatch.dispatch_tender_aware_delete_section
-    assert node_map["update_word"] is tender_aware_word_dispatch.dispatch_tender_aware_update_word
+    assert REWRITE_NODE_HANDLERS["delete_section"] is tender_aware_word_dispatch.dispatch_tender_aware_delete_section
+    assert REWRITE_NODE_HANDLERS["update_word"] is tender_aware_word_dispatch.dispatch_tender_aware_update_word

@@ -147,18 +147,7 @@ expect(mockStreamAgentRun).toHaveBeenCalledWith(
 
 **框架：**
 - Jest mock function / module mock。
-- MSW `setupServer()`。
 - Playwright `page.route()`。
-
-**MSW 模式：**
-```typescript
-import { setupServer } from 'msw/node';
-import { handlers } from './handlers';
-
-export const server = setupServer(...handlers);
-```
-
-实际文件：`frontend/mocks/server.ts`、`frontend/mocks/handlers.ts`。
 
 **Fetch Mock 模式：**
 ```typescript

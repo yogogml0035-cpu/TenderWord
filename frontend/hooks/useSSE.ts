@@ -281,7 +281,6 @@ export function useSSE(options: UseSSEOptions): SSEHookReturn {
  *   return (
  *     <div>
  *       <ProgressBar value={progress} />
- *       <LogViewer logs={logs} />
  *     </div>
  *   );
  * }
