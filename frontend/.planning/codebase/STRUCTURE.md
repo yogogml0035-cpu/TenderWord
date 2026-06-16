@@ -1,6 +1,6 @@
 # 前端结构事实地图
 
-**分析日期：** 2026-06-09
+**分析日期：** 2026-06-16
 
 **范围：** `frontend/` 源码、测试、前端配置、`README.md` 和 `frontend/.planning/codebase/` 文档目录。跳过 `frontend/node_modules/`、`frontend/node_modules-wsl/`、`frontend/.next/`、`frontend/playwright-report/`、`frontend/test-results/`、`frontend/.swc/`。未读取 `frontend/.env.local`、`backend/.env`、`.npmrc` 或真实密钥文件。
 
@@ -19,10 +19,9 @@ frontend/
 ├── stores/                  # Zustand stores
 ├── types/                   # API、聊天和全局招标类型
 ├── utils/                   # 招标类型和 canonical URL 映射
-├── mocks/                   # MSW handlers/server
-├── __tests__/               # Jest 单元/集成测试、测试夹具、测试工具
+├── __tests__/               # Jest 单元测试、测试夹具（unit/、mocks/）
 ├── e2e/                     # Playwright E2E specs
-├── test-shims/              # Jest moduleNameMapper shim
+├── test-shims/              # 测试异步等待 helper（until-async.ts）
 ├── tasks/                   # 前端任务工作区资料，不是 runtime 源码层
 ├── .planning/codebase/      # 前端事实文档
 ├── package.json             # npm scripts、依赖、Node engine
@@ -69,34 +68,30 @@ frontend/
 - 关键文件：`frontend/hooks/useChatSSE.ts` 是后端任务 SSE 到 store/UI 的核心映射；`frontend/hooks/useCurrentConversationTaskStatus.ts` 管理当前会话 task status polling；`frontend/hooks/useTaskHeartbeat.ts` 管理活跃 task heartbeat。
 
 **`frontend/lib/`：**
-- 用途：无 UI 依赖的 API client、SSE runtime、表单 payload 转换、数据同步和工具。
-- 包含：`api.ts`、`apiBaseUrl.ts`、`sse.ts`、`formDataConverter.ts`、`gngkFormType.ts`、`tenderFetch.ts`、`chat-utils.ts`、`agentThinking.ts`、`utils.ts`。
-- 关键文件：`frontend/lib/api.ts` 是后端调用边界；`frontend/lib/gngkFormType.ts` 是 `gngk` form type 分派真源；`frontend/lib/formDataConverter.ts` 是表单到 `GenerateRequest` 的转换边界；`frontend/lib/apiBaseUrl.ts` 同时服务 API client 和 `frontend/next.config.ts`。
+- 用途：API client、SSE runtime、表单转换、API base URL 解析和通用 helper。
+- 包含：`api.ts`、`sse.ts`、`formDataConverter.ts`、`gngkFormType.ts`、`apiBaseUrl.ts`、`tenderFetch.ts`、`agentThinking.ts`、`chat-utils.ts`、`utils.ts`。
+- 关键文件：`frontend/lib/api.ts` 是后端 API 唯一入口（统一 `request<T>` + `api.*` + `streamNdjson`，不写裸 fetch）；`frontend/lib/sse.ts` 是 EventSource 封装；`frontend/lib/formDataConverter.ts` 是表单到 `GenerateRequest` 转换；`frontend/lib/gngkFormType.ts` 负责 `gngk` form type 分派。
 
 **`frontend/stores/`：**
-- 用途：Zustand 状态层。
+- 用途：Zustand 状态管理。
 - 包含：`chatStore.ts`、`chatStreamStore.ts`、`chatTaskSessionStore.ts`、`historyStore.ts`、`useAppStore.ts`。
-- 关键文件：`frontend/stores/chatStore.ts` 负责会话、草稿、task summary、任务消息、URL 同步和后端重启收敛；`frontend/stores/chatStreamStore.ts` 保存运行中 SSE stream；`frontend/stores/chatTaskSessionStore.ts` 保存 task resume 元数据。
+- 关键文件：`frontend/stores/chatStore.ts` 是会话和任务状态主 store；`frontend/stores/chatStreamStore.ts` 维护运行中 SSE stream；`frontend/stores/chatTaskSessionStore.ts` 维护 task resume 元数据。
 
 **`frontend/types/`：**
-- 用途：跨层 TypeScript 契约。
-- 包含：`api.ts`、`chat.ts`、`index.ts`。
-- 关键文件：`frontend/types/api.ts` 镜像后端 API/SSE/agent run；`frontend/types/chat.ts` 定义会话消息、任务消息和过程卡 metadata；`frontend/types/index.ts` 定义前端 `TenderType` 并 re-export API 类型。
+- 用途：API、聊天、全局招标类型和测试类型补全。
+- 包含：`api.ts`、`chat.ts`、`index.ts`、`jest-dom.d.ts`。
+- 关键文件：`frontend/types/api.ts` 定义 client-side 请求契约（声明后端 routes 和 Pydantic models 是 source of truth）；`frontend/types/jest-dom.d.ts`（本轮新增）补齐 jest-dom matcher 全局 TS 类型。
 
 **`frontend/utils/`：**
 - 用途：非 React 的共享映射工具。
 - 包含：`tenderTypeMapper.ts`。
 - 关键文件：`frontend/utils/tenderTypeMapper.ts` 负责 URL 参数解析、`TenderType` 判定和 canonical URL 构造。
 
-**`frontend/mocks/`：**
-- 用途：MSW handlers/server，供测试 mock 后端 API。
-- 包含：`handlers.ts`、`server.ts`。
-- 关键文件：`frontend/mocks/handlers.ts` 定义 mock endpoints；`frontend/mocks/server.ts` 暴露测试 server。
-
 **`frontend/__tests__/`：**
-- 用途：Jest 单元/集成测试、测试工厂和渲染工具。
-- 包含：`unit/`、`integration/`、`mocks/`、`utils/`。
-- 关键文件：`frontend/__tests__/unit/lib/test_api.test.ts`、`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/stores/`、`frontend/__tests__/mocks/data-factories.ts`、`frontend/__tests__/utils/test-utils.tsx`。
+- 用途：Jest 单元测试、测试数据工厂和 SSE mock。
+- 包含：`unit/`（按 app/components/hooks/lib/stores/types/utils 分包）、`mocks/`（`data-factories.ts`、`sse-mock.ts`）。
+- 关键文件：`frontend/__tests__/unit/lib/test_api.test.ts`、`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/stores/`、`frontend/__tests__/mocks/data-factories.ts`。
+- 约束：本轮已移除 `frontend/mocks/`（MSW handlers/server）、`frontend/__tests__/utils/`（setup/test-utils）和 `frontend/__tests__/integration/`；不要再向这些路径新增文件，单测直接 mock `globalThis.fetch`。
 
 **`frontend/e2e/`：**
 - 用途：Playwright 浏览器契约测试。
@@ -119,7 +114,7 @@ frontend/
 - `frontend/tsconfig.json`: TypeScript strict、`@/*` alias、Next plugin、module resolution。
 - `frontend/tsconfig.typecheck.json`: 类型检查专用配置。
 - `frontend/eslint.config.mjs`: ESLint flat config、Next core web vitals/typescript、React hooks rule。
-- `frontend/jest.config.ts`: Jest jsdom、Next Jest wrapper、`@/*` alias、MSW mapper、coverage scope。
+- `frontend/jest.config.ts`: Jest jsdom、Next Jest wrapper、`@/*` alias、coverage scope（本轮已移除 MSW mapper 与 `'^until-async$'` 映射）。
 - `frontend/playwright.config.ts`: E2E baseURL `http://localhost:8502`、dev server、Chromium project。
 - `frontend/postcss.config.mjs`: Tailwind 4 PostCSS 插件配置。
 
@@ -142,12 +137,10 @@ frontend/
 - `frontend/utils/tenderTypeMapper.ts`: URL 与 tender type 映射。
 
 **测试：**
-- `frontend/__tests__/unit/`: 模块级单元测试。
-- `frontend/__tests__/integration/`: 集成测试样例。
+- `frontend/__tests__/unit/`: 模块级单元测试（按 app/components/hooks/lib/stores/types/utils 分包）。
 - `frontend/__tests__/mocks/data-factories.ts`: 测试数据工厂。
 - `frontend/__tests__/mocks/sse-mock.ts`: SSE 测试 mock。
-- `frontend/__tests__/utils/test-utils.tsx`: Testing Library 渲染 helper。
-- `frontend/mocks/handlers.ts`: MSW API mock。
+- `frontend/test-shims/until-async.ts`: 测试异步等待 helper（注意：本轮 jest.config 已移除对应 moduleNameMapper 映射，使用前先确认引用关系）。
 - `frontend/e2e/`: Playwright specs。
 
 **文档：**
@@ -247,9 +240,10 @@ frontend/
 - 是否提交：取决于任务工作区策略；不要把它当成 runtime 源码层。
 
 **`frontend/test-shims/`：**
-- 用途：Jest moduleNameMapper shim。
+- 用途：测试异步等待 helper（`until-async.ts`）。
 - 是否生成：否。
 - 是否提交：是。
+- 注意：本轮 `jest.config.ts` 已移除 `'^until-async$'` moduleNameMapper 映射；新增引用前先确认该文件是否仍被使用。
 
 **环境配置文件：**
 - 用途：本地运行配置。
@@ -259,4 +253,4 @@ frontend/
 
 ---
 
-*结构分析：2026-06-09*
+*结构分析：2026-06-16*

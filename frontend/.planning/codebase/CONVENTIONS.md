@@ -1,6 +1,6 @@
 # 前端编码约定
 
-**分析日期：** 2026-06-09
+**分析日期：** 2026-06-16
 
 **范围：** `frontend/` 源码、类型、测试、配置、`README.md`、`docs/frontend.md`、`docs/interfaces-runtime.md` 和既有 `frontend/.planning/codebase/` 事实文档。`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc` 仅确认存在，不读取内容。
 
@@ -63,7 +63,7 @@
 - `@/*` 映射到 `frontend/*`，配置在 `frontend/tsconfig.json`。
 - Jest 中同样映射 `^@/(.*)# 前端编码约定
 
-**分析日期：** 2026-06-09
+**分析日期：** 2026-06-16
 
 **范围：** `frontend/` 源码、类型、测试、配置、`README.md`、`docs/frontend.md`、`docs/interfaces-runtime.md` 和既有 `frontend/.planning/codebase/` 事实文档。`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc` 仅确认存在，不读取内容。
 
@@ -254,4 +254,4 @@ export async function createGenerateTask(params: GenerateRequest): Promise<Creat
 
 ---
 
-*约定分析：2026-06-09*
+*约定分析：2026-06-16*

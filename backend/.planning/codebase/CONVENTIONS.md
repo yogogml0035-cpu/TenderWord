@@ -1,13 +1,13 @@
 # 后端编码约定
 
-**分析日期：** 2026-06-09
+**分析日期：** 2026-06-16
 
 **范围：** `backend/` 源码、`backend/tests/`、`backend/requirements.txt`、`backend/.env.example`、`docs/backend.md`、`docs/interfaces-runtime.md`、`docs/knowledge-validation.md`、既有 `backend/.planning/codebase/` 事实文档和项目内 `.agents/skills/gsd-map-codebase/SKILL.md`。`backend/.env` 文件存在，但不得读取或引用内容。
 
 **关键事实来源：**
 - 应用入口与 API：`backend/main.py`、`backend/api/generate.py`、`backend/api/agent.py`、`backend/api/tasks.py`、`backend/api/template_candidates.py`、`backend/api/comment_supplement.py`
 - 请求、任务与状态模型：`backend/models/generate.py`、`backend/models/agent_run.py`、`backend/models/task.py`、`backend/states/base_state.py`、`backend/states/skill_state.py`
-- 任务与 Graph 编排：`backend/services/document_service.py`、`backend/services/agent_run_service.py`、`backend/graphs/base_graph.py`、`backend/graphs/skill_graph.py`、`backend/graphs/task_skill_workflows.py`
+- 任务与 Graph 编排：`backend/services/document_service.py`、`backend/services/agent_run_service.py`、`backend/graphs/base_graph.py`、`backend/graphs/skill_graph.py`、`backend/skills/rewrite/scripts/runtime.py`
 - rewrite 与 Word 写回：`backend/nodes/skills_nodes/rewrite_nodes.py`、`backend/nodes/skills_nodes/tender_aware_word_dispatch.py`、`backend/nodes/common_word_nodes/update_word.py`、`backend/helper/word_helper/`、`backend/util/word_util/`
 - 日志与审计：`backend/util/log_util/progress_log.py`、`backend/util/log_util/skill_audit_log.py`、`backend/agents/task_context_assistant/logging.py`
 
@@ -18,7 +18,7 @@
 - API、model、service、graph、state、node、helper、util 按职责目录放置；新增后端能力优先落入 `backend/api/`、`backend/models/`、`backend/services/`、`backend/graphs/`、`backend/nodes/`、`backend/helper/word_helper/` 或 `backend/util/` 的既有边界。
 - 招标类型 graph 使用 `<form_type>_tender_graph.py`，例如 `backend/graphs/gngk_hw_cz_tender_graph.py`。
 - 类型专属 Word 节点使用 `<runtime_type>_<operation>.py`，例如 `backend/nodes/gngk_word_nodes/gngk_fw_zc_update_word.py`。
-- task skill 声明放在 `backend/skills/<skill_id>/SKILL.md`，运行时 helper 放在 `backend/skills/<skill_id>/scripts/`，workflow 注册在 `backend/graphs/task_skill_workflows.py`。
+- task skill 声明放在 `backend/skills/<skill_id>/SKILL.md`，运行时 helper 放在 `backend/skills/<skill_id>/scripts/`，graph 执行落在 `backend/graphs/skill_graph.py` 的显式 `RewriteSkillGraph`（新 skill 先评估是否新增显式 graph，不要恢复 `SkillGraph.for_skill + TaskSkillWorkflow` 元数据驱动框架）。
 - 测试文件使用 `test_*.py`，并放在 `backend/tests/<scope>/`，例如 `backend/tests/api/test_agent_run_api.py`、`backend/tests/nodes/test_rewrite_nodes.py`。
 
 **函数：**
@@ -83,7 +83,7 @@
 **Graph/State/Node 层：**
 - 位置：`backend/graphs/`、`backend/states/`、`backend/nodes/`
 - 用法：LangGraph 负责长任务流程；state 定义跨节点字段；node 执行具体 Word、LLM、rewrite、comment 逻辑。
-- 新节点必须通过 `BaseGraph.wrap_node()` 或 `SkillGraph` workflow 元数据接入进度与取消检查。
+- 新节点必须通过 `BaseGraph.wrap_node()` 或 rewrite skill graph 的显式节点表（`REWRITE_NODE_HANDLERS`）接入进度与取消检查；不要新增 task skill 元数据驱动入口。
 
 **Word helper 层：**
 - 位置：`backend/helper/word_helper/`
@@ -110,6 +110,13 @@
 - 上传文件 rewrite 由 `DocumentService._build_uploaded_rewrite_initial_state()` 写入 `rewrite_source="uploaded_file"`，并由 `resolve_rewrite_target()` 复制工作副本、开启 `verbose_style_progress_logs` 和 `suppress_comment_progress_logs`。
 - 会话 rewrite 由 `DocumentService._build_skill_graph_initial_state()` 使用 conversation rewrite history；上传文件 rewrite 使用 `source_document_path`、`form_type`、`insertion_config`、`tender_lx`、`fund_source_lx` 和可选 `tender_data_snapshot`。
 - 保护该边界的测试位于 `backend/tests/services/test_document_service_initial_state.py`、`backend/tests/nodes/test_uploaded_rewrite_inline_style_context.py`、`backend/tests/agents/test_task_context_assistant_tools.py`。
+
+## Content Agent 结构化表占位符硬契约
+
+- 技术参数中的结构化表必须以占位符 `[[TABLE:<id>]]` 原样出现在生成正文里，不得改写为 Markdown 表格、手绘表格或省略。
+- 占位符正则、缺失比对和 `AuditFinding` 构造集中在 `backend/agents/generation/table_placeholder_utils.py`；verify agent 据此产出缺失审计 finding。
+- 新增占位符格式或校验规则时，同步该工具模块、verify agent 调用点（`backend/agents/generation/verify_agent_graph.py`）和 `backend/tests/agents/test_table_placeholder_utils.py`、`backend/tests/agents/test_generation_content_agent.py`。
+- `table_id` 字符集与 `backend/util/word_util/table_models.py` 保持一致（`[A-Za-z0-9_-]+`）。
 
 ## 错误处理
 
@@ -186,4 +193,4 @@
 
 ---
 
-*后端编码约定分析：2026-06-09*
+*后端编码约定分析：2026-06-16*

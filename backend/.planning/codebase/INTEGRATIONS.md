@@ -1,6 +1,6 @@
 # 后端外部集成
 
-**分析日期：** 2026-06-09
+**分析日期：** 2026-06-16
 
 **范围：** 仅覆盖 `backend/` 后端子项目。事实来源包括 `backend/` 源码、`backend/requirements.txt`、`backend/.env.example`、`backend/.planning/codebase/` 现有事实文档、`README.md`、`docs/backend.md`、`docs/interfaces-runtime.md`、`docs/knowledge-validation.md`、根级启动脚本 `scripts/start-dev.ps1`、`scripts/start-dev-win.ps1`、`scripts/start-dev-wsl.sh`，以及项目内 `.agents/skills/*/SKILL.md` 的轻量规则索引。`backend/.env` 存在但未读取；`frontend/.env.local` 未读取。
 
@@ -127,7 +127,7 @@
 **认证提供方：**
 - 未检测到强制执行的 API 鉴权层。
   - 实现：`backend/main.py` 注册的业务 routers 未检测到统一 `Depends(...)` auth dependency。
-  - 依赖：`python-jose[cryptography]`、`passlib[bcrypt]` 在 `backend/requirements.txt` 中声明，但不是当前 API router 的统一鉴权实现。
+  - 依赖：当前 `backend/requirements.txt` 已不再声明 `python-jose[cryptography]` 和 `passlib[bcrypt]`；业务 API 无统一鉴权实现。
 
 **身份 / 会话：**
 - `conversation_id` 用于 rewrite history、agent run 上下文和补充批注状态连续性。
@@ -216,4 +216,4 @@
 
 ---
 
-*集成审计：2026-06-09*
+*集成审计：2026-06-16*

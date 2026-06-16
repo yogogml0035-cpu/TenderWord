@@ -22,6 +22,8 @@ TenderWord 是招标文档生成、修改、补充批注和模板复用系统；
 - `generation_style`、`generation_mode`、`comment_generation_mode` 和 `style_writeback_mode` 是 generate-only 字段，不得进入 rewrite 请求模型、skill state 或 prompt surface。
 - `gngk` 在前端只是一种 UI 类型；提交到后端时必须由共享 helper 按 `tender_lx + fund_lx + ifzgcg` 分派到具体 form type。
 - 上传文件 rewrite 前端使用 `rewrite_source` 文件类型，后端 task skill state 用 `rewrite_source="uploaded_file"` 标记来源；不要恢复旧 edit 入口或把上传修改做成第二套任务链路。
+- rewrite 任务由显式 `RewriteSkillGraph` 承载，节点、边和条件分支直接写在 `backend/graphs/skill_graph.py`；不要恢复 `SkillGraph.for_skill + TaskSkillWorkflow` 元数据驱动框架。
+- content agent 生成正文必须原样保留技术参数里的 `[[TABLE:<id>]]` 结构化表占位符；占位符校验集中在 `backend/agents/generation/table_placeholder_utils.py`，不得改写为 Markdown/手绘表格或省略。
 - Agent run 只负责任务创建前置流；审计日志和摘要工具只暴露 scrub 后白名单信息，不记录或返回完整客户原文、真实密钥、私有路径、traceback 或下载路径。
 
 ## 验证与维护

@@ -1,6 +1,6 @@
 # 后端技术栈
 
-**分析日期：** 2026-06-09
+**分析日期：** 2026-06-16
 
 **范围：** 仅覆盖 `backend/` 后端子项目。事实来源包括 `backend/` 源码、`backend/requirements.txt`、`backend/.env.example`、`backend/.planning/codebase/` 现有事实文档、`README.md`、`docs/backend.md`、`docs/interfaces-runtime.md`、`docs/knowledge-validation.md`、根级启动脚本 `scripts/start-dev.ps1`、`scripts/start-dev-win.ps1`、`scripts/start-dev-wsl.sh`，以及项目内 `.agents/skills/*/SKILL.md` 的轻量规则索引。`backend/.env` 存在但未读取；`frontend/.env.local` 未读取。
 
@@ -49,8 +49,9 @@
 **构建 / 开发：**
 - `python-multipart>=0.0.12` - FastAPI 上传文件解析；使用点是 `backend/api/upload.py`。
 - `python-dotenv>=1.0.0` - retrieval 配置加载 `backend/.env`；使用点是 `backend/retrieval/config.py`。
-- `structlog>=24.4.0` - 依赖已声明；当前主日志实现主要使用 stdlib `logging` 和 `backend/util/log_util/`。
 - watchfiles 由 `uvicorn[standard]` 间接提供，开发脚本设置 `WATCHFILES_FORCE_POLLING` 和 `WATCHFILES_POLL_DELAY_MS`；路径是 `scripts/start-dev.ps1`。
+
+> 日志与 HTTP client 说明：当前 `backend/requirements.txt` 已不再声明 `structlog`、`aiohttp`、`python-jose[cryptography]` 和 `passlib[bcrypt]`；主日志实现使用 stdlib `logging` 和 `backend/util/log_util/`，HTTP 调用主要使用 `requests` 与 `httpx`，业务 API 也未启用统一鉴权层（参见 INTEGRATIONS.md 与 CONCERNS.md）。
 
 ## 关键依赖
 
@@ -67,8 +68,6 @@
 - `langchain-core>=0.3.0` - message、tool、runnable 类型；路径包括 `backend/agents/comments/comment_agent.py`、`backend/agents/comments/tools.py`。
 - `langchain-deepseek>=0.1.0` - 依赖已声明；当前主要 provider 调用路径通过 OpenAI-compatible base URL 和 `langchain_openai.ChatOpenAI`。
 - `volcengine-python-sdk[ark]>=1.0.0` - ARK/Doubao 依赖已声明；当前 provider 配置同样走 OpenAI-compatible base URL，配置在 `backend/config/settings.py`。
-- `python-jose[cryptography]>=3.3.0`、`passlib[bcrypt]>=1.7.4` - 认证相关依赖已声明；当前 `backend/main.py` 注册的业务 routers 未检测到统一鉴权 dependency。
-- `aiohttp>=3.11.0` - HTTP client 依赖已声明；当前扫描到的主要后端 HTTP 调用使用 `requests` 和 `httpx`。
 
 ## 配置
 
@@ -157,4 +156,4 @@ git diff --check
 
 ---
 
-*技术栈分析：2026-06-09*
+*技术栈分析：2026-06-16*

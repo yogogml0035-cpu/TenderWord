@@ -1,8 +1,10 @@
 # 前端测试约定
 
-**分析日期：** 2026-06-09
+**分析日期：** 2026-06-16
 
-**范围：** `frontend/__tests__/`、`frontend/e2e/`、`frontend/mocks/`、`frontend/test-shims/`、`frontend/jest.config.ts`、`frontend/playwright.config.ts`、`frontend/package.json`、`frontend/tsconfig.typecheck.json` 和前端事实文档。`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc` 仅确认存在，不读取内容。
+**范围：** `frontend/__tests__/`、`frontend/e2e/`、`frontend/test-shims/`、`frontend/jest.config.ts`、`frontend/playwright.config.ts`、`frontend/package.json`、`frontend/tsconfig.typecheck.json` 和前端事实文档。`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc` 仅确认存在，不读取内容。
+
+> 本轮（feat-wsq）已移除 MSW mock 层（`frontend/mocks/handlers.ts`、`frontend/mocks/server.ts`）、`jest.setup.ts`、`polyfills.ts`、`__tests__/utils/`（setup/test-utils）、`__tests__/integration/` 以及 `msw`、`jest-fetch-mock`、`und`、`undici` 依赖；Jest 本身仍在，单测改为直接 mock `globalThis.fetch`，setup 入口统一为 `jest.setup.js` / `polyfills.js`。
 
 ## 测试框架
 
@@ -11,8 +13,8 @@
 - 配置：`frontend/jest.config.ts`。
 - 环境：`jsdom`。
 - `setupFiles`: `frontend/polyfills.js`。
-- `setupFilesAfterEnv`: `frontend/jest.setup.js`。
-- `frontend/jest.setup.ts` 存在，但当前 Jest 配置实际引用 `frontend/jest.setup.js`；修改全局 setup 时先确认实际入口。
+- `setupFilesAfterEnv`: `frontend/jest.setup.js`（`jest.setup.ts` 与 `polyfills.ts` 已在本轮移除，入口统一为 `.js` 版本）。
+- `frontend/types/jest-dom.d.ts`（本轮新增）补齐 `@testing-library/jest-dom` matcher 的全局 TS 类型，测试文件无需逐个 import。
 
 **断言库：**
 - Jest `expect`。
@@ -48,11 +50,11 @@ TMPDIR=/tmp TMP=/tmp TEMP=/tmp CI=1 npm test -- --runInBand
 ## 测试文件组织
 
 **位置：**
-- Jest 测试集中在 `frontend/__tests__/`，不与源码文件并排。
+- Jest 测试集中在 `frontend/__tests__/unit/`，不与源码文件并排。
 - Playwright 测试集中在 `frontend/e2e/`。
-- MSW mock server 和 handlers 位于 `frontend/mocks/`。
 - 测试数据工厂和 SSE mock 位于 `frontend/__tests__/mocks/`。
-- Testing Library helper 位于 `frontend/__tests__/utils/test-utils.tsx`。
+- 异步测试等待工具位于 `frontend/test-shims/until-async.ts`。
+- 本轮已移除 `frontend/mocks/`（MSW handlers/server）、`frontend/__tests__/utils/`（setup/test-utils）和 `frontend/__tests__/integration/`；不要再向这些路径新增文件。
 
 **命名：**
 - Jest 测试文件使用 `test_*.test.ts` 或 `test_*.test.tsx`。
@@ -62,25 +64,20 @@ TMPDIR=/tmp TMP=/tmp TEMP=/tmp CI=1 npm test -- --runInBand
 **结构：**
 ```text
 frontend/__tests__/
-├── integration/
-│   └── examples/
 ├── mocks/
 │   ├── data-factories.ts
 │   └── sse-mock.ts
-├── unit/
-│   ├── app/
-│   ├── components/
-│   │   ├── chat/
-│   │   ├── forms/
-│   │   └── layout/
-│   ├── hooks/
-│   ├── lib/
-│   ├── stores/
-│   ├── types/
-│   └── utils/
-└── utils/
-    ├── setup.ts
-    └── test-utils.tsx
+└── unit/
+    ├── app/
+    ├── components/
+    │   ├── chat/
+    │   ├── forms/
+    │   └── layout/
+    ├── hooks/
+    ├── lib/
+    ├── stores/
+    ├── types/
+    └── utils/
 
 frontend/e2e/
 └── test_*.spec.ts
@@ -215,8 +212,7 @@ export class ConversationFactory {
 **位置：**
 - 通用数据工厂：`frontend/__tests__/mocks/data-factories.ts`。
 - SSE mock：`frontend/__tests__/mocks/sse-mock.ts`。
-- Testing Library helper：`frontend/__tests__/utils/test-utils.tsx`。
-- MSW handlers：`frontend/mocks/handlers.ts`。
+- Testing Library render 现直接使用 `@testing-library/react`，不再经过 `frontend/__tests__/utils/test-utils.tsx`（本轮已移除）。
 - Playwright session seed 使用 `page.addInitScript()` 写入 `sessionStorage`，见 `frontend/e2e/test_agent_run_chat_panel.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`。
 
 ## 覆盖率
@@ -224,7 +220,7 @@ export class ConversationFactory {
 **要求：**
 - `frontend/jest.config.ts` 配置全局 coverage threshold：`branches`、`functions`、`lines`、`statements` 均为 `50`。
 - 覆盖率收集范围：`components/`、`hooks/`、`lib/`、`stores/`。
-- 覆盖率排除：`.d.ts`、`node_modules`、`.next`、`frontend/mocks/`。
+- 覆盖率排除：`.d.ts`、`node_modules`、`.next`、`__tests__/mocks/`。
 
 **查看覆盖率：**
 ```bash
@@ -246,8 +242,7 @@ npm run test:coverage
 - 类型守卫 / SSE 类型：`frontend/__tests__/unit/types/test_api_sse_agent_step.test.ts`。
 
 **集成测试：**
-- Testing Library provider/render 示例位于 `frontend/__tests__/integration/examples/test_example_component.test.tsx`。
-- 当前集成测试更多是模式样例；业务跨模块行为主要由 unit suites 和 Playwright specs 覆盖。
+- 本轮已移除 `frontend/__tests__/integration/`（含 `test_example_component.test.tsx`）；跨模块行为由 unit suites 和 Playwright specs 覆盖，不再维护独立集成测试目录。
 
 **E2E 测试：**
 - Playwright specs 位于 `frontend/e2e/`。
@@ -362,9 +357,10 @@ await page.route('**/api/generate', async (route) => {
 
 - 真实后端 + Word COM 生成闭环不属于常规前端 Jest / Playwright 覆盖，需要 Windows Python、pywin32 和本机 Word/WPS COM 环境。
 - Playwright 当前主要验证 mock 后端下的前端契约，不能证明生成 `.docx` 内容正确。
-- `frontend/mocks/handlers.ts` 的 MSW 基础 mock 覆盖有限，复杂 agent run、SSE 和任务事件更多依赖单测内 mock 或 Playwright route。
-- `frontend/jest.setup.ts` 与 `frontend/jest.setup.js` 并存，实际生效入口是 `frontend/jest.setup.js`。
+- 本轮移除 MSW 后不再有统一 mock 层；复杂 agent run、SSE 和任务事件依赖单测内的 `globalThis.fetch` mock 或 Playwright `page.route()`。
+- `frontend/test-shims/until-async.ts` 在本轮 `jest.config.ts` 移除 `'^until-async
+` moduleNameMapper 映射后，可能变为无引用孤儿文件；新增引用前先确认是否仍被使用。
 
 ---
 
-*测试分析：2026-06-09*
+*测试分析：2026-06-16*

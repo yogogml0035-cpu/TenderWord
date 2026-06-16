@@ -1,6 +1,6 @@
 # 后端测试模式
 
-**分析日期：** 2026-06-09
+**分析日期：** 2026-06-16
 
 **范围：** `backend/tests/`、`backend/requirements.txt`、`backend/scripts/diagnose_word.py`、`docs/backend.md`、`docs/interfaces-runtime.md`、`docs/knowledge-validation.md` 和与测试直接相关的后端实现文件。`backend/.env` 文件存在，但不得读取或引用内容。
 
@@ -293,6 +293,7 @@ assert events[0]["event"] == "run_started"
 - Graph/type 路由变更：运行 `python -m pytest tests/graphs -v` 和 `backend/tests/services/test_document_service_initial_state.py`。
 - Generate-only 字段、生成模式、批注开关、样式回填变更：运行 `backend/tests/models/test_generate_request_generation_style.py`、`backend/tests/services/test_document_service_initial_state.py`、`backend/tests/graphs/test_generation_mode_branching.py`。
 - Rewrite / uploaded file rewrite 变更：运行 `backend/tests/api/test_agent_run_api.py`、`backend/tests/services/test_agent_run_service.py`、`backend/tests/agents/test_task_context_assistant_tools.py`、`backend/tests/nodes/test_rewrite_nodes.py`、`backend/tests/nodes/test_uploaded_rewrite_inline_style_context.py`、`backend/tests/progress/test_uploaded_rewrite_progress_tracking.py`。
+- Content agent / 结构化表占位符硬契约变更：运行 `backend/tests/agents/test_generation_content_agent.py` 和 `backend/tests/agents/test_table_placeholder_utils.py`，再运行 `backend/tests/nodes/test_tender_aware_word_dispatch.py` 覆盖 rewrite 写回分支。
 - Word helper 变更：运行相关 `backend/tests/helper/`，再运行受影响的 `backend/tests/nodes/`。
 - Word node/direct-replace 变更：运行聚焦的 `backend/tests/nodes/test_<node>.py`，路由变化时再运行 `backend/tests/graphs/`。
 - Prompt 或 LLM stream 变更：运行 `backend/tests/prompts/`、`backend/tests/util/test_llm_stream_utils.py` 和调用方测试。
@@ -309,4 +310,4 @@ assert events[0]["event"] == "run_started"
 
 ---
 
-*后端测试分析：2026-06-09*
+*后端测试分析：2026-06-16*

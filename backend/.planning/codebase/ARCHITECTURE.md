@@ -1,7 +1,7 @@
-<!-- refreshed: 2026-06-09 -->
+<!-- refreshed: 2026-06-16 -->
 # 后端架构事实地图
 
-**分析日期：** 2026-06-09
+**分析日期：** 2026-06-16
 
 **范围：** 仅覆盖 `backend/` 子项目。事实来源为 `backend/` 源码、`backend/tests/`、`backend/requirements.txt`、`README.md`、`docs/backend.md`、`docs/interfaces-runtime.md` 和 `.agents/skills/gsd-map-codebase/SKILL.md`。`backend/.env` 文件存在，但不得读取或引用内容。
 
@@ -54,7 +54,7 @@
 | BaseGraph | LangGraph 基类，提供跨进程文件锁、节点进度包装、取消检查和同步/异步执行包装 | `backend/graphs/base_graph.py:351`, `backend/graphs/base_graph.py:703` |
 | StandardTenderWorkflowGraph | 初次生成主拓扑，维护 Word 子图、`generation_mode` 分支、批注开关和后写回分支 | `backend/graphs/base_graph.py:480`, `backend/graphs/base_graph.py:533` |
 | Tender graph classes | 按招标类型绑定差异节点，复用标准 graph 主干 | `backend/graphs/xjcg_tender_graph.py`, `backend/graphs/gngk_hw_zc_tender_graph.py`, `backend/graphs/gjgk_tender_graph.py` |
-| SkillGraph | 通过 `TaskSkillWorkflow` 元数据构建 rewrite 等 task skill graph | `backend/graphs/skill_graph.py:15`, `backend/graphs/task_skill_workflows.py:27` |
+| RewriteSkillGraph | 显式实现 rewrite 任务流程的 LangGraph，取代原先 `SkillGraph.for_skill + TaskSkillWorkflow` 元数据驱动框架；当前只服务 rewrite 一种 skill | `backend/graphs/skill_graph.py:54` |
 | CommentSupplementGraph | 补充批注独立 graph，复用任务队列、SSE、锁和 `comment_agent` 写回 | `backend/graphs/comment_supplement_graph.py:19`, `backend/graphs/comment_supplement_graph.py:60` |
 | Word nodes | 模板准备、抽参、删除、替换、正文生成、批注生成、写回、rewrite 节点 | `backend/nodes/` |
 | Word helper | Word 业务 helper：段落边界、受保护字段、正文写回、样式回填、range、删除、语义匹配 | `backend/helper/word_helper/` |
@@ -211,10 +211,10 @@
 - 示例：`backend/graphs/base_graph.py:480`
 - 模式：类型 graph 通过 class attribute 绑定 `NODE_*`，不要复制 `build_graph()`。
 
-**`TaskSkillWorkflow`:**
-- 用途：声明 task skill 的 state、节点、普通边、等待边、条件边和节点估算；当前跟踪源码中只注册 `rewrite`。
-- 示例：`backend/graphs/task_skill_workflows.py:27`, `backend/graphs/task_skill_types.py`
-- 模式：新 skill 先新增 `backend/skills/<skill_id>/SKILL.md` 和运行时节点，再在 `_TASK_SKILL_WORKFLOWS` 注册。
+**`RewriteSkillGraph` 显式 skill graph：**
+- 用途：显式声明 rewrite 任务的固定节点顺序、普通边和条件分支，取代原先 `SkillGraph.for_skill + TaskSkillWorkflow` 的元数据驱动框架。
+- 示例：`backend/graphs/skill_graph.py:54`
+- 模式：节点名 `REWRITE_NODE_NAMES` 和 handler 直接写在该文件；条件分支 `select_resolve_branch` / `select_comment_branch` 来自 `backend/skills/rewrite/scripts/runtime.py`。新增非 rewrite skill 时先评估是否复用显式 graph 模式，而不是恢复元数据驱动框架。
 
 **`SSEEvent` / `AgentStepEventData`:**
 - 用途：后台任务事件和 agent 过程卡事件契约。
@@ -230,6 +230,11 @@
 - 用途：OpenAI-compatible LLM 流式调用统一入口，支持超时、回调和模型配置。
 - 示例：`backend/util/common_util/llm_stream_utils.py:190`
 - 模式：后端 LLM 调用复用该 helper 或 `create_generation_chat_model()`，不要在节点里散落新的 SDK 初始化。
+
+**结构化表占位符硬契约：**
+- 用途：content agent 生成正文中技术参数里的结构化表必须以 `[[TABLE:<id>]]` 占位符原样保留，verify agent 据此校验占位符不丢失，并产出缺失审计 finding。
+- 示例：`backend/agents/generation/table_placeholder_utils.py`
+- 模式：占位符正则、缺失比对和 `AuditFinding` 构造集中在该工具模块；verify agent 调用 `find_missing_table_placeholders()` + `build_missing_table_placeholder_findings()`。占位符不得被改写为 Markdown/手绘表格或省略；新增占位符格式或校验规则时同步该工具模块、verify agent 调用点和相关测试。
 
 **`Comment bad case retrieval` 运行时：**
 - 用途：为批注生成提供可注入 prompt 的坏案例上下文。
@@ -343,4 +348,4 @@
 
 ---
 
-*架构分析：2026-06-09*
+*架构分析：2026-06-16*

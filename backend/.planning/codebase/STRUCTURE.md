@@ -1,6 +1,6 @@
 # 后端结构事实地图
 
-**分析日期：** 2026-06-09
+**分析日期：** 2026-06-16
 
 **范围：** 仅覆盖 `backend/` 子项目。输出限定为 `backend/.planning/codebase/ARCHITECTURE.md` 和 `backend/.planning/codebase/STRUCTURE.md`。`backend/.env` 文件存在，但不得读取或引用内容。
 
@@ -15,7 +15,7 @@ backend/
 ├── api/                        # FastAPI routers
 ├── config/                     # settings 与招标类型配置
 ├── core/                       # SSE manager 等核心运行设施
-├── graphs/                     # LangGraph graph 类和 task skill workflow 元数据
+├── graphs/                     # LangGraph graph 类（标准生成主干、类型 graph、rewrite skill graph、补充批注 graph）
 ├── helper/
 │   └── word_helper/            # Word 业务 helper
 ├── models/                     # Pydantic API/runtime 模型
@@ -76,9 +76,9 @@ backend/
 - 关键文件： `backend/core/sse_manager.py:44`
 
 **`backend/graphs/`:**
-- 用途： 定义 LangGraph 工作流和 task skill graph 元数据。
-- 包含： `BaseGraph`、`StandardTenderWorkflowGraph`、类型 graph、`SkillGraph`、`CommentSupplementGraph`、`TaskSkillWorkflow`。
-- 关键文件： `backend/graphs/base_graph.py:480`, `backend/graphs/skill_graph.py:15`, `backend/graphs/task_skill_workflows.py:27`, `backend/graphs/comment_supplement_graph.py:19`
+- 用途： 定义 LangGraph 工作流；包括标准生成主干、按招标类型继承的类型 graph、rewrite 任务的显式 skill graph 和补充批注 graph。
+- 包含： `BaseGraph`、`StandardTenderWorkflowGraph`、类型 graph（xjcg/gngk_*/gjgk）、`RewriteSkillGraph`、`CommentSupplementGraph`。
+- 关键文件： `backend/graphs/base_graph.py:480`, `backend/graphs/skill_graph.py:54`, `backend/graphs/comment_supplement_graph.py:19`
 
 **`backend/states/`:**
 - 用途： 保存 LangGraph state TypedDict，作为节点输入输出 shape。
@@ -122,8 +122,8 @@ backend/
 
 **`backend/agents/generation/`:**
 - 用途： `generation_mode=agent` 的正文生成智能体运行时。
-- 包含： DeepAgents 主 agent、generate/verify/revise 子图、workspace、model factory、JSON 协议和 `agent_step` emitter。
-- 关键文件： `backend/agents/generation/content_agents.py:845`, `backend/agents/generation/generate_agent_graph.py:195`, `backend/agents/generation/verify_agent_graph.py:369`, `backend/agents/generation/workspace.py:39`
+- 包含： DeepAgents 主 agent、generate/verify/revise 子图、workspace、model factory、JSON 协议、`agent_step` emitter 和结构化表占位符硬契约工具。
+- 关键文件： `backend/agents/generation/content_agents.py:845`, `backend/agents/generation/generate_agent_graph.py:195`, `backend/agents/generation/verify_agent_graph.py:369`, `backend/agents/generation/workspace.py:39`, `backend/agents/generation/table_placeholder_utils.py`
 
 **`backend/agents/comments/`:**
 - 用途： 批注 agent 运行时。
@@ -156,10 +156,10 @@ backend/
 - 关键文件： `backend/util/log_util/progress_log.py`, `backend/util/log_util/execution_log.py`, `backend/util/log_util/sse_log_handler.py`, `backend/util/log_util/skill_audit_log.py`
 
 **`backend/skills/`:**
-- 用途： task skill 声明和 loader。
-- 包含： `catalog.py`、`rewrite/SKILL.md`、`rewrite/scripts/runtime.py`
+- 用途： task skill 声明和 runtime helper。
+- 包含： `catalog.py`、`rewrite/SKILL.md`、`rewrite/scripts/runtime.py`（提供 `select_resolve_branch`、`select_comment_branch`、`estimate_total_nodes` 等条件分支与节点估算 helper）。
 - 关键文件： `backend/skills/catalog.py`, `backend/skills/rewrite/SKILL.md`, `backend/skills/rewrite/scripts/runtime.py`
-- 约束： 当前被 Git 跟踪的 task skill 源码只有 `backend/skills/rewrite/`；不要把本地 `__pycache__` 或旧缓存目录当作可用 skill 来源。
+- 约束： 当前被 Git 跟踪的 task skill 源码只有 `backend/skills/rewrite/`；不要把本地 `__pycache__` 或旧缓存目录（例如已删除模块遗留的 `.pyc`）当作可用 skill 来源。
 
 **`backend/tests/`:**
 - 用途： 后端 pytest 测试。
@@ -187,7 +187,7 @@ backend/
 - `backend/services/document_service.py`: 生成/rewrite/补充批注任务创建、graph 执行、结果收敛。
 - `backend/task/task_queue_manager.py`: 任务队列、进度、取消、心跳、公平锁。
 - `backend/graphs/base_graph.py`: graph 基类、标准生成主干、锁、进度、取消。
-- `backend/graphs/task_skill_workflows.py`: rewrite task skill graph 元数据。
+- `backend/graphs/skill_graph.py`: rewrite 任务的显式 LangGraph 实现（节点顺序、普通边、条件分支）。
 - `backend/core/sse_manager.py`: SSE 事件管理。
 - `backend/services/agent_run_service.py`: agent run NDJSON 流和 rewrite guard。
 
@@ -289,7 +289,7 @@ backend/
 - Skill 声明： `backend/skills/<skill_id>/SKILL.md`
 - Runtime helper： `backend/skills/<skill_id>/scripts/runtime.py`
 - 节点： `backend/nodes/skills_nodes/<skill_id>_nodes.py`
-- Graph 执行：显式 `RewriteSkillGraph`（`backend/graphs/skill_graph.py`）
+- Graph 执行：rewrite 当前由显式 `RewriteSkillGraph`（`backend/graphs/skill_graph.py`）承载；新 skill 先评估是否新增显式 graph 类，不要恢复 `SkillGraph.for_skill + TaskSkillWorkflow` 元数据驱动框架。
 - 测试： `backend/tests/skills/`、`backend/tests/graphs/`、`backend/tests/nodes/`
 - 兼容约束：不要恢复旧 `/api/edit`、`edit` task kind 或独立 `edit` skill；上传文件修改应继续复用 `backend/skills/rewrite/` 和 `rewrite_source="uploaded_file"`。
 
@@ -366,4 +366,4 @@ backend/
 
 ---
 
-*结构分析： 2026-06-09*
+*结构分析： 2026-06-16*

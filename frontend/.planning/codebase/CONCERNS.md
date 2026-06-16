@@ -1,6 +1,6 @@
 # 前端风险事实地图
 
-**分析日期：** 2026-06-09
+**分析日期：** 2026-06-16
 
 **范围：** `frontend/` 当前技术债、脆弱区、安全边界、性能限制和测试缺口；必要时引用跨前后端契约代码和根级接口文档。本文只记录有当前代码证据的事实或明确未检测到的能力。`frontend/.env.local`、`backend/.env`、`.npmrc` 和密钥类文件只记录存在性，不读取内容。
 
@@ -42,11 +42,10 @@
 - 影响：把 generate-only 字段塞进 rewrite 请求、skill state 或 prompt surface 会污染 rewrite 语义，也会破坏后端关于 `rewrite_source="uploaded_file"` 的判断。
 - 修复方式：rewrite 能力只改 `AgentRunStreamRequest` 和 `AgentRunContextSnapshot` 明确存在的字段；generate 字段改动只进入 `GenerateRequest` 链路。
 
-**Jest setup 存在双文件入口：**
-- 问题：`frontend/jest.setup.js` 和 `frontend/jest.setup.ts` 同时存在，`frontend/jest.config.ts` 实际只引用 `frontend/jest.setup.js`。
-- 文件：`frontend/jest.config.ts`、`frontend/jest.setup.js`、`frontend/jest.setup.ts`
-- 影响：修改 `frontend/jest.setup.ts` 不会影响当前 Jest 运行，容易产生验证误判。
-- 修复方式：测试环境变更前先看 `setupFilesAfterEnv`；需要保留双文件时同步更新，或单独计划清理。
+**Jest setup 双文件入口已解决（本轮）：**
+- 问题：`frontend/jest.setup.js` 和 `frontend/jest.setup.ts` 曾同时存在，`frontend/jest.config.ts` 实际只引用 `.js` 版本。
+- 状态：本轮已删除 `frontend/jest.setup.ts` 与 `frontend/polyfills.ts`，入口统一为 `frontend/jest.setup.js` + `frontend/polyfills.js`；`frontend/types/jest-dom.d.ts`（新增）补齐 jest-dom matcher 全局类型。
+- 残留约束：修改全局 setup 时只改 `.js` 入口；不要再创建 `.ts` 版本。
 
 ## 已知问题
 
@@ -56,11 +55,10 @@
 - 触发方式：使用 `var(--primary-hover)` 或 Tailwind theme `--color-primary-hover` 的样式会得到后定义的红色值。
 - 临时处理：修改视觉 token 前先清理 `frontend/app/globals.css` 的重复变量，并检查引用 `--color-primary-hover` 的样式。
 
-**`waitForLoadingToFinish()` 测试工具是空实现：**
-- 症状：调用该 helper 不会等待 loading 状态，只返回 resolved promise。
-- 文件：`frontend/__tests__/utils/test-utils.tsx`
-- 触发方式：新测试误用 `waitForLoadingToFinish()` 作为真实等待条件。
-- 临时处理：使用 Testing Library `waitFor()` 或显式断言目标状态；如需通用 helper，先实现行为再补测试。
+**`waitForLoadingToFinish()` 测试工具已移除（本轮）：**
+- 症状：曾存在空实现的 `waitForLoadingToFinish()` helper，调用后只返回 resolved promise，不等待 loading。
+- 状态：本轮已删除 `frontend/__tests__/utils/test-utils.tsx`（含该 helper）；测试改用 Testing Library `waitFor()` 或显式断言目标状态。
+- 残留约束：不要再向已删除的 `frontend/__tests__/utils/` 路径新增 helper。
 
 ## 安全注意事项
 
@@ -177,7 +175,7 @@
 - 迁移计划：Windows 使用 `frontend/node_modules/`；WSL 使用 Linux npm 安装，必要时使用 `frontend/node_modules-wsl/`；启动脚本和 README 说明以 `README.md`、`scripts/start-dev-win.ps1`、`scripts/start-dev-wsl.sh` 为准。
 
 **Next.js 16 / React 19 / Jest 29 测试环境组合：**
-- 风险：框架版本较新，测试环境依赖 `next/jest`、`jest-environment-jsdom`、MSW ESM 转换和 polyfill 配置。
+- 风险：框架版本较新，测试环境依赖 `next/jest`、`jest-environment-jsdom` 和 polyfill 配置（本轮已移除 MSW ESM 转换层）。
 - 影响：升级依赖或新增 ESM 包时可能触发 jsdom、fetch、EventSource、TextEncoder 或 transform 问题。
 - 迁移计划：依赖变更后运行 `npm run type-check`、`npm run test`，重点检查 `frontend/jest.config.ts`、`frontend/polyfills.js`、`frontend/jest.setup.js`。
 
@@ -238,12 +236,19 @@
 - 风险：局部修复影响未覆盖的任务/会话分支。
 - 优先级：中；新增分支应补窄单测或 mock E2E。
 
-**测试 setup 双入口：**
-- 未覆盖内容：`frontend/jest.setup.ts` 与 `frontend/jest.setup.js` 的一致性和是否被实际加载。
-- 文件：`frontend/jest.setup.js`、`frontend/jest.setup.ts`、`frontend/jest.config.ts`
-- 风险：测试环境修改未生效。
-- 优先级：低；除非调整测试环境。
+**`test-shims/until-async.ts` 引用关系待确认（本轮新引入）：**
+- 未覆盖内容：本轮 `jest.config.ts` 移除 `'^until-async
+` moduleNameMapper 映射后，`frontend/test-shims/until-async.ts` 是否仍被测试引用。
+- 文件：`frontend/test-shims/until-async.ts`、`frontend/jest.config.ts`
+- 风险：文件可能变为无引用孤儿；新增引用前先确认导入路径与实际使用。
+- 优先级：低；除非调整测试异步等待工具。
+
+**MSW 移除后的集成 mock 覆盖（本轮新引入）：**
+- 未覆盖内容：本轮移除 MSW handlers/server 后，复杂 agent run、SSE 和任务事件缺少统一 mock 层，只能依赖单测内 `globalThis.fetch` mock 或 Playwright `page.route()`。
+- 文件：`frontend/__tests__/unit/lib/test_api.test.ts`、`frontend/e2e/`
+- 风险：新增复杂链路时单测 mock 分散，跨模块行为更多依赖 Playwright。
+- 优先级：中；跨工作台改动时优先补 Playwright spec。
 
 ---
 
-*前端风险审计：2026-06-09*
+*前端风险审计：2026-06-16*

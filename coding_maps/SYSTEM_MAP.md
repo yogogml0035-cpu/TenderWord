@@ -1,8 +1,8 @@
 # TenderWord 系统地图
 
-**生成日期：** 2026-06-09
+**生成日期：** 2026-06-16
 
-本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它基于 2026-06-09 刷新的子项目事实文档，不替代代码真源、不替代根级 `AGENTS.md` 的执行红线，也不替代 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 的子系统事实文档。
+本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它基于 2026-06-16 刷新的子项目事实文档，不替代代码真源、不替代根级 `AGENTS.md` 的执行红线，也不替代 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 的子系统事实文档。
 
 ## 系统目的与仓库形态
 
@@ -28,7 +28,8 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 7. `DocumentService` 选择 `GRAPH_REGISTRY`，构造初始 state，并提交到 `backend/task/task_queue_manager.py`。
 8. `backend/graphs/base_graph.py` 执行共享 LangGraph 工作流，类型 graph 绑定具体 node；`generation_mode=workflow` 走 `generate_polished_text`，`generation_mode=agent` 走公共 `content_agent`。
 9. Word 业务逻辑通过 `backend/helper/word_helper/` 和 `backend/util/word_util/` 执行，LLM prompt 通过 `backend/prompts/` 渲染；正文智能体运行时在 `backend/agents/generation/`，批注智能体运行时在 `backend/agents/comments/`。
-10. 后端写入任务结果并推送 `agent_step` / `done` / `error` SSE，前端通过 `frontend/hooks/useChatSSE.ts` 更新任务消息、智能体过程卡和下载入口。
+10. `generation_mode=agent` 路径中，技术参数里的结构化表必须以 `[[TABLE:<id>]]` 占位符原样保留；`backend/agents/generation/table_placeholder_utils.py` 提供占位符正则、缺失比对和 `AuditFinding` 构造，verify agent 据此校验占位符不丢失。占位符不得被改写为 Markdown/手绘表格或省略。
+11. 后端写入任务结果并推送 `agent_step` / `done` / `error` SSE，前端通过 `frontend/hooks/useChatSSE.ts` 更新任务消息、智能体过程卡和下载入口。
 
 ### 任务状态、SSE 与下载
 
@@ -188,6 +189,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - Prompt、LLM 流式、`content_agent` 或 `comment_agent` 改动是否复用 `LLM_STREAM_TIMEOUT_SECONDS`，并保留 Prompt Layer 与智能体协议边界。
 - `backend/retrieval/` 改动是否仍限制在批注 prompt 增强边界内：只接入 `generate_comments`、自主生成模式 `comment_agent` 和 `comment_supplement`，不进入 rewrite 或 `comment_generation_mode=off`；检索状态、日志路径和命中详情不进入 SSE、下载卡或 `agent_step`。
 - `content_verify_agent` 是否只输出真实需修复 findings，并把“无问题 / 无需修改”的无效审核项折叠为 `[]`。
+- content agent 生成的正文是否原样保留 `[[TABLE:<id>]]` 结构化表占位符，verify agent 是否据此比对技术参数与正文并产出缺失 finding；占位符正则和 `table_id` 字符集是否与 `backend/util/word_util/table_models.py` 一致。
 - 模板候选改动是否仍由后端代理外部列表、文件下载和白名单校验。
 - 前端 running task 恢复是否先查任务状态，避免直接连接已不存在的 SSE。
 - 文档引用的路径、命令、端口和目录是否仍真实存在。

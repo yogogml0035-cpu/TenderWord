@@ -1,6 +1,6 @@
 # 前端技术栈事实地图
 
-**分析日期：** 2026-06-09
+**分析日期：** 2026-06-16
 
 **范围：** 仅 `frontend/` 子项目。依据 `frontend/package.json`、`frontend/package-lock.json`、`frontend/next.config.ts`、TypeScript/Jest/Playwright/ESLint/Prettier/PostCSS 配置、`frontend/app/`、`frontend/components/`、`frontend/hooks/`、`frontend/lib/`、`frontend/stores/`、`frontend/types/`、`README.md`、`docs/frontend.md`、`docs/interfaces-runtime.md` 和既有 `frontend/.planning/codebase/` 事实文档刷新。`frontend/README*` 未检测到。`frontend/.env.local`、`frontend/.env.local.example` 和 `frontend/.npmrc` 文件存在；内容不读取，不写入事实文档。
 
@@ -12,7 +12,7 @@
 
 **辅助语言：**
 - CSS - Tailwind 4 入口、CSS variables 和全局样式，见 `frontend/app/globals.css`。
-- JavaScript - Jest setup 与 Node/jsdom polyfill，见 `frontend/jest.setup.js`、`frontend/polyfills.js`。
+- JavaScript - Jest setup 与 Node/jsdom polyfill，见 `frontend/jest.setup.js`、`frontend/polyfills.js`（本轮已移除对应的 `.ts` 版本）。
 
 ## 运行时
 
@@ -29,16 +29,15 @@
 ## 框架
 
 **核心：**
-- Next.js `^16.2.6` - App Router、dev/build/start、rewrites、headers、图片 remote pattern、React strict mode 和 TypeScript build 校验，见 `frontend/package.json`、`frontend/app/`、`frontend/next.config.ts`。
+- Next.js `^16.2.6` - App Router、dev/build/start、rewrites、headers、图片 remote patterns、React strict mode 和 TypeScript build 校验，见 `frontend/package.json`、`frontend/app/`、`frontend/next.config.ts`。
 - React `19.2.3` / React DOM `19.2.3` - 页面、客户端组件和 hooks runtime，见 `frontend/components/`、`frontend/hooks/`。
 - Zustand `^5.0.11` - 会话、草稿、任务、stream、历史和 UI 状态，见 `frontend/stores/chatStore.ts`、`frontend/stores/chatStreamStore.ts`、`frontend/stores/chatTaskSessionStore.ts`、`frontend/stores/historyStore.ts`、`frontend/stores/useAppStore.ts`。
 - Tailwind CSS `^4` + `@tailwindcss/postcss` `^4` - utility 样式与 PostCSS 插件，见 `frontend/app/globals.css`、`frontend/postcss.config.mjs`。
 
 **测试：**
-- Jest `^29.7.0` - 单元与集成测试 runner，配置位于 `frontend/jest.config.ts`。
+- Jest `^29.7.0` - 单元测试 runner，配置位于 `frontend/jest.config.ts`；setup 入口为 `frontend/jest.setup.js` + `frontend/polyfills.js`（本轮已移除 `.ts` 版本与 MSW 层）。
 - `jest-environment-jsdom` `^30.3.0` - DOM 测试环境，见 `frontend/jest.config.ts`。
 - Testing Library - React 组件测试依赖，见 `frontend/package.json`、`frontend/__tests__/unit/components/`。
-- MSW `^2.12.10` - API mock，见 `frontend/mocks/handlers.ts`、`frontend/mocks/server.ts`。
 - Playwright `^1.58.2` - E2E 测试，见 `frontend/playwright.config.ts`、`frontend/e2e/`。
 
 **构建/开发：**
@@ -60,12 +59,14 @@
 - `@playwright/test` `^1.58.2` - E2E runner 与 Chromium 项目配置，见 `frontend/playwright.config.ts`。
 - `ts-node` `^10.9.2` - TypeScript 配置执行支持，见 `frontend/package.json`。
 
+> 本轮（feat-wsq）已移除 `msw`、`jest-fetch-mock`、`und`、`undici` 等 mock 相关依赖；单测改为直接 mock `globalThis.fetch`，复杂 agent run/SSE/任务事件依赖单测内 fetch mock 或 Playwright `page.route()`。
+
 ## 配置
 
 **环境：**
 - `NEXT_PUBLIC_API_URL` - 可选 API base URL 配置键；解析逻辑在 `frontend/lib/apiBaseUrl.ts`，Next rewrite 和开发期 allowed origins 在 `frontend/next.config.ts`。
 - `NODE_ENV` - `frontend/next.config.ts` 用于区分生产 header。
-- `CI` - `frontend/playwright.config.ts` 用于控制 forbidOnly、retries、workers 和 dev server reuse。
+- `CI` - `frontend/playwright.config.ts` 用于控制 forbidOnly、retries、workers 和 dev server Reuse。
 - `PLAYWRIGHT_USE_SYSTEM_CHROME` - `frontend/playwright.config.ts` 用于控制非 CI 环境是否使用系统 Chrome channel。
 - `frontend/.env.local` 文件存在，作为本地环境配置；内容不读取。
 - `frontend/.env.local.example` 文件存在，作为示例环境文件；内容不读取。
@@ -77,7 +78,7 @@
 - `frontend/eslint.config.mjs`：Next core web vitals、Next TS、React hooks 插件和生成目录 ignore。
 - `frontend/.prettierrc`：2 空格、单引号、分号、100 列、Tailwind 插件。
 - `frontend/postcss.config.mjs`：`@tailwindcss/postcss` 插件。
-- `frontend/jest.config.ts`：Next/Jest 集成、`jsdom`、coverage、moduleNameMapper、MSW transform 兼容和 50% 全局 coverage threshold。
+- `frontend/jest.config.ts`：Next/Jest 集成、`jsdom`、coverage、moduleNameMapper 和 50% 全局 coverage threshold（本轮已移除 MSW transform 兼容与 `'^until-async$'` 映射）。
 - `frontend/playwright.config.ts`：`baseURL: http://localhost:8502`、Chromium 项目、HTML reporter、失败截图/视频/trace、dev server。
 
 ## 平台要求
@@ -107,4 +108,4 @@ npm run test:e2e
 
 ---
 
-*前端技术栈分析：2026-06-09*
+*前端技术栈分析：2026-06-16*

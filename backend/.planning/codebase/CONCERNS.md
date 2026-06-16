@@ -1,6 +1,6 @@
 # 后端代码库风险事实地图
 
-**分析日期：** 2026-06-09
+**分析日期：** 2026-06-16
 
 **范围：** 仅覆盖 `backend/` 当前后端代码、配置、测试、现有 `backend/.planning/codebase/` 文档和可列名的配置文件。`backend/.env` 与 `backend/.env.example` 只确认存在性，未读取内容；文档只记录环境变量名称，不记录任何值。
 
@@ -29,6 +29,12 @@
 - 涉及文件：`backend/main.py`, `backend/config/settings.py`
 - 影响：readiness 不能证明 `UPLOAD_DIR` 可写、Word/WPS COM 可用、pywin32 注册正常、LLM provider 可达、Qdrant/embedding 可达或外部 HTTP 可达。
 - 修复方式：保留 `/health` 的进程探测语义；新增 readiness 时分项报告上传目录、COM、LLM、Qdrant/embedding 和外部接口，不要把轻量探测当完整生成验收。
+
+**已删除模块遗留陈旧 `.pyc` 缓存：**
+- 问题：本轮回退移除了元数据驱动框架（`task_skill_workflows.py`、`task_skill_types.py`），源码已无引用，但 `backend/graphs/__pycache__/` 下仍可能残留对应 `.cpython-312.pyc`。
+- 涉及文件：`backend/graphs/__pycache__/task_skill_types.cpython-312.pyc`, `backend/graphs/__pycache__/task_skill_workflows.cpython-312.pyc`
+- 影响：`.pyc` 不被 git 跟踪，不会影响线上；但本地调试或静态扫描可能误判这些模块仍存在，进而误引用已删除的 `SkillGraph.for_skill` / `TaskSkillWorkflow`。
+- 修复方式：清理 `backend/graphs/__pycache__/` 下陈旧 `.pyc`；不要据此反推架构模块。
 
 **任务完成结果与下载字段存在分散契约：**
 - 问题：`DocumentService._build_task_result_payload()` 构造 `output_file`、`file_name`、`file_size`、`model_used` 等字段，但不构造 `download_url`；`read_current_task_public_summary_tool` 用 `result_payload.get("download_url")` 判断 `download_ready`。
@@ -176,6 +182,12 @@
 - 安全修改：改 prompt 时同步 parser/validator 测试；不要翻译 `content_agent`、`comment_agent`、`agent_step`、tool names、provider id 等机器标识符。
 - 测试覆盖：`backend/tests/prompts/test_generate_prompt_routing.py`, `backend/tests/prompts/test_comment_prompt_reference_contract.py`, `backend/tests/prompts/test_comment_prompt_bad_case_context.py`, `backend/tests/agents/test_generation_content_agent.py`
 
+**结构化表占位符硬契约：**
+- 涉及文件：`backend/agents/generation/table_placeholder_utils.py`, `backend/agents/generation/verify_agent_graph.py`, `backend/agents/generation/content_agents.py`
+- 为什么脆弱：content agent 生成的正文中，技术参数里的结构化表必须以 `[[TABLE:<id>]]` 占位符原样保留；verify agent 据此比对技术参数与正文，产出缺失 `AuditFinding`。占位符正则、`table_id` 字符集和缺失判定集中在单一工具模块，任一改动都可能让占位符被改写成 Markdown 表格或被省略而不被发现。
+- 安全修改：改占位符格式、字符合法集或缺失判定时同步 `table_placeholder_utils.py`、verify agent 调用点、`backend/tests/agents/test_table_placeholder_utils.py` 和 `backend/tests/agents/test_generation_content_agent.py`；`table_id` 字符集需与 `backend/util/word_util/table_models.py` 保持一致。
+- 测试覆盖：`backend/tests/agents/test_table_placeholder_utils.py`, `backend/tests/agents/test_generation_content_agent.py`
+
 ## 扩展限制
 
 **Task/SSE/conversation 内存状态：**
@@ -303,4 +315,4 @@
 
 ---
 
-*风险审计：2026-06-09*
+*风险审计：2026-06-16*
