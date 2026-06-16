@@ -17,6 +17,10 @@ from backend.agents.generation.json_utils import (
 )
 from backend.agents.generation.model_factory import create_generation_chat_model
 from backend.agents.generation.revise_agent_graph import create_revise_agent_graph
+from backend.agents.generation.table_placeholder_utils import (
+    build_missing_table_placeholder_findings,
+    find_missing_table_placeholders,
+)
 from backend.agents.generation.types import (
     AgentStepPayload,
     AuditFinding,
@@ -840,7 +844,21 @@ def _final_recheck_findings(
     generation_context: dict[str, Any],
     model_provider: str,
 ) -> list[AuditFinding]:
+    # 结构化表占位符是运行时硬契约：即使最后一轮 audit 为 []，最终正文缺失占位符也必须暴露。
+    missing_ids = find_missing_table_placeholders(
+        generation_context.get("tender_params"),
+        final_text,
+    )
+    placeholder_findings = build_missing_table_placeholder_findings(missing_ids)
+
     if not pending_findings:
+        if placeholder_findings:
+            progress_log.warning(
+                "[content_agent] 最终复核发现缺失 TABLE 占位符，按降级 warning 继续交付: "
+                "missing_placeholders=%s",
+                ",".join(missing_ids),
+            )
+            return placeholder_findings
         return []
 
     final_findings = verify_final_text_findings(
@@ -848,6 +866,15 @@ def _final_recheck_findings(
         generation_context=generation_context,
         model_provider=model_provider,
     )
+    # verify_final_text_findings 内部已合并占位符检查，这里再做一次幂等并集以兜底。
+    if placeholder_findings:
+        existing_evidence = {
+            finding.evidence for finding in final_findings if isinstance(finding, AuditFinding)
+        }
+        for finding in placeholder_findings:
+            if finding.evidence not in existing_evidence:
+                final_findings.append(finding)
+
     if not final_findings:
         return []
 

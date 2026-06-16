@@ -17,6 +17,10 @@ from backend.agents.generation.json_utils import (
     is_contract_placeholder_text,
     parse_audit_findings,
 )
+from backend.agents.generation.table_placeholder_utils import (
+    build_missing_table_placeholder_findings,
+    find_missing_table_placeholders,
+)
 from backend.agents.generation.types import (
     AuditFinding,
     GenerationAgentProtocolError,
@@ -126,6 +130,34 @@ VERIFY_JSON_REPAIR_SYSTEM_PROMPT = (
     "你是 JSON 修复助手。只把输入修复为严格合法的 JSON 数组。"
     "数组每项必须包含非空字符串 evidence 和 fix_hint。禁止新增审核问题，禁止解释。"
 )
+
+# 确定性硬契约提示：[[TABLE:id]] 占位符只能原样保留，LLM 不得将其视为格式差异或用 Markdown 表等价替代。
+TABLE_PLACEHOLDER_CONTRACT_PROMPT = (
+    "【结构化表占位符硬契约】技术参数中的 `[[TABLE:<id>]]` 是结构化表的写回入口，属于运行时硬契约。\n"
+    "- 只要【技术参数】包含 `[[TABLE:id]]`，待审核正文必须原样保留该占位符（独占一行），不得删除、改写、拆散或替换。\n"
+    "- Markdown 表格、手绘表格、散文式参数列表、表格投影文本都不能视为占位符的等价替代；缺失占位符必须输出 finding。\n"
+    "- 占位符内容 `[[TABLE:...]]` 本身必须逐字保留，不得改写括号、冒号或 id。\n"
+)
+
+
+def _merge_missing_table_findings(
+    findings: list[AuditFinding],
+    *,
+    tender_params: Any,
+    current_text: str,
+) -> list[AuditFinding]:
+    """在 LLM 审核结果基础上，追加确定性占位符缺失检查。
+
+    只对 `tender_params` 中存在但 `current_text` 缺失的占位符报 finding；
+    已命中的占位符不会被覆盖或重复报告。
+    """
+    missing_ids = find_missing_table_placeholders(tender_params, current_text)
+    if not missing_ids:
+        return findings
+    extra_findings = build_missing_table_placeholder_findings(missing_ids)
+    if not extra_findings:
+        return findings
+    return [*findings, *extra_findings]
 
 
 def _emit_verify_agent_step_snapshot(
@@ -271,6 +303,8 @@ def _render_verify_user_prompt(
         "- 参数章节是否符合当前生成风格：技术/服务/商务/售后条款由技术参数按物理顺序、原始表格 schema、文本/表格容器和 ★/▲ 归属接管；旧标题粉碎、无源旧事实删除、旧表壳清洗和连续重编号。\n"
         "- 参考内容中的技术/服务/商务/售后旧参数、旧表格、旧 ★/▲ 不得作为 finding 依据；只有技术参数或项目基础信息支持时才允许报缺失。\n"
         "- 不要因为外层章节编号或标题壳与技术参数原文不同而报错；但参数正文、表格 schema、条款顺序和 ★/▲ 必须按技术参数审核。\n\n"
+        + TABLE_PLACEHOLDER_CONTRACT_PROMPT
+        + "\n"
         "只返回需要修复的问题；不需要修改的问题不要出现在 JSON 数组里。"
         "如果比对结论是“实质一致、无问题、无需修改”，必须输出 []，"
         "不要把一致性说明写成 evidence。\n\n"
@@ -360,6 +394,7 @@ def _verify_text(
             or ""
         )
     model_provider = str(_context_value(merged_state, config, "model_provider", "deepseek") or "deepseek")
+    tender_params = _context_value(merged_state, config, "tender_params")
     if is_contract_placeholder_text(current_text):
         findings = _build_placeholder_text_findings(current_text)
     else:
@@ -367,7 +402,7 @@ def _verify_text(
             generation_style=_context_value(merged_state, config, "generation_style", "template"),
             project_info=_context_value(merged_state, config, "project_info"),
             template_reference_text=_context_value(merged_state, config, "template_reference_text"),
-            tender_params=_context_value(merged_state, config, "tender_params"),
+            tender_params=tender_params,
             current_text=current_text,
         )
         raw_content = _run_async(
@@ -383,6 +418,11 @@ def _verify_text(
             str(raw_content),
             model_provider=model_provider,
         )
+    findings = _merge_missing_table_findings(
+        findings,
+        tender_params=tender_params,
+        current_text=current_text,
+    )
     findings_payload = [finding.model_dump() for finding in findings]
     findings_json = json.dumps(findings_payload, ensure_ascii=False)
     if backend:
@@ -407,8 +447,13 @@ def verify_final_text_findings(
     generation_context: dict[str, Any],
     model_provider: str,
 ) -> list[AuditFinding]:
-    """Run the verify contract without writing another audit artifact."""
+    """Run the verify contract without writing another audit artifact.
+
+    即使 LLM 复核返回 `[]`，仍会叠加确定性 TABLE 占位符缺失检查，
+    以保证最终正文不会静默丢失结构化表占位符。
+    """
     current_text = str(final_text or "").strip()
+    tender_params = generation_context.get("tender_params")
     if is_contract_placeholder_text(current_text):
         return _build_placeholder_text_findings(current_text)
 
@@ -420,16 +465,21 @@ def verify_final_text_findings(
                 generation_style=generation_context.get("generation_style", "template"),
                 project_info=generation_context.get("project_info"),
                 template_reference_text=generation_context.get("template_reference_text"),
-                tender_params=generation_context.get("tender_params"),
+                tender_params=tender_params,
                 current_text=current_text,
             ),
             callbacks=StreamCallbacks(),
             check_interval=CHECK_INTERVAL,
         )
     )
-    return _parse_or_repair_audit_findings(
+    findings = _parse_or_repair_audit_findings(
         str(raw_content),
         model_provider=model_provider,
+    )
+    return _merge_missing_table_findings(
+        findings,
+        tender_params=tender_params,
+        current_text=current_text,
     )
 
 
