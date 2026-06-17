@@ -93,6 +93,19 @@ def write_backend_text(backend: BackendProtocol, path: str, content: str) -> Non
         raise GenerationAgentProtocolError(f"无法写入智能体工作区文件 {path}: {result.error}")
 
 
+def overwrite_backend_text(backend: BackendProtocol, path: str, content: str) -> None:
+    next_content = str(content or "")
+    existing = read_backend_text_optional(backend, path)
+    if existing is None:
+        write_backend_text(backend, path, next_content)
+        return
+    if existing == next_content:
+        return
+    result = backend.edit(path, existing, next_content)
+    if result.error:
+        raise GenerationAgentProtocolError(f"无法覆盖智能体工作区文件 {path}: {result.error}")
+
+
 def render_generation_context_markdown(payload: dict[str, Any]) -> str:
     return (
         "# Generation Context\n\n"
@@ -201,6 +214,7 @@ __all__ = [
     "read_generation_context",
     "render_generation_context_markdown",
     "revision_path",
+    "overwrite_backend_text",
     "validate_round_protocol",
     "write_backend_text",
     "write_generation_context",

@@ -282,6 +282,62 @@ def test_extract_tender_params_joins_multiple_tender_param_paths(
     assert structured_extract_calls == ["TP1_"]
 
 
+def test_extract_tender_params_keeps_table_context_without_markdown_projection(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    doc_path = tmp_path / "template.docx"
+    doc_path.write_bytes(b"docx")
+    param_one = tmp_path / "param-one.docx"
+    param_one.write_bytes(b"param-one")
+    fake_doc = _FakeDoc()
+    progress_messages: list[str] = []
+    progress_warnings: list[str] = []
+    debug_messages: list[str] = []
+
+    _patch_extract_runtime(
+        monkeypatch,
+        doc=fake_doc,
+        style_fragments=[],
+        progress_messages=progress_messages,
+        progress_warnings=progress_warnings,
+        debug_messages=debug_messages,
+    )
+
+    monkeypatch.setattr(
+        extract_module,
+        "_extract_structured_tender_param_file",
+        lambda _file_path_obj, *, file_index: (
+            "附件三 技术参数表\n楼宇 / 岗位\n[[TABLE:TP1_1]]\n注：按附件执行",
+            [
+                {
+                    "table_id": "TP1_1",
+                    "rows": 2,
+                    "cols": 2,
+                    "cells": [
+                        {"row": 1, "col": 1, "row_span": 1, "col_span": 2, "text": "楼宇"},
+                        {"row": 2, "col": 1, "row_span": 1, "col_span": 1, "text": "岗位"},
+                    ],
+                }
+            ],
+        ),
+    )
+
+    result = extract_module.extract_tender_params(
+        {
+            **_build_state(doc_path),
+            "tender_param_paths": [str(param_one)],
+        },
+        config=None,
+    )
+
+    assert "附件三 技术参数表" in result["tender_params"]
+    assert "[[TABLE:TP1_1]]" in result["tender_params"]
+    assert "注：按附件执行" in result["tender_params"]
+    assert "| --- |" not in result["tender_params"]
+    assert result["tender_param_table_models"][0]["cells"][0]["col_span"] == 2
+
+
 def test_extract_tender_params_style_extraction_failure_is_best_effort(
     monkeypatch, tmp_path: Path
 ) -> None:

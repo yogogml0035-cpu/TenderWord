@@ -6,6 +6,9 @@ import sys
 import time
 from typing import Callable, Optional
 
+from backend.agents.generation.table_placeholder_utils import (
+    raise_if_table_placeholders_missing,
+)
 from backend.prompts.generate_prompt import render_generate_prompt
 from backend.prompts.skill_prompt import render_task_skill_prompt
 from backend.prompts.types import (
@@ -187,6 +190,12 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
             complete_callback(str(content))
         except Exception as cb_exc:
             progress_log.debug(f"警告: LLM 完成回调失败: {cb_exc}")
+
+    raise_if_table_placeholders_missing(
+        tender_params,
+        content,
+        error_prefix="结构化表占位符缺失",
+    )
 
     try:
         output_file_base = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"

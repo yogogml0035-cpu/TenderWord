@@ -134,6 +134,40 @@ def render_structured_table_markdown(
     return "\n".join(lines)
 
 
+def render_structured_table_prompt_context(
+    model: Mapping[str, Any],
+    *,
+    max_rows: int = 3,
+    max_cell_chars: int = 40,
+) -> str:
+    rows = render_structured_table_grid(model, repeat_merged_text=False)
+    if not rows:
+        return ""
+
+    context_lines: list[str] = []
+    for row in rows:
+        cells: list[str] = []
+        for cell in row:
+            text = str(cell or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+            if not text:
+                continue
+            text = " ".join(part for part in text.splitlines() if part.strip()).strip()
+            if not text:
+                continue
+            if len(text) > max_cell_chars:
+                text = text[: max_cell_chars - 3].rstrip() + "..."
+            cells.append(text)
+        if not cells:
+            continue
+        line = " / ".join(cells)
+        if context_lines and context_lines[-1] == line:
+            continue
+        context_lines.append(line)
+        if len(context_lines) >= max_rows:
+            break
+    return "\n".join(context_lines)
+
+
 __all__ = [
     "StructuredTableModel",
     "TABLE_PLACEHOLDER_RE",
@@ -143,4 +177,5 @@ __all__ = [
     "normalize_structured_table_model",
     "render_structured_table_grid",
     "render_structured_table_markdown",
+    "render_structured_table_prompt_context",
 ]
