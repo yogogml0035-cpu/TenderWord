@@ -21,6 +21,8 @@
 ## 任务与 SSE
 
 - 任务状态字段变化必须同步后端模型、前端类型、store task summary 和任务 UI。
+- 当前任务类型只有 `generate`、`rewrite`、`comment_supplement`；新增类型必须同步后端 `TaskKind`、前端 `TaskKind`、SSE 终态、下载卡和会话结果语义。
+- 后端 SSE event enum 包括 `log`、`llm`、`progress`、`node_start`、`node_complete`、`agent_step`、`done`、`error`、`heartbeat`；前端 runtime 还处理连接层 `connected` 和任务状态层 `status`。
 - 新增 SSE 事件类型必须同步后端模型、事件发送、前端 union 类型、`frontend/lib/sse.ts` named event 注册、`useChatSSE` 解析和测试。
 - 任务失败必须最终表现为 `error` 或 `done`，不能让 SSE 静默中断。
 - `comment_writeback_*` 和 `style_writeback_*` 摘要属于任务结果契约，不得在 state、任务结果或 `done` 事件中丢失。

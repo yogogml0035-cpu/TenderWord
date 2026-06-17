@@ -1,6 +1,6 @@
 # 后端测试模式
 
-**分析日期：** 2026-06-16
+**分析日期：** 2026-06-18
 
 **范围：** `backend/tests/`、`backend/requirements.txt`、`backend/scripts/diagnose_word.py`、`docs/backend.md`、`docs/interfaces-runtime.md`、`docs/knowledge-validation.md` 和与测试直接相关的后端实现文件。`backend/.env` 文件存在，但不得读取或引用内容。
 
@@ -10,6 +10,7 @@
 - Service 与任务测试：`backend/tests/services/test_document_service_initial_state.py`、`backend/tests/services/test_document_service_task_result.py`、`backend/tests/services/test_agent_run_service.py`
 - Graph、rewrite、进度测试：`backend/tests/graphs/test_generation_mode_branching.py`、`backend/tests/graphs/test_gngk_tender_graph.py`、`backend/tests/nodes/test_rewrite_nodes.py`、`backend/tests/progress/test_uploaded_rewrite_progress_tracking.py`
 - Word helper 与隐私审计测试：`backend/tests/helper/test_inline_style_ops.py`、`backend/tests/nodes/test_uploaded_rewrite_inline_style_context.py`、`backend/tests/agents/test_task_context_assistant_logging.py`
+- Prompt、LLM 与 retrieval 测试：`backend/tests/prompts/test_generate_prompt_routing.py`、`backend/tests/util/test_llm_stream_utils.py`、`backend/tests/agents/test_table_placeholder_utils.py`、`backend/tests/retrieval/test_comment_bad_case_runtime.py`、`backend/tests/retrieval/test_qdrant_store.py`
 
 ## 测试框架
 
@@ -30,6 +31,7 @@ python -m pytest tests -v
 python -m pytest tests/api -v
 python -m pytest tests/models tests/services -v
 python -m pytest tests/graphs tests/nodes -v
+python -m pytest tests/prompts tests/util tests/retrieval -v
 ```
 
 Windows 虚拟环境：
@@ -52,7 +54,7 @@ TMPDIR=/tmp TMP=/tmp TEMP=/tmp .venv-linux/bin/python -m pytest tests -v
 **位置：**
 - 测试集中在 `backend/tests/<scope>/`，不与源码 co-locate。
 - `backend/tests/conftest.py` 只把项目根和 `backend/` 加入 `sys.path`，没有全局业务 fixture。
-- `backend/tests/` 下检测到 72 个 `test_*.py` 文件。
+- `backend/tests/` 下检测到 78 个 `test_*.py` 文件。
 
 **命名：**
 - 测试文件使用 `test_*.py`。
@@ -152,6 +154,7 @@ result = style_ops.apply_inline_style_fragments(
 - 下载/上传安全测试不 mock path containment 和文件类型校验本身。
 - Prompt 契约文本、rewrite 保护字段 prompt、agent event payload 解析不 mock。
 - 纯 helper 解析、归一化、匹配函数直接用确定性输入调用。
+- 结构化表占位符、`generation_style` 路由、LLM provider 配置和超时行为使用真实 helper/model/config 默认值，只 mock 外部 I/O 或 provider client。
 
 ## 夹具与工厂
 
@@ -194,6 +197,15 @@ def build_request(*, template: str | None, generation_mode=GenerationMode.WORKFL
 - 上传文件 rewrite 的 `rewrite_source="uploaded_file"`、工作副本、样式和批注抽取由 `backend/tests/nodes/test_uploaded_rewrite_inline_style_context.py` 覆盖。
 - rewrite workflow 公开节点名和 tender-aware dispatch 由 `backend/tests/nodes/test_tender_aware_word_dispatch.py` 覆盖。
 - 上传 rewrite 进度节点必须加入 `TRACKED_PROGRESS_NODES`，由 `backend/tests/progress/test_uploaded_rewrite_progress_tracking.py` 覆盖。
+- Agent run 对上传文件 rewrite 上下文的预检、`needs_input`、`task_accepted` 和错误终态由 `backend/tests/api/test_agent_run_api.py`、`backend/tests/services/test_agent_run_service.py` 覆盖。
+
+## Prompt、LLM 与 Retrieval 测试策略
+
+- Prompt routing 使用真实 `GeneratePromptInput` 和 prompt builder；`backend/tests/prompts/test_generate_prompt_routing.py` 保护 `generation_style="param"` 与模板模式分派。
+- 结构化表占位符使用真实 `backend/agents/generation/table_placeholder_utils.py`；`backend/tests/agents/test_table_placeholder_utils.py` 和 `backend/tests/agents/test_generation_content_agent.py` 覆盖缺失占位符审计、恢复和 fail-fast。
+- LLM stream 测试只 mock provider client、heartbeat 或 settings 属性；`backend/tests/util/test_llm_stream_utils.py` 覆盖 `LLM_STREAM_TIMEOUT_SECONDS`、provider extra body 和 chat stream 终态。
+- Retrieval 测试以本地 Markdown bad case、fake embedding/Qdrant client 和 `tmp_path` 为主；`backend/tests/retrieval/test_comment_bad_case_runtime.py` 覆盖 hybrid / BM25 fallback，`backend/tests/retrieval/test_qdrant_store.py` 覆盖 Qdrant client proxy 行为。
+- 批注 bad case 检索失败只断言降级、warning 或审计 JSON，不要求外部 Qdrant 服务在线。
 
 ## Word Helper 与 COM 测试策略
 
@@ -230,6 +242,7 @@ python -m pytest tests -v
 - Graph：`backend/tests/graphs/test_generation_mode_branching.py`、`backend/tests/graphs/test_gngk_tender_graph.py`、`backend/tests/graphs/test_comment_supplement_graph.py`
 - Skill/Node：`backend/tests/skills/test_task_skill_runtime.py`、`backend/tests/nodes/test_rewrite_nodes.py`、`backend/tests/nodes/test_tender_aware_word_dispatch.py`
 - Retrieval：`backend/tests/retrieval/test_comment_bad_case_runtime.py`、`backend/tests/retrieval/test_comment_hybrid_retrieval_script.py`
+- LLM/stream util：`backend/tests/util/test_llm_stream_utils.py`
 
 **E2E 测试：**
 - `backend/tests/` 下未检测到浏览器 E2E。
@@ -310,4 +323,4 @@ assert events[0]["event"] == "run_started"
 
 ---
 
-*后端测试分析：2026-06-16*
+*后端测试分析：2026-06-18*

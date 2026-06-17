@@ -21,6 +21,7 @@
 
 - Word COM 是稀缺临界资源，所有写入必须经过任务队列、graph 锁、取消检查和进度包装。
 - 不得在 API route、service、前端或随意脚本中直接操作 COM。
+- 当前后台任务类型只有 `generate`、`rewrite`、`comment_supplement`；新增类型要同步任务模型、SSE、会话结果和前端下载卡。
 - `progress_log` 只写用户可理解的进度；排障栈、参数摘要和诊断细节进入 `execution_log`。
 - 任务失败必须收敛为任务失败状态和 SSE `error` 或终态事件，不能让 SSE 静默中断。
 - 受保护字段 profile 统一由招标类型配置解析；字段 marker 先规范化为中文冒号，再做严格字段行匹配。

@@ -1,8 +1,8 @@
 # TenderWord 架构地图
 
-**生成日期：** 2026-06-16
+**生成日期：** 2026-06-18
 
-本文件是根级系统架构地图，描述 TenderWord 的系统边界、子系统职责和推荐理解路径。实现细节仍以代码为准；子系统内部事实以 2026-06-16 刷新的 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 为准。
+本文件是根级系统架构地图，描述 TenderWord 的系统边界、子系统职责和推荐理解路径。实现细节仍以代码为准；子系统内部事实以 2026-06-18 刷新的 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 为准。
 
 ## 系统边界
 
@@ -41,6 +41,8 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 - `frontend/.planning/codebase/INTEGRATIONS.md`
 - `frontend/.planning/codebase/CONVENTIONS.md`
 - `frontend/.planning/codebase/TESTING.md`
+- `frontend/.planning/codebase/STACK.md`
+- `frontend/.planning/codebase/CONCERNS.md`
 
 ### `backend/`
 
@@ -64,6 +66,8 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 - `backend/.planning/codebase/INTEGRATIONS.md`
 - `backend/.planning/codebase/CONVENTIONS.md`
 - `backend/.planning/codebase/TESTING.md`
+- `backend/.planning/codebase/STACK.md`
+- `backend/.planning/codebase/CONCERNS.md`
 
 ### `asset/`
 

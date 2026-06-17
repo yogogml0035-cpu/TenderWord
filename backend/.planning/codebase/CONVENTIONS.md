@@ -1,6 +1,6 @@
 # 后端编码约定
 
-**分析日期：** 2026-06-16
+**分析日期：** 2026-06-18
 
 **范围：** `backend/` 源码、`backend/tests/`、`backend/requirements.txt`、`backend/.env.example`、`docs/backend.md`、`docs/interfaces-runtime.md`、`docs/knowledge-validation.md`、既有 `backend/.planning/codebase/` 事实文档和项目内 `.agents/skills/gsd-map-codebase/SKILL.md`。`backend/.env` 文件存在，但不得读取或引用内容。
 
@@ -9,6 +9,7 @@
 - 请求、任务与状态模型：`backend/models/generate.py`、`backend/models/agent_run.py`、`backend/models/task.py`、`backend/states/base_state.py`、`backend/states/skill_state.py`
 - 任务与 Graph 编排：`backend/services/document_service.py`、`backend/services/agent_run_service.py`、`backend/graphs/base_graph.py`、`backend/graphs/skill_graph.py`、`backend/skills/rewrite/scripts/runtime.py`
 - rewrite 与 Word 写回：`backend/nodes/skills_nodes/rewrite_nodes.py`、`backend/nodes/skills_nodes/tender_aware_word_dispatch.py`、`backend/nodes/common_word_nodes/update_word.py`、`backend/helper/word_helper/`、`backend/util/word_util/`
+- Prompt、LLM 与结构化表契约：`backend/prompts/generate_prompt.py`、`backend/prompts/types.py`、`backend/util/common_util/llm_stream_utils.py`、`backend/agents/generation/content_agents.py`、`backend/agents/generation/table_placeholder_utils.py`
 - 日志与审计：`backend/util/log_util/progress_log.py`、`backend/util/log_util/skill_audit_log.py`、`backend/agents/task_context_assistant/logging.py`
 
 ## 命名模式
@@ -97,11 +98,16 @@
 
 ## 请求与任务模型
 
+- API shape 真源放在 `backend/models/`；FastAPI endpoint 只引用 model，不在 route 内临时拼复杂 DTO。新增或修改字段必须同步前端类型、API client 和相关测试。
+- REST 创建任务返回 `GenerateResponse` / `TaskResponse`，查询与取消返回 `backend/models/task.py` 中的公共任务模型；不要直接泄露 `backend/task/task_queue_manager.py` 的内部 dataclass。
+- `POST /api/agent/runs/stream` 使用 `AgentRunStreamRequest`，由 `backend/api/agent.py` 返回 `StreamingResponse`，media type 固定为 `application/x-ndjson`，事件行由 service 层序列化。
 - 请求模型优先使用 Pydantic model，并把输入归一化放在 validator 中；参考 `GenerateFilePaths`、`AgentRunStreamRequest`、`AgentRunRewriteContextSnapshot`。
 - 需要禁止额外字段的边界模型使用 `model_config = ConfigDict(extra="forbid")`；参考 `backend/models/agent_run.py` 和 `backend/models/generate.py` 中的 `GenerateFilePaths`。
 - `TaskKind` 的协议值只包含 `generate`、`rewrite`、`comment_supplement`，定义在 `backend/models/task.py`，任务创建时由 `backend/services/document_service.py` 传入 `TaskQueueManager`。
 - `GenerateRequest.file_paths` 只接受 `template` 和 `tender_params`，对应测试在 `backend/tests/services/test_document_service_initial_state.py`。
 - `AgentRunStreamRequest` 是 `POST /api/agent/runs/stream` 的 NDJSON 请求模型，`selected_skills` 会去重，上传文件 rewrite 上下文在 `AgentRunRewriteContextSnapshot` 中收口。
+- `TaskStatus` 公共值保持 `queued`、`running`、`completed`、`failed`、`cancelled`；内部队列状态到公共模型的转换集中在 `backend/services/task_service.py`。
+- Agent run 事件名保持 `run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`needs_input`、`done`、`error`；新增事件必须同步 `backend/models/agent_run.py`、`backend/services/agent_run_service.py` 和前端解析。
 
 ## Generate 与 Rewrite 字段边界
 
@@ -118,6 +124,15 @@
 - 新增占位符格式或校验规则时，同步该工具模块、verify agent 调用点（`backend/agents/generation/verify_agent_graph.py`）和 `backend/tests/agents/test_table_placeholder_utils.py`、`backend/tests/agents/test_generation_content_agent.py`。
 - `table_id` 字符集与 `backend/util/word_util/table_models.py` 保持一致（`[A-Za-z0-9_-]+`）。
 
+## Prompt 与 LLM 约定
+
+- Prompt builder 放在 `backend/prompts/`，输入 DTO 放在 `backend/prompts/types.py`，返回 `RenderedPrompt(system_prompt, user_prompt)`；不要在 node 或 service 中手写大段 prompt 拼接。
+- 初次生成 prompt 统一走 `backend/prompts/generate_prompt.py`，由 `generation_style` 分派到 `render_generate_by_template_prompt()` 或 `render_generate_by_param_prompt()`。
+- task skill prompt 统一走 `backend/prompts/skill_prompt.py`，rewrite 任务审计在 `backend/nodes/skills_nodes/rewrite_nodes.py` 记录 `skill_prompt_render` 等白名单 stage。
+- LLM 流式调用统一走 `backend/util/common_util/llm_stream_utils.py` 的 `stream_llm_completion()`；新增调用要复用 `StreamCallbacks`、`ensure_llm_env()` 和 `LLM_STREAM_TIMEOUT_SECONDS`，不要绕过统一超时、模型配置和回调。
+- `MODEL_CONFIGS` 中的 `deepseek`、`qwen`、`doubao` 是后端 provider 真源；新增 provider 必须同步 `backend/models/generate.py` 的 `LLMModel`、settings、测试和前端选项。
+- Prompt、LLM 日志和 agent run 审计只能写 scrub 后摘要、配置键和节点名；不要写完整客户原文、真实路径、密钥值、traceback 或下载路径。
+
 ## 错误处理
 
 **模式：**
@@ -126,6 +141,8 @@
 - Service 层返回 `GenerateResponse` / `TaskResponse` 等模型，或在后台任务中把失败收敛为任务失败状态、SSE `error` 和进度日志；参考 `backend/services/document_service.py`。
 - Graph 节点用 fail-fast 保护 Word 写入边界；受保护字段缺失、锚点缺失、非法字段区间、空 rewrite 正文等应抛出明确异常。
 - Retrieval/embedding/Qdrant 失败降级为 `bm25_only` 并记录 warning，不阻塞批注生成；参考 `backend/retrieval/comment_bad_case_runtime.py`。
+- Agent run 预检失败返回 `needs_input` 事件，不创建后台任务；运行时异常收敛为 `error` 事件，参考 `backend/services/agent_run_service.py`。
+- LLM 超时使用 `LLMTimeoutError` 表达用户可理解错误；配置缺失由 `ensure_llm_env()` 抛出只包含配置键的错误信息。
 
 ## 日志
 
@@ -193,4 +210,4 @@
 
 ---
 
-*后端编码约定分析：2026-06-16*
+*后端编码约定分析：2026-06-18*

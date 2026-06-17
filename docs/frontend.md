@@ -11,6 +11,7 @@
 ## 请求与接口
 
 - 前端所有后端请求统一走 `frontend/lib/api.ts`；组件不写裸 `fetch`。
+- 这个约定当前主要靠评审和测试维护，没有专门 lint 规则兜底；新增组件、hooks 或 store 请求时要人工检查是否绕过 API client。
 - JSON、上传、下载、NDJSON 和 SSE URL 都由 API client 或专用 helper 提供。
 - `NEXT_PUBLIC_API_URL` 会同时影响 API client、Next rewrite 目标和开发期 allowed origin；修改时要一起验证。
 - 前端不直接访问外部模板候选 URL，不直接访问本地文件系统或云存储。
@@ -44,4 +45,4 @@
 
 - 前端改动至少运行 `npm run lint`、`npm run type-check` 和相关 `npm run test`。
 - 涉及浏览器交互、URL、会话、SSE、模板弹窗或任务展示时，补或跑 Playwright。
-- 前端 E2E 入口是 `npm run test:e2e`。
+- 前端 E2E 入口是 `npm run test:e2e`；Playwright 对本机浏览器、端口和平台二进制较敏感，Windows/WSL 切换后优先重新安装依赖并确认浏览器渠道。

@@ -1,14 +1,14 @@
 # 前端外部集成事实地图
 
-**分析日期：** 2026-06-16
+**分析日期：** 2026-06-18
 
-**范围：** 仅 `frontend/` 对后端 API、SSE、NDJSON、浏览器运行时、本地存储、上传下载、模板候选、agent run 前置流、测试工具和开发服务器的集成边界。`frontend/.env.local`、`frontend/.env.local.example` 和 `frontend/.npmrc` 文件存在；内容不读取，不写入事实文档。
+**范围：** 仅 `frontend/` 对后端 API、SSE、NDJSON、浏览器运行时、本地存储、上传下载、模板候选、agent run 前置流、测试工具和开发服务器的集成边界。`frontend/.env.local`、`frontend/.env.local.example` 和 `frontend/.npmrc` 文件存在；只记录存在性，不读取内容。
 
 ## API 与外部服务
 
 **TenderWord 后端 API：**
 - 服务用途：招标数据查询、模板候选、文件上传、生成任务、补充批注任务、任务状态、任务取消、心跳、下载、agent run 前置流和任务 SSE。
-- SDK/Client：无第三方 SDK；JSON、上传、下载和 NDJSON 主入口统一封装在 `frontend/lib/api.ts`。
+- SDK/Client：无第三方 SDK；JSON、上传、下载、NDJSON 和 SSE URL 主入口统一封装在 `frontend/lib/api.ts`。
 - 认证：未检测到登录 provider、JWT 注入、OAuth SDK 或稳定 `Authorization` header；`frontend/lib/api.ts` 不注入 auth。
 - 基础 URL：`frontend/lib/apiBaseUrl.ts` 解析 `NEXT_PUBLIC_API_URL`，无配置时使用 `http://localhost:8000`，浏览器环境还会按当前 hostname 推导 `:8000` 后端地址。
 - 开发代理：`frontend/next.config.ts` 将 `/api/:path*` rewrite 到后端 API base URL，并将 `NEXT_PUBLIC_API_URL` 候选 hostname 纳入 `allowedDevOrigins`。
@@ -18,22 +18,22 @@
 - 招标查询：`GET /api/tender/{tender_no}`，helper 为 `fetchTenderDataWithType()` / `fetchTenderData()`，见 `frontend/lib/api.ts`、`frontend/lib/tenderFetch.ts`。
 - 模板候选列表：`GET /api/template-candidates`，helper 为 `fetchTemplateCandidates()`，见 `frontend/lib/api.ts`、`frontend/components/forms/TenderFormShared.tsx`。
 - 模板候选选择：`POST /api/template-candidates/select`，helper 为 `selectTemplateCandidate()`，见 `frontend/lib/api.ts`。
-- 模板候选下载代理：`GET /api/template-candidates/download`，helper 为 `getTemplateCandidateDownloadUrl()`，见 `frontend/lib/api.ts`、`frontend/components/forms/TemplateCandidateDialog.tsx`。
+- 模板候选下载代理：`GET /api/template-candidates/download`，helper 为 `getTemplateCandidateDownloadUrl()`，见 `frontend/lib/api.ts`、`frontend/components/forms/TenderFormShared.tsx`、`frontend/components/forms/TemplateCandidateDialog.tsx`。
 - 文件上传：`POST /api/upload`、`POST /api/upload/multiple`，使用 `FormData`，见 `frontend/lib/api.ts`、`frontend/components/forms/FileUploader.tsx`。
 - 生成任务创建：`POST /api/generate`，helper 为 `createGenerateTask()`，见 `frontend/lib/api.ts`、`frontend/components/chat/FormPanel.tsx`。
 - 补充批注任务创建：`POST /api/comment-supplement`，helper 为 `createCommentSupplementTask()`，见 `frontend/lib/api.ts`、`frontend/components/chat/ChatPanel.tsx`。
-- 任务状态与列表：`GET /api/tasks/{taskId}`、`GET /api/tasks`，见 `frontend/lib/api.ts`。
-- 任务取消：`DELETE /api/tasks/{taskId}`，helper 为 `cancelTask()`，见 `frontend/lib/api.ts`。
-- 任务心跳：`POST /api/tasks/{taskId}/heartbeat`，helper 为 `sendTaskHeartbeat()`，见 `frontend/hooks/useTaskHeartbeat.ts`。
-- 会话心跳：`POST /api/conversations/{conversationId}/heartbeat`，helper 为 `sendConversationHeartbeat()`，见 `frontend/app/tender/page.tsx`。
-- 文件下载：`GET /api/download/{file_path}`，helper 为 `downloadFile()` / `getDownloadUrl()`，见 `frontend/lib/api.ts`；`frontend/components/layout/Sidebar.tsx` 也使用相对 `href="/api/download/..."` 交给 Next rewrite 代理。
+- 任务状态与列表：`GET /api/tasks/{taskId}`、`GET /api/tasks`，见 `frontend/lib/api.ts`、`frontend/hooks/useCurrentConversationTaskStatus.ts`、`frontend/hooks/useLatestActiveTaskSummary.ts`。
+- 任务取消：`DELETE /api/tasks/{taskId}`，helper 为 `cancelTask()`，见 `frontend/lib/api.ts`、`frontend/components/chat/FormPanel.tsx`、`frontend/components/chat/ChatPanel.tsx`。
+- 任务心跳：`POST /api/tasks/{taskId}/heartbeat`，helper 为 `sendTaskHeartbeat()`，见 `frontend/lib/api.ts`、`frontend/hooks/useTaskHeartbeat.ts`。
+- 会话心跳：`POST /api/conversations/{conversationId}/heartbeat`，helper 为 `sendConversationHeartbeat()`，见 `frontend/lib/api.ts`、`frontend/app/tender/page.tsx`。
+- 文件下载：`GET /api/download/{file_path}`，helper 为 `downloadFile()` / `getDownloadUrl()`，见 `frontend/lib/api.ts`、`frontend/components/chat/ChatPanel.tsx`；`frontend/components/layout/Sidebar.tsx` 也使用相对 `href="/api/download/..."` 交给 Next rewrite 代理。
 
 **Agent run 前置流：**
 - 服务用途：右侧聊天输入先经任务上下文助手判定 rewrite 能力、需求补充和任务创建。
 - 入口：`streamAgentRun()` 调用 `POST /api/agent/runs/stream`，见 `frontend/lib/api.ts`、`frontend/components/chat/ChatPanel.tsx`。
 - 协议：`streamNdjson()` 使用 `fetch` 读取 NDJSON response body，每行 JSON 由 `parseAgentRunEvent()` 过滤为类型化事件，见 `frontend/lib/api.ts`。
 - 请求字段：`conversation_id`、`message`、`model`、`selected_skills`、`context_snapshot`，类型为 `AgentRunStreamRequest`，见 `frontend/types/api.ts`。
-- 技能范围：`AgentSkill` 当前只有 `rewrite`；`selected_skills` 在 `frontend/stores/chatStore.ts` 中归一化为最多一个技能，消息发出后清空。
+- 技能范围：`AgentSkill` 当前只有 `rewrite`；`selected_skills` 在 `frontend/stores/chatStore.ts` 和 `frontend/components/chat/ChatPanel.tsx` 中归一化为最多一个技能，消息发出后清空。
 - 上传文件 rewrite：`frontend/components/chat/ChatPanel.tsx` 使用 `uploadFile(file, 'rewrite_source')`，再把 `uploaded_files` 与 `rewrite_context` 放入 `context_snapshot`。
 - 事件类型：`run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`needs_input`、`done`、`error`，类型位于 `frontend/types/api.ts`。
 - 任务边界：`task_accepted` 进入 task summary、SSE、取消和下载链路；`needs_input` 与非任务 `done` 只更新聊天消息，不创建后台任务。
@@ -41,7 +41,7 @@
 **任务 SSE：**
 - 服务用途：生成、rewrite、补充批注任务的实时日志、进度、LLM 文本、agent step、终态和 heartbeat。
 - 入口：`getTaskStreamUrl()`、`createSSEConnection()`、`useSSE()`、`useChatSSE()`，见 `frontend/lib/api.ts`、`frontend/lib/sse.ts`、`frontend/hooks/useSSE.ts`、`frontend/hooks/useChatSSE.ts`。
-- 运行时：`frontend/lib/sse.ts` 包装浏览器 `EventSource`，支持 `lastEventId` query 参数、事件去重、heartbeat timeout 和重连。
+- 运行时：`frontend/lib/sse.ts` 包装浏览器 `EventSource`，支持 `lastEventId` query 参数、事件去重、heartbeat timeout 和可选重连。
 - 命名事件：`connected`、`log`、`llm`、`progress`、`agent_step`、`status`、`error`、`done`、`heartbeat`。
 - 状态映射：`frontend/hooks/useChatSSE.ts` 将 SSE 事件写入 `frontend/stores/chatStreamStore.ts` 和 `frontend/stores/chatStore.ts`，并在终态后清理 `frontend/stores/chatTaskSessionStore.ts`。
 
@@ -53,6 +53,11 @@
 - 缓存：`frontend/components/forms/TenderFormShared.tsx` 使用 `buildTemplateCandidateCacheKey(tenderNo, projectName)` 在组件状态内缓存候选与 ranking。
 - 约束：前端只消费后端返回的候选、ranking、`selectable` 和 `blocked_reason`；不得直接访问外部模板候选 URL。
 
+**模型选择：**
+- UI 选项：`deepseek`、`qwen`、`doubao`，定义在 `frontend/components/forms/ModelSelector.tsx`。
+- 前端职责：仅把模型枚举传给 `GenerateRequest`、`CommentSupplementTaskRequest` 或 `AgentRunStreamRequest`，见 `frontend/types/api.ts`、`frontend/lib/api.ts`、`frontend/components/chat/FormPanel.tsx`、`frontend/components/chat/ChatPanel.tsx`。
+- Provider 密钥和真实 LLM 调用不在前端；前端不保存 provider key。
+
 ## 数据存储
 
 **数据库：**
@@ -63,14 +68,14 @@
 - `chat-storage` - `frontend/stores/chatStore.ts` 使用 Zustand persist + `sessionStorage` 保存会话、草稿、任务摘要和未读结果。
 - `chat-task-session-storage` - `frontend/stores/chatTaskSessionStore.ts` 使用 Zustand persist + `sessionStorage` 保存 task id 与 last event id。
 - `tender-history-storage` - `frontend/stores/historyStore.ts` 使用 Zustand persist + `sessionStorage` 保存最近历史条目。
-- `tender-app-storage` - `frontend/stores/useAppStore.ts` 使用 Zustand persist，未显式指定 storage adapter；只 partialize `sidebarOpen`。
+- `tender-app-storage` - `frontend/stores/useAppStore.ts` 使用 Zustand persist 保存 `sidebarOpen`；该 store 未显式指定 `sessionStorage` adapter。
 - `frontend/stores/chatStreamStore.ts` 是内存 store，不持久化完整 stream payload。
 
 **文件存储：**
 - 浏览器不直接访问本地文件系统、对象存储或云盘。
-- 上传经 `uploadFile()` / `uploadFiles()` 发送 `FormData` 到 `/api/upload` 或 `/api/upload/multiple`，见 `frontend/lib/api.ts`。
-- 生成产物下载经 `downloadFile()` / `getDownloadUrl()` 或相对 `/api/download/...` 链接访问后端下载代理。
-- 模板候选下载经 `/api/template-candidates/download`，见 `frontend/lib/api.ts`。
+- 上传经 `uploadFile()` / `uploadFiles()` 发送 `FormData` 到 `/api/upload` 或 `/api/upload/multiple`，见 `frontend/lib/api.ts`、`frontend/components/forms/FileUploader.tsx`。
+- 生成产物下载经 `downloadFile()` / `getDownloadUrl()` 或相对 `/api/download/...` 链接访问后端下载代理，见 `frontend/lib/api.ts`、`frontend/components/chat/TaskDownloadMessage.tsx`、`frontend/components/layout/Sidebar.tsx`。
+- 模板候选下载经 `/api/template-candidates/download`，见 `frontend/lib/api.ts`、`frontend/components/forms/TemplateCandidateDialog.tsx`。
 
 **缓存：**
 - 模板候选组件状态缓存位于 `frontend/components/forms/TenderFormShared.tsx`。
@@ -109,11 +114,11 @@
 
 ## 环境配置
 
-**必需环境变量：**
+**必需 env vars：**
 - 无必须前端密钥变量。
 - `NEXT_PUBLIC_API_URL` 是可选配置；配置后影响浏览器 API base URL、Next rewrite 目标和开发期 allowed origins。
 
-**测试环境变量：**
+**测试 env vars：**
 - `CI` - 影响 Playwright forbidOnly、retries、workers 和 server reuse，见 `frontend/playwright.config.ts`。
 - `PLAYWRIGHT_USE_SYSTEM_CHROME` - 非 CI 环境下控制是否使用系统 Chrome channel，见 `frontend/playwright.config.ts`。
 
@@ -131,7 +136,7 @@
 - JSON / upload / binary download / NDJSON：由 `frontend/lib/api.ts` 发起。
 - 任务 SSE：由 `frontend/lib/sse.ts` 发起 `EventSource` 连接。
 - 历史下载链接：`frontend/components/layout/Sidebar.tsx` 使用相对 `/api/download/...` 链接。
-- 裸 `fetch(` 在产品源码中集中于 `frontend/lib/api.ts`；组件层不直接裸 `fetch` 调用后端。
+- 产品源码中的后端 `fetch(` 集中于 `frontend/lib/api.ts`；组件层不直接裸 `fetch` 调用后端。
 
 ## 集成修改规则
 
@@ -145,4 +150,4 @@
 
 ---
 
-*前端集成分析：2026-06-16*
+*前端集成分析：2026-06-18*

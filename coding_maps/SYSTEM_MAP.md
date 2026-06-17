@@ -1,8 +1,8 @@
 # TenderWord 系统地图
 
-**生成日期：** 2026-06-16
+**生成日期：** 2026-06-18
 
-本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它基于 2026-06-16 刷新的子项目事实文档，不替代代码真源、不替代根级 `AGENTS.md` 的执行红线，也不替代 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 的子系统事实文档。
+本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它基于 2026-06-18 刷新的子项目事实文档，不替代代码真源、不替代根级 `AGENTS.md` 的执行红线，也不替代 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 的子系统事实文档。
 
 ## 系统目的与仓库形态
 
@@ -35,8 +35,8 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 
 - 前端任务创建、查询、取消、心跳、下载统一通过 `frontend/lib/api.ts`。
 - 后端任务生命周期在 `backend/task/task_queue_manager.py`，API 展示在 `backend/api/tasks.py` 和 `backend/services/task_service.py`。
-- SSE 后端入口是 `backend/api/stream.py`，事件缓冲和重放在 `backend/core/sse_manager.py`，进度日志桥接在 `backend/util/log_util/sse_log_handler.py`。
-- 前端 SSE runtime 是 `frontend/lib/sse.ts`，任务事件到 UI 的映射是 `frontend/hooks/useChatSSE.ts`；`agent_step` 必须在 runtime 层注册 named event。
+- SSE 后端入口是 `backend/api/stream.py`，事件缓冲和重放在 `backend/core/sse_manager.py`，进度日志桥接在 `backend/util/log_util/sse_log_handler.py`；后端事件枚举含 `node_start` / `node_complete`。
+- 前端 SSE runtime 是 `frontend/lib/sse.ts`，任务事件到 UI 的映射是 `frontend/hooks/useChatSSE.ts`；`connected` / `status` 属于前端连接和任务映射层事件，`agent_step` 必须在 runtime 层注册 named event。
 - 下载由 `backend/api/download.py` 和上传存储 helper 保护，前端使用 `downloadFile()` / `getDownloadUrl()`。
 - 根级 `/health*` 端点只适合作为后端进程探测；Word COM 真实生成能力仍要用 Windows 环境诊断或实际任务验证。
 
@@ -177,6 +177,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 ## 集成风险检查清单
 
 - API 形状变化是否同步后端模型、前端类型、API client 和测试。
+- 前端新增请求是否仍经过 API client；当前没有 lint 规则自动阻止组件或 hooks 写裸 `fetch`，评审时要人工检查。
 - `gngk` 的 `tender_lx + fund_lx + ifzgcg` 分派是否集中在 `frontend/lib/gngkFormType.ts`，且 `formDataConverter.ts` 与 `ChatPanel.tsx` 是否都调用该 helper。
 - 生成文件契约是否仍是 `template + tender_params`，后端初始 state 是否只装配 `template_path + tender_param_paths`。
 - 上传文件 rewrite 是否仍使用前端 `rewrite_source` 文件类型，并在后端 task skill state 中通过 `rewrite_source="uploaded_file"` 路由。
