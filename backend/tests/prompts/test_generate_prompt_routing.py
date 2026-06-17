@@ -61,9 +61,24 @@ def test_render_generate_by_param_prompt_preserves_basic_info_shells() -> None:
 
     assert "基础信息章节镜像铁律" in rendered.system_prompt
     assert "基础信息字段镜像优先" in rendered.system_prompt
+    assert "项目元数据字段白名单" in rendered.system_prompt
     assert "不能改写成 `1、设备名称及数量`、`2、项目预算`" in rendered.system_prompt
     assert "基础信息章节不参与技术重组" in rendered.system_prompt
     assert "预算金额、最高限价等只能填入模板里本来就存在的预算/限价类槽位" in rendered.system_prompt
+
+
+def test_render_generate_by_param_prompt_drops_technical_fields_in_project_overview() -> None:
+    rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    assert "技术正文伪装字段黑名单" in rendered.system_prompt
+    assert "服务范围、维保范围、功能检测范围、维护保养范围" in rendered.system_prompt
+    assert "过滤器清单、更换周期、备品备件" in rendered.system_prompt
+    assert "项目概述瘦身" in rendered.system_prompt
+    assert "旧服务范围、旧清单、旧过滤器字段必须删除" in rendered.system_prompt
+    assert "旧资产/旧清单硬删除" in rendered.system_prompt
+
 
 def test_render_generate_by_template_prompt_preserves_colon_attached_lists() -> None:
     rendered = render_generate_by_template_prompt(build_prompt_input())
