@@ -63,6 +63,8 @@ def test_extract_content_with_table_models_preserves_merge_topology() -> None:
         {"row": 2, "col": 3, "row_span": 1, "col_span": 1, "text": "安保"},
         {"row": 3, "col": 1, "row_span": 1, "col_span": 3, "text": "合计"},
     ]
+    assert "| " not in content
+    assert "楼宇 / 岗位" in content
 
 
 def test_extract_content_with_table_models_keeps_nonempty_projection_for_personnel_table() -> None:
@@ -99,4 +101,5 @@ def test_extract_content_with_table_models_keeps_nonempty_projection_for_personn
     assert "DSA2" in content
     assert "岗位数人数" in content
     assert "[[TABLE:TP1]]" in content
+    assert "| --- |" not in content
     assert len(models) == 1

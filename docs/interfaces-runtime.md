@@ -13,7 +13,7 @@
 
 - `GenerateRequest.file_paths` 当前只接受 `template` 与 `tender_params`。
 - 生成节点只消费 `template_path` 与 `tender_param_paths`，不要重新引入旧文件槽位。
-- 合并单元格表格拓扑是后端内部运行时状态：结构化 sidecar 字段 `tender_param_table_models`、表格文本投影和正文中的 `[[TABLE:table_id]]` 占位符只在生成/写回运行时内部使用，不进入前端 API、SSE 契约或 rewrite 请求模型。
+- 合并单元格表格拓扑是后端内部运行时状态：结构化 sidecar 字段 `tender_param_table_models` 与正文中的 `[[TABLE:table_id]]` 占位符只在生成/写回运行时内部使用；给 LLM 的结构化表输入只保留简短上下文和占位符，不进入前端 API、SSE 契约或 rewrite 请求模型。
 - `generation_style`、`generation_mode`、`comment_generation_mode` 和 `style_writeback_mode` 都是 generate-only 字段，不得进入 rewrite 请求模型、skill state 或 prompt surface。
 - `generation_mode=workflow` 走旧 `generate_polished_text`，`generation_mode=agent` 走公共 `content_agent`。
 - `comment_generation_mode=off` 时 workflow 与 agent 生成都跳过 AI 批注生成和 bad case 检索增强，不进入 rewrite 链路。
@@ -21,6 +21,8 @@
 ## 任务与 SSE
 
 - 任务状态字段变化必须同步后端模型、前端类型、store task summary 和任务 UI。
+- 当前任务类型只有 `generate`、`rewrite`、`comment_supplement`；新增类型必须同步后端 `TaskKind`、前端 `TaskKind`、SSE 终态、下载卡和会话结果语义。
+- 后端 SSE event enum 包括 `log`、`llm`、`progress`、`node_start`、`node_complete`、`agent_step`、`done`、`error`、`heartbeat`；前端 runtime 还处理连接层 `connected` 和任务状态层 `status`。
 - 新增 SSE 事件类型必须同步后端模型、事件发送、前端 union 类型、`frontend/lib/sse.ts` named event 注册、`useChatSSE` 解析和测试。
 - 任务失败必须最终表现为 `error` 或 `done`，不能让 SSE 静默中断。
 - `comment_writeback_*` 和 `style_writeback_*` 摘要属于任务结果契约，不得在 state、任务结果或 `done` 事件中丢失。

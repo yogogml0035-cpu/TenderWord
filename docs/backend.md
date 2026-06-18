@@ -21,12 +21,13 @@
 
 - Word COM 是稀缺临界资源，所有写入必须经过任务队列、graph 锁、取消检查和进度包装。
 - 不得在 API route、service、前端或随意脚本中直接操作 COM。
+- 当前后台任务类型只有 `generate`、`rewrite`、`comment_supplement`；新增类型要同步任务模型、SSE、会话结果和前端下载卡。
 - `progress_log` 只写用户可理解的进度；排障栈、参数摘要和诊断细节进入 `execution_log`。
 - 任务失败必须收敛为任务失败状态和 SSE `error` 或终态事件，不能让 SSE 静默中断。
 - 受保护字段 profile 统一由招标类型配置解析；字段 marker 先规范化为中文冒号，再做严格字段行匹配。
 - 关键受保护字段缺失、乱序或非法时 fail-fast，不能部分写回后靠 cleanup 兜底。
 - 正文写回使用真实段落边界；显式空行属于正文语义，拆块和 cleanup 不得无差别压平。
-- 参数源表的合并单元格拓扑只在后端内部保留：提取阶段写入 `tender_param_table_models` 侧车，prompt 正文使用表格文本投影 + `[[TABLE:table_id]]` 占位符配对；生成结果需要该表时只保留占位符，写回解析会把相邻投影表和占位符合并为一个结构化表 item，再按侧车模型恢复 merge。
+- 参数源表的合并单元格拓扑只在后端内部保留：提取阶段写入 `tender_param_table_models` 侧车，prompt 正文在结构化表位置只保留简短表格上下文 + `[[TABLE:table_id]]` 占位符；生成结果需要该表时必须原样保留占位符，写回解析继续兼容相邻投影表反查 sidecar，并按侧车模型恢复 merge。
 
 ## 智能体与生成运行时
 

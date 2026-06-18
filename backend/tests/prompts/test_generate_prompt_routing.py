@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from backend.agents.generation.content_agents import CONTENT_AGENT_SYSTEM_PROMPT
+from backend.agents.generation.revise_agent_graph import REVISE_SYSTEM_PROMPT
+from backend.agents.generation.verify_agent_graph import VERIFY_SYSTEM_PROMPT
 from backend.prompts.generate_by_param_prompt import render_generate_by_param_prompt
 from backend.prompts.generate_by_template_prompt import render_generate_by_template_prompt
 from backend.prompts.generate_prompt import render_generate_prompt
@@ -80,6 +83,22 @@ def test_render_generate_by_param_prompt_drops_technical_fields_in_project_overv
     assert "旧资产/旧清单硬删除" in rendered.system_prompt
 
 
+def test_generate_prompts_drop_scoring_sections() -> None:
+    param_rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+
+    assert "采购需求边界与评分污染过滤" in param_rendered.system_prompt
+    assert "投标评分细则（100分）" in param_rendered.system_prompt
+    assert "必须整段、整表删除" in param_rendered.system_prompt
+    assert "评分污染红线" in param_rendered.system_prompt
+
+    assert "采购需求边界与评分污染过滤" in template_rendered.system_prompt
+    assert "评分大章不参与定位" in template_rendered.system_prompt
+    assert "严禁触发“全量框架锁定+定点注入”" in template_rendered.system_prompt
+
+
 def test_render_generate_by_template_prompt_preserves_colon_attached_lists() -> None:
     rendered = render_generate_by_template_prompt(build_prompt_input())
 
@@ -111,3 +130,10 @@ def test_generate_prompt_renders_none_inputs_as_empty_text() -> None:
     rendered = render_generate_prompt(data)
 
     assert "None" not in rendered.user_prompt
+
+
+def test_generation_agents_drop_scoring_sections() -> None:
+    assert "投标阶段打分内容必须删除" in CONTENT_AGENT_SYSTEM_PROMPT
+    assert "投标阶段打分规则" in VERIFY_SYSTEM_PROMPT
+    assert "投标评分细则（100分）" in VERIFY_SYSTEM_PROMPT
+    assert "必须整段/整表删除" in REVISE_SYSTEM_PROMPT

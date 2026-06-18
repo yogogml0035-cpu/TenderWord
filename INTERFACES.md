@@ -1,8 +1,8 @@
 # TenderWord 接口边界
 
-**生成日期：** 2026-06-16
+**生成日期：** 2026-06-18
 
-本文件记录 TenderWord 当前已确认的系统级接口边界。具体模型和行为以代码真源为准，并参考 2026-06-16 刷新的 `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 事实层。
+本文件记录 TenderWord 当前已确认的系统级接口边界。具体模型和行为以代码真源为准，并参考 2026-06-18 刷新的 `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 事实层。
 
 ## 已确认接口边界
 
@@ -49,6 +49,7 @@
 
 同步要求：
 - 任务状态字段变化必须同步 `backend/models/task.py`、`frontend/types/api.ts`、store task summary 和任务 UI。
+- 当前任务类型只有 `generate`、`rewrite`、`comment_supplement`；新增任务类型必须同步后端 `TaskKind`、前端 `TaskKind`、SSE 终态、下载卡和会话结果语义。
 - 从 `sessionStorage` 恢复 running task 前，前端必须先查任务状态；404 / `TASK_NOT_FOUND` 收敛成本地中断态。
 
 ### 任务 SSE
@@ -63,7 +64,7 @@
 | 前端映射 | `frontend/hooks/useChatSSE.ts` |
 | 前端类型 | `frontend/types/api.ts` |
 
-已确认前端事件类型包括 `connected`、`log`、`llm`、`progress`、`agent_step`、`status`、`error`、`done`、`heartbeat`。
+后端 SSE event enum 包括 `log`、`llm`、`progress`、`node_start`、`node_complete`、`agent_step`、`done`、`error`、`heartbeat`。前端 runtime 还处理连接层 `connected` 和任务状态层 `status` 事件；改事件时要同时区分后端真实事件和前端包装/映射事件。
 
 同步要求：
 - 新增 SSE 事件类型必须同步后端模型、事件发送、前端 union 类型、`frontend/lib/sse.ts` named event 注册、`useChatSSE` 解析和测试。

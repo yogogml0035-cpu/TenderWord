@@ -20,6 +20,7 @@ from backend.util.word_util.word_application_util import (
 from backend.util.word_util.table_models import (
     StructuredTableModel,
     render_structured_table_markdown,
+    render_structured_table_prompt_context,
 )
 
 
@@ -1021,12 +1022,10 @@ def extract_content_with_table_models(
                 continue
             table_models.append(table_model)
             placeholder = f"[[TABLE:{table_model['table_id']}]]"
-            table_markdown = render_structured_table_markdown(table_model)
-            if table_markdown:
-                result_parts.append(table_markdown)
-                result_parts.append(placeholder)
-            else:
-                result_parts.append(placeholder)
+            table_prompt_context = render_structured_table_prompt_context(table_model)
+            if table_prompt_context:
+                result_parts.append(table_prompt_context)
+            result_parts.append(placeholder)
 
         rendered = "\n".join(part for part in result_parts if part is not None)
         return rendered, table_models
