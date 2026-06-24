@@ -30,6 +30,7 @@ from backend.agents.generation.types import (
 from backend.agents.generation.workspace import (
     audit_path,
     context_value,
+    ensure_round_within_protocol,
     get_workspace_backend,
     infer_current_text_path,
     infer_next_audit_round,
@@ -397,6 +398,9 @@ def _verify_text(
             _context_value(merged_state, config, "revision_round", 0)
             or infer_next_audit_round(backend)
         )
+        # 协议轮次已用尽时（显式 revision_round=4 或已存在 3 轮审核），
+        # 不再写越界审核产物，直接抛受控错误，交由主流程兜底交付。
+        ensure_round_within_protocol(round_index, artifact_type="审核")
     else:
         round_index = int(_context_value(state, config, "revision_round", 1) or 1)
         current_text = str(

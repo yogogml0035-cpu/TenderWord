@@ -11,6 +11,7 @@ from backend.agents.generation.types import GenerationAgentState
 from backend.agents.generation.workspace import (
     audit_path,
     context_value,
+    ensure_round_within_protocol,
     get_workspace_backend,
     infer_current_text_path,
     infer_next_revision_round,
@@ -109,6 +110,9 @@ def _revise_text(
             context_value(state, config, "revision_round", 0)
             or infer_next_revision_round(backend)
         )
+        # 协议轮次已用尽时（显式 revision_round=4 或已存在 3 轮修订），
+        # 不再写越界修订产物，直接抛受控错误，交由主流程兜底交付。
+        ensure_round_within_protocol(round_index, artifact_type="修订")
         current_text_path = str(
             context_value(state, config, "current_text_path")
             or infer_current_text_path(backend)

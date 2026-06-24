@@ -45,6 +45,7 @@ from backend.agents.generation.workspace import (
     audit_path,
     create_workspace_backend,
     create_workspace_dir,
+    ensure_round_within_protocol,
     infer_next_audit_round,
     infer_next_revision_round,
     overwrite_backend_text,
@@ -814,6 +815,11 @@ def _relay_runner_stream(
         raise
 
 
+def _is_protocol_round_exhausted(exc: BaseException) -> bool:
+    """判断异常是否来自轮次用尽的协议校验（越界审核/修订请求）。"""
+    return isinstance(exc, GenerationAgentProtocolError) and "协议轮次已用尽" in str(exc)
+
+
 def _validate_final_text(final_text: str) -> str:
     normalized = str(final_text or "").strip()
     if (
@@ -884,8 +890,13 @@ def _count_revision_rounds(workspace_dir: Path) -> int:
         return 0
     for path in revisions_dir.iterdir():
         match = re.fullmatch(r"round-(\d+)\.md", path.name)
-        if match:
-            rounds.append(int(match.group(1)))
+        if not match:
+            continue
+        round_index = int(match.group(1))
+        # 越界轮次（round-4 及以上）视为历史/异常产物，不计入交付的修订轮次。
+        if not (1 <= round_index <= MAX_REVISION_ROUNDS):
+            continue
+        rounds.append(round_index)
     return max(rounds, default=0)
 
 
@@ -934,12 +945,25 @@ def run_content_agent_generation(
         payload=base_payload,
     )
 
-    _relay_runner_stream(
-        selected_runner,
-        {"messages": [{"role": "user", "content": _build_main_agent_user_prompt()}]},
-        runner_config,
-        step_emitter,
-    )
+    try:
+        _relay_runner_stream(
+            selected_runner,
+            {"messages": [{"role": "user", "content": _build_main_agent_user_prompt()}]},
+            runner_config,
+            step_emitter,
+        )
+    except GenerationAgentProtocolError as exc:
+        if not _is_protocol_round_exhausted(exc):
+            raise
+        # 第 3 轮后 runner 仍尝试越界审核/修订；若 final 已写入，按协议兜底交付，
+        # 不因 round-4 请求整单失败；否则属真正的协议违规，向上抛错。
+        if read_backend_text_optional(backend, FINAL_POLISHED_TEXT_PATH) is None:
+            raise
+        progress_log.warning(
+            "[content_agent] runner 在协议轮次用尽后仍尝试越界轮次，已按最终正文兜底交付: task_id=%s, error=%s",
+            task_id,
+            str(exc),
+        )
 
     validate_round_protocol(workspace_dir)
     raw_final_text = read_backend_text_optional(backend, FINAL_POLISHED_TEXT_PATH)

@@ -154,12 +154,36 @@ def context_value(
     return state.get(key, default)
 
 
+def ensure_round_within_protocol(
+    round_index: int,
+    *,
+    artifact_type: str = "round",
+) -> int:
+    """校验轮次下标必须在协议允许的 [1, MAX_REVISION_ROUNDS] 范围内。
+
+    主流程最多只允许 3 轮审核/修订；第 3 轮后必须停止返修，交付最终正文。
+    任何写入或推断得到的第 4 轮（及以上）都必须在此处拦截，
+    抛出“协议轮次已用尽”的受控错误，而不是把越界轮次传给写文件逻辑。
+    """
+    normalized = int(round_index)
+    if normalized < 1 or normalized > MAX_REVISION_ROUNDS:
+        raise GenerationAgentProtocolError(
+            f"协议轮次已用尽：{artifact_type} 第 {normalized} 轮超出允许范围 "
+            f"[1, {MAX_REVISION_ROUNDS}]，不得再写第 {normalized} 轮产物"
+        )
+    return normalized
+
+
 def infer_next_audit_round(backend: BackendProtocol) -> int:
-    for round_index in range(1, MAX_REVISION_ROUNDS + 2):
+    for round_index in range(1, MAX_REVISION_ROUNDS + 1):
         result = backend.read(audit_path(round_index))
         if result.error or result.file_data is None:
             return round_index
-    return MAX_REVISION_ROUNDS + 1
+    # 第 3 轮审核产物已存在：协议轮次用尽，不得再写第 4 轮审核。
+    raise GenerationAgentProtocolError(
+        f"协议轮次已用尽：已存在 {MAX_REVISION_ROUNDS} 轮审核产物，"
+        f"不得再写第 {MAX_REVISION_ROUNDS + 1} 轮审核"
+    )
 
 
 def infer_current_text_path(backend: BackendProtocol) -> str:
@@ -171,14 +195,25 @@ def infer_current_text_path(backend: BackendProtocol) -> str:
 
 
 def infer_next_revision_round(backend: BackendProtocol) -> int:
-    for round_index in range(1, MAX_REVISION_ROUNDS + 2):
+    for round_index in range(1, MAX_REVISION_ROUNDS + 1):
         result = backend.read(revision_path(round_index))
         if result.error or result.file_data is None:
             return round_index
-    return MAX_REVISION_ROUNDS + 1
+    # 第 3 轮修订产物已存在：协议轮次用尽，不得再写第 4 轮修订。
+    raise GenerationAgentProtocolError(
+        f"协议轮次已用尽：已存在 {MAX_REVISION_ROUNDS} 轮修订产物，"
+        f"不得再写第 {MAX_REVISION_ROUNDS + 1} 轮修订"
+    )
 
 
 def validate_round_protocol(workspace_dir: Path) -> None:
+    """校验工作区轮次产物路径合法。
+
+    历史或异常 runner 可能留下越界产物（如 round-4）。这类产物不参与交付，
+    也不作为 fatal：合法轮次范围外的 round-N 文件忽略，只对非法文件名报错。
+    越界文件会被调用方在读取/统计阶段排除，确保 last_audit_round /
+    revision_rounds 不会包含第 4 轮及以后。
+    """
     for folder_name in ("audits", "revisions"):
         folder = workspace_dir / folder_name
         if not folder.exists():
@@ -188,8 +223,9 @@ def validate_round_protocol(workspace_dir: Path) -> None:
             if not match:
                 raise GenerationAgentProtocolError(f"智能体工作区存在非法路径: /{folder_name}/{path.name}")
             round_index = int(match.group(1))
-            if round_index < 1 or round_index > MAX_REVISION_ROUNDS:
-                raise GenerationAgentProtocolError(f"智能体工作区存在超出协议轮次的文件: /{folder_name}/{path.name}")
+            if round_index < 1:
+                raise GenerationAgentProtocolError(f"智能体工作区存在非法轮次文件: /{folder_name}/{path.name}")
+            # round_index > MAX_REVISION_ROUNDS 视为历史越界产物，忽略而非 fatal。
 
 
 __all__ = [
@@ -202,6 +238,7 @@ __all__ = [
     "context_value",
     "create_workspace_backend",
     "create_workspace_dir",
+    "ensure_round_within_protocol",
     "get_configurable",
     "get_generation_context",
     "get_workspace_backend",

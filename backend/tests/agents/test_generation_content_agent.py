@@ -19,7 +19,17 @@ from backend.agents.generation import content_agents as content_agent_module
 from backend.agents.generation import revise_agent_graph as revise_agent_graph_module
 from backend.agents.generation import verify_agent_graph as verify_agent_graph_module
 from backend.agents.generation.types import AgentStepPayload, AuditFinding
-from backend.agents.generation.workspace import FINAL_POLISHED_TEXT_PATH
+from backend.agents.generation.workspace import (
+    FINAL_POLISHED_TEXT_PATH,
+    audit_path,
+    create_workspace_backend,
+    create_workspace_dir,
+    ensure_round_within_protocol,
+    infer_next_audit_round,
+    infer_next_revision_round,
+    validate_round_protocol,
+    write_generation_context,
+)
 from backend.agents.log_naming import build_agent_log_stem
 
 
@@ -930,3 +940,299 @@ def test_content_runner_final_recheck_allows_missing_placeholder_when_section_re
     assert result.audit_findings == [
         AuditFinding(evidence="正文仍有多余内容", fix_hint="删除多余内容")
     ]
+
+
+def test_infer_next_audit_round_raises_when_all_rounds_present(tmp_path) -> None:
+    workspace_dir = create_workspace_dir("task-infer-audit")
+    backend = create_workspace_backend(workspace_dir)
+    for round_index in range(1, 4):
+        backend.write(audit_path(round_index), "[]")
+
+    # 第 3 轮审核产物已存在，第 4 轮写入路径不得产生。
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        infer_next_audit_round(backend)
+
+
+def test_infer_next_revision_round_raises_when_all_rounds_present(tmp_path) -> None:
+    workspace_dir = create_workspace_dir("task-infer-revision")
+    backend = create_workspace_backend(workspace_dir)
+    for round_index in range(1, 4):
+        backend.write(f"/revisions/round-{round_index}.md", f"revision {round_index}")
+
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        infer_next_revision_round(backend)
+
+
+def test_ensure_round_within_protocol_accepts_valid_rounds() -> None:
+    assert ensure_round_within_protocol(1) == 1
+    assert ensure_round_within_protocol(3) == 3
+
+
+def test_ensure_round_within_protocol_rejects_out_of_range_rounds() -> None:
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        ensure_round_within_protocol(4, artifact_type="审核")
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        ensure_round_within_protocol(0)
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        ensure_round_within_protocol(-1)
+
+
+def test_verify_agent_graph_raises_and_skips_round4_when_three_rounds_exist(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    workspace_dir = create_workspace_dir("task-verify-round4")
+    backend = create_workspace_backend(workspace_dir)
+    write_generation_context(
+        backend,
+        {
+            "generation_style": "template",
+            "current_text": "采购需求正文",
+            "model_provider": "deepseek",
+        },
+    )
+    for round_index in range(1, 4):
+        backend.write(audit_path(round_index), "[]")
+        backend.write(f"/revisions/round-{round_index}.md", f"revision {round_index}")
+
+    async def fake_stream_llm_completion(**_kwargs):
+        pytest.fail("协议轮次用尽时不应再调用审核 LLM")
+
+    monkeypatch.setattr(
+        verify_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        verify_agent_graph_module.create_verify_agent_graph().invoke(
+            {
+                "current_text": "采购需求正文",
+                "model_provider": "deepseek",
+            },
+            {
+                "configurable": {
+                    "content_agent_backend": backend,
+                }
+            },
+        )
+
+    # 第 4 轮审核产物不得被写出。
+    assert backend.read(audit_path(4)).file_data is None
+
+
+def test_revise_agent_graph_raises_and_skips_round4_when_three_rounds_exist(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    workspace_dir = create_workspace_dir("task-revise-round4")
+    backend = create_workspace_backend(workspace_dir)
+    for round_index in range(1, 4):
+        backend.write(audit_path(round_index), "[]")
+        backend.write(f"/revisions/round-{round_index}.md", f"revision {round_index}")
+
+    async def fake_stream_llm_completion(**_kwargs):
+        pytest.fail("协议轮次用尽时不应再调用修订 LLM")
+
+    monkeypatch.setattr(
+        revise_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        revise_agent_graph_module.create_revise_agent_graph().invoke(
+            {
+                "current_text": "采购需求正文",
+                "audit_findings": [{"evidence": "问题", "fix_hint": "修复"}],
+                "revision_round": 4,
+                "model_provider": "deepseek",
+            },
+            {
+                "configurable": {
+                    "content_agent_backend": backend,
+                    "generation_agent_context": {
+                        "current_text": "采购需求正文",
+                        "audit_findings": [{"evidence": "问题", "fix_hint": "修复"}],
+                        "revision_round": 4,
+                        "model_provider": "deepseek",
+                    },
+                }
+            },
+        )
+
+    # 第 4 轮修订产物不得被写出。
+    assert backend.read("/revisions/round-4.md").file_data is None
+
+
+def test_content_runner_delivers_final_after_three_rounds_with_remaining_findings(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    runner = FakeRunner(
+        [
+            {"draft": "draft"},
+            {"audit": [{"evidence": "issue 1", "fix_hint": "fix 1"}], "round": 1},
+            {"revision": "revision 1", "round": 1},
+            {"audit": [{"evidence": "issue 2", "fix_hint": "fix 2"}], "round": 2},
+            {"revision": "revision 2", "round": 2},
+            {"audit": [{"evidence": "issue 3", "fix_hint": "fix 3"}], "round": 3},
+            {"revision": "final revised", "round": 3},
+            {"final": "final revised"},
+        ]
+    )
+
+    monkeypatch.setattr(
+        content_agent_module,
+        "verify_final_text_findings",
+        lambda **_kwargs: [AuditFinding(evidence="issue 3", fix_hint="fix 3")],
+    )
+
+    result = run_content_agent_generation(
+        {
+            "generation_style": "param",
+            "project_content": "project",
+            "tender_params": "params",
+            "template_reference_text": "origin",
+        },
+        {"configurable": {"model_provider": "deepseek", "task_id": "task-three-rounds"}},
+        runner=runner,
+    )
+
+    # 第 3 轮后固定停止返修，交付最终正文。
+    assert result.polished_text == "final revised"
+    assert result.revision_rounds == 3
+    # 剩余问题暴露在最终 payload，便于卡片最终完成区逐条展示 warning。
+    assert result.audit_findings == [
+        AuditFinding(evidence="issue 3", fix_hint="fix 3"),
+    ]
+    workspace_dir = result.workspace_dir
+    # 第 4 轮产物不得出现。
+    assert not (workspace_dir / "audits" / "round-4.json").exists()
+    assert not (workspace_dir / "revisions" / "round-4.md").exists()
+
+
+def test_content_runner_tolerates_historical_round4_artifact(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    class Round4LeavingRunner:
+        def __init__(self):
+            self.payloads: list[dict] = []
+            self.configs: list[dict | None] = []
+
+        def invoke(self, payload, config=None):  # type: ignore[no-untyped-def]
+            raise AssertionError("workspace runner should stream, not invoke")
+
+        def stream(self, payload, config=None, **_kwargs):  # type: ignore[no-untyped-def]
+            self.payloads.append(payload)
+            self.configs.append(config)
+            backend = config["configurable"]["content_agent_backend"]
+            # 正常写完初稿并通过第 1 轮审核，写 final。
+            backend.write("/drafts/round-1.md", "draft")
+            yield {"node": "content_generate_agent", "round": 1, "content": "draft", "is_complete": True}
+            backend.write(audit_path(1), "[]")
+            yield {"node": "content_verify_agent", "round": 1, "content": "[]", "is_complete": True}
+            backend.write(FINAL_POLISHED_TEXT_PATH, "final text")
+            yield {"node": "content_agent", "content": "final written", "is_complete": True}
+            # 模拟历史/异常 runner 在写 final 后仍留下越界 round-4 产物。
+            backend.write("/audits/round-4.json", "[]")
+
+    runner = Round4LeavingRunner()
+
+    result = run_content_agent_generation(
+        {
+            "generation_style": "param",
+            "project_content": "project",
+            "tender_params": "params",
+            "template_reference_text": "origin",
+        },
+        {"configurable": {"model_provider": "deepseek", "task_id": "task-tolerate-round4"}},
+        runner=runner,
+    )
+
+    # 越界产物存在但不作为 fatal，也不参与交付/统计。
+    workspace_dir = result.workspace_dir
+    assert (workspace_dir / "audits" / "round-4.json").exists()
+    assert result.polished_text == "final text"
+    assert result.audit_findings == []
+    # revision_rounds 只统计协议内合法轮次，不含 round-4。
+    assert result.revision_rounds == 0
+
+
+def test_content_runner_falls_back_to_final_when_runner_requests_round4(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    class Round4RequestingRunner:
+        def __init__(self):
+            self.payloads: list[dict] = []
+            self.configs: list[dict | None] = []
+
+        def invoke(self, payload, config=None):  # type: ignore[no-untyped-def]
+            raise AssertionError("workspace runner should stream, not invoke")
+
+        def stream(self, payload, config=None, **_kwargs):  # type: ignore[no-untyped-def]
+            self.payloads.append(payload)
+            self.configs.append(config)
+            backend = config["configurable"]["content_agent_backend"]
+            # 正常走完 3 轮并写 final。
+            backend.write("/drafts/round-1.md", "draft")
+            yield {"node": "content_generate_agent", "round": 1, "content": "draft", "is_complete": True}
+            backend.write(audit_path(1), "[]")
+            backend.write(audit_path(2), "[]")
+            backend.write(audit_path(3), "[]")
+            backend.write("/revisions/round-2.md", "revision 2")
+            yield {"node": "content_agent", "content": "final written", "is_complete": True}
+            backend.write(FINAL_POLISHED_TEXT_PATH, "final text")
+            # final 写完后，runner 仍尝试越界发起第 4 轮审核；
+            # 这会触发 verify graph 的轮次校验并抛“协议轮次已用尽”错误。
+            raise GenerationAgentProtocolError("协议轮次已用尽：已存在 3 轮审核产物")
+
+    runner = Round4RequestingRunner()
+
+    result = run_content_agent_generation(
+        {
+            "generation_style": "param",
+            "project_content": "project",
+            "tender_params": "params",
+            "template_reference_text": "origin",
+        },
+        {"configurable": {"model_provider": "deepseek", "task_id": "task-round4-request"}},
+        runner=runner,
+    )
+
+    # final 已写入，越界审核请求不整单失败，按最终正文兜底交付。
+    assert result.polished_text == "final text"
+    # revision_rounds 只统计协议内合法轮次（round-2），不含 round-4。
+    assert result.revision_rounds == 2
+
+
+def test_content_runner_fails_when_round4_requested_and_final_missing(
+    _redirect_content_agent_workspace,
+) -> None:
+    class Round4RequestingRunner:
+        def invoke(self, payload, config=None):  # type: ignore[no-untyped-def]
+            raise AssertionError("workspace runner should stream, not invoke")
+
+        def stream(self, payload, config=None, **_kwargs):  # type: ignore[no-untyped-def]
+            backend = config["configurable"]["content_agent_backend"]
+            backend.write(audit_path(1), "[]")
+            backend.write(audit_path(2), "[]")
+            backend.write(audit_path(3), "[]")
+            # 越界请求且未写 final：属真正的协议违规，应向上抛错。
+            raise GenerationAgentProtocolError("协议轮次已用尽：已存在 3 轮审核产物")
+
+    runner = Round4RequestingRunner()
+
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        run_content_agent_generation(
+            {
+                "generation_style": "param",
+                "project_content": "project",
+                "tender_params": "params",
+                "template_reference_text": "origin",
+            },
+            {"configurable": {"model_provider": "deepseek", "task_id": "task-round4-no-final"}},
+            runner=runner,
+        )
