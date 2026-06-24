@@ -137,3 +137,82 @@ def test_generation_agents_drop_scoring_sections() -> None:
     assert "投标阶段打分规则" in VERIFY_SYSTEM_PROMPT
     assert "投标评分细则（100分）" in VERIFY_SYSTEM_PROMPT
     assert "必须整段/整表删除" in REVISE_SYSTEM_PROMPT
+
+
+def test_generate_prompts_generalize_importance_markers_with_delta() -> None:
+    """重要性标识规则泛化为 ★/▲/△/Δ/*/#/※/●，并给出 Δ 示例。"""
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(build_prompt_input(generation_style="param"))
+
+    for rendered in (template_rendered, param_rendered):
+        assert "★/▲/△/Δ/*/#/※/●" in rendered.system_prompt
+
+    # template 的符号白名单显式列出 Δ，并给出 Symbol 字体示例。
+    assert "Symbol 字体抽取出的 `Δ`" in template_rendered.system_prompt
+    assert "Δ3.1.1" in template_rendered.system_prompt
+    # param 的标识保留规则显式包含 Δ。
+    assert "Symbol 字体抽取出的 `Δ`" in param_rendered.system_prompt
+
+
+def test_generate_prompts_exclude_technical_symbols_from_marker_whitelist() -> None:
+    """正文技术符号 ≥/±/×/Ω/SpO₂ 不进入重要性标识白名单。"""
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(build_prompt_input(generation_style="param"))
+
+    for rendered in (template_rendered, param_rendered):
+        assert "≥/±/×/Ω/SpO₂" in rendered.system_prompt
+
+
+def test_generate_prompts_forbid_ai_preamble_and_filler() -> None:
+    """生成 prompt 明确禁止 AI 自述、最终说明、无信息占位句。"""
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(build_prompt_input(generation_style="param"))
+
+    for rendered in (template_rendered, param_rendered):
+        assert "禁止 AI 自述/包装语" in rendered.system_prompt
+        assert "好的，已收到您的指令" in rendered.system_prompt
+        assert "禁止无信息占位句" in rendered.system_prompt
+        assert "须提供详细技术参数要求" in rendered.system_prompt
+
+    # revise prompt 也禁止 AI 自述与占位句。
+    assert "好的，已收到您的指令" in REVISE_SYSTEM_PROMPT
+    assert "须提供详细技术参数要求" in REVISE_SYSTEM_PROMPT
+
+
+def test_generate_prompts_flip_table_placeholder_to_internal_entry() -> None:
+    """`[[TABLE:id]]` 被描述为内部写回入口，不再要求模型保留/补回占位符。"""
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(build_prompt_input(generation_style="param"))
+
+    for rendered in (template_rendered, param_rendered):
+        assert "内部结构化写回入口" in rendered.system_prompt
+        assert "不是最终正文的可见内容" in rendered.system_prompt or "不是最终正文可见内容" in rendered.system_prompt
+        assert "不要" in rendered.system_prompt and "占位句" in rendered.system_prompt
+
+
+def test_generate_param_prompt_preserves_field_shell_protection() -> None:
+    """param 生成固化字段壳保护区：无新值时保留模板字段壳/占位值，不得删除。"""
+    rendered = render_generate_by_param_prompt(build_prompt_input(generation_style="param"))
+
+    assert "绝不能删掉该字段" in rendered.system_prompt
+    assert "保留模板里的占位表达、固定表达或字段空壳" in rendered.system_prompt
+    assert "设备名称及数量" in rendered.system_prompt
+    assert "交付日期" in rendered.system_prompt
+    assert "付款方式" in rendered.system_prompt
+    assert "交付地点" in rendered.system_prompt
+
+
+def test_verify_prompt_describes_table_placeholder_as_internal_entry() -> None:
+    """审核规则泛化重要性标识并排除技术符号；
+    占位符硬契约（附加到 user prompt）把占位符描述为内部写回入口且不要求补回。"""
+    from backend.agents.generation.verify_agent_graph import (
+        TABLE_PLACEHOLDER_CONTRACT_PROMPT,
+    )
+
+    # 审核规则泛化重要性标识并排除技术符号。
+    assert "★/▲/△/Δ" in VERIFY_SYSTEM_PROMPT
+    assert "SpO₂" in VERIFY_SYSTEM_PROMPT
+    # 占位符硬契约描述为内部写回入口，且明确不要求补回。
+    assert "内部写回入口" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+    assert "不应作为可见行" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+    assert "不要**为缺失" in TABLE_PLACEHOLDER_CONTRACT_PROMPT

@@ -103,3 +103,71 @@ def test_extract_content_with_table_models_keeps_nonempty_projection_for_personn
     assert "[[TABLE:TP1]]" in content
     assert "| --- |" not in content
     assert len(models) == 1
+
+
+def test_extract_content_with_table_models_maps_symbol_font_delta_in_paragraph() -> None:
+    """`<w:sym w:font="Symbol" w:char="F044"/>` 必须在段落抽取中映射为可见 Δ。"""
+    xml = """
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body>
+        <w:p>
+          <w:r><w:sym w:font="Symbol" w:char="F044"/><w:t>3.1.1</w:t></w:r>
+          <w:r><w:t>波长范围：400-700nm。</w:t></w:r>
+        </w:p>
+      </w:body>
+    </w:document>
+    """
+
+    content, models = extract_content_with_table_models(_FakeRange(xml))
+
+    assert "Δ3.1.1" in content
+    assert "波长范围：400-700nm。" in content
+    assert models == []
+
+
+def test_extract_content_with_table_models_maps_symbol_font_delta_in_table_cell() -> None:
+    """Symbol 字体的 Δ 必须在表格 cell / prompt context 中也保留。"""
+    xml = """
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body>
+        <w:tbl>
+          <w:tr>
+            <w:tc><w:p><w:r><w:t>序号</w:t></w:r></w:p></w:tc>
+            <w:tc><w:p><w:r><w:t>参数</w:t></w:r></w:p></w:tc>
+          </w:tr>
+          <w:tr>
+            <w:tc><w:p><w:r><w:sym w:font="Symbol" w:char="F044"/><w:t>3.1.1</w:t></w:r></w:p></w:tc>
+            <w:tc><w:p><w:r><w:t>分辨率：≥4K</w:t></w:r></w:p></w:tc>
+          </w:tr>
+        </w:tbl>
+      </w:body>
+    </w:document>
+    """
+
+    content, models = extract_content_with_table_models(_FakeRange(xml))
+
+    assert "Δ3.1.1" in content
+    assert "分辨率：≥4K" in content
+    assert len(models) == 1
+    # 结构化表 prompt context 也应保留 Δ。
+    cell_texts = [cell["text"] for cell in models[0]["cells"]]
+    assert any("Δ3.1.1" in text for text in cell_texts)
+
+
+def test_extract_content_with_table_models_ignores_non_symbol_font_sym() -> None:
+    """非 Symbol 字体的 sym 元素不应被错误映射。"""
+    xml = """
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body>
+        <w:p>
+          <w:r><w:sym w:font="Wingdings" w:char="F044"/><w:t>正文</w:t></w:r>
+        </w:p>
+      </w:body>
+    </w:document>
+    """
+
+    content, models = extract_content_with_table_models(_FakeRange(xml))
+
+    assert "正文" in content
+    assert "Δ" not in content
+    assert models == []

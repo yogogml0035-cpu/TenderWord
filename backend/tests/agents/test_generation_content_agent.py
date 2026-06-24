@@ -588,9 +588,11 @@ def test_content_runner_fails_when_final_file_empty() -> None:
         run_content_agent_generation({}, runner=runner)
 
 
-def test_content_runner_restores_missing_table_placeholder_in_final_text(
+def test_content_runner_no_longer_restores_table_placeholder_in_final_text(
     _redirect_content_agent_workspace,
 ) -> None:
+    """`[[TABLE:id]]` 是内部写回入口，最终正文不再自动补回占位符；
+    写回层根据结构化表模型决定恢复或丢弃，缺失占位符不视为错误。"""
     runner = FakeRunner(
         [
             {"draft": "draft text"},
@@ -609,13 +611,16 @@ def test_content_runner_restores_missing_table_placeholder_in_final_text(
         {
             "configurable": {
                 "model_provider": "deepseek",
-                "task_id": "task-final-restores-table",
+                "task_id": "task-final-no-restore-table",
             }
         },
         runner=runner,
     )
 
-    assert "[[TABLE:TP1_1]]" in result.polished_text
+    # 占位符不再被自动补回；final 正文保持模型输出，缺失占位符不报错。
+    assert "[[TABLE:TP1_1]]" not in result.polished_text
+    assert "技术参数" in result.polished_text
+    assert result.audit_findings == []
 
 
 def test_content_runner_rechecks_final_text_when_last_audit_has_findings(monkeypatch) -> None:
@@ -732,9 +737,11 @@ def test_fake_runner_injection_point(monkeypatch) -> None:
     assert result.polished_text == "injected text"
 
 
-def test_content_verify_agent_flags_missing_table_placeholder_when_llm_returns_empty(
+def test_content_verify_agent_no_longer_flags_missing_table_placeholder(
     monkeypatch,
 ) -> None:
+    """`[[TABLE:id]]` 占位符是内部写回入口，缺失它不再产生 finding；
+    审核环节不再要求模型补回或原样保留占位符。"""
     async def fake_stream_llm_completion(**_kwargs):
         return "[]"
 
@@ -758,10 +765,7 @@ def test_content_verify_agent_flags_missing_table_placeholder_when_llm_returns_e
     )
 
     findings = result["structured_response"]
-    assert len(findings) == 1
-    assert "[[TABLE:TP1_1]]" in findings[0]["evidence"]
-    assert "缺失该占位符" in findings[0]["evidence"]
-    assert "补回占位符 [[TABLE:TP1_1]]" in findings[0]["fix_hint"]
+    assert findings == []
 
 
 def test_content_verify_agent_keeps_empty_when_all_table_placeholders_present(
@@ -787,7 +791,8 @@ def test_content_verify_agent_keeps_empty_when_all_table_placeholders_present(
     assert result["structured_response"] == []
 
 
-def test_content_verify_agent_reports_only_missing_table_placeholder(monkeypatch) -> None:
+def test_content_verify_agent_no_longer_reports_missing_table_placeholder(monkeypatch) -> None:
+    """缺失占位符不再单独报 finding；多个占位符缺失也不产生任何占位符相关 finding。"""
     async def fake_stream_llm_completion(**_kwargs):
         return "[]"
 
@@ -806,12 +811,13 @@ def test_content_verify_agent_reports_only_missing_table_placeholder(monkeypatch
     )
 
     findings = result["structured_response"]
-    assert len(findings) == 1
-    assert "[[TABLE:TP1_2]]" in findings[0]["evidence"]
-    assert "[[TABLE:TP1_1]]" not in findings[0]["evidence"]
+    assert findings == []
 
 
-def test_content_verify_agent_appends_placeholder_finding_to_llm_findings(monkeypatch) -> None:
+def test_content_verify_agent_does_not_append_placeholder_finding_to_llm_findings(
+    monkeypatch,
+) -> None:
+    """占位符缺失不再追加 finding；LLM 自身的审核结果原样保留，不被占位符检查覆盖。"""
     async def fake_stream_llm_completion(**_kwargs):
         return '[{"evidence":"缺少 ★ 指标","fix_hint":"补充 ★ 符号"}]'
 
@@ -835,14 +841,16 @@ def test_content_verify_agent_appends_placeholder_finding_to_llm_findings(monkey
     )
 
     findings = result["structured_response"]
-    assert len(findings) == 2
+    assert len(findings) == 1
     assert findings[0]["evidence"] == "缺少 ★ 指标"
-    assert "[[TABLE:TP1_1]]" in findings[1]["evidence"]
+    # 不再追加占位符相关 finding。
+    assert not any("[[TABLE:" in f["evidence"] for f in findings)
 
 
-def test_content_verify_agent_prompt_states_table_placeholder_is_hard_contract(
+def test_content_verify_agent_prompt_states_table_placeholder_is_internal_entry(
     monkeypatch,
 ) -> None:
+    """审核提示词把 `[[TABLE:id]]` 描述为内部写回入口，且明确不要求补回占位符。"""
     calls: list[dict[str, object]] = []
 
     async def fake_stream_llm_completion(**kwargs):
@@ -865,13 +873,15 @@ def test_content_verify_agent_prompt_states_table_placeholder_is_hard_contract(
 
     user_prompt = str(calls[0]["user_prompt"])
     assert "结构化表占位符硬契约" in user_prompt
-    assert "Markdown 表格" in user_prompt
-    assert "`[[TABLE:...]]`" in user_prompt
+    assert "内部写回入口" in user_prompt
+    assert "不应作为可见行" in user_prompt
+    assert "不要**为缺失" in user_prompt
 
 
-def test_verify_final_text_findings_reports_missing_placeholder_when_llm_empty(
+def test_verify_final_text_findings_no_longer_reports_missing_placeholder(
     monkeypatch,
 ) -> None:
+    """最终复核不再叠加占位符缺失检查；即使 LLM 返回 [] 且正文缺占位符，也不报 finding。"""
     async def fake_stream_llm_completion(**_kwargs):
         return "[]"
 
@@ -895,8 +905,7 @@ def test_verify_final_text_findings_reports_missing_placeholder_when_llm_empty(
         model_provider="deepseek",
     )
 
-    assert len(findings) == 1
-    assert "[[TABLE:TP1_1]]" in findings[0].evidence
+    assert findings == []
 
 
 def test_content_runner_final_recheck_allows_missing_placeholder_when_section_removed(

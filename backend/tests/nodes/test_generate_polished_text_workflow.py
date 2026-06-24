@@ -3,8 +3,6 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
-import pytest
-
 from backend.prompts.types import GeneratePromptInput, RenderedPrompt
 
 node_module = importlib.import_module(
@@ -83,9 +81,12 @@ def test_generate_polished_text_uses_generate_prompt_and_stream_llm(
     assert result["generate_polished_done"] is True
 
 
-def test_generate_polished_text_fails_when_table_placeholder_missing(
+def test_generate_polished_text_no_longer_raises_for_missing_table_placeholder(
     monkeypatch, tmp_path: Path
 ) -> None:
+    """`[[TABLE:id]]` 占位符是内部写回入口，不再强制要求最终正文保留；
+    generate_polished_text 不再对缺失占位符抛错，交由写回层恢复或丢弃。"""
+
     def _fake_render_generate_prompt(data: GeneratePromptInput) -> RenderedPrompt:
         return RenderedPrompt(system_prompt="system prompt", user_prompt="user prompt")
 
@@ -100,27 +101,36 @@ def test_generate_polished_text_fails_when_table_placeholder_missing(
         lambda _anchor_file: tmp_path,
     )
 
-    with pytest.raises(ValueError, match="TP1_5"):
-        node_module.generate_polished_text(
-            {
-                "tender_type": "xjcg",
-                "generation_style": "param",
-                "project_content": "project info",
-                "tender_params": "技术参数\n[[TABLE:TP1_5]]",
-                "template_reference_text": "template shell",
-            },
-            {"configurable": {"model_provider": "qwen", "suppress_llm_stdout": True}},
-        )
+    result = node_module.generate_polished_text(
+        {
+            "tender_type": "xjcg",
+            "generation_style": "param",
+            "project_content": "project info",
+            "tender_params": "技术参数\n[[TABLE:TP1_5]]",
+            "template_reference_text": "template shell",
+        },
+        {"configurable": {"model_provider": "qwen", "suppress_llm_stdout": True}},
+    )
+
+    assert result["polished_text"] == "技术参数\n普通表格文本"
+    assert result["generate_polished_done"] is True
 
 
-def test_generate_polished_text_fails_with_all_missing_table_ids(
+def test_generate_polished_text_strips_ai_preamble_and_filler_via_sanitizer(
     monkeypatch, tmp_path: Path
 ) -> None:
+    """generate_polished_text 返回前过 sanitizer：AI 自述、无信息占位句被清除。"""
+
     def _fake_render_generate_prompt(data: GeneratePromptInput) -> RenderedPrompt:
         return RenderedPrompt(system_prompt="system prompt", user_prompt="user prompt")
 
     async def _fake_stream_llm_completion(**kwargs):
-        return "技术参数\n[[TABLE:TP1_5]]"
+        return (
+            "好的，以下是重构后的内容。\n"
+            "1、技术参数：A。\n"
+            "2、须提供详细配置清单。\n"
+            "以上为最终内容，请核对。"
+        )
 
     monkeypatch.setattr(node_module, "render_generate_prompt", _fake_render_generate_prompt)
     monkeypatch.setattr(node_module, "stream_llm_completion", _fake_stream_llm_completion)
@@ -130,17 +140,23 @@ def test_generate_polished_text_fails_with_all_missing_table_ids(
         lambda _anchor_file: tmp_path,
     )
 
-    with pytest.raises(ValueError, match="TP1_6"):
-        node_module.generate_polished_text(
-            {
-                "tender_type": "xjcg",
-                "generation_style": "param",
-                "project_content": "project info",
-                "tender_params": "技术参数\n[[TABLE:TP1_5]]\n[[TABLE:TP1_6]]",
-                "template_reference_text": "template shell",
-            },
-            {"configurable": {"model_provider": "qwen", "suppress_llm_stdout": True}},
-        )
+    result = node_module.generate_polished_text(
+        {
+            "tender_type": "xjcg",
+            "generation_style": "param",
+            "project_content": "project info",
+            "tender_params": "技术参数\n[[TABLE:TP1_5]]\n[[TABLE:TP1_6]]",
+            "template_reference_text": "template shell",
+        },
+        {"configurable": {"model_provider": "qwen", "suppress_llm_stdout": True}},
+    )
+
+    polished = result["polished_text"]
+    assert "好的" not in polished
+    assert "以下是重构后" not in polished
+    assert "以上为最终内容" not in polished
+    assert "须提供详细配置清单" not in polished
+    assert "1、技术参数：A。" in polished
 
 
 def test_generate_polished_text_allows_non_table_tender_params(
@@ -205,9 +221,11 @@ def test_generate_polished_text_allows_removed_table_section_when_context_absent
     assert result["polished_text"] == "正文仅保留其他章节，不再包含附件表单"
 
 
-def test_generate_polished_text_still_fails_when_context_kept_but_placeholder_missing(
+def test_generate_polished_text_keeps_text_when_context_kept_but_placeholder_missing(
     monkeypatch, tmp_path: Path
 ) -> None:
+    """占位符缺失不再报错：保留该章节其它可靠文本参数，占位符由写回层处理。"""
+
     def _fake_render_generate_prompt(data: GeneratePromptInput) -> RenderedPrompt:
         return RenderedPrompt(system_prompt="system prompt", user_prompt="user prompt")
 
@@ -222,14 +240,15 @@ def test_generate_polished_text_still_fails_when_context_kept_but_placeholder_mi
         lambda _anchor_file: tmp_path,
     )
 
-    with pytest.raises(ValueError, match="TP1_5"):
-        node_module.generate_polished_text(
-            {
-                "tender_type": "xjcg",
-                "generation_style": "param",
-                "project_content": "project info",
-                "tender_params": "附件三：保洁耗材\n序号 / 名称 / 费用\n[[TABLE:TP1_5]]",
-                "template_reference_text": "template shell",
-            },
-            {"configurable": {"model_provider": "qwen", "suppress_llm_stdout": True}},
-        )
+    result = node_module.generate_polished_text(
+        {
+            "tender_type": "xjcg",
+            "generation_style": "param",
+            "project_content": "project info",
+            "tender_params": "附件三：保洁耗材\n序号 / 名称 / 费用\n[[TABLE:TP1_5]]",
+            "template_reference_text": "template shell",
+        },
+        {"configurable": {"model_provider": "qwen", "suppress_llm_stdout": True}},
+    )
+
+    assert result["polished_text"] == "附件三：保洁耗材\n序号 / 名称 / 费用\n这里只剩普通文本"

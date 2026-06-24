@@ -17,10 +17,7 @@ from backend.agents.generation.json_utils import (
 )
 from backend.agents.generation.model_factory import create_generation_chat_model
 from backend.agents.generation.revise_agent_graph import create_revise_agent_graph
-from backend.agents.generation.table_placeholder_utils import (
-    raise_if_table_placeholders_missing,
-    restore_missing_table_placeholders,
-)
+from backend.agents.generation.content_sanitizer import sanitize_generated_content
 from backend.agents.generation.types import (
     AgentStepPayload,
     AuditFinding,
@@ -852,14 +849,8 @@ def _final_recheck_findings(
     generation_context: dict[str, Any],
     model_provider: str,
 ) -> list[AuditFinding]:
-    # 结构化表占位符是运行时硬契约：即使最后一轮 audit 为 []，最终正文缺失占位符也必须暴露。
-    raise_if_table_placeholders_missing(
-        generation_context.get("tender_params"),
-        final_text,
-        error_prefix="最终正文结构化表占位符缺失",
-        error_cls=GenerationAgentProtocolError,
-    )
-
+    # `[[TABLE:id]]` 占位符是内部结构化写回入口，不再强制要求最终正文保留占位符；
+    # 写回层会根据结构化表模型决定恢复或静默丢弃，因此这里不再做“占位符缺失”硬校验。
     if not pending_findings:
         return []
 
@@ -970,12 +961,12 @@ def run_content_agent_generation(
     if raw_final_text is None:
         raw_final_text = read_backend_text(backend, FINAL_POLISHED_TEXT_PATH)
     final_text = _validate_final_text(raw_final_text)
-    restored_final_text = restore_missing_table_placeholders(
-        base_payload.get("tender_params"),
-        final_text,
-    )
-    if restored_final_text != final_text:
-        final_text = _validate_final_text(restored_final_text)
+    # 写入 final 前过统一 sanitizer：删除 AI 自述/包装语、最终说明、Markdown 外壳、
+    # 无信息占位句（“须提供详细…”）；保留 [[TABLE:id]] 占位符、技术符号和重要性标识。
+    # 占位符是内部写回入口，是否可见由写回层（convert_lines_to_items）决定。
+    sanitized_final_text = sanitize_generated_content(final_text)
+    if sanitized_final_text != final_text:
+        final_text = _validate_final_text(sanitized_final_text)
         overwrite_backend_text(backend, FINAL_POLISHED_TEXT_PATH, final_text)
     findings, last_audit_round = _read_optional_audit_findings(backend)
     findings = _final_recheck_findings(

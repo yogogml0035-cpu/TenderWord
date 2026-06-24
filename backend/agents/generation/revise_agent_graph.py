@@ -7,6 +7,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
 from backend.agents.generation.agent_step_events import emit_agent_step_event
+from backend.agents.generation.content_sanitizer import sanitize_generated_content
 from backend.agents.generation.types import GenerationAgentState
 from backend.agents.generation.workspace import (
     audit_path,
@@ -34,6 +35,9 @@ REVISE_SYSTEM_PROMPT = """
 3. 输出必须是修订后的完整采购需求正文，不要输出解释、Markdown 代码块或 JSON。
 4. 如果 audit 为 []，直接返回“无需修订”，不得输出或重写当前正文。
 5. 若 audit 要求删除投标评分细则、评分标准、评审办法或评分表，必须整段/整表删除，不得改写成采购需求、商务条款或占位章节。
+6. 输出的重要性标识（★/▲/△/Δ/*/#/※/● 等，例如 Symbol 字体抽取出的 Δ）必须按技术参数原样保留；正文技术符号（≥/±/×/Ω/SpO₂/℃）按参数文本原样保留，不当作重要性标识。
+7. 严禁输出“好的，已收到您的指令”“以下是重构后的招标文件”“以上为最终内容”等 AI 自述、包装语或内部自检；严禁输出“须提供详细技术参数要求/须提供详细配置清单”这类无信息占位句；严禁用代码块包裹整段正文。
+8. `[[TABLE:id]]` 是内部结构化写回入口，不是最终正文可见内容；修订时不要把占位符作为可见行输出，也不要为缺失的表补占位句，正常输出该表所在章节的其它文本参数即可。
 """.strip()
 
 
@@ -162,6 +166,9 @@ def _revise_text(
             )
         )
     )
+    # 写入 revision 前过统一 sanitizer：删除 AI 自述/包装语、最终说明、Markdown 外壳、
+    # 无信息占位句；保留 [[TABLE:id]] 占位符、技术符号和重要性标识。
+    revised_text = sanitize_generated_content(revised_text)
 
     if backend:
         write_backend_text(backend, revision_path(round_index), revised_text)

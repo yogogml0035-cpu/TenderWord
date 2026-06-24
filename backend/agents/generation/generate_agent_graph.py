@@ -10,6 +10,7 @@ from backend.agents.generation.agent_step_events import (
     emit_agent_step_event,
     get_configurable,
 )
+from backend.agents.generation.content_sanitizer import sanitize_generated_content
 from backend.agents.generation.types import GenerationAgentState
 from backend.agents.generation.workspace import (
     DRAFT_PATH,
@@ -179,12 +180,15 @@ def _generate_draft(
         )
     )
     if backend:
-        write_backend_text(backend, DRAFT_PATH, str(content))
-        _emit_agent_step_snapshot(config, str(content))
-        _emit_agent_step_complete(config, str(content))
+        # 写入 draft 前过统一 sanitizer：删除 AI 自述/包装语、最终说明、Markdown 外壳、
+        # 无信息占位句；保留 [[TABLE:id]] 占位符、技术符号和重要性标识。
+        draft_text = sanitize_generated_content(str(content))
+        write_backend_text(backend, DRAFT_PATH, draft_text)
+        _emit_agent_step_snapshot(config, draft_text)
+        _emit_agent_step_complete(config, draft_text)
         structured_response = {"draft_path": DRAFT_PATH}
     else:
-        structured_response = {"draft_text": str(content)}
+        structured_response = {"draft_text": sanitize_generated_content(str(content))}
     return {
         "messages": [AIMessage(content=f"已生成初稿并写入 {DRAFT_PATH}")],
         "structured_response": structured_response,
