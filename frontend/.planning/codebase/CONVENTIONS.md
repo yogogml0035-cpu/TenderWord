@@ -1,6 +1,6 @@
 # 前端编码约定
 
-**分析日期：** 2026-06-18
+**分析日期：** 2026-06-25
 
 **范围：** `frontend/` 的组件、hooks、stores、API client、类型、表单、上传、测试和配置文件。`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc` 仅确认存在，不读取内容，不在文档中记录任何密钥、token、客户原文或私有下载路径。
 
@@ -202,4 +202,4 @@ export async function createGenerateTask(params: GenerateRequest): Promise<Creat
 
 ---
 
-*约定分析：2026-06-18*
+*前端约定分析：2026-06-25*

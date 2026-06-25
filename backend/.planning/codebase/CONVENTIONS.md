@@ -1,6 +1,6 @@
 # 后端编码约定
 
-**分析日期：** 2026-06-18
+**分析日期：** 2026-06-25
 
 **范围：** `backend/` 源码、`backend/tests/`、`backend/requirements.txt`、`backend/.env.example`、`docs/backend.md`、`docs/interfaces-runtime.md`、`docs/knowledge-validation.md`、既有 `backend/.planning/codebase/` 事实文档和项目内 `.agents/skills/gsd-map-codebase/SKILL.md`。`backend/.env` 文件存在，但不得读取或引用内容。
 
@@ -117,11 +117,11 @@
 - 会话 rewrite 由 `DocumentService._build_skill_graph_initial_state()` 使用 conversation rewrite history；上传文件 rewrite 使用 `source_document_path`、`form_type`、`insertion_config`、`tender_lx`、`fund_source_lx` 和可选 `tender_data_snapshot`。
 - 保护该边界的测试位于 `backend/tests/services/test_document_service_initial_state.py`、`backend/tests/nodes/test_uploaded_rewrite_inline_style_context.py`、`backend/tests/agents/test_task_context_assistant_tools.py`。
 
-## Content Agent 结构化表占位符硬契约
+## Content Agent 结构化表入口契约
 
-- 技术参数中的结构化表必须以占位符 `[[TABLE:<id>]]` 原样出现在生成正文里，不得改写为 Markdown 表格、手绘表格或省略。
-- 占位符正则、缺失比对和 `AuditFinding` 构造集中在 `backend/agents/generation/table_placeholder_utils.py`；verify agent 据此产出缺失审计 finding。
-- 新增占位符格式或校验规则时，同步该工具模块、verify agent 调用点（`backend/agents/generation/verify_agent_graph.py`）和 `backend/tests/agents/test_table_placeholder_utils.py`、`backend/tests/agents/test_generation_content_agent.py`。
+- 技术参数中的 `[[TABLE:<id>]]` 是结构化表的内部写回入口，不是最终正文必须保留的可见内容。
+- 占位符识别与 `table_id` 字符集真源集中在 `backend/agents/generation/table_placeholder_utils.py`；缺失占位符不再单独生成审核 finding，最终是否恢复真实表格由写回层结合 `tender_param_table_models` sidecar 决定。
+- 新增占位符格式、sidecar 匹配规则或写回语义时，同步该工具模块、`backend/agents/generation/verify_agent_graph.py`、`backend/helper/word_helper/text_parsing.py` 和 `backend/tests/agents/test_table_placeholder_utils.py`、`backend/tests/agents/test_generation_content_agent.py`、`backend/tests/helper/test_text_parsing_table_placeholder.py`。
 - `table_id` 字符集与 `backend/util/word_util/table_models.py` 保持一致（`[A-Za-z0-9_-]+`）。
 
 ## Prompt 与 LLM 约定
@@ -210,4 +210,4 @@
 
 ---
 
-*后端编码约定分析：2026-06-18*
+*后端编码约定分析：2026-06-25*

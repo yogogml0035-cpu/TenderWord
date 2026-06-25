@@ -1,8 +1,8 @@
 # TenderWord 接口边界
 
-**生成日期：** 2026-06-18
+**生成日期：** 2026-06-25
 
-本文件记录 TenderWord 当前已确认的系统级接口边界。具体模型和行为以代码真源为准，并参考 2026-06-18 刷新的 `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 事实层。
+本文件记录 TenderWord 当前已确认的系统级接口边界。具体模型和行为以代码真源为准，并参考 2026-06-25 刷新的 `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 事实层。
 
 ## 已确认接口边界
 
@@ -33,7 +33,7 @@
 - `generation_mode` 是 generate-only 字段，默认 `workflow`；`agent` 只影响初次生成节点选择，不进入 rewrite 请求模型、skill state 或 prompt surface。
 - `comment_generation_mode` 是 generate-only 字段，默认 `on`；`off` 时 workflow 与 agent 生成都跳过 AI 批注生成，不进入 rewrite 链路。
 - `content_verify_agent` 的审核结果只保留真实需修复 findings；无问题 / 无需修改会折叠为 `[]`，前端过程卡不应把这类空审核项当成真实问题展示。
-- content agent 生成正文必须原样保留技术参数里的 `[[TABLE:<id>]]` 结构化表占位符；`backend/agents/generation/table_placeholder_utils.py` 提供正则、缺失比对和 `AuditFinding` 构造，verify agent 据此产出缺失 finding。占位符不得改写为 Markdown/手绘表格或省略；`table_id` 字符集需与 `backend/util/word_util/table_models.py` 一致。
+- content agent 生成正文把技术参数里的 `[[TABLE:<id>]]` 当作内部写回入口；`backend/agents/generation/table_placeholder_utils.py` 提供占位符识别与 `table_id` 字符集真源，`backend/helper/word_helper/text_parsing.py` 负责按 sidecar 恢复真实表格或静默丢弃不可恢复的投影表。verify agent 不再把缺失占位符单独当 finding，`table_id` 字符集需与 `backend/util/word_util/table_models.py` 一致。
 - `gngk` 的后端分派依赖 `tender_lx + fund_lx + ifzgcg`，共享真源是 `frontend/lib/gngkFormType.ts`；generate 由 `formDataConverter.ts` 调用该 helper，上传文件 rewrite 由 `ChatPanel.tsx` 调用该 helper，不能绕开 helper 单独改调用点。
 
 ### 任务状态、取消与心跳

@@ -1,11 +1,10 @@
-<!-- refreshed: 2026-06-18 -->
-# Architecture
+# 前端架构事实地图
 
-**分析日期：** 2026-06-18
+**分析日期：** 2026-06-25
 
 **范围：** `frontend/` 子项目。分析覆盖 App Router 工作台、API client、hooks、Zustand 状态流、上传、generate/rewrite/comment_supplement UI 边界、SSE 与目录分层。未读取 `.env`、`.env.*`、`.npmrc`、凭据或真实密钥文件。
 
-## System Overview
+## 系统总览
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
@@ -41,7 +40,7 @@
 
 前端是 TenderWord 的浏览器工作台，负责招标类型选择、URL 深链、会话与草稿、招标信息预取、模板候选、文件上传、generate 任务创建、agent run、上传文件 rewrite、补充批注、SSE 进度和下载入口。浏览器端不执行 Word COM、LLM、检索、真实文件落盘或外部模板候选直连；这些能力由后端 `/api/*` 封装。
 
-## Component Responsibilities
+## 组件职责
 
 | Component | Responsibility | File |
 |-----------|----------------|------|
@@ -64,7 +63,7 @@
 | URL mapper | URL 参数解析、`TenderType` 判定、canonical query 构造 | `frontend/utils/tenderTypeMapper.ts` |
 | API types | 后端 payload、任务、agent run、SSE、错误码和模板候选类型 | `frontend/types/api.ts` |
 
-## Pattern Overview
+## 核心模式
 
 **Overall:** Next.js App Router + 客户端工作台 + Zustand 状态层 + 统一 API/SSE 边界。
 
@@ -75,7 +74,7 @@
 - 任务链路以 `task_id` 为主键，SSE、任务消息组、下载卡、补充批注和 rewrite 产物续写都围绕 task summary 收敛。
 - 会话、草稿、任务摘要和未读结果持久化到 `sessionStorage`；SSE stream runtime 是内存态，task resume metadata 单独持久化。
 
-## Layers
+## 分层结构
 
 **Route Layer:**
 - 职责： 定义页面入口、metadata、全局样式和 `/tender` 工作台页面。
@@ -112,9 +111,9 @@
 - Depends on: TypeScript 类型系统。
 - Used by: API client、stores、hooks、组件 props 和测试。
 
-## Data Flow
+## 数据流
 
-### Primary Request Path
+### 初次生成主链路
 
 1. `/` 通过 `redirect('/tender')` 进入工作台 (`frontend/app/page.tsx:3`)。
 2. `TenderPageContent` 解析 URL、建立或选择 conversation，并按需预取招标数据 (`frontend/app/tender/page.tsx:34`, `frontend/app/tender/page.tsx:58`)。
@@ -125,21 +124,21 @@
 7. `useCurrentConversationTaskStatus()`、`useTaskHeartbeat()` 和 `useChatSSE()` 同步 queue/running/terminal 状态 (`frontend/hooks/useCurrentConversationTaskStatus.ts:88`, `frontend/hooks/useTaskHeartbeat.ts:16`, `frontend/hooks/useChatSSE.ts:175`)。
 8. `chatStore.completeTask()` 创建或更新 `task-download` 下载卡，保留 `style_writeback` 和 `comment_writeback` 摘要 (`frontend/stores/chatStore.ts:1536`)。
 
-### URL And Conversation Flow
+### URL 与会话链路
 
 1. `useUrlParams()` 使用 `useSearchParams()` 读取 `tender_lx`、`purchase_method`、`fund_lx`、`tenderno` (`frontend/hooks/useUrlParams.ts:66`)。
 2. `parseTenderUrlParams()` 只按 `purchase_method` 判定前端 `TenderType` (`frontend/utils/tenderTypeMapper.ts:205`)。
 3. `TenderPageContent` 对 `gngk` 使用 tenderno + `tender_lx` + `fund_lx` 查找会话，避免不同子类型复用同一 draft (`frontend/app/tender/page.tsx:78`, `frontend/stores/chatStore.ts:870`)。
 4. `syncBrowserUrlToConversation()` 和 `chatStore.syncUrlToCurrentConversation()` 维护 canonical query (`frontend/utils/tenderTypeMapper.ts:72`, `frontend/stores/chatStore.ts:2375`)。
 
-### Generate Payload Flow
+### 生成请求载荷链路
 
 1. 表单 wrapper 只传入 `tenderType`，具体 UI 复用 `TenderFormShared` (`frontend/components/forms/XjcgTenderForm.tsx`, `frontend/components/forms/GngkTenderForm.tsx`, `frontend/components/forms/GjgkTenderForm.tsx`)。
 2. 模板文件使用 `fileType="template"` 上传，技术参数文件使用 `fileType="params"` 上传 (`frontend/components/forms/TenderFormShared.tsx:1737`, `frontend/components/forms/TenderFormShared.tsx:1753`)。
 3. `convertXjcgFormToApiRequest()`、`convertGngkFormToApiRequest()`、`convertGjgkFormToApiRequest()` 生成后端 payload (`frontend/lib/formDataConverter.ts:117`, `frontend/lib/formDataConverter.ts:193`, `frontend/lib/formDataConverter.ts:225`)。
 4. `gngk` 后端 `form_type` 由 `resolveGngkFormType()` 按 `tender_lx + fund_lx + ifzgcg` 分派；工程类和服务类进入 `gngk_fw_*` form type (`frontend/lib/gngkFormType.ts:18`)。
 
-### Agent Run And Chat Flow
+### Agent Run 与聊天链路
 
 1. `ChatInput` 解析 `$rewrite` / `/rewrite` 前缀，或通过加号菜单选择上传文件 rewrite (`frontend/components/chat/ChatInput.tsx:37`, `frontend/components/chat/ChatInput.tsx:482`)。
 2. `ChatPanel` 构造 `AgentRunStreamRequest`，包含模型、消息、`selected_skills` 和 `context_snapshot` (`frontend/components/chat/ChatPanel.tsx:393`, `frontend/components/chat/ChatPanel.tsx:423`)。
@@ -147,7 +146,7 @@
 4. `run_started`、`thinking_stage`、`tool_call` 更新 thinking card 或普通 AI 消息；`needs_input` 不创建后台 task (`frontend/components/chat/ChatPanel.tsx:553`)。
 5. 只有 `task_accepted` 调用 `startTask()` 并进入任务/SSE 体系 (`frontend/components/chat/ChatPanel.tsx:559`)。
 
-### Upload Rewrite Flow
+### 上传文件 Rewrite 链路
 
 1. `ChatInput` 的隐藏文件输入只接受 `.doc` / `.docx` (`frontend/components/chat/ChatInput.tsx:308`)。
 2. `ChatPanel.handleRewriteFileSelect()` 调用 `uploadFile(file, 'rewrite_source')`，把返回文件写入 conversation draft 的 `rewrite_file`，并设置 `selected_skills: ['rewrite']` (`frontend/components/chat/ChatPanel.tsx:338`)。
@@ -155,7 +154,7 @@
 4. `resolveRewriteFormType()` 为上传 rewrite 计算后端 `form_type`，`gngk` 继续复用 `resolveGngkFormType()` (`frontend/components/chat/ChatPanel.tsx:162`)。
 5. rewrite task 完成后，`ChatPanel` 用下载卡产物回写 draft 的 `rewrite_file`，让下一轮 rewrite 基于最新文档 (`frontend/components/chat/ChatPanel.tsx:955`)。
 
-### Task SSE And Artifact Flow
+### 任务 SSE 与产物流转
 
 1. `createSSEConnection()` 注册 `connected`、`log`、`llm`、`progress`、`agent_step`、`status`、`error`、`done`、`heartbeat` named events (`frontend/lib/sse.ts:77`, `frontend/lib/sse.ts:193`)。
 2. `useChatSSE()` 在连接前查询 `getTaskStatus()`，queued 不连 SSE，terminal 直接终态收敛 (`frontend/hooks/useChatSSE.ts:667`, `frontend/hooks/useChatSSE.ts:710`)。
@@ -163,25 +162,25 @@
 4. `done` / `error` 关闭连接并调用 `completeTask()` / `failTask()` / `cancelTask()` (`frontend/hooks/useChatSSE.ts:530`, `frontend/hooks/useChatSSE.ts:568`)。
 5. `MessageList` 按 `message.metadata.messageKind` 渲染任务日志、AI 正文、agent-step、下载卡或 thinking card (`frontend/components/chat/MessageList.tsx`)。
 
-### Template Candidate Flow
+### 模板候选链路
 
 1. `TenderFormShared` 用招标编号和项目名维护候选缓存，并调用 `fetchTemplateCandidates()` (`frontend/components/forms/TenderFormShared.tsx:1378`, `frontend/lib/api.ts:734`)。
 2. 候选选择使用 `selectTemplateCandidate()`，后端返回 selected file 后写入模板上传槽 (`frontend/components/forms/TenderFormShared.tsx:1485`, `frontend/lib/api.ts:748`)。
 3. 候选模板下载 URL 必须由 `getTemplateCandidateDownloadUrl()` 生成项目内代理 URL (`frontend/lib/api.ts:757`, `frontend/components/forms/TemplateCandidateDialog.tsx:62`)。
 
-### Comment Supplement Flow
+### 补充批注链路
 
 1. `TaskDownloadMessage` 只对 `taskKind === 'generate'` 显示补充批注入口 (`frontend/components/chat/TaskDownloadMessage.tsx:15`)。
 2. `ChatPanel.handleCommentSupplement()` 从下载卡读取 `metadata.outputFile`，调用 `createCommentSupplementTask()` (`frontend/components/chat/ChatPanel.tsx:847`, `frontend/lib/api.ts:814`)。
 3. `comment_supplement` 复用 task summary、SSE、agent-step 和下载卡，不引入第二套任务流 (`frontend/hooks/useChatSSE.ts:175`)。
 
-**State Management:**
+**状态管理：**
 - `chatStore` 是持久化主状态，storage name 为 `chat-storage`，持久化 `conversations`、`currentConversationId`、`selectedTenderType`、`conversationDrafts`、`taskSummaries`、`unreadConversationResults` (`frontend/stores/chatStore.ts:994`, `frontend/stores/chatStore.ts:2408`)。
 - `chatStreamStore` 是运行时内存状态，保存 `logs`、`aiText`、`agentSteps`、progress 和 `lastEventId` (`frontend/stores/chatStreamStore.ts:5`)。
 - `chatTaskSessionStore` 只持久化 task resume 元数据，storage name 为 `chat-task-session-storage` (`frontend/stores/chatTaskSessionStore.ts:16`, `frontend/stores/chatTaskSessionStore.ts:43`)。
 - `historyStore` 和 `useAppStore` 存在，但工作台主流程以 `chatStore` 为准 (`frontend/stores/historyStore.ts`, `frontend/stores/useAppStore.ts`)。
 
-## Key Abstractions
+## 关键抽象
 
 **`TenderType`:**
 - 职责： 前端 UI 类型，取值为 `xjcg`、`gngk`、`gjgk`。
@@ -213,7 +212,7 @@
 - Examples: `frontend/lib/agentThinking.ts`, `frontend/components/chat/AgentThinkingMessage.tsx`, `frontend/types/chat.ts`
 - Pattern: 只展示前置流状态；后台任务创建后进度交给 task/SSE 卡。
 
-## Entry Points
+## 入口清单
 
 **Root Page:**
 - Location: `frontend/app/page.tsx`
@@ -245,7 +244,7 @@
 - Triggers: 任务创建、恢复或进入 running 后绑定 `task_id`。
 - Responsibilities: 状态确认、连接 SSE、映射事件、终态收敛。
 
-## Architectural Constraints
+## 架构约束
 
 - **Threading:** 浏览器单线程 React 渲染；异步 `fetch`、`EventSource`、timer、focus、pageshow、online 和 visibility 事件驱动任务状态。
 - **Global state:** Zustand stores 是模块级 singleton，见 `frontend/stores/chatStore.ts`、`frontend/stores/chatStreamStore.ts`、`frontend/stores/chatTaskSessionStore.ts`、`frontend/stores/historyStore.ts`、`frontend/stores/useAppStore.ts`。
@@ -257,7 +256,7 @@
 - **SSE contract:** 新增 SSE event 要同步 `frontend/types/api.ts`、`frontend/lib/sse.ts` named event 注册、`frontend/hooks/useChatSSE.ts` 解析和相关测试。
 - **Sensitive data:** `.env`、token、真实客户原文、私有路径和 traceback 不进入文档、日志、测试夹具或最终回复。
 
-## Anti-Patterns
+## 反模式
 
 ### 组件内实现后端请求协议
 
@@ -295,7 +294,7 @@
 **Why it's wrong:** 违反 agent run 和检索审计的白名单边界，增加敏感信息泄露风险。
 **Do this instead:** 只消费 scrub 后的摘要字段和公开任务状态，类型定义放在 `frontend/types/api.ts`。
 
-## Error Handling
+## 错误处理
 
 **Strategy:** API 层统一转换为 `ApiError`，任务层通过状态确认、SSE 终态、heartbeat 和本地中断态收敛 UI。
 
@@ -307,7 +306,7 @@
 - `frontend/app/tender/page.tsx` 用 conversation heartbeat 检测后端 `instance_id` 变化，并调用 `handleBackendRestart()`。
 - UI 组件展示用户可读错误；下载失败路径在 `frontend/components/chat/ChatPanel.tsx` 使用 alert + console 错误。
 
-## Cross-Cutting Concerns
+## 横切关注点
 
 **Logging:** 用户可见任务日志经 `TaskLogMessage` 渲染；排障日志使用 `console`，主要在 `frontend/lib/sse.ts`、`frontend/components/chat/ChatPanel.tsx`、`frontend/components/chat/FormPanel.tsx`。
 
@@ -321,4 +320,4 @@
 
 ---
 
-*Architecture analysis: 2026-06-18*
+*前端架构分析：2026-06-25*

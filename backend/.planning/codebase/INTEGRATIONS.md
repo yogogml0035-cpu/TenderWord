@@ -1,10 +1,10 @@
 # 后端外部集成
 
-**分析日期：** 2026-06-18
+**分析日期：** 2026-06-25
 
 **范围：** 本文只覆盖 `backend/` 子项目。事实来源包括 `backend/main.py`、`backend/config/settings.py`、`backend/api/`、`backend/services/`、`backend/agents/`、`backend/retrieval/`、`backend/util/common_util/`、`backend/util/word_util/`、`backend/task/task_queue_manager.py`、`backend/core/sse_manager.py`、`README.md`、`docs/backend.md` 和 `docs/interfaces-runtime.md`。`backend/.env` 与 `backend/.env.example` 均存在；本次未读取其内容。
 
-## APIs & External Services
+## API 与外部服务
 
 **浏览器到后端 API：**
 - FastAPI app 在 `backend/main.py` 创建；业务 routers 统一挂载 `/api` 前缀，健康检查保留根级 `/health*`。
@@ -98,7 +98,7 @@
   - Auth: Not applicable
   - 使用路径：`backend/util/word_util/word_application_util.py`、`backend/util/word_util/word_com_manager.py`、`backend/util/word_util/word_diagnostics.py`、`backend/util/word_util/word_extraction_utils.py`
 
-## Data Storage
+## 数据存储
 
 **数据库：**
 - 外部关系数据库、ORM、migration 和 SQL client 未检测到。
@@ -124,7 +124,7 @@
 - Bad case BM25 index：进程内缓存，按 markdown 文件签名失效；路径是 `backend/retrieval/comment_bad_case_runtime.py`。
 - Redis、Memcached 或独立 cache service：未检测到。
 
-## Authentication & Identity
+## 认证与身份
 
 **Auth Provider:**
 - 未检测到强制执行的 API 鉴权层。
@@ -138,7 +138,7 @@
 - `task_id` 用于任务队列、SSE topic、日志命名、下载结果和心跳取消。
   - 使用路径：`backend/task/task_queue_manager.py`、`backend/core/sse_manager.py`、`backend/services/document_service.py`
 
-## Monitoring & Observability
+## 监控与可观测性
 
 **Error Tracking:**
 - 外部 error tracking service 未检测到。
@@ -162,7 +162,7 @@
 - `Last-Event-ID` 断线重连支持在 `backend/api/stream.py` 和 `backend/core/sse_manager.py`。
 - Agent run NDJSON 行由 `backend/services/chat_stream_service.py` 的 `to_ndjson_line()` 复用，流式入口在 `backend/api/agent.py` 和 `backend/services/agent_run_service.py`。
 
-## CI/CD & Deployment
+## CI/CD 与部署
 
 **Hosting:**
 - 未检测到生产托管配置。
@@ -173,7 +173,7 @@
 - 未检测到 `.github/workflows` 或后端专用 CI 配置。
 - 完整 Word COM 验证必须在 Windows + Word/WPS COM 环境执行；无 COM 环境只能覆盖 API shape、service、prompt、retrieval、agent guard 和 helper 纯逻辑。
 
-## Environment Configuration
+## 环境配置
 
 **Required env vars:**
 - DeepSeek LLM：`DEEPSEEK_API_KEY`；可覆盖 `DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`。
@@ -190,7 +190,7 @@
 - `backend/.env.example` 文件存在；本次未读取内容。
 - 文档、日志、测试夹具和最终回复只允许记录变量名，不记录 secret value。
 
-## Webhooks & Callbacks
+## Webhook 与回调
 
 **Incoming:**
 - 第三方入站 webhook：未检测到。
@@ -219,4 +219,4 @@
 
 ---
 
-*Integration audit: 2026-06-18*
+*后端集成分析：2026-06-25*

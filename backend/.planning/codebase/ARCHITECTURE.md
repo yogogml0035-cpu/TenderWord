@@ -1,11 +1,10 @@
-<!-- refreshed: 2026-06-18 -->
-# Architecture
+# 后端架构事实地图
 
-**分析日期：** 2026-06-18
+**分析日期：** 2026-06-25
 
 **范围：** 仅覆盖 `backend/` 子项目。`backend/.env` 文件存在，但不得读取、摘录或把其中任何值写入文档、日志、测试夹具或回复。
 
-## System Overview
+## 系统总览
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
@@ -47,7 +46,7 @@
 
 后端是 TenderWord 的 FastAPI + LangGraph + Word COM 执行端，负责招标详情代理、模板候选代理、上传下载、初次生成、rewrite、补充批注、任务队列、SSE、LLM/agent 调用、bad case retrieval 和 Word 文件写回。完整 Word 闭环必须运行在 Windows Python、`pywin32`、本机 Word/WPS COM 环境中；无 COM 环境只能验证纯逻辑、API 契约和非写回分支。
 
-## Component Responsibilities
+## 组件职责
 
 | Component | Responsibility | File |
 |-----------|----------------|------|
@@ -71,9 +70,9 @@
 | Comment agents | 批注候选生成/校验/修复、工具门禁、Word 写回和审计 | `backend/agents/comments/comment_agent.py`, `backend/nodes/common_word_nodes/comment_agent.py` |
 | Task context assistant | 右侧 agent run 前置流，只用受控上下文和白名单工具创建 rewrite 任务 | `backend/services/agent_run_service.py`, `backend/agents/task_context_assistant/tools.py`, `backend/agents/task_context_assistant/factory.py` |
 | Prompt layer | 只做 prompt 渲染和机器契约解析，不承载副作用、SSE、COM 或 session state | `backend/prompts/` |
-| Retrieval layer | 为批注生成注入 bad case prompt context，hybrid 失败时降级 `bm25_only` | `backend/retrieval/comment_bad_case_runtime.py`, `backend/retrieval/hybrid.py`, `backend/retrieval/qdrant_store.py` |
+| Retrieval layer | 为批注生成注入 bad case prompt context，hybrid 失败时降级 | `backend/retrieval/comment_bad_case_runtime.py`, `backend/retrieval/hybrid.py`, `backend/retrieval/qdrant_store.py` |
 
-## Pattern Overview
+## 核心模式
 
 **Overall:** FastAPI 薄入口 + Service 编排 + 进程内任务队列 + LangGraph 工作流 + Word COM 临界资源串行化。
 
@@ -85,7 +84,7 @@
 - Agent run 只负责任务创建前置流；后台 task、SSE、取消、下载仍沿用 task/SSE/download 链路。
 - 子项目 `.planning/codebase/` 是事实层；根级 `AGENTS.md`、`ARCHITECTURE.md`、`INTERFACES.md` 只做导航和跨项目边界。项目内规则来源包括 `.agents/skills/ai-coding-first/SKILL.md`、`.agents/skills/agents-map/SKILL.md`、`.agents/skills/gsd-map-codebase/SKILL.md`。
 
-## Layers
+## 分层结构
 
 **API 层:**
 - 职责： 暴露 HTTP、SSE、NDJSON 入口，转换为 service 调用。
@@ -143,9 +142,9 @@
 - Depends on: `backend/retrieval/bad_cases/`, Qdrant, embedding API, env。
 - Used by: `backend/nodes/common_word_nodes/generate_comments.py`, `backend/nodes/common_word_nodes/comment_agent.py`。
 
-## Data Flow
+## 数据流
 
-### Primary Request Path
+### 初次生成主链路
 
 1. `POST /api/generate` 进入 `create_generate_task()`，请求模型是 `GenerateRequest` (`backend/api/generate.py:51`, `backend/models/generate.py:117`)。
 2. `DocumentService.create_task()` 使用 `request.form_type.value` 从 `GRAPH_REGISTRY` 选择 graph (`backend/services/document_service.py:430`, `backend/services/document_service.py:216`)。
@@ -156,7 +155,7 @@
 7. `StandardTenderWorkflowGraph.build_graph()` 执行 `prepare_template -> extract_tender_params`，并行进入 Word 子图和生成分支，之后汇合到 `update_word` (`backend/graphs/base_graph.py:491`)。
 8. `DocumentService` 收敛 output file、file size、model、style/comment writeback summary，并通过 task queue 与 `SSEManager` 推送 `done` 或 `error` (`backend/core/sse_manager.py:675`, `backend/core/sse_manager.py:719`)。
 
-### Rewrite Agent Path
+### Rewrite 智能体链路
 
 1. `POST /api/agent/runs/stream` 进入 `AgentRunService.stream()` 并返回 NDJSON (`backend/api/agent.py:19`, `backend/services/agent_run_service.py`)。
 2. `AgentRunService` 先输出 `run_started`、`thinking_stage`，再做 preflight guard 或调用 DeepAgents runner (`backend/services/agent_run_service.py`)。
@@ -165,34 +164,26 @@
 5. `RewriteSkillGraph` 执行 `resolve_rewrite_target`、`extract_rewrite_context`、`get_rewrite_comments`、`delete_section`、`rewrite_text`、`update_word`，条件分支来自 `backend/skills/rewrite/scripts/runtime.py` (`backend/graphs/skill_graph.py:31`, `backend/graphs/skill_graph.py:63`)。
 6. rewrite 后台任务复用 task/SSE/download 链路；agent run 只负责 `task_accepted` 和终态摘要 (`backend/services/agent_run_service.py`)。
 
-### Comment Supplement Path
+### 补充批注链路
 
 1. `POST /api/comment-supplement` 进入 `DocumentService.create_comment_supplement_task()` (`backend/api/comment_supplement.py:24`, `backend/services/document_service.py:594`)。
 2. Service 校验 `conversation_id`、`source_file`、latest `rewrite_state`、`polished_text` 和当前文件是否仍是会话 latest 文档 (`backend/services/document_service.py:594`)。
 3. `CommentSupplementGraph` 执行 `prepare_comment_supplement -> comment_agent -> finalize_comment_supplement` (`backend/graphs/comment_supplement_graph.py:35`)。
 4. 成功后 `ConversationService.append_comment_supplement_success()` 更新 latest rewrite state (`backend/services/conversation_service.py`)。
 
-### SSE Path
+### SSE 链路
 
 1. 前端连接 `GET /api/stream/{task_id}`，`stream_task_events()` 校验任务并解析 `Last-Event-ID` (`backend/api/stream.py:23`)。
 2. `SSEManager.event_stream()` 建立 client、重放 missed events、持续 yield SSE 字符串并在 `done`/`error` 后结束 (`backend/core/sse_manager.py:395`)。
 3. 后台线程通过 `send_*_threadsafe()` 把事件调度回 FastAPI 主 loop (`backend/core/sse_manager.py:99`, `backend/core/sse_manager.py:127`)。
 
-### Template Candidate Path
+### 模板候选链路
 
 1. `GET /api/template-candidates` 调用 `fetch_template_candidates()` 代理外部候选列表 (`backend/api/template_candidates.py`, `backend/util/common_util/template_candidates.py`)。
 2. `TemplateCandidateRankingService.rank_candidates()` 对同优先级候选按项目名称调用 LLM 重排；失败时保持优先级排序 (`backend/services/template_candidate_ranking_service.py`)。
 3. `GET /api/template-candidates/download` 和 `POST /api/template-candidates/select` 通过 allowlist 校验外部模板链接，再下载或保存到上传目录 (`backend/api/template_candidates.py`, `backend/util/common_util/upload_storage.py`)。
 
-**State Management:**
-- 任务、队列、进度和结果是进程内状态，真源在 `backend/task/task_queue_manager.py`。
-- SSE client 和 event cache 是进程内状态，真源在 `backend/core/sse_manager.py`。
-- 会话 rewrite history 是进程内状态，真源在 `backend/services/conversation_service.py`。
-- graph state 是 TypedDict，在 `backend/states/base_state.py` 和 `backend/states/skill_state.py`。
-- 文档产物写到 `settings.UPLOAD_DIR`；下载路径限制在 `settings.UPLOAD_DIR` 内，入口在 `backend/api/download.py`。
-- 运行日志和 agent workspace 写到 `backend/logs/`、`backend/context_log/`；不要读取真实日志内容作为文档事实。
-
-## Key Abstractions
+## 关键抽象
 
 **`FormType` 与 runtime `tender_type`:**
 - 职责： 连接 API 表单类型和 graph 运行态招标类型。
@@ -207,7 +198,7 @@
 **`StandardTenderWorkflowGraph`:**
 - 职责： 初次生成主流程真源。
 - Examples: `backend/graphs/base_graph.py:438`, `backend/graphs/xjcg_tender_graph.py`
-- Pattern: 类型 graph 覆盖 `STATE_CLS` 和 `NODE_*`，不要复制 `build_graph()`。
+- Pattern: 类型 graph 覆盖 `STATE_CLS` 和必要 `NODE_*`，不要复制 `build_graph()`。
 
 **`RewriteSkillGraph`:**
 - 职责： rewrite 任务显式 graph。
@@ -235,16 +226,16 @@
 - Pattern: agent 的长正文、草稿、审核和修订通过 workspace 文件交接；Word 写回仍由 graph 节点线程执行。
 
 **结构化表占位符:**
-- 职责： 保留技术参数结构化表写回入口 `[[TABLE:<id>]]`。
+- 职责： 标记技术参数结构化表的内部写回入口 `[[TABLE:<id>]]`。
 - Examples: `backend/agents/generation/table_placeholder_utils.py`
-- Pattern: content agent 生成、verify agent 审核和最终复核都必须维持占位符；不得改成 Markdown 或手绘表格。
+- Pattern: 占位符只在生成/审核/写回运行时内部使用，不是最终正文可见内容；缺失占位符不再单独产出 finding，写回层会按 sidecar 模型恢复真实表格，或在无法恢复时静默丢弃占位符与其投影表，避免把 Markdown/手绘表格当成最终真源。
 
 **Bad case retrieval:**
 - 职责： 给批注生成注入坏案例上下文。
 - Examples: `backend/retrieval/comment_bad_case_runtime.py`, `backend/retrieval/hybrid.py`
 - Pattern: hybrid 检索失败降级为 `bm25_only`；retrieval 状态不进入前端 SSE、下载卡或 agent_step 展示。
 
-## Entry Points
+## 入口清单
 
 **ASGI app:**
 - Location: `backend/main.py`
@@ -281,7 +272,7 @@
 - Triggers: `/api/tender/{tender_no}`, `/api/template-candidates`, `/api/upload`, `/api/download/{file_path:path}`
 - Responsibilities: 外部数据代理、模板候选代理、文件落盘和下载。
 
-## Architectural Constraints
+## 架构约束
 
 - **Threading:** FastAPI 主 loop 处理 HTTP/SSE；`DocumentService` 用 `ThreadPoolExecutor(max_workers=4)` 提交任务；每个 graph 任务在后台线程中创建独立 asyncio loop (`backend/services/document_service.py`)。
 - **Word COM:** 所有 Word 写入必须经过 task queue、graph 锁、取消检查、进度包装、`CrossProcessFileLock` 和 `com_lock()` (`backend/graphs/base_graph.py:53`, `backend/util/word_util/word_com_manager.py:100`)。
@@ -292,9 +283,9 @@
 - **Document hierarchy:** 子项目事实写入 `backend/.planning/codebase/`；根级系统文档不复制后端实现细节。相关项目内规则见 `.agents/skills/ai-coding-first/SKILL.md`、`.agents/skills/agents-map/SKILL.md`。
 - **Cross-layer sync:** API shape、SSE、任务类型、招标类型、prompt/LLM、Word helper、模板候选和 retrieval 改动必须同步后端模型、前端类型/API client、测试和长期知识包。
 
-## Anti-Patterns
+## 反模式
 
-### API route 直接执行 Word COM 或 LangGraph
+### API 路由直接执行 Word COM 或 LangGraph
 
 **What happens:** 在 `backend/api/*.py` 里直接打开 Word、调用 COM、运行 graph 或拼接长业务流程。
 **Why it's wrong:** 会绕过 `TaskQueueManager`、公平锁、文件锁、取消检查、SSE 终态和日志上下文。
@@ -324,7 +315,7 @@
 **Why it's wrong:** Agent run 是前置流和 UI 摘要，不是排障日志或文件浏览接口。
 **Do this instead:** 使用 scrub 和白名单摘要工具，参照 `backend/agents/task_context_assistant/logging.py`、`backend/agents/task_context_assistant/tools.py`。
 
-## Error Handling
+## 错误处理
 
 **Strategy:** API 层用 `HTTPException` 返回结构化错误；后台任务捕获异常后写 task 失败状态和 SSE `error`；取消按非 fatal 终态处理；retrieval、批注生成等可降级失败写 warning 后继续。
 
@@ -335,14 +326,14 @@
 - Word COM 创建失败抛诊断性 `RuntimeError`，并在 finally 路径关闭 doc、退出 Word、`CoUninitialize()` (`backend/util/word_util/word_application_util.py:132`)。
 - bad case retrieval 失败降级为 `bm25_only` 或 unavailable payload，不阻塞批注生成 (`backend/retrieval/comment_bad_case_runtime.py`)。
 
-## Cross-Cutting Concerns
+## 横切关注点
 
 **Logging:** `backend/util/log_util/progress_log.py` 处理用户可见进度日志；`backend/util/log_util/execution_log.py` 记录生成成功审计；`backend/util/log_util/sse_log_handler.py` 将任务上下文日志推到 SSE；`backend/agents/task_context_assistant/logging.py` 负责 agent run scrub 审计。
 **Validation:** Pydantic 模型校验 API shape；service 校验上下文和文件一致性；`backend/api/download.py` 限制下载路径；`backend/util/common_util/template_candidates.py` 校验模板下载 allowlist。
 **Authentication:** 未检测到统一应用鉴权中间件；新增外部暴露接口时要显式设计认证、授权、日志 scrub 和路径/URL 白名单。
 **Security:** 不读取或输出 `backend/.env`；外部模板下载使用 allowlist；agent run 和任务摘要不得暴露完整客户原文、私有路径、token、traceback 或下载路径。
-**Verification:** 后端代码改动至少运行 `python -m pytest tests -v`；Word COM 闭环必须回到 Windows + Word/WPS COM 环境；仅文档变更至少运行 `git diff --check` 和密钥模式扫描。
+**Verification:** 后端代码改动至少运行 `python -m pytest tests -v`；Word COM 闭环必须回到 Windows + Word/WPS COM 环境；仅文档变更至少运行 `git diff --check`。
 
 ---
 
-*Architecture analysis: 2026-06-18*
+*后端架构分析：2026-06-25*

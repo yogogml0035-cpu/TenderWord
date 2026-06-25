@@ -1,10 +1,10 @@
-# Codebase Structure
+# 后端结构事实地图
 
-**分析日期：** 2026-06-18
+**分析日期：** 2026-06-25
 
 **范围：** 仅覆盖 `backend/` 子项目。`backend/.env` 文件存在，但不得读取或引用内容；`backend/logs/`、`backend/context_log/` 只按目录职责描述，不读取真实运行日志。
 
-## Directory Layout
+## 目录布局
 
 ```text
 backend/
@@ -43,7 +43,7 @@ backend/
 └── requirements.txt            # 后端依赖清单
 ```
 
-## Directory Purposes
+## 目录职责
 
 **`backend/api/`:**
 - 职责： FastAPI HTTP、SSE、NDJSON 入口，保持薄路由。
@@ -165,7 +165,7 @@ backend/
 - 包含： API、agents、config、graphs、helper、logging、models、nodes、progress、prompts、retrieval、services、skills、util 测试。
 - 关键文件： `backend/tests/conftest.py`, `backend/tests/api/test_generate_api.py`, `backend/tests/graphs/test_generation_mode_branching.py`, `backend/tests/services/test_document_service_task_result.py`
 
-## Key File Locations
+## 关键文件位置
 
 **Entry Points:**
 - `backend/main.py`: FastAPI app、router 注册、CORS、startup/shutdown、健康检查。
@@ -218,7 +218,7 @@ backend/
 - `backend/tests/services/`: service、SSE、任务结果、agent run 测试。
 - `backend/tests/retrieval/`: bad case retrieval 运行时测试。
 
-## Naming Conventions
+## 命名约定
 
 **文件：**
 - Python 源码使用 `snake_case.py`，例如 `document_service.py`、`task_queue_manager.py`。
@@ -235,7 +235,7 @@ backend/
 - 非 Word 通用工具放入 `backend/util/common_util/`。
 - task skill 节点放入 `backend/nodes/skills_nodes/`，声明和 runtime helper 放入 `backend/skills/`。
 
-## Where to Add New Code
+## 新代码落位
 
 **New API Endpoint:**
 - Primary code: `backend/api/<feature>.py`
@@ -309,7 +309,7 @@ backend/
 - Security: add timeout、allowlist、file type/path validation、log scrub。
 - Tests: `backend/tests/util/`, `backend/tests/api/`, `backend/tests/services/`
 
-## Special Directories
+## 特殊目录
 
 **`backend/.planning/codebase/`:**
 - 职责： 后端事实地图。
@@ -364,4 +364,4 @@ backend/
 
 ---
 
-*Structure analysis: 2026-06-18*
+*后端结构分析：2026-06-25*

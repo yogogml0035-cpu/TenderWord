@@ -1,10 +1,10 @@
-# Codebase Structure
+# 前端结构事实地图
 
-**分析日期：** 2026-06-18
+**分析日期：** 2026-06-25
 
 **范围：** `frontend/` 子项目。未读取 `.env`、`.env.*`、`.npmrc`、凭据或真实密钥文件。
 
-## Directory Layout
+## 目录布局
 
 ```text
 frontend/
@@ -34,7 +34,7 @@ frontend/
 └── postcss.config.mjs       # Tailwind 4 PostCSS 插件
 ```
 
-## Directory Purposes
+## 目录职责
 
 **`frontend/app/`:**
 - 职责： Next.js App Router 页面边界和全局样式。
@@ -96,7 +96,7 @@ frontend/
 - 包含： `test_*.spec.ts`。
 - 关键文件： `frontend/e2e/test_url_conversation.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`、`frontend/e2e/test_comment_supplement.spec.ts`、`frontend/e2e/test_agent_run_chat_panel.spec.ts`、`frontend/e2e/test_tender_form_upload_slots.spec.ts`。
 
-## Key File Locations
+## 关键文件位置
 
 **Entry Points:**
 - `frontend/app/page.tsx`: 根路径进入 `/tender`。
@@ -141,7 +141,7 @@ frontend/
 - `frontend/test-shims/until-async.ts`: 测试异步等待 helper。
 - `frontend/e2e/`: Playwright specs。
 
-## Naming Conventions
+## 命名约定
 
 **文件：**
 - React 组件使用 PascalCase：`frontend/components/chat/ChatPanel.tsx`、`frontend/components/forms/FileUploader.tsx`。
@@ -158,7 +158,7 @@ frontend/
 - 表单低层复用控件放在 `frontend/components/forms/shared/`。
 - 测试目录按测试类型和源码作用域分层：`frontend/__tests__/unit/components/chat/`、`frontend/__tests__/unit/lib/`、`frontend/__tests__/unit/stores/`。
 
-## Where to Add New Code
+## 新代码落位
 
 **New Feature:**
 - Primary code: 工作台页面编排放 `frontend/app/tender/page.tsx`；工作台交互放 `frontend/components/chat/`；表单、字段、上传、模板候选放 `frontend/components/forms/` 或 `frontend/components/forms/shared/`。
@@ -182,7 +182,7 @@ frontend/
 - 上传文件 rewrite 变化：同步 `frontend/types/api.ts` 的 `FileType` / agent context、`frontend/components/chat/ChatInput.tsx`、`frontend/components/chat/ChatPanel.tsx` 和相关测试。
 - 任务产物展示变化：同步 `frontend/types/chat.ts`、`frontend/stores/chatStore.ts`、`frontend/hooks/useChatSSE.ts`、`frontend/components/chat/MessageList.tsx`、`frontend/components/chat/TaskDownloadMessage.tsx`。
 
-## Special Directories
+## 特殊目录
 
 **`frontend/.planning/codebase/`:**
 - 职责： 前端事实文档，供后续计划和执行阶段消费。
@@ -222,4 +222,4 @@ frontend/
 
 ---
 
-*Structure analysis: 2026-06-18*
+*前端结构分析：2026-06-25*

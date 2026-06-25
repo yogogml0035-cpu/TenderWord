@@ -1,6 +1,6 @@
 # 前端测试约定
 
-**分析日期：** 2026-06-18
+**分析日期：** 2026-06-25
 
 **范围：** `frontend/__tests__/`、`frontend/e2e/`、`frontend/test-shims/`、`frontend/jest.config.ts`、`frontend/jest.setup.js`、`frontend/polyfills.js`、`frontend/playwright.config.ts`、`frontend/package.json`、`frontend/tsconfig.typecheck.json`。`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc` 仅确认存在，不读取内容。
 
@@ -326,4 +326,4 @@ await expect(createGenerateTask(validGenerateRequest)).rejects.toMatchObject({
 
 ---
 
-*测试分析：2026-06-18*
+*前端测试分析：2026-06-25*

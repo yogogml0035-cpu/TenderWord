@@ -1,8 +1,8 @@
-# Codebase Concerns
+# 后端风险事实地图
 
-**分析日期：** 2026-06-18
+**分析日期：** 2026-06-25
 
-## Tech Debt
+## 技术债
 
 **Word COM、任务队列和结果收尾耦合过深：**
 - 问题： `backend/graphs/base_graph.py`、`backend/task/task_queue_manager.py`、`backend/services/document_service.py`、`backend/util/word_util/word_application_util.py` 把排队、公平锁、取消检查、COM 生命周期、SSE 通知和结果收尾分散在多层；`invoke_with_timing_async()` 会先写入一个占位完成结果，随后 `DocumentService._run_graph()` 再覆盖为完整 payload，终态语义依赖调用顺序。
@@ -34,7 +34,7 @@
 - 影响： 依赖升级可能直接改变 agent 协议、SSE 序列化、Word COM 行为或上传下载边界。
 - 修复方向： 把关键兼容性放进测试而不是经验里，至少锁住 `backend/tests/api/`、`backend/tests/agents/`、`backend/tests/services/` 和 `backend/tests/nodes/` 的高风险路径。
 
-## Known Bugs
+## 已知问题
 
 **`GET /api/generate/{task_id}` 完成态返回 shape 不稳定：**
 - Symptoms: `backend/api/generate.py` 在完成态把 `task_info.result` 直接赋给 `GenerateResponse.output_file`，但 `task_info.result` 实际上是 `backend/services/document_service.py` 构造的 dict payload，而不是纯字符串。
@@ -42,19 +42,7 @@
 - Trigger: 查询已完成任务的生成状态。
 - Workaround: 先用 `GET /api/tasks/{task_id}` 或 SSE `done` 事件拿完整结果，不要依赖 `GET /api/generate/{task_id}` 作为唯一结果源。
 
-**公共摘要的下载就绪判定与任务结果不一致：**
-- Symptoms: `backend/agents/task_context_assistant/tools.py` 用 `result_payload.get("download_url")` 推导 `download_ready`，但 `backend/services/document_service.py` 的标准任务结果 payload 只写 `output_file`、`file_name`、`file_size`、`model_used` 和写回摘要。
-- 相关文件： `backend/agents/task_context_assistant/tools.py`, `backend/services/document_service.py`, `backend/tests/agents/test_task_context_assistant_tools.py`
-- Trigger: agent run 读取某个已完成任务的公共摘要。
-- Workaround: 把 `download_ready` 视为“是否显式提供下载链接”，不要把它当成“是否已经生成文件”的同义词。
-
-**就绪检查把可用性写成固定真值：**
-- Symptoms: `backend/main.py` 的 `upload_dir_accessible` 没有做真实权限探测。
-- 相关文件： `backend/main.py`, `backend/tests/services/test_task_service_task_kind.py`
-- Trigger: 上传目录不存在、不可写或磁盘异常时访问 `/health/ready`。
-- Workaround: 用真实上传、真实任务或 `backend/scripts/diagnose_word.py` 验证环境，不要把 readiness 当作生成验收。
-
-## Security Considerations
+## 安全注意事项
 
 **下载接口的路径边界必须保持：**
 - 风险： `backend/api/download.py` 接收 URL 编码的完整路径，任何放松 `relative_to(settings.UPLOAD_DIR)` 的改动都会重新打开路径穿越。
@@ -86,7 +74,7 @@
 - Current mitigation: prompt 上下文只保留 `risk_type`、`risk_pattern`、`recommended_comment_policy`、`applicability_boundary` 和 `anchor_policy`。
 - Recommendations: 保持 prompt context 与 audit payload 分离，命中详情只留在后端审计产物里。
 
-## Performance Bottlenecks
+## 性能瓶颈
 
 **Word COM 只能串行化：**
 - 问题： `backend/util/word_util/word_com_manager.py`、`backend/util/word_util/word_application_util.py`、`backend/graphs/base_graph.py` 和 `backend/task/task_queue_manager.py` 把 Word COM 保护成单通道临界资源。
@@ -118,7 +106,7 @@
 - Cause: Word 结构、表格、编号和局部候选的组合太多。
 - 改进路径： 改动前先用 focused fixture 锁住具体样式分支，不要直接在大文件里连带重写。
 
-## Fragile Areas
+## 脆弱区域
 
 **任务完成链路对顺序敏感：**
 - 相关文件： `backend/graphs/base_graph.py`, `backend/task/task_queue_manager.py`, `backend/services/document_service.py`, `backend/core/sse_manager.py`
@@ -144,11 +132,11 @@
 - 安全修改： 新增生成选项只进 `GenerateRequest` 和初始 generate state，不要写进 rewrite 请求模型、skill state 或 prompt surface。
 - 测试覆盖： `backend/tests/services/test_document_service_initial_state.py`、`backend/tests/models/test_generate_request_generation_style.py` 和 `backend/tests/skills/test_task_skill_runtime.py` 在守这个边界。
 
-**结构化表占位符是硬契约：**
-- 相关文件： `backend/agents/generation/table_placeholder_utils.py`, `backend/agents/generation/verify_agent_graph.py`, `backend/agents/generation/content_agents.py`
-- 脆弱点： `[[TABLE:<id>]]` 不是装饰文本，而是结构化表写回入口；一旦被改写成 Markdown 表或普通段落，就会丢失硬审核信号。
-- 安全修改： 改 regex、修复逻辑或 `table_id` 字符集时，同步 `backend/util/word_util/table_models.py` 和 `backend/tests/agents/test_table_placeholder_utils.py`。
-- 测试覆盖： 有单测覆盖提取、修复和缺失 finding，但缺少真实 Word 写回端到端验证。
+**结构化表占位符是内部写回入口：**
+- 相关文件： `backend/agents/generation/table_placeholder_utils.py`, `backend/agents/generation/verify_agent_graph.py`, `backend/helper/word_helper/text_parsing.py`, `backend/agents/generation/content_sanitizer.py`
+- 脆弱点： `[[TABLE:<id>]]` 不再是最终正文必须保留的可见内容；审核、写回、sidecar 恢复和投影表静默丢弃必须严格一致，否则会把表格近似文本写错、写漏或误判。
+- 安全修改： 改 regex、sidecar 匹配、`table_id` 字符集或写回语义时，同步 `backend/tests/agents/test_table_placeholder_utils.py`、`backend/tests/agents/test_generation_content_agent.py` 和 `backend/tests/helper/test_text_parsing_table_placeholder.py`。
+- 测试覆盖： 现有测试覆盖提取、修复和写回入口，但缺真实 Word 写回端到端验证。
 
 **Prompt 和 bad case 上下文绑定得很紧：**
 - 相关文件： `backend/prompts/generate_prompt.py`, `backend/prompts/comment_prompt.py`, `backend/retrieval/comment_bad_case_runtime.py`
@@ -162,7 +150,7 @@
 - 安全修改： 改 COM 逻辑时先锁住 close/open/save 的重试路径，再验证清理顺序和异常释放。
 - 测试覆盖： 现有测试基本停留在 fake object 和 helper 层，没有真实 Word/WPS CI。
 
-## Scaling Limits
+## 扩展边界
 
 **单进程内存边界：**
 - 当前能力： `backend/core/sse_manager.py`、`backend/task/task_queue_manager.py` 和 `backend/services/conversation_service.py` 都依赖当前进程内状态。
@@ -184,7 +172,7 @@
 - 限制： 上传、生成、审计和 workspace 会长期累积。
 - 扩展路径： 统一保留策略、对象存储和清理策略。
 
-## Dependencies at Risk
+## 高风险依赖
 
 **`pywin32` / Word / WPS COM：**
 - 风险： `backend/util/word_util/word_application_util.py`、`backend/util/word_util/word_com_manager.py` 和 `backend/scripts/diagnose_word.py` 依赖 Windows Python、本机 Word/WPS COM 注册和 `pywin32`。
@@ -211,7 +199,7 @@
 - 影响： 字段变更、主机变更或超时都会让模板候选和招标详情链路失效。
 - 迁移建议： 先更新后端模型和工具，再同步前端 client 和测试。
 
-## Missing Critical Features
+## 缺失的关键能力
 
 **持久化任务存储：**
 - 问题： `backend/task/task_queue_manager.py`、`backend/core/sse_manager.py` 和 `backend/services/conversation_service.py` 仍是内存态。
@@ -233,7 +221,7 @@
 - 问题： `backend/tests/` 没有真实 Word/WPS COM 端到端链路。
 - Blocks: 无法自动证明 `.doc/.docx` 真写回、rewrite、补充批注和样式回填闭环。
 
-## Test Coverage Gaps
+## 测试覆盖缺口
 
 **队列、公平锁和运行中取消：**
 - What’s not tested: `backend/task/task_queue_manager.py` 的 `wait_for_turn()`、`cancel_task()`、心跳超时和 `backend/graphs/base_graph.py` 的 `CrossProcessFileLock`、`invoke_with_timing_async()`。
@@ -279,4 +267,4 @@
 
 ---
 
-*Risk audit: 2026-06-18*
+*后端风险分析：2026-06-25*
