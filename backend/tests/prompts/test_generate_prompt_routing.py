@@ -216,3 +216,58 @@ def test_verify_prompt_describes_table_placeholder_as_internal_entry() -> None:
     assert "内部写回入口" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
     assert "不应作为可见行" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
     assert "不要**为缺失" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+
+
+def test_verify_prompt_states_protected_field_non_deletion_contract() -> None:
+    """verify prompt 固化受保护字段口径：字段壳来自模板、字段值优先级、不得删除。"""
+    # 系统提示词固化业务口径。
+    assert "受保护基础字段（受保护字段）不得删除" in VERIFY_SYSTEM_PROMPT
+    assert "设备名称及数量" in VERIFY_SYSTEM_PROMPT
+    assert "付款方式" in VERIFY_SYSTEM_PROMPT
+    assert "交付日期" in VERIFY_SYSTEM_PROMPT
+    assert "服务地点" in VERIFY_SYSTEM_PROMPT
+    assert "服务期限" in VERIFY_SYSTEM_PROMPT
+    assert "字段值优先级为" in VERIFY_SYSTEM_PROMPT
+    assert "项目基础信息 > 技术参数项目概述同名字段 > 参考模板同包字段原句" in VERIFY_SYSTEM_PROMPT
+    assert "字段存在性优先级高于旧事实清理" in VERIFY_SYSTEM_PROMPT
+    assert "审核只能要求补回/恢复受保护字段行，不能要求删除" in VERIFY_SYSTEM_PROMPT
+    # 黑名单仍删除的伪装字段保留。
+    assert "技术或商务正文伪装字段" in VERIFY_SYSTEM_PROMPT
+    assert "评分/评审内容" in VERIFY_SYSTEM_PROMPT
+
+
+def test_verify_prompt_includes_protected_field_few_shots() -> None:
+    """verify prompt few-shot：参考模板有付款方式、新材料无付款方式时输出 []；
+    待审核正文缺付款方式时 finding 必须要求补回。"""
+    # 参考模板有付款方式、新材料无付款方式、正文已保留 -> []
+    assert "待审核正文已正确保留" in VERIFY_SYSTEM_PROMPT
+    assert "付款方式：设备安装验收合格后的三个月内付清全款" in VERIFY_SYSTEM_PROMPT
+    # 待审核正文缺付款方式 -> finding 要求补回
+    assert "缺少受保护基础字段 `付款方式：`" in VERIFY_SYSTEM_PROMPT
+    # 审核意见要求删除付款方式时 -> []
+    assert "无新材料支撑的旧事实" in VERIFY_SYSTEM_PROMPT
+
+
+def test_revise_prompt_ignores_delete_protected_field_audit_item() -> None:
+    """revise prompt 明确：忽略要求删除受保护字段的 audit item。"""
+    assert "受保护基础字段" in REVISE_SYSTEM_PROMPT
+    assert "即使 audit JSON 某一项要求删除受保护字段" in REVISE_SYSTEM_PROMPT
+    assert "忽略该项 audit item" in REVISE_SYSTEM_PROMPT
+    assert "不得删除对应字段行" in REVISE_SYSTEM_PROMPT
+
+
+def test_verify_user_prompt_states_protected_field_hard_contract() -> None:
+    """verify user prompt 的硬契约区写入“受保护字段不得删除/缺值继承模板同包字段原句/删除建议无效”。"""
+    from backend.agents.generation.verify_agent_graph import _render_verify_user_prompt
+
+    user_prompt = _render_verify_user_prompt(
+        generation_style="template",
+        project_info="项目基础信息",
+        template_reference_text="模板",
+        tender_params="技术参数",
+        current_text="待审核正文",
+    )
+    assert "受保护字段不得删除" in user_prompt
+    assert "缺值继承模板同包字段原句" in user_prompt
+    assert "删除建议无效" in user_prompt
+    assert "受保护字段硬契约" in user_prompt
