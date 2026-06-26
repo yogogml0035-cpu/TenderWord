@@ -63,11 +63,12 @@ def test_extract_content_with_table_models_preserves_merge_topology() -> None:
         {"row": 2, "col": 3, "row_span": 1, "col_span": 1, "text": "安保"},
         {"row": 3, "col": 1, "row_span": 1, "col_span": 3, "text": "合计"},
     ]
-    assert "| " not in content
-    assert "楼宇 / 岗位" in content
+    assert "| 楼宇 | 楼宇 | 岗位 |" in content
+    assert "| 楼宇 | 楼宇 | 安保 |" in content
+    assert "| 合计 | 合计 | 合计 |" in content
 
 
-def test_extract_content_with_table_models_keeps_nonempty_projection_for_personnel_table() -> None:
+def test_extract_content_with_table_models_renders_full_markdown_projection_for_personnel_table() -> None:
     xml = """
     <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
       <w:body>
@@ -97,11 +98,47 @@ def test_extract_content_with_table_models_keeps_nonempty_projection_for_personn
 
     content, models = extract_content_with_table_models(_FakeRange(xml))
 
-    assert "楼宇" in content
-    assert "DSA2" in content
-    assert "岗位数人数" in content
+    assert "| 楼宇 | 楼层 | DSA | 岗位数人数 |" in content
+    assert "| 1号楼 | 2F | DSA1 | 2 |" in content
+    assert "| 1号楼 | 3F | DSA2 | 3 |" in content
     assert "[[TABLE:TP1]]" in content
-    assert "| --- |" not in content
+    assert "| --- | --- | --- | --- |" in content
+    assert len(models) == 1
+
+
+def test_extract_content_with_table_models_repeats_horizontal_and_vertical_merges_in_markdown() -> None:
+    xml = """
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body>
+        <w:tbl>
+          <w:tr>
+            <w:tc><w:p><w:r><w:t>序号</w:t></w:r></w:p></w:tc>
+            <w:tc><w:p><w:r><w:t>楼宇</w:t></w:r></w:p></w:tc>
+            <w:tc><w:p><w:r><w:t>楼层</w:t></w:r></w:p></w:tc>
+            <w:tc><w:p><w:r><w:t>科室</w:t></w:r></w:p></w:tc>
+          </w:tr>
+          <w:tr>
+            <w:tc><w:p><w:r><w:t>1</w:t></w:r></w:p></w:tc>
+            <w:tc><w:tcPr><w:vMerge w:val="restart"/></w:tcPr><w:p><w:r><w:t>医疗综合楼</w:t></w:r></w:p></w:tc>
+            <w:tc><w:p><w:r><w:t>B2</w:t></w:r></w:p></w:tc>
+            <w:tc><w:p><w:r><w:t>放疗科</w:t></w:r></w:p></w:tc>
+          </w:tr>
+          <w:tr>
+            <w:tc><w:p><w:r><w:t>2</w:t></w:r></w:p></w:tc>
+            <w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p><w:r><w:t></w:t></w:r></w:p></w:tc>
+            <w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr><w:p><w:r><w:t>1F/门诊诊室</w:t></w:r></w:p></w:tc>
+          </w:tr>
+        </w:tbl>
+      </w:body>
+    </w:document>
+    """
+
+    content, models = extract_content_with_table_models(_FakeRange(xml))
+
+    assert "| 序号 | 楼宇 | 楼层 | 科室 |" in content
+    assert "| 1 | 医疗综合楼 | B2 | 放疗科 |" in content
+    assert "| 2 | 医疗综合楼 | 1F/门诊诊室 | 1F/门诊诊室 |" in content
+    assert "[[TABLE:TP1]]" in content
     assert len(models) == 1
 
 

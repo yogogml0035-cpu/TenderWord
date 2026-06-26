@@ -55,6 +55,21 @@ def test_render_generate_by_param_prompt_limits_reference_tables_and_business_sh
     assert "绝不能输出品牌或数量列" in rendered.system_prompt
     assert "空白单元格续行合并" in rendered.system_prompt
     assert "不得重复生成商务章节" in rendered.system_prompt
+    assert "模板正文禁回灌" in rendered.system_prompt
+    assert "反模板回灌红线" in rendered.system_prompt
+
+
+def test_render_generate_by_param_prompt_prefers_tender_params_as_final_body() -> None:
+    rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    assert "技术参数正文直出优先" in rendered.system_prompt
+    assert "默认把【技术参数】删除评分/评审污染后的结果视为最终正文母本" in rendered.system_prompt
+    assert "最终结果应尽量等于“【技术参数】原文删除评分污染、去掉已被项目概述消耗的裸元数据行后的版本”" in rendered.system_prompt
+    assert "附件与表单原位保留" in rendered.system_prompt
+    assert "反格式改写红线" in rendered.system_prompt
+    assert "【技术参数】（先读；正文默认直接以它为准，只删除评分/评审污染）" in rendered.user_prompt
 
 
 def test_render_generate_by_param_prompt_preserves_basic_info_shells() -> None:
@@ -68,6 +83,12 @@ def test_render_generate_by_param_prompt_preserves_basic_info_shells() -> None:
     assert "不能改写成 `1、设备名称及数量`、`2、项目预算`" in rendered.system_prompt
     assert "基础信息章节不参与技术重组" in rendered.system_prompt
     assert "预算金额、最高限价等只能填入模板里本来就存在的预算/限价类槽位" in rendered.system_prompt
+    assert "开头首章动态硬镜像" in rendered.system_prompt
+    assert "项目名称 -> 服务地点 -> 服务期限 -> 付款方式" in rendered.system_prompt
+    assert "第二大章起标题跟随技术参数" in rendered.system_prompt
+    assert "最终正文必须先按模板输出开头基础信息章节" in rendered.user_prompt
+    assert "模板首章字段保留规则" in rendered.system_prompt
+    assert "模板出现即保留" in rendered.system_prompt
 
 
 def test_render_generate_by_param_prompt_drops_technical_fields_in_project_overview() -> None:
@@ -180,7 +201,9 @@ def test_generate_prompts_forbid_ai_preamble_and_filler() -> None:
 
 
 def test_generate_prompts_flip_table_placeholder_to_internal_entry() -> None:
-    """`[[TABLE:id]]` 被描述为内部写回入口，不再要求模型保留/补回占位符。"""
+    """`[[TABLE:id]]` 被描述为内部写回入口；param 模式要求模型原样保留占位符
+    作为真实表格的写回锚点；template 模式按容器主权分情况（表格容器保留、
+    纯文本容器降维丢弃）。两者都不为缺失的表补占位句。"""
     template_rendered = render_generate_by_template_prompt(build_prompt_input())
     param_rendered = render_generate_by_param_prompt(build_prompt_input(generation_style="param"))
 
@@ -188,6 +211,19 @@ def test_generate_prompts_flip_table_placeholder_to_internal_entry() -> None:
         assert "内部结构化写回入口" in rendered.system_prompt
         assert "不是最终正文的可见内容" in rendered.system_prompt or "不是最终正文可见内容" in rendered.system_prompt
         assert "不要" in rendered.system_prompt and "占位句" in rendered.system_prompt
+
+    # param 模式现在要求模型必须原样保留 [[TABLE:id]] 占位符（写回锚点），而不是删除它。
+    assert "必须" in param_rendered.system_prompt
+    assert "原样、独占一行" in param_rendered.system_prompt
+    assert "唯一可靠锚点" in param_rendered.system_prompt
+    assert "一旦你删掉它" in param_rendered.system_prompt
+    assert "结构化表锚点红线" in param_rendered.system_prompt
+
+    # template 模式按容器主权分情况：表格容器保留占位符，纯文本容器降维丢弃。
+    assert "表格容器" in template_rendered.system_prompt
+    assert "纯文本容器" in template_rendered.system_prompt
+    assert "原样、独占一行保留" in template_rendered.system_prompt
+    assert "唯一可靠锚点" in template_rendered.system_prompt
 
 
 def test_generate_param_prompt_preserves_field_shell_protection() -> None:
@@ -203,8 +239,8 @@ def test_generate_param_prompt_preserves_field_shell_protection() -> None:
 
 
 def test_verify_prompt_describes_table_placeholder_as_internal_entry() -> None:
-    """审核规则泛化重要性标识并排除技术符号；
-    占位符硬契约（附加到 user prompt）把占位符描述为内部写回入口且不要求补回。"""
+    """审核规则泛化重要性标识并排除技术符号；占位符硬契约（附加到 user prompt）
+    把占位符描述为内部写回入口：保留占位符是正确行为，既不要求补回也不要求删除。"""
     from backend.agents.generation.verify_agent_graph import (
         TABLE_PLACEHOLDER_CONTRACT_PROMPT,
     )
@@ -216,6 +252,9 @@ def test_verify_prompt_describes_table_placeholder_as_internal_entry() -> None:
     assert "内部写回入口" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
     assert "不应作为可见行" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
     assert "不要**为缺失" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+    # 现在还明确：保留占位符是正确行为，不要报 finding 要求删除占位符。
+    assert "正确且被要求" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+    assert "要求删除它" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
 
 
 def test_verify_prompt_states_protected_field_non_deletion_contract() -> None:
