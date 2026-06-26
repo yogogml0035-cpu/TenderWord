@@ -6,9 +6,7 @@ import sys
 import time
 from typing import Callable, Optional
 
-from backend.agents.generation.table_placeholder_utils import (
-    raise_if_table_placeholders_missing,
-)
+from backend.agents.generation.content_sanitizer import sanitize_generated_content
 from backend.prompts.generate_prompt import render_generate_prompt
 from backend.prompts.skill_prompt import render_task_skill_prompt
 from backend.prompts.types import (
@@ -191,11 +189,10 @@ def generate_polished_text(state: TenderGraphStateBase, config) -> TenderGraphSt
         except Exception as cb_exc:
             progress_log.debug(f"警告: LLM 完成回调失败: {cb_exc}")
 
-    raise_if_table_placeholders_missing(
-        tender_params,
-        content,
-        error_prefix="结构化表占位符缺失",
-    )
+    # 进入 polished_text 前过统一 sanitizer：删除 AI 自述/包装语、最终说明、Markdown 外壳、
+    # 无信息占位句（“须提供详细…”）；保留 [[TABLE:id]] 占位符、技术符号和重要性标识。
+    # 占位符是内部写回入口，是否可见由写回层（convert_lines_to_items）决定，不在此强制校验。
+    content = sanitize_generated_content(content)
 
     try:
         output_file_base = "-".join(filename_parts + ["初稿"]) if filename_parts else "初稿"

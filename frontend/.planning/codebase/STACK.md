@@ -1,6 +1,6 @@
 # 前端技术栈事实地图
 
-**分析日期：** 2026-06-18
+**分析日期：** 2026-06-25
 
 **范围：** 仅 `frontend/` 子项目。依据 `frontend/package.json`、`frontend/package-lock.json`、`frontend/next.config.ts`、`frontend/tsconfig.json`、`frontend/tsconfig.typecheck.json`、`frontend/jest.config.ts`、`frontend/playwright.config.ts`、`frontend/eslint.config.mjs`、`frontend/postcss.config.mjs`、`frontend/app/`、`frontend/components/`、`frontend/hooks/`、`frontend/lib/`、`frontend/stores/`、`frontend/types/`、`docs/frontend.md`、`docs/interfaces-runtime.md` 和 `README.md`。`frontend/.env.local`、`frontend/.env.local.example` 和 `frontend/.npmrc` 文件存在；只记录存在性，不读取内容。
 
@@ -124,4 +124,4 @@ npm run test:e2e
 
 ---
 
-*前端技术栈分析：2026-06-18*
+*前端技术栈分析：2026-06-25*

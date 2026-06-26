@@ -1,8 +1,8 @@
 # TenderWord 架构地图
 
-**生成日期：** 2026-06-18
+**生成日期：** 2026-06-25
 
-本文件是根级系统架构地图，描述 TenderWord 的系统边界、子系统职责和推荐理解路径。实现细节仍以代码为准；子系统内部事实以 2026-06-18 刷新的 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 为准。
+本文件是根级系统架构地图，描述 TenderWord 的系统边界、子系统职责和推荐理解路径。实现细节仍以代码为准；子系统内部事实以 2026-06-25 刷新的 `backend/.planning/codebase/` 和 `frontend/.planning/codebase/` 为准。
 
 ## 系统边界
 
@@ -58,7 +58,7 @@ TenderWord 是招标文档生成与修改系统，核心闭环是：
 - Word COM 生命周期、共享 Word helper、类型特化节点和 Prompt Layer。
 - 外部 LLM provider、招标详情接口和模板候选接口的后端代理。
 - `content_verify_agent` 的审核契约只保留真实需修复的问题；无问题或无需修改的审核项会在后端折叠为 `[]`，避免把空 findings 传播到 workspace audit 或前端过程卡。
-- content agent 生成正文中技术参数里的结构化表必须以 `[[TABLE:<id>]]` 占位符原样保留；占位符正则、缺失比对和 `AuditFinding` 构造集中在 `backend/agents/generation/table_placeholder_utils.py`，verify agent 据此校验占位符不丢失。
+- content agent 生成正文中技术参数里的结构化表以 `[[TABLE:<id>]]` 作为内部写回入口；占位符识别和写回恢复逻辑集中在 `backend/agents/generation/table_placeholder_utils.py` 与 `backend/helper/word_helper/text_parsing.py`，verify agent 不再要求最终正文原样保留占位符，缺失占位符也不再单独产出 finding。
 
 事实入口：
 - `backend/.planning/codebase/ARCHITECTURE.md`
@@ -265,3 +265,7 @@ backend/prompts/ 与 backend/skills/
 - 长期业务规则进入 `asset/`；影响多数未来需求的规则再上提到 `AGENTS.md`。
 - 接口变化必须同步 `INTERFACES.md`、前后端类型和测试；新增任务类型还要同步任务状态、SSE、下载卡和会话结果语义。
 - 仅文档变更至少运行 `git diff --check` 和密钥模式扫描。
+
+---
+
+*后端架构分析：2026-06-25*

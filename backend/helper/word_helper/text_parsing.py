@@ -23,6 +23,18 @@ from backend.util.word_util.table_models import (
     render_structured_table_grid,
 )
 
+# `[[TABLE:id]]` 是内部结构化写回入口，绝不可见写入最终 Word。
+# 独占一行的占位符由 convert_lines_to_items 单独处理；这里清理行内残留的占位符 token，
+# 避免模型把占位符和正文拼在同一行时把占位符写进 Word。
+_INLINE_TABLE_PLACEHOLDER_RE = re.compile(r"\[\[TABLE:[A-Za-z0-9_-]+\]\]")
+
+
+def _strip_inline_table_placeholders(line: str) -> str:
+    cleaned = _INLINE_TABLE_PLACEHOLDER_RE.sub("", str(line or ""))
+    # 仅清理占位符 token 本身，不改变其余正文；若清理后只剩空白，保留为原样交给上游判断。
+    return cleaned
+
+
 # ---------------------------------------------------------------------------
 # Markdown 表格解析
 # ---------------------------------------------------------------------------
@@ -140,6 +152,16 @@ def convert_lines_to_items(
     每个 item 为：
     - {"type": "text", "line": "..."} — 普通文本行
     - {"type": "table", "rows": [[...]]} — 表格
+    - {"type": "structured_table", ...} — 结构化表（命中 sidecar 模型）
+
+    `[[TABLE:id]]` 占位符契约：
+    - 它是内部结构化写回入口，**不是最终正文可见内容**。
+    - 命中 sidecar 结构化表模型时，恢复为真实结构化表（structured_table）。
+    - 未命中 sidecar 时，**静默丢弃该占位符行**，绝不作为可见文本写入 Word。
+    - 占位符前的 Markdown/pipe 表格投影只是模型对“真实表”的近似，并非真实数据：
+      当其后紧跟 `[[TABLE:id]]` 且该 id 未命中 sidecar 时，整段投影表一并丢弃，
+      避免把近似/编造数据写入 Word。能通过内容匹配到其它 sidecar 模型的投影表仍按
+      structured_table 恢复；既无占位符邻居又无 sidecar 匹配的独立表格按普通表格输出。
     """
     items: List[Dict[str, Any]] = []
     table_model_index = build_structured_table_model_index(structured_table_models)
@@ -151,8 +173,7 @@ def convert_lines_to_items(
             table_model = table_model_index.get(table_id)
             if table_model is not None:
                 items.append(_structured_table_item(table_id, table_model))
-            else:
-                items.append({"type": "text", "line": line})
+            # 未命中 sidecar：占位符是内部入口，静默丢弃，不作为可见文本写入 Word。
             idx += 1
             continue
         maybe_table, next_idx = parse_table_block(lines, idx)
@@ -161,6 +182,7 @@ def convert_lines_to_items(
                 match_table_placeholder(lines[next_idx]) if next_idx < len(lines) else None
             )
             if next_table_id is not None and next_table_id in table_model_index:
+                # 投影表后紧跟可恢复的占位符：用真实结构化表替代近似投影。
                 items.append(
                     _structured_table_item(
                         next_table_id,
@@ -177,11 +199,25 @@ def convert_lines_to_items(
             if matched_model is not None:
                 matched_table_id, table_model = matched_model
                 items.append(_structured_table_item(matched_table_id, table_model))
-            else:
-                items.append({"type": "table", "rows": maybe_table})
+                # 命中 sidecar 时，若其后紧跟未命中 sidecar 的占位符，一并跳过该占位符行。
+                if next_table_id is not None and next_table_id not in table_model_index:
+                    idx = next_idx + 1
+                    continue
+                idx = next_idx
+                continue
+
+            # 投影表后紧跟 `[[TABLE:id]]` 但该 id 未命中 sidecar：投影只是对真实表的近似，
+            # 真实数据应来自 sidecar，既无法恢复又不能编造，整段投影表连同占位符一并丢弃。
+            if next_table_id is not None and next_table_id not in table_model_index:
+                idx = next_idx + 1
+                continue
+
+            items.append({"type": "table", "rows": maybe_table})
             idx = next_idx
         else:
-            items.append({"type": "text", "line": line})
+            # 防御性清理：行内残留的 [[TABLE:id]] 是内部写回入口，绝不写入最终 Word。
+            text_line = _strip_inline_table_placeholders(line)
+            items.append({"type": "text", "line": text_line})
             idx += 1
     return items
 

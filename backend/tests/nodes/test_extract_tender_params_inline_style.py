@@ -282,7 +282,7 @@ def test_extract_tender_params_joins_multiple_tender_param_paths(
     assert structured_extract_calls == ["TP1_"]
 
 
-def test_extract_tender_params_keeps_table_context_without_markdown_projection(
+def test_extract_tender_params_keeps_full_markdown_projection_for_structured_table(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -308,7 +308,7 @@ def test_extract_tender_params_keeps_table_context_without_markdown_projection(
         extract_module,
         "_extract_structured_tender_param_file",
         lambda _file_path_obj, *, file_index: (
-            "附件三 技术参数表\n楼宇 / 岗位\n[[TABLE:TP1_1]]\n注：按附件执行",
+            "附件三 技术参数表\n| 楼宇 | 岗位 |\n| --- | --- |\n| 门诊楼 | 保洁 |\n[[TABLE:TP1_1]]\n注：按附件执行",
             [
                 {
                     "table_id": "TP1_1",
@@ -332,9 +332,10 @@ def test_extract_tender_params_keeps_table_context_without_markdown_projection(
     )
 
     assert "附件三 技术参数表" in result["tender_params"]
+    assert "| 楼宇 | 岗位 |" in result["tender_params"]
     assert "[[TABLE:TP1_1]]" in result["tender_params"]
     assert "注：按附件执行" in result["tender_params"]
-    assert "| --- |" not in result["tender_params"]
+    assert "| --- | --- |" in result["tender_params"]
     assert result["tender_param_table_models"][0]["cells"][0]["col_span"] == 2
 
 

@@ -367,6 +367,18 @@ function ContentAgentProcessView({ contentAgent }: { contentAgent: SSEContentAge
             </p>
           </div>
           {finalResult.summary && <p className="mt-1 text-xs leading-5 text-gray-600">{finalResult.summary}</p>}
+          {contentAgent.highlights.length > 0 && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-amber-800">
+                第 3 轮后仍有 {contentAgent.highlights.length} 个问题未通过，请按依据/修复建议人工核对：
+              </p>
+              <ul className="mt-2 space-y-2">
+                {contentAgent.highlights.map((finding, index) => (
+                  <ContentAgentFindingItem key={`final-highlight-${index}`} finding={finding} />
+                ))}
+              </ul>
+            </div>
+          )}
           <ContentAgentRawBlock label="查看最终正文" content={finalResult.content} />
         </section>
       )}

@@ -20,7 +20,6 @@ from backend.util.word_util.word_application_util import (
 from backend.util.word_util.table_models import (
     StructuredTableModel,
     render_structured_table_markdown,
-    render_structured_table_prompt_context,
 )
 
 
@@ -68,6 +67,57 @@ SUBSCRIPT_MAP = {
 }
 
 WORD_XML_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+# Symbol 字体（w:font="Symbol"）通过 <w:sym w:char="xxxx"/> 表示特殊字符，
+# char 是十六进制私有区码位（Symbol 字体内部编码），需要在抽取阶段映射回可见字符，
+# 否则下游会看到乱码或空。这里覆盖常见的标书/技术参数符号。
+# char 属性值大小写不敏感，统一按大写匹配。
+SYMBOL_FONT_NAME = "symbol"
+# 关键：Word 把 Delta（Δ）画成 <w:sym w:font="Symbol" w:char="F044"/>。
+# 抽取层必须把它转成可见 Δ，否则重要性标识会丢失，导致生成/审核/写回链路整体失真。
+SYMBOL_FONT_CHAR_MAP = {
+    "F044": "Δ",  # 增量符号 Delta，标书中常用作紧邻编号的重要性标识
+    "F0D7": "Δ",  # 部分模板用 D7 表示 Delta
+    "F0E5": "D",  # Symbol 'D'
+    "F0B1": "±",  # 加减号
+    "F0B4": "×",  # 乘号
+    "F0B0": "°",  # 度
+    "F051": "Ö",  # 欧姆符号 Ö/Ω 在不同字体中映射
+    "F0B3": "³",  # 上标 3
+    "F0B2": "²",  # 上标 2
+    "F0B0": "°",
+    "F0A8": "·",  # 中点
+    "F0A9": "√",  # 对号
+    "F0BF": "￮",
+}
+
+
+def _resolve_sym_element(run_content: str) -> str:
+    """从 <w:r> 内容中解析 <w:sym w:font="..." w:char="..."/>，返回可见字符或空串。
+
+    Symbol 字体的 sym 元素不产生可见文本，必须显式映射；只有 font 为 Symbol
+    且 char 命中映射表时才替换，其它情况返回空串（保持原有跳过行为）。
+    """
+    sym_match = re.search(
+        r'<w:sym\s+[^>]*?w:font=["\']([^"\']+)["\'][^>]*?w:char=["\']([0-9A-Fa-f]+)["\']',
+        run_content,
+    )
+    if sym_match is None:
+        # 兼容属性顺序相反的写法：char 在前，font 在后
+        sym_match = re.search(
+            r'<w:sym\s+[^>]*?w:char=["\']([0-9A-Fa-f]+)["\'][^>]*?w:font=["\']([^"\']+)["\']',
+            run_content,
+        )
+        if sym_match is None:
+            return ""
+        char_code = sym_match.group(1)
+        font_name = sym_match.group(2)
+    else:
+        font_name = sym_match.group(1)
+        char_code = sym_match.group(2)
+    if str(font_name or "").strip().lower() != SYMBOL_FONT_NAME:
+        return ""
+    return SYMBOL_FONT_CHAR_MAP.get(str(char_code or "").strip().upper(), "")
 
 
 def _xml_unescape(text):
@@ -148,6 +198,18 @@ def _process_run_text(run_content, align_pattern, position_pattern, text_pattern
                 logger.debug(f"[_process_run_text] 解析position偏移失败（可忽略）: {e}")
 
     run_texts = []
+    # Symbol 字体（如 <w:sym w:font="Symbol" w:char="F044"/>）不产生 <w:t>，
+    # 必须先把映射后的可见字符（如 Δ）拼到 run 文本前部，保证段落/cell/prompt context 一致。
+    sym_char = ""
+    if "<w:sym" in run_content:
+        try:
+            sym_char = _resolve_sym_element(run_content)
+        except Exception as e:
+            logger.debug(f"[_process_run_text] 解析 w:sym 失败（可忽略）: {e}")
+            sym_char = ""
+    if sym_char:
+        run_texts.append(sym_char)
+
     text_matches = text_pattern.finditer(run_content)
     for tm in text_matches:
         raw_text = tm.group(1)
@@ -203,6 +265,25 @@ def _iter_paragraph_texts_from_xml(
                         logger.debug(f"[_iter_paragraph_texts_from_xml] 解析position失败（可忽略）: {e}")
 
             texts = []
+            # Symbol 字体 sym 元素（如 <w:sym w:font="Symbol" w:char="F044"/> -> Δ）
+            # 不产生 <w:t>，必须先把映射后的可见字符拼到 run 文本前，保证 cell/prompt
+            # context 与段落抽取一致。
+            sym_char = ""
+            for sym_node in run.findall(".//w:sym", WORD_XML_NS):
+                font_name = str(
+                    sym_node.attrib.get(f"{{{WORD_XML_NS['w']}}}font", "") or ""
+                ).strip().lower()
+                char_code = str(
+                    sym_node.attrib.get(f"{{{WORD_XML_NS['w']}}}char", "") or ""
+                ).strip().upper()
+                if font_name != SYMBOL_FONT_NAME or not char_code:
+                    continue
+                mapped = SYMBOL_FONT_CHAR_MAP.get(char_code, "")
+                if mapped:
+                    sym_char = mapped
+                    break
+            if sym_char:
+                texts.append(sym_char)
             for text_node in run.findall(".//w:t", WORD_XML_NS):
                 text_value = _xml_unescape(text_node.text or "")
                 if is_superscript:
@@ -1021,10 +1102,10 @@ def extract_content_with_table_models(
             if table_model is None:
                 continue
             table_models.append(table_model)
+            table_markdown = render_structured_table_markdown(table_model)
             placeholder = f"[[TABLE:{table_model['table_id']}]]"
-            table_prompt_context = render_structured_table_prompt_context(table_model)
-            if table_prompt_context:
-                result_parts.append(table_prompt_context)
+            if table_markdown:
+                result_parts.append(table_markdown)
             result_parts.append(placeholder)
 
         rendered = "\n".join(part for part in result_parts if part is not None)

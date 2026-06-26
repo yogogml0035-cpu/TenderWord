@@ -191,7 +191,7 @@ describe('TaskContentMessage', () => {
     expect(draftDetails).not.toHaveAttribute('open');
   });
 
-  it('does not repeat final content_agent highlights as a separate attention block', () => {
+  it('renders remaining content_agent highlights inside the final completion block', () => {
     render(
       <TaskContentMessage
         message={createMessage({
@@ -204,16 +204,16 @@ describe('TaskContentMessage', () => {
             agentStepRound: 3,
             contentAgent: {
               phase: 'final',
-              summary: '最终完成，修复 3 轮，最终正文约 4 字。',
+              summary: '最终完成，修复 3 轮，最终正文约 4 字。 仍保留 1 个问题记录。',
               rounds: [],
               highlights: [
                 {
-                  evidence: '最终重复提示',
-                  fix_hint: '不再单独展示',
+                  evidence: '正文仍有多余内容',
+                  fix_hint: '删除多余内容',
                 },
               ],
               final_result: {
-                summary: '最终完成，修复 3 轮，最终正文约 4 字。',
+                summary: '最终完成，修复 3 轮，最终正文约 4 字。 仍保留 1 个问题记录。',
                 revision_rounds: 3,
                 final_chars: 4,
                 issue_count: 1,
@@ -225,9 +225,15 @@ describe('TaskContentMessage', () => {
       />
     );
 
+    // 第 3 轮后剩余问题只在“最终完成”区逐条展示依据/修复建议。
     expect(screen.getByText('最终完成')).toBeInTheDocument();
+    expect(screen.getByText('正文仍有多余内容')).toBeInTheDocument();
+    expect(screen.getByText('删除多余内容')).toBeInTheDocument();
+    expect(
+      screen.getByText(/仍有 1 个问题未通过/),
+    ).toBeInTheDocument();
+    // 不再单独渲染历史“最终仍需关注”汇总块。
     expect(screen.queryByText('最终仍需关注')).not.toBeInTheDocument();
-    expect(screen.queryByText('最终重复提示')).not.toBeInTheDocument();
   });
 
   it('uses the Chinese comment_agent process card title', () => {

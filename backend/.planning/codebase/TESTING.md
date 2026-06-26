@@ -1,6 +1,6 @@
 # 后端测试模式
 
-**分析日期：** 2026-06-18
+**分析日期：** 2026-06-25
 
 **范围：** `backend/tests/`、`backend/requirements.txt`、`backend/scripts/diagnose_word.py`、`docs/backend.md`、`docs/interfaces-runtime.md`、`docs/knowledge-validation.md` 和与测试直接相关的后端实现文件。`backend/.env` 文件存在，但不得读取或引用内容。
 
@@ -202,7 +202,7 @@ def build_request(*, template: str | None, generation_mode=GenerationMode.WORKFL
 ## Prompt、LLM 与 Retrieval 测试策略
 
 - Prompt routing 使用真实 `GeneratePromptInput` 和 prompt builder；`backend/tests/prompts/test_generate_prompt_routing.py` 保护 `generation_style="param"` 与模板模式分派。
-- 结构化表占位符使用真实 `backend/agents/generation/table_placeholder_utils.py`；`backend/tests/agents/test_table_placeholder_utils.py` 和 `backend/tests/agents/test_generation_content_agent.py` 覆盖缺失占位符审计、恢复和 fail-fast。
+- 结构化表占位符使用真实 `backend/agents/generation/table_placeholder_utils.py`；`backend/tests/agents/test_table_placeholder_utils.py`、`backend/tests/agents/test_generation_content_agent.py` 和 `backend/tests/helper/test_text_parsing_table_placeholder.py` 覆盖占位符提取、审核不再对缺失占位符报 finding、以及写回层对未命中 sidecar 占位符/投影表的静默丢弃语义。
 - LLM stream 测试只 mock provider client、heartbeat 或 settings 属性；`backend/tests/util/test_llm_stream_utils.py` 覆盖 `LLM_STREAM_TIMEOUT_SECONDS`、provider extra body 和 chat stream 终态。
 - Retrieval 测试以本地 Markdown bad case、fake embedding/Qdrant client 和 `tmp_path` 为主；`backend/tests/retrieval/test_comment_bad_case_runtime.py` 覆盖 hybrid / BM25 fallback，`backend/tests/retrieval/test_qdrant_store.py` 覆盖 Qdrant client proxy 行为。
 - 批注 bad case 检索失败只断言降级、warning 或审计 JSON，不要求外部 Qdrant 服务在线。
@@ -306,7 +306,7 @@ assert events[0]["event"] == "run_started"
 - Graph/type 路由变更：运行 `python -m pytest tests/graphs -v` 和 `backend/tests/services/test_document_service_initial_state.py`。
 - Generate-only 字段、生成模式、批注开关、样式回填变更：运行 `backend/tests/models/test_generate_request_generation_style.py`、`backend/tests/services/test_document_service_initial_state.py`、`backend/tests/graphs/test_generation_mode_branching.py`。
 - Rewrite / uploaded file rewrite 变更：运行 `backend/tests/api/test_agent_run_api.py`、`backend/tests/services/test_agent_run_service.py`、`backend/tests/agents/test_task_context_assistant_tools.py`、`backend/tests/nodes/test_rewrite_nodes.py`、`backend/tests/nodes/test_uploaded_rewrite_inline_style_context.py`、`backend/tests/progress/test_uploaded_rewrite_progress_tracking.py`。
-- Content agent / 结构化表占位符硬契约变更：运行 `backend/tests/agents/test_generation_content_agent.py` 和 `backend/tests/agents/test_table_placeholder_utils.py`，再运行 `backend/tests/nodes/test_tender_aware_word_dispatch.py` 覆盖 rewrite 写回分支。
+- Content agent / 结构化表占位符入口契约变更：运行 `backend/tests/agents/test_generation_content_agent.py`、`backend/tests/agents/test_table_placeholder_utils.py` 和 `backend/tests/helper/test_text_parsing_table_placeholder.py`，再运行 `backend/tests/nodes/test_tender_aware_word_dispatch.py` 覆盖 rewrite 写回分支。
 - Word helper 变更：运行相关 `backend/tests/helper/`，再运行受影响的 `backend/tests/nodes/`。
 - Word node/direct-replace 变更：运行聚焦的 `backend/tests/nodes/test_<node>.py`，路由变化时再运行 `backend/tests/graphs/`。
 - Prompt 或 LLM stream 变更：运行 `backend/tests/prompts/`、`backend/tests/util/test_llm_stream_utils.py` 和调用方测试。
@@ -323,4 +323,4 @@ assert events[0]["event"] == "run_started"
 
 ---
 
-*后端测试分析：2026-06-18*
+*后端测试分析：2026-06-25*

@@ -1,6 +1,6 @@
 # 后端技术栈
 
-**分析日期：** 2026-06-18
+**分析日期：** 2026-06-25
 
 **范围：** 本文只覆盖 `backend/` 子项目。事实来源包括 `backend/requirements.txt`、`backend/main.py`、`backend/config/settings.py`、`backend/api/`、`backend/services/`、`backend/graphs/`、`backend/agents/`、`backend/retrieval/`、`backend/util/word_util/`、`README.md`、`docs/backend.md`、`docs/interfaces-runtime.md`、`scripts/start-dev.ps1`、`scripts/start-dev-win.ps1`、`scripts/start-dev-wsl.sh` 和项目内 `.agents/skills/ai-coding-first/SKILL.md`、`.agents/skills/gsd-map-codebase/SKILL.md`。`backend/.env` 与 `backend/.env.example` 均存在；本次仅确认文件存在，未读取内容。
 
@@ -132,4 +132,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-dev-win.ps1 
 
 ---
 
-*Stack analysis: 2026-06-18*
+*后端技术栈分析：2026-06-25*

@@ -1,10 +1,10 @@
-# Codebase Concerns
+# 前端风险事实地图
 
-**分析日期：** 2026-06-18
+**分析日期：** 2026-06-25
 
 **范围：** `frontend/` 前端风险事实地图。必要时引用后端契约源文件来说明前后端同步边界；未读取 `frontend/.env.local`、`frontend/.npmrc` 或任何凭据文件内容。
 
-## Tech Debt
+## 技术债
 
 **核心文件职责密集：**
 - 问题： 会话、任务、SSE、表单、聊天、API 和 rewrite 的关键行为集中在少数大文件中。当前实现体量较大的文件包括 `frontend/stores/chatStore.ts`、`frontend/components/forms/TenderFormShared.tsx`、`frontend/components/chat/ChatPanel.tsx`、`frontend/lib/api.ts`、`frontend/hooks/useChatSSE.ts`、`frontend/components/chat/FormPanel.tsx`、`frontend/types/api.ts`。
@@ -42,7 +42,7 @@
 - 影响： 新页面误接 `useTaskProgress()` 可能只得到通用进度，不会更新聊天消息组、下载卡、agent step 卡、session replay 和后端重启中断状态。
 - 修复方向： 工作台任务优先复用 `useChatSSE()`；通用 hook 只用于不需要会话消息副作用的只读监控场景。
 
-## Known Bugs
+## 已知问题
 
 **全局主色 hover token 重复定义：**
 - Symptoms: `frontend/app/globals.css` 的 `:root` 中 `--primary-hover` 被定义两次，后定义值覆盖前定义值；`--color-primary-hover` 继续引用被覆盖后的变量。
@@ -56,7 +56,7 @@
 - Trigger: 用户拖入非预期扩展名文件时，前端会发起上传请求，由后端 `persist_file_bytes()` 返回类型错误。
 - Workaround: 后端 `backend/util/common_util/upload_storage.py` 继续作为最终文件类型和大小防线；前端如需更早提示，应在 `FileUploader` 增加扩展名校验并补单测。
 
-## Security Considerations
+## 安全注意事项
 
 **前端没有认证和授权边界：**
 - 风险： `sessionStorage` 会话、conversation id、task id、task heartbeat 和草稿状态都不是身份凭据，不能用于权限判断。
@@ -82,7 +82,7 @@
 - Current mitigation: 本次审计只记录文件存在性，未读取内容。
 - Recommendations: 文档、测试夹具、E2E 截图说明和最终回复不得写入 `.env`、token、私有凭据或真实客户原文。
 
-## Performance Bottlenecks
+## 性能瓶颈
 
 **浏览器会话和任务消息存储会随对话增长：**
 - 问题： 会话、草稿、任务摘要、消息组和未读结果持久化到浏览器 `sessionStorage`；运行中 stream 快照另存在内存 store。
@@ -92,7 +92,7 @@
 
 **SSE 高事件流会放大内存和重放成本：**
 - 问题： `frontend/lib/sse.ts` 为每条连接保留 `seenEventIds` 去重，上限 5000；`frontend/hooks/useChatSSE.ts` 把日志、AI 文本、进度和 agent step 写入 `chatStreamStore`。
-- 相关文件： `frontend/lib/sse.ts`, `frontend/hooks/useChatSSE.ts`, `frontend/stores/chatStreamStore.ts`, `backend/core/sse_manager.py`, `backend/api/stream.py`
+- 相关文件： `frontend/lib/sse.ts`, `frontend/hooks/useChatSSE.ts`, `frontend/stores/chatStreamStore.ts`, `backend/core/sse_manager.ts`, `backend/api/stream.ts`
 - Cause: 断线重连、Last-Event-ID 回放、过程卡实时展示都依赖运行时缓存。
 - 改进路径： 新增高频 SSE event 前定义采样、压缩或摘要策略，并补长流重连测试。
 
@@ -108,7 +108,7 @@
 - Cause: 候选列表依赖当前招标编号、项目名和后端重排策略。
 - 改进路径： 如需跨会话缓存，先定义失效规则、刷新按钮行为和后端候选策略，再改缓存层。
 
-## Fragile Areas
+## 脆弱区域
 
 **Generate 提交状态机：**
 - 相关文件： `frontend/components/forms/TenderFormShared.tsx`, `frontend/components/chat/FormPanel.tsx`, `frontend/lib/formDataConverter.ts`, `frontend/lib/api.ts`, `frontend/stores/chatStore.ts`
@@ -146,7 +146,7 @@
 - 安全修改： 保持 `taskKind === 'generate'` 才允许补充批注；请求只携带当前会话、当前 output file 和模型。
 - 测试覆盖： `frontend/__tests__/unit/components/chat/test_message_list.test.tsx`, `frontend/e2e/test_comment_supplement.spec.ts`
 
-## Scaling Limits
+## 扩展边界
 
 **浏览器 session 不是多设备会话系统：**
 - 当前能力： `frontend/stores/chatStore.ts` 和 `frontend/stores/chatTaskSessionStore.ts` 使用浏览器 `sessionStorage` 保存当前浏览器会话状态。
@@ -168,7 +168,7 @@
 - 限制： `npm run lint`、`npm run type-check`、`npm run test`、`npm run test:e2e` 和文档校验是否执行取决于人工或外部流水线。
 - 扩展路径： 建立 CI 时按前端包边界运行 `frontend/package.json` 的脚本，并保留文档变更的 `git diff --check`。
 
-## Dependencies at Risk
+## 高风险依赖
 
 **Windows/WSL 原生依赖不能混用：**
 - 风险： Next、SWC、Tailwind、Playwright 和相关原生包依赖平台二进制，Windows 与 WSL 复用同一 `node_modules` 容易失败。
@@ -185,7 +185,7 @@
 - 影响： 本机已有服务、Chrome 渠道缺失或端口冲突会影响 E2E 稳定性。
 - 迁移建议： E2E 调试时明确端口和浏览器渠道；CI 中使用 Playwright 自带浏览器并保持 `workers: 1`。
 
-## Missing Critical Features
+## 缺失的关键能力
 
 **自动契约同步未检测到：**
 - 问题： 未检测到从后端 Pydantic schema 自动生成 `frontend/types/api.ts` 的流程。
@@ -203,7 +203,7 @@
 - 问题： `frontend/e2e/` 中存在 `page.screenshot()` 人工证据输出，但未检测到 `toHaveScreenshot()`、baseline 截图断言或视觉 diff 阈值。
 - Blocks: 布局、颜色 token、按钮文案溢出和移动端重排只能靠人工截图审查或普通 DOM 断言发现。
 
-## Test Coverage Gaps
+## 测试覆盖缺口
 
 **真实 Word COM 生成闭环：**
 - 未覆盖测试： 真实后端、任务队列、LangGraph、Word/WPS COM、文件写回、下载文件内容和补充批注写回。
@@ -255,4 +255,4 @@
 
 ---
 
-*Concerns audit: 2026-06-18*
+*前端风险分析：2026-06-25*

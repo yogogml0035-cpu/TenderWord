@@ -19,7 +19,17 @@ from backend.agents.generation import content_agents as content_agent_module
 from backend.agents.generation import revise_agent_graph as revise_agent_graph_module
 from backend.agents.generation import verify_agent_graph as verify_agent_graph_module
 from backend.agents.generation.types import AgentStepPayload, AuditFinding
-from backend.agents.generation.workspace import FINAL_POLISHED_TEXT_PATH
+from backend.agents.generation.workspace import (
+    FINAL_POLISHED_TEXT_PATH,
+    audit_path,
+    create_workspace_backend,
+    create_workspace_dir,
+    ensure_round_within_protocol,
+    infer_next_audit_round,
+    infer_next_revision_round,
+    validate_round_protocol,
+    write_generation_context,
+)
 from backend.agents.log_naming import build_agent_log_stem
 
 
@@ -578,9 +588,11 @@ def test_content_runner_fails_when_final_file_empty() -> None:
         run_content_agent_generation({}, runner=runner)
 
 
-def test_content_runner_restores_missing_table_placeholder_in_final_text(
+def test_content_runner_no_longer_restores_table_placeholder_in_final_text(
     _redirect_content_agent_workspace,
 ) -> None:
+    """`[[TABLE:id]]` 是内部写回入口，最终正文不再自动补回占位符；
+    写回层根据结构化表模型决定恢复或丢弃，缺失占位符不视为错误。"""
     runner = FakeRunner(
         [
             {"draft": "draft text"},
@@ -599,13 +611,16 @@ def test_content_runner_restores_missing_table_placeholder_in_final_text(
         {
             "configurable": {
                 "model_provider": "deepseek",
-                "task_id": "task-final-restores-table",
+                "task_id": "task-final-no-restore-table",
             }
         },
         runner=runner,
     )
 
-    assert "[[TABLE:TP1_1]]" in result.polished_text
+    # 占位符不再被自动补回；final 正文保持模型输出，缺失占位符不报错。
+    assert "[[TABLE:TP1_1]]" not in result.polished_text
+    assert "技术参数" in result.polished_text
+    assert result.audit_findings == []
 
 
 def test_content_runner_rechecks_final_text_when_last_audit_has_findings(monkeypatch) -> None:
@@ -722,9 +737,11 @@ def test_fake_runner_injection_point(monkeypatch) -> None:
     assert result.polished_text == "injected text"
 
 
-def test_content_verify_agent_flags_missing_table_placeholder_when_llm_returns_empty(
+def test_content_verify_agent_no_longer_flags_missing_table_placeholder(
     monkeypatch,
 ) -> None:
+    """`[[TABLE:id]]` 占位符是内部写回入口，缺失它不再产生 finding；
+    审核环节不再要求模型补回或原样保留占位符。"""
     async def fake_stream_llm_completion(**_kwargs):
         return "[]"
 
@@ -748,10 +765,7 @@ def test_content_verify_agent_flags_missing_table_placeholder_when_llm_returns_e
     )
 
     findings = result["structured_response"]
-    assert len(findings) == 1
-    assert "[[TABLE:TP1_1]]" in findings[0]["evidence"]
-    assert "缺失该占位符" in findings[0]["evidence"]
-    assert "补回占位符 [[TABLE:TP1_1]]" in findings[0]["fix_hint"]
+    assert findings == []
 
 
 def test_content_verify_agent_keeps_empty_when_all_table_placeholders_present(
@@ -777,7 +791,8 @@ def test_content_verify_agent_keeps_empty_when_all_table_placeholders_present(
     assert result["structured_response"] == []
 
 
-def test_content_verify_agent_reports_only_missing_table_placeholder(monkeypatch) -> None:
+def test_content_verify_agent_no_longer_reports_missing_table_placeholder(monkeypatch) -> None:
+    """缺失占位符不再单独报 finding；多个占位符缺失也不产生任何占位符相关 finding。"""
     async def fake_stream_llm_completion(**_kwargs):
         return "[]"
 
@@ -796,12 +811,13 @@ def test_content_verify_agent_reports_only_missing_table_placeholder(monkeypatch
     )
 
     findings = result["structured_response"]
-    assert len(findings) == 1
-    assert "[[TABLE:TP1_2]]" in findings[0]["evidence"]
-    assert "[[TABLE:TP1_1]]" not in findings[0]["evidence"]
+    assert findings == []
 
 
-def test_content_verify_agent_appends_placeholder_finding_to_llm_findings(monkeypatch) -> None:
+def test_content_verify_agent_does_not_append_placeholder_finding_to_llm_findings(
+    monkeypatch,
+) -> None:
+    """占位符缺失不再追加 finding；LLM 自身的审核结果原样保留，不被占位符检查覆盖。"""
     async def fake_stream_llm_completion(**_kwargs):
         return '[{"evidence":"缺少 ★ 指标","fix_hint":"补充 ★ 符号"}]'
 
@@ -825,14 +841,16 @@ def test_content_verify_agent_appends_placeholder_finding_to_llm_findings(monkey
     )
 
     findings = result["structured_response"]
-    assert len(findings) == 2
+    assert len(findings) == 1
     assert findings[0]["evidence"] == "缺少 ★ 指标"
-    assert "[[TABLE:TP1_1]]" in findings[1]["evidence"]
+    # 不再追加占位符相关 finding。
+    assert not any("[[TABLE:" in f["evidence"] for f in findings)
 
 
-def test_content_verify_agent_prompt_states_table_placeholder_is_hard_contract(
+def test_content_verify_agent_prompt_states_table_placeholder_is_internal_entry(
     monkeypatch,
 ) -> None:
+    """审核提示词把 `[[TABLE:id]]` 描述为内部写回入口，且明确不要求补回占位符。"""
     calls: list[dict[str, object]] = []
 
     async def fake_stream_llm_completion(**kwargs):
@@ -855,13 +873,15 @@ def test_content_verify_agent_prompt_states_table_placeholder_is_hard_contract(
 
     user_prompt = str(calls[0]["user_prompt"])
     assert "结构化表占位符硬契约" in user_prompt
-    assert "Markdown 表格" in user_prompt
-    assert "`[[TABLE:...]]`" in user_prompt
+    assert "内部写回入口" in user_prompt
+    assert "不应作为可见行" in user_prompt
+    assert "不要**为缺失" in user_prompt
 
 
-def test_verify_final_text_findings_reports_missing_placeholder_when_llm_empty(
+def test_verify_final_text_findings_no_longer_reports_missing_placeholder(
     monkeypatch,
 ) -> None:
+    """最终复核不再叠加占位符缺失检查；即使 LLM 返回 [] 且正文缺占位符，也不报 finding。"""
     async def fake_stream_llm_completion(**_kwargs):
         return "[]"
 
@@ -885,8 +905,7 @@ def test_verify_final_text_findings_reports_missing_placeholder_when_llm_empty(
         model_provider="deepseek",
     )
 
-    assert len(findings) == 1
-    assert "[[TABLE:TP1_1]]" in findings[0].evidence
+    assert findings == []
 
 
 def test_content_runner_final_recheck_allows_missing_placeholder_when_section_removed(
@@ -930,3 +949,582 @@ def test_content_runner_final_recheck_allows_missing_placeholder_when_section_re
     assert result.audit_findings == [
         AuditFinding(evidence="正文仍有多余内容", fix_hint="删除多余内容")
     ]
+
+
+def test_infer_next_audit_round_raises_when_all_rounds_present(tmp_path) -> None:
+    workspace_dir = create_workspace_dir("task-infer-audit")
+    backend = create_workspace_backend(workspace_dir)
+    for round_index in range(1, 4):
+        backend.write(audit_path(round_index), "[]")
+
+    # 第 3 轮审核产物已存在，第 4 轮写入路径不得产生。
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        infer_next_audit_round(backend)
+
+
+def test_infer_next_revision_round_raises_when_all_rounds_present(tmp_path) -> None:
+    workspace_dir = create_workspace_dir("task-infer-revision")
+    backend = create_workspace_backend(workspace_dir)
+    for round_index in range(1, 4):
+        backend.write(f"/revisions/round-{round_index}.md", f"revision {round_index}")
+
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        infer_next_revision_round(backend)
+
+
+def test_ensure_round_within_protocol_accepts_valid_rounds() -> None:
+    assert ensure_round_within_protocol(1) == 1
+    assert ensure_round_within_protocol(3) == 3
+
+
+def test_ensure_round_within_protocol_rejects_out_of_range_rounds() -> None:
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        ensure_round_within_protocol(4, artifact_type="审核")
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        ensure_round_within_protocol(0)
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        ensure_round_within_protocol(-1)
+
+
+def test_verify_agent_graph_raises_and_skips_round4_when_three_rounds_exist(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    workspace_dir = create_workspace_dir("task-verify-round4")
+    backend = create_workspace_backend(workspace_dir)
+    write_generation_context(
+        backend,
+        {
+            "generation_style": "template",
+            "current_text": "采购需求正文",
+            "model_provider": "deepseek",
+        },
+    )
+    for round_index in range(1, 4):
+        backend.write(audit_path(round_index), "[]")
+        backend.write(f"/revisions/round-{round_index}.md", f"revision {round_index}")
+
+    async def fake_stream_llm_completion(**_kwargs):
+        pytest.fail("协议轮次用尽时不应再调用审核 LLM")
+
+    monkeypatch.setattr(
+        verify_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        verify_agent_graph_module.create_verify_agent_graph().invoke(
+            {
+                "current_text": "采购需求正文",
+                "model_provider": "deepseek",
+            },
+            {
+                "configurable": {
+                    "content_agent_backend": backend,
+                }
+            },
+        )
+
+    # 第 4 轮审核产物不得被写出。
+    assert backend.read(audit_path(4)).file_data is None
+
+
+def test_revise_agent_graph_raises_and_skips_round4_when_three_rounds_exist(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    workspace_dir = create_workspace_dir("task-revise-round4")
+    backend = create_workspace_backend(workspace_dir)
+    for round_index in range(1, 4):
+        backend.write(audit_path(round_index), "[]")
+        backend.write(f"/revisions/round-{round_index}.md", f"revision {round_index}")
+
+    async def fake_stream_llm_completion(**_kwargs):
+        pytest.fail("协议轮次用尽时不应再调用修订 LLM")
+
+    monkeypatch.setattr(
+        revise_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        revise_agent_graph_module.create_revise_agent_graph().invoke(
+            {
+                "current_text": "采购需求正文",
+                "audit_findings": [{"evidence": "问题", "fix_hint": "修复"}],
+                "revision_round": 4,
+                "model_provider": "deepseek",
+            },
+            {
+                "configurable": {
+                    "content_agent_backend": backend,
+                    "generation_agent_context": {
+                        "current_text": "采购需求正文",
+                        "audit_findings": [{"evidence": "问题", "fix_hint": "修复"}],
+                        "revision_round": 4,
+                        "model_provider": "deepseek",
+                    },
+                }
+            },
+        )
+
+    # 第 4 轮修订产物不得被写出。
+    assert backend.read("/revisions/round-4.md").file_data is None
+
+
+def test_content_runner_delivers_final_after_three_rounds_with_remaining_findings(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    runner = FakeRunner(
+        [
+            {"draft": "draft"},
+            {"audit": [{"evidence": "issue 1", "fix_hint": "fix 1"}], "round": 1},
+            {"revision": "revision 1", "round": 1},
+            {"audit": [{"evidence": "issue 2", "fix_hint": "fix 2"}], "round": 2},
+            {"revision": "revision 2", "round": 2},
+            {"audit": [{"evidence": "issue 3", "fix_hint": "fix 3"}], "round": 3},
+            {"revision": "final revised", "round": 3},
+            {"final": "final revised"},
+        ]
+    )
+
+    monkeypatch.setattr(
+        content_agent_module,
+        "verify_final_text_findings",
+        lambda **_kwargs: [AuditFinding(evidence="issue 3", fix_hint="fix 3")],
+    )
+
+    result = run_content_agent_generation(
+        {
+            "generation_style": "param",
+            "project_content": "project",
+            "tender_params": "params",
+            "template_reference_text": "origin",
+        },
+        {"configurable": {"model_provider": "deepseek", "task_id": "task-three-rounds"}},
+        runner=runner,
+    )
+
+    # 第 3 轮后固定停止返修，交付最终正文。
+    assert result.polished_text == "final revised"
+    assert result.revision_rounds == 3
+    # 剩余问题暴露在最终 payload，便于卡片最终完成区逐条展示 warning。
+    assert result.audit_findings == [
+        AuditFinding(evidence="issue 3", fix_hint="fix 3"),
+    ]
+    workspace_dir = result.workspace_dir
+    # 第 4 轮产物不得出现。
+    assert not (workspace_dir / "audits" / "round-4.json").exists()
+    assert not (workspace_dir / "revisions" / "round-4.md").exists()
+
+
+def test_content_runner_tolerates_historical_round4_artifact(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    class Round4LeavingRunner:
+        def __init__(self):
+            self.payloads: list[dict] = []
+            self.configs: list[dict | None] = []
+
+        def invoke(self, payload, config=None):  # type: ignore[no-untyped-def]
+            raise AssertionError("workspace runner should stream, not invoke")
+
+        def stream(self, payload, config=None, **_kwargs):  # type: ignore[no-untyped-def]
+            self.payloads.append(payload)
+            self.configs.append(config)
+            backend = config["configurable"]["content_agent_backend"]
+            # 正常写完初稿并通过第 1 轮审核，写 final。
+            backend.write("/drafts/round-1.md", "draft")
+            yield {"node": "content_generate_agent", "round": 1, "content": "draft", "is_complete": True}
+            backend.write(audit_path(1), "[]")
+            yield {"node": "content_verify_agent", "round": 1, "content": "[]", "is_complete": True}
+            backend.write(FINAL_POLISHED_TEXT_PATH, "final text")
+            yield {"node": "content_agent", "content": "final written", "is_complete": True}
+            # 模拟历史/异常 runner 在写 final 后仍留下越界 round-4 产物。
+            backend.write("/audits/round-4.json", "[]")
+
+    runner = Round4LeavingRunner()
+
+    result = run_content_agent_generation(
+        {
+            "generation_style": "param",
+            "project_content": "project",
+            "tender_params": "params",
+            "template_reference_text": "origin",
+        },
+        {"configurable": {"model_provider": "deepseek", "task_id": "task-tolerate-round4"}},
+        runner=runner,
+    )
+
+    # 越界产物存在但不作为 fatal，也不参与交付/统计。
+    workspace_dir = result.workspace_dir
+    assert (workspace_dir / "audits" / "round-4.json").exists()
+    assert result.polished_text == "final text"
+    assert result.audit_findings == []
+    # revision_rounds 只统计协议内合法轮次，不含 round-4。
+    assert result.revision_rounds == 0
+
+
+def test_content_runner_falls_back_to_final_when_runner_requests_round4(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    class Round4RequestingRunner:
+        def __init__(self):
+            self.payloads: list[dict] = []
+            self.configs: list[dict | None] = []
+
+        def invoke(self, payload, config=None):  # type: ignore[no-untyped-def]
+            raise AssertionError("workspace runner should stream, not invoke")
+
+        def stream(self, payload, config=None, **_kwargs):  # type: ignore[no-untyped-def]
+            self.payloads.append(payload)
+            self.configs.append(config)
+            backend = config["configurable"]["content_agent_backend"]
+            # 正常走完 3 轮并写 final。
+            backend.write("/drafts/round-1.md", "draft")
+            yield {"node": "content_generate_agent", "round": 1, "content": "draft", "is_complete": True}
+            backend.write(audit_path(1), "[]")
+            backend.write(audit_path(2), "[]")
+            backend.write(audit_path(3), "[]")
+            backend.write("/revisions/round-2.md", "revision 2")
+            yield {"node": "content_agent", "content": "final written", "is_complete": True}
+            backend.write(FINAL_POLISHED_TEXT_PATH, "final text")
+            # final 写完后，runner 仍尝试越界发起第 4 轮审核；
+            # 这会触发 verify graph 的轮次校验并抛“协议轮次已用尽”错误。
+            raise GenerationAgentProtocolError("协议轮次已用尽：已存在 3 轮审核产物")
+
+    runner = Round4RequestingRunner()
+
+    result = run_content_agent_generation(
+        {
+            "generation_style": "param",
+            "project_content": "project",
+            "tender_params": "params",
+            "template_reference_text": "origin",
+        },
+        {"configurable": {"model_provider": "deepseek", "task_id": "task-round4-request"}},
+        runner=runner,
+    )
+
+    # final 已写入，越界审核请求不整单失败，按最终正文兜底交付。
+    assert result.polished_text == "final text"
+    # revision_rounds 只统计协议内合法轮次（round-2），不含 round-4。
+    assert result.revision_rounds == 2
+
+
+def test_content_runner_fails_when_round4_requested_and_final_missing(
+    _redirect_content_agent_workspace,
+) -> None:
+    class Round4RequestingRunner:
+        def invoke(self, payload, config=None):  # type: ignore[no-untyped-def]
+            raise AssertionError("workspace runner should stream, not invoke")
+
+        def stream(self, payload, config=None, **_kwargs):  # type: ignore[no-untyped-def]
+            backend = config["configurable"]["content_agent_backend"]
+            backend.write(audit_path(1), "[]")
+            backend.write(audit_path(2), "[]")
+            backend.write(audit_path(3), "[]")
+            # 越界请求且未写 final：属真正的协议违规，应向上抛错。
+            raise GenerationAgentProtocolError("协议轮次已用尽：已存在 3 轮审核产物")
+
+    runner = Round4RequestingRunner()
+
+    with pytest.raises(GenerationAgentProtocolError, match="协议轮次已用尽"):
+        run_content_agent_generation(
+            {
+                "generation_style": "param",
+                "project_content": "project",
+                "tender_params": "params",
+                "template_reference_text": "origin",
+            },
+            {"configurable": {"model_provider": "deepseek", "task_id": "task-round4-no-final"}},
+            runner=runner,
+        )
+
+
+# ---------------------------------------------------------------------------
+# 受保护基础字段防删除护栏 (protected_field_guard)
+# ---------------------------------------------------------------------------
+
+_XJCG_PAYMENT_TEMPLATE = (
+    "一、项目概述\n"
+    "1、设备名称及数量：球管/壹个\n"
+    "2、交付日期：合同签订后两个月内交货\n"
+    "3、付款方式：设备安装验收合格后的三个月内付清全款。\n"
+)
+
+
+def _verify_findings(monkeypatch, *, llm_output, current_text, tender_type="xjcg", template=None):
+    async def fake_stream_llm_completion(**_kwargs):
+        return llm_output
+
+    monkeypatch.setattr(
+        verify_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+    result = verify_agent_graph_module.create_verify_agent_graph().invoke(
+        {
+            "current_text": current_text,
+            "tender_type": tender_type,
+            "template_reference_text": template or "",
+            "model_provider": "deepseek",
+        }
+    )
+    return result["structured_response"]
+
+
+def test_verify_drops_delete_payment_finding_before_writing_audit(monkeypatch) -> None:
+    """LLM 返回“删除付款方式”的 finding 时，最终写入 audit JSON 前被过滤。"""
+    findings = _verify_findings(
+        monkeypatch,
+        llm_output=(
+            '[{"evidence":"付款方式无新材料支撑的旧事实","fix_hint":"'
+            '删除付款方式字段行，保持其它内容不变"}]'
+        ),
+        current_text=(
+            "一、项目概述\n"
+            "2、交付日期：合同签订后两个月内交货\n"
+            "3、付款方式：设备安装验收合格后的三个月内付清全款。\n"
+        ),
+        template=_XJCG_PAYMENT_TEMPLATE,
+    )
+    # “删除付款方式”的 finding 被丢弃；正文里付款方式/交付日期都存在，不补回。
+    assert findings == []
+
+
+def test_verify_appends_backfill_when_payment_missing(monkeypatch) -> None:
+    """当前正文缺少 `付款方式：` 且参考模板有该字段时，追加补回 finding。"""
+    findings = _verify_findings(
+        monkeypatch,
+        llm_output="[]",
+        current_text=(
+            "一、项目概述\n"
+            "2、交付日期：合同签订后两个月内交货\n"
+        ),
+        template=_XJCG_PAYMENT_TEMPLATE,
+    )
+    # LLM 返回 []，但正文缺付款方式；guard 追加一条“补回付款方式”的 finding。
+    assert len(findings) == 1
+    assert "付款方式" in findings[0]["evidence"]
+    assert "设备安装验收合格后的三个月内付清全款" in findings[0]["fix_hint"]
+
+
+def test_verify_no_delete_finding_when_text_keeps_payment_and_material_lacks_it(
+    monkeypatch,
+) -> None:
+    """当前正文已有 `付款方式：` 且新材料未提供付款方式时，不产生删除 finding。"""
+    findings = _verify_findings(
+        monkeypatch,
+        llm_output="[]",
+        current_text=(
+            "一、项目概述\n"
+            "2、交付日期：合同签订后两个月内交货\n"
+            "3、付款方式：设备安装验收合格后的三个月内付清全款。\n"
+        ),
+        template=_XJCG_PAYMENT_TEMPLATE,
+    )
+    assert findings == []
+
+
+def test_verify_inherits_template_field_per_package_for_multi_package(monkeypatch) -> None:
+    """多包场景按包序号继承参考模板字段；参考缺对应包时复用第一个可用字段。"""
+    multi_pkg_template = (
+        "第1包：显微镜\n"
+        "1、交付日期：合同签订后30天内交货\n"
+        "2、付款方式：设备验收合格后30天内付清全款。\n"
+        "第2包：离心机\n"
+        "1、交付日期：合同签订后60天内交货\n"
+        "2、付款方式：设备验收合格后60天内付清全款。\n"
+    )
+    from backend.agents.generation.protected_field_guard import (
+        sanitize_protected_field_findings,
+    )
+
+    # 包2 缺付款方式：应从包2继承“设备验收合格后60天内付清全款”。
+    findings = sanitize_protected_field_findings(
+        findings=[],
+        tender_type="xjcg",
+        current_text="第2包：离心机\n1、交付日期：合同签订后60天内交货\n",
+        template_reference_text=multi_pkg_template,
+        package_index=2,
+    )
+    assert len(findings) == 1
+    assert "付款方式" in findings[0].evidence
+    assert "设备验收合格后60天内付清全款" in findings[0].fix_hint
+
+    # 参考只有 2 个包，请求包 3 时回退到第一个可用字段行。
+    findings_pkg3 = sanitize_protected_field_findings(
+        findings=[],
+        tender_type="xjcg",
+        current_text="交付日期：合同签订后30天内交货\n",
+        template_reference_text=multi_pkg_template,
+        package_index=3,
+    )
+    # 包3 缺付款方式，回退到第一个可用付款方式行（包1）。
+    payment_findings = [f for f in findings_pkg3 if "付款方式" in f.evidence]
+    assert len(payment_findings) == 1
+    assert "设备验收合格后30天内付清全款" in payment_findings[0].fix_hint
+
+
+def test_verify_guard_skips_direct_replace_tender_type(monkeypatch) -> None:
+    """`gngk_hw_cz` 这类 direct_replace 类型不进入 protected-field guard。"""
+    from backend.agents.generation.protected_field_guard import (
+        sanitize_protected_field_findings,
+    )
+
+    raw_finding = AuditFinding(
+        evidence="付款方式无新材料支撑",
+        fix_hint="删除付款方式字段行",
+    )
+    findings = sanitize_protected_field_findings(
+        findings=[raw_finding],
+        tender_type="gngk_hw_cz",
+        current_text="",
+        template_reference_text=_XJCG_PAYMENT_TEMPLATE,
+    )
+    # direct_replace 类型原样返回，不过滤、不补回。
+    assert findings == [raw_finding]
+
+
+def test_verify_guard_filters_delete_verb_variants() -> None:
+    """删除/移除/去掉/删去 + 受保护字段名都被识别为删除建议并过滤。"""
+    from backend.agents.generation.protected_field_guard import (
+        sanitize_protected_field_findings,
+    )
+
+    current_text = (
+        "2、交付日期：合同签订后两个月内交货\n"
+        "3、付款方式：设备安装验收合格后的三个月内付清全款。\n"
+    )
+    for verb in ("删除", "移除", "去掉", "删去"):
+        finding = AuditFinding(
+            evidence=f"付款方式是旧事实",
+            fix_hint=f"{verb}付款方式字段行",
+        )
+        findings = sanitize_protected_field_findings(
+            findings=[finding],
+            tender_type="xjcg",
+            current_text=current_text,
+            template_reference_text=_XJCG_PAYMENT_TEMPLATE,
+        )
+        # 正文里付款方式/交付日期都存在，删除 finding 被丢弃且不补回。
+        assert findings == [], f"verb={verb} should be filtered"
+
+
+def test_revise_ignores_delete_protected_field_audit_item(monkeypatch) -> None:
+    """revise 阶段即使 audit JSON 要求删除受保护字段，guard 也会过滤掉该项。"""
+    captured_audits: list[str] = []
+
+    async def fake_stream_llm_completion(**kwargs):
+        captured_audits.append(str(kwargs.get("user_prompt", "")))
+        return "修订后的正文（保留付款方式）"
+
+    monkeypatch.setattr(
+        revise_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    result = revise_agent_graph_module.create_revise_agent_graph().invoke(
+        {
+            "current_text": (
+                "2、交付日期：合同签订后两个月内交货\n"
+                "3、付款方式：设备安装验收合格后的三个月内付清全款。\n"
+            ),
+            "tender_type": "xjcg",
+            "template_reference_text": _XJCG_PAYMENT_TEMPLATE,
+            "audit_findings": [
+                {
+                    "evidence": "付款方式无新材料支撑",
+                    "fix_hint": "删除付款方式字段行",
+                }
+            ],
+            "revision_round": 1,
+            "model_provider": "deepseek",
+        }
+    )
+
+    # 删除付款方式的 finding 被 guard 过滤；剩余 audit 为空时跳过修订。
+    assert result["structured_response"] == {
+        "status": "no_revision",
+        "message": "无需修订",
+    }
+    assert result["no_revision"] is True
+    # 删除付款方式的 audit item 不应进入 LLM。
+    assert not captured_audits
+
+
+def test_revise_keeps_real_audit_after_protected_field_filter(monkeypatch) -> None:
+    """revise 阶段保留非删除类 audit item，只过滤删除受保护字段的 item。"""
+    captured_audits: list[str] = []
+
+    async def fake_stream_llm_completion(**kwargs):
+        captured_audits.append(str(kwargs.get("user_prompt", "")))
+        return "修订后的正文"
+
+    monkeypatch.setattr(
+        revise_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    result = revise_agent_graph_module.create_revise_agent_graph().invoke(
+        {
+            "current_text": (
+                "2、交付日期：合同签订后两个月内交货\n"
+                "3、付款方式：设备安装验收合格后的三个月内付清全款。\n"
+                "技术参数缺少 ★ 符号。\n"
+            ),
+            "tender_type": "xjcg",
+            "template_reference_text": _XJCG_PAYMENT_TEMPLATE,
+            "audit_findings": [
+                {
+                    "evidence": "技术参数缺少 ★ 符号",
+                    "fix_hint": "补充 ★ 符号",
+                },
+                {
+                    "evidence": "付款方式无新材料支撑",
+                    "fix_hint": "删除付款方式字段行",
+                },
+            ],
+            "revision_round": 1,
+            "model_provider": "deepseek",
+        }
+    )
+
+    # 只过滤删除付款方式的 item；★ 符号 finding 保留，触发修订。
+    assert "revision_path" in result["structured_response"]
+    assert result["polished_text"] == "修订后的正文"
+    # 传给 LLM 的 audit JSON 只保留 ★ 符号 finding。
+    assert "补充 ★ 符号" in captured_audits[0]
+    assert "删除付款方式" not in captured_audits[0]
+
+
+def test_verify_final_text_findings_appends_backfill_for_missing_payment(monkeypatch) -> None:
+    """最终复核也应用受保护字段护栏：缺付款方式时追加补回 finding。"""
+    async def fake_stream_llm_completion(**_kwargs):
+        return "[]"
+
+    monkeypatch.setattr(
+        verify_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    findings = verify_agent_graph_module.verify_final_text_findings(
+        final_text="2、交付日期：合同签订后两个月内交货\n",
+        generation_context={
+            "generation_style": "template",
+            "tender_type": "xjcg",
+            "template_reference_text": _XJCG_PAYMENT_TEMPLATE,
+        },
+        model_provider="deepseek",
+    )
+    assert len(findings) == 1
+    assert "付款方式" in findings[0].evidence
