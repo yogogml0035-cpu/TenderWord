@@ -30,7 +30,6 @@ from backend.agents.generation.workspace import (
     validate_round_protocol,
     write_generation_context,
 )
-from backend.agents.log_naming import build_agent_log_stem
 
 
 @pytest.fixture(autouse=True)
@@ -44,12 +43,14 @@ def _redirect_content_agent_workspace(tmp_path, monkeypatch) -> Path:
         project_name: str | None = None,
         now: float | None = None,
     ) -> Path:
-        stem = build_agent_log_stem(
-            task_id,
-            project_number=project_number,
-            project_name=project_name,
-            fallback="content-agent",
-        )
+        parts: list[str] = []
+        for value in (project_number, project_name):
+            text = str(value or "").strip()
+            if text:
+                parts.append(
+                    re.sub(r'[<>:"/\\|?*\x00-\x1f\s]+', "_", text).strip("._")
+                )
+        stem = "_".join(parts) if parts else task_id
         workspace_dir = workspace_root / f"{stem}_20260529-153000"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         return workspace_dir
@@ -511,7 +512,7 @@ def test_content_runner_creates_workspace_and_reads_final_file(
     workspace_dir = result.workspace_dir
     assert workspace_dir == (
         _redirect_content_agent_workspace
-        / "task-agent-42_XJ-001_测试_项目_20260529-153000"
+        / "XJ-001_测试_项目_20260529-153000"
     )
     assert (workspace_dir / "drafts" / "round-1.md").read_text(encoding="utf-8") == "draft text"
     assert (workspace_dir / "revisions" / "round-1.md").read_text(encoding="utf-8") == "revised text"
