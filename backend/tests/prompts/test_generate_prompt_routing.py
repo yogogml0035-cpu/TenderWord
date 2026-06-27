@@ -248,6 +248,26 @@ def test_generate_prompts_forbid_structured_table_projection_as_text() -> None:
     assert "不得因参考内容是纯文本而把锚点表降维成普通列表" in template_rendered.user_prompt
 
 
+def test_generate_prompts_preserve_text_around_structured_table_placeholders() -> None:
+    """结构化表占位符只替代表格本体，不能吞掉前后非表格正文。"""
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    assert "锚点不吞正文" in param_rendered.system_prompt
+    assert "只替换“紧邻它之前的一张表格”" in param_rendered.system_prompt
+    assert "禁止集中堆叠占位符" in param_rendered.system_prompt
+    assert "锚点邻接正文红线" in param_rendered.system_prompt
+    assert "附件5：《专项保洁报价单》" in param_rendered.user_prompt
+    assert "投标人授权代表签字或盖章" in VERIFY_SYSTEM_PROMPT
+
+    assert "锚点不吞正文" in template_rendered.system_prompt
+    assert "锚点邻接正文保留" in template_rendered.system_prompt
+    assert "表格前后的非表格正文必须按原位置继续输出" in template_rendered.system_prompt
+    assert "不能只输出 `[[TABLE:TP1_2]]`" in template_rendered.user_prompt
+
+
 def test_generate_param_prompt_preserves_field_shell_protection() -> None:
     """param 生成固化字段壳保护区：无新值时保留模板字段壳/占位值，不得删除。"""
     rendered = render_generate_by_param_prompt(build_prompt_input(generation_style="param"))
@@ -278,6 +298,7 @@ def test_verify_prompt_describes_table_placeholder_as_internal_entry() -> None:
     assert "正确且被要求" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
     assert "要求删除它" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
     assert "必须检查锚点表是否被重复散文化" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+    assert "必须检查锚点邻接正文是否丢失或挪位" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
     assert "有锚点时它们是重复投影内容" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
 
 
@@ -287,10 +308,15 @@ def test_verify_and_revise_prompts_reject_textified_structured_tables() -> None:
     assert "锚点 + 散文化投影表" in VERIFY_SYSTEM_PROMPT
     assert "1 设备用途" in VERIFY_SYSTEM_PROMPT
     assert "删除该锚点表对应的普通文本/手绘投影行" in VERIFY_SYSTEM_PROMPT
+    assert "结构化表邻接正文审核总则" in VERIFY_SYSTEM_PROMPT
+    assert "多个锚点集中到文末" in VERIFY_SYSTEM_PROMPT
+    assert "只在文末连续输出两个表格锚点" in VERIFY_SYSTEM_PROMPT
 
     assert "锚点表被重复转写成普通文本" in REVISE_SYSTEM_PROMPT
     assert "删除这些重复投影行" in REVISE_SYSTEM_PROMPT
     assert "不得把投影行改写成另一种表格" in REVISE_SYSTEM_PROMPT
+    assert "锚点之间/锚点之后缺失附件标题" in REVISE_SYSTEM_PROMPT
+    assert "把对应锚点放回原位置" in REVISE_SYSTEM_PROMPT
 
 
 def test_verify_prompt_states_protected_field_non_deletion_contract() -> None:
