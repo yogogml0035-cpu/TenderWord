@@ -872,8 +872,10 @@ def _run_file_protocol(
         )
         next_path = revision_path(round_index)
         if read_backend_text_optional(backend, next_path) is None:
-            _write_current_text_to_final(backend, current_path)
-            return
+            raise GenerationAgentProtocolError(
+                f"第 {round_index} 轮审核发现 {len(findings)} 个问题，"
+                f"但修订智能体未写入 {next_path}，不得直接交付未修订正文"
+            )
         if round_index == MAX_REVISION_ROUNDS:
             _write_current_text_to_final(backend, next_path)
             return
@@ -907,6 +909,25 @@ def _read_optional_audit_findings(backend: BackendProtocol) -> tuple[list[AuditF
         last_round = round_index
         last_findings = coerce_audit_findings(raw, fallback_on_error=True)
     return last_findings, last_round
+
+
+def _validate_audit_revision_sequence(backend: BackendProtocol) -> None:
+    findings, last_round = _read_optional_audit_findings(backend)
+    if last_round == 0 or not findings:
+        return
+    if read_backend_text_optional(backend, revision_path(last_round)) is None:
+        raise GenerationAgentProtocolError(
+            f"第 {last_round} 轮审核发现 {len(findings)} 个问题，"
+            f"但缺少 {revision_path(last_round)}，不得直接交付最终正文"
+        )
+    if last_round < MAX_REVISION_ROUNDS and read_backend_text_optional(
+        backend,
+        audit_path(last_round + 1),
+    ) is None:
+        raise GenerationAgentProtocolError(
+            f"第 {last_round} 轮修订后缺少第 {last_round + 1} 轮审核，"
+            "不得直接交付最终正文"
+        )
 
 
 def _final_recheck_findings(
@@ -1024,6 +1045,7 @@ def run_content_agent_generation(
         )
 
     validate_round_protocol(workspace_dir)
+    _validate_audit_revision_sequence(backend)
     raw_final_text = read_backend_text_optional(backend, FINAL_POLISHED_TEXT_PATH)
     if raw_final_text is None:
         raw_final_text = read_backend_text(backend, FINAL_POLISHED_TEXT_PATH)

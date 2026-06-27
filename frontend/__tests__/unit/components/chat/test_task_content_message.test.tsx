@@ -232,8 +232,47 @@ describe('TaskContentMessage', () => {
     expect(
       screen.getByText(/仍有 1 个问题未通过/),
     ).toBeInTheDocument();
+    expect(screen.getByText(/第 3 轮后仍有 1 个问题未通过/)).toBeInTheDocument();
     // 不再单独渲染历史“最终仍需关注”汇总块。
     expect(screen.queryByText('最终仍需关注')).not.toBeInTheDocument();
+  });
+
+  it('labels early final recheck warnings without pretending three rounds ran', () => {
+    render(
+      <TaskContentMessage
+        message={createMessage({
+          content: '最终正文',
+          metadata: {
+            messageKind: 'agent-step',
+            taskKind: 'generate',
+            agentStepType: 'final',
+            agentStepNode: 'content_agent',
+            agentStepRound: 1,
+            contentAgent: {
+              phase: 'final',
+              summary: '最终完成，修复 0 轮，最终正文约 4 字。 仍保留 1 个问题记录。',
+              rounds: [],
+              highlights: [
+                {
+                  evidence: '第1包缺少付款方式',
+                  fix_hint: '补回付款方式字段',
+                },
+              ],
+              final_result: {
+                summary: '最终完成，修复 0 轮，最终正文约 4 字。 仍保留 1 个问题记录。',
+                revision_rounds: 0,
+                final_chars: 4,
+                issue_count: 1,
+                content: '最终正文',
+              },
+            },
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByText(/最终复核仍有 1 个问题未通过/)).toBeInTheDocument();
+    expect(screen.queryByText(/第 3 轮后仍有/)).not.toBeInTheDocument();
   });
 
   it('uses the Chinese comment_agent process card title', () => {

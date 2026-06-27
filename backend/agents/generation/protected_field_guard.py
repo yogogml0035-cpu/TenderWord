@@ -37,6 +37,36 @@ from backend.helper.word_helper.protected_fields import (
 
 # 命中即视为“要求删除字段”的动词；与受保护字段名同现时该项 finding 被丢弃。
 _PROTECTED_FIELD_DELETE_VERBS = ("删除", "移除", "去掉", "删去", "删除掉", "清除")
+_NEGATED_DELETE_PHRASES = (
+    "不得删除",
+    "不能删除",
+    "不应删除",
+    "不要删除",
+    "无需删除",
+    "禁止删除",
+    "不允许删除",
+    "不得移除",
+    "不能移除",
+    "不应移除",
+    "不要移除",
+    "无需移除",
+    "禁止移除",
+    "不允许移除",
+    "不得去掉",
+    "不能去掉",
+    "不应去掉",
+    "不要去掉",
+    "无需去掉",
+    "禁止去掉",
+    "不允许去掉",
+    "不得清除",
+    "不能清除",
+    "不应清除",
+    "不要清除",
+    "无需清除",
+    "禁止清除",
+    "不允许清除",
+)
 # 限定受保护字段的“基础信息”字段名（不包含值/具体说明），用于判断 finding 是否
 # 在讨论受保护字段；只取字段名（不含冒号）即可。
 _BASIC_INFO_FIELD_NAMES = (
@@ -116,7 +146,9 @@ def _finding_requests_protected_field_deletion(
     只有同时命中“删除类动词”和“受保护字段名”才视为越界删除建议；只提及字段名
     但 fix_hint 是“补回/保留/恢复”的不视为删除建议。
     """
-    combined = f"{finding.evidence}\n{finding.fix_hint}"
+    combined = re.sub(r"\s+", "", f"{finding.evidence}\n{finding.fix_hint}")
+    for phrase in _NEGATED_DELETE_PHRASES:
+        combined = combined.replace(phrase, "")
     has_delete_verb = any(verb in combined for verb in _PROTECTED_FIELD_DELETE_VERBS)
     if not has_delete_verb:
         return False
@@ -166,7 +198,7 @@ def _resolve_template_field_line(
     package_index 指向同序号的包；找不到同包时回退到全局第一个可用字段行。
     package_index 为 None 或非正数时直接走全局第一个。
     """
-    normalized = str(template_reference_text or "")
+    normalized = str(template_reference_text or "").replace("\r\n", "\n").replace("\r", "\n")
     if not normalized:
         return None
 
@@ -188,12 +220,13 @@ def _lines_for_package(text: str, package_index: int | None) -> list[str]:
     package_index 为 None 或 <=0 时返回全部行（不做包过滤）。
     无法识别包段时也返回全部行，保证不误删字段。
     """
+    normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
     if package_index is None or package_index <= 0:
-        return text.split("\n")
+        return normalized.split("\n")
     target = package_index
-    segments = _split_by_package_markers(text)
+    segments = _split_by_package_markers(normalized)
     if not segments:
-        return text.split("\n")
+        return normalized.split("\n")
     for index, segment in enumerate(segments, start=1):
         if index == target:
             return segment
@@ -203,7 +236,7 @@ def _lines_for_package(text: str, package_index: int | None) -> list[str]:
 
 def _split_by_package_markers(text: str) -> list[list[str]]:
     """把参考文本按包/标段标题切分成段；识别不到任何包标题时返回空列表。"""
-    lines = str(text or "").split("\n")
+    lines = str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
 
     segments: list[list[str]] = []
     current: list[str] | None = None

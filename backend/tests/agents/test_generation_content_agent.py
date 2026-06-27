@@ -695,6 +695,61 @@ def test_content_runner_copies_revision_to_final_after_second_audit_passes(
     assert result.revision_rounds == 1
 
 
+def test_file_protocol_fails_when_revision_missing_after_non_empty_audit(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    def fake_generate_graph():
+        class Graph:
+            def invoke(self, _state, config=None):  # type: ignore[no-untyped-def]
+                config["configurable"]["content_agent_backend"].write(
+                    "/drafts/round-1.md", "draft"
+                )
+                return {"draft_path": "/drafts/round-1.md"}
+
+        return Graph()
+
+    def fake_verify_graph():
+        class Graph:
+            def invoke(self, state, config=None):  # type: ignore[no-untyped-def]
+                backend = config["configurable"]["content_agent_backend"]
+                round_index = int(state["revision_round"])
+                backend.write(
+                    audit_path(round_index),
+                    json.dumps(
+                        [{"evidence": "缺少付款方式", "fix_hint": "补回付款方式"}],
+                        ensure_ascii=False,
+                    ),
+                )
+                return {"audit_path": audit_path(round_index)}
+
+        return Graph()
+
+    def fake_revise_graph():
+        class Graph:
+            def invoke(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+                return {"no_revision": True}
+
+        return Graph()
+
+    monkeypatch.setattr(content_agent_module, "create_generate_agent_graph", fake_generate_graph)
+    monkeypatch.setattr(content_agent_module, "create_verify_agent_graph", fake_verify_graph)
+    monkeypatch.setattr(content_agent_module, "create_revise_agent_graph", fake_revise_graph)
+
+    with pytest.raises(GenerationAgentProtocolError, match="修订智能体未写入"):
+        run_content_agent_generation(
+            {
+                "generation_style": "template",
+                "project_number": "P-003",
+                "project_name": "缺修订文件",
+                "project_content": "project",
+                "tender_params": "params",
+                "template_reference_text": "origin",
+            },
+            {"configurable": {"model_provider": "deepseek", "task_id": "task-missing-revision"}},
+        )
+
+
 def test_content_agent_tracker_preserves_completed_audit_after_late_empty_update() -> None:
     tracker = content_agent_module.ContentAgentProcessTracker()
     finding = {"evidence": "缺少 ★ 指标", "fix_hint": "补充 ★ 符号"}
@@ -872,6 +927,51 @@ def test_content_runner_returns_warning_findings_when_final_recheck_still_has_fi
         AuditFinding(evidence="正文仍有多余内容", fix_hint="删除多余内容")
     ]
     assert any("最终复核未通过" in message for message in warnings)
+
+
+def test_content_runner_fails_when_final_written_after_non_empty_audit_without_revision() -> None:
+    runner = FakeRunner(
+        [
+            {"draft": "draft"},
+            {"audit": [{"evidence": "缺少付款方式", "fix_hint": "补回付款方式"}], "round": 1},
+            {"final": "draft"},
+        ]
+    )
+
+    with pytest.raises(GenerationAgentProtocolError, match="缺少 /revisions/round-1.md"):
+        run_content_agent_generation(
+            {
+                "generation_style": "template",
+                "project_content": "project",
+                "tender_params": "params",
+                "template_reference_text": "origin",
+            },
+            {"configurable": {"model_provider": "deepseek", "task_id": "task-premature-final"}},
+            runner=runner,
+        )
+
+
+def test_content_runner_fails_when_revision_is_not_followed_by_next_audit() -> None:
+    runner = FakeRunner(
+        [
+            {"draft": "draft"},
+            {"audit": [{"evidence": "缺少付款方式", "fix_hint": "补回付款方式"}], "round": 1},
+            {"revision": "revision 1", "round": 1},
+            {"final": "revision 1"},
+        ]
+    )
+
+    with pytest.raises(GenerationAgentProtocolError, match="缺少第 2 轮审核"):
+        run_content_agent_generation(
+            {
+                "generation_style": "template",
+                "project_content": "project",
+                "tender_params": "params",
+                "template_reference_text": "origin",
+            },
+            {"configurable": {"model_provider": "deepseek", "task_id": "task-missing-recheck"}},
+            runner=runner,
+        )
 
 
 def test_content_runner_accepts_invoke_only_test_runner() -> None:
@@ -1579,6 +1679,28 @@ def test_verify_guard_backfills_missing_field_for_each_current_package() -> None
     )
 
 
+def test_verify_guard_keeps_backfill_finding_that_says_field_must_not_be_deleted() -> None:
+    """补回字段的 finding 可能包含“不得删除”，不能误判成删除建议。"""
+    from backend.agents.generation.protected_field_guard import (
+        sanitize_protected_field_findings,
+    )
+
+    finding = AuditFinding(
+        evidence="待审核正文第1包项目概述缺少受保护基础信息字段 `付款方式：`，该字段属于受保护字段，不得删除。",
+        fix_hint="在第1包的项目概述恢复 `付款方式：` 字段行，保持其它内容不变。",
+    )
+
+    findings = sanitize_protected_field_findings(
+        findings=[finding],
+        tender_type="xjcg",
+        current_text="第1包：病人监护仪\n1、交付日期：合同签订后30天内到货\n",
+        template_reference_text=_XJCG_PAYMENT_TEMPLATE,
+        backfill_missing=False,
+    )
+
+    assert findings == [finding]
+
+
 def test_verify_guard_skips_direct_replace_tender_type(monkeypatch) -> None:
     """`gngk_hw_cz` 这类 direct_replace 类型不进入 protected-field guard。"""
     from backend.agents.generation.protected_field_guard import (
@@ -1711,6 +1833,49 @@ def test_revise_keeps_real_audit_after_protected_field_filter(monkeypatch) -> No
     # 传给 LLM 的 audit JSON 只保留 ★ 符号 finding。
     assert "补充 ★ 符号" in captured_audits[0]
     assert "删除付款方式" not in captured_audits[0]
+
+
+def test_revise_keeps_missing_payment_audit_when_evidence_says_not_delete(monkeypatch) -> None:
+    """修订阶段不能把“缺付款方式，不得删除”的补回意见过滤成空审核。"""
+    captured_audits: list[str] = []
+
+    async def fake_stream_llm_completion(**kwargs):
+        captured_audits.append(str(kwargs.get("user_prompt", "")))
+        return (
+            "一、项目概述\n"
+            "2、交付日期：合同签订后两个月内交货\n"
+            "3、付款方式：设备安装验收合格后的三个月内付清全款。\n"
+        )
+
+    monkeypatch.setattr(
+        revise_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    result = revise_agent_graph_module.create_revise_agent_graph().invoke(
+        {
+            "current_text": (
+                "一、项目概述\n"
+                "2、交付日期：合同签订后两个月内交货\n"
+            ),
+            "tender_type": "xjcg",
+            "template_reference_text": _XJCG_PAYMENT_TEMPLATE,
+            "audit_findings": [
+                {
+                    "evidence": "待审核正文第1包项目概述缺少受保护基础信息字段 `付款方式：`，该字段属于受保护字段，不得删除。",
+                    "fix_hint": "在第1包的项目概述恢复 `付款方式：` 字段行，保持其它内容不变。",
+                }
+            ],
+            "revision_round": 1,
+            "model_provider": "deepseek",
+        }
+    )
+
+    assert "revision_path" in result["structured_response"]
+    assert result["polished_text"].count("付款方式") == 1
+    assert captured_audits
+    assert "不得删除" in captured_audits[0]
 
 
 def test_verify_final_text_findings_appends_backfill_for_missing_payment(monkeypatch) -> None:
