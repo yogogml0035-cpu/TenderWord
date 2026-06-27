@@ -310,3 +310,51 @@ def test_verify_user_prompt_states_protected_field_hard_contract() -> None:
     assert "缺值继承模板同包字段原句" in user_prompt
     assert "删除建议无效" in user_prompt
     assert "受保护字段硬契约" in user_prompt
+
+
+def test_generate_prompts_enforce_special_symbol_fidelity() -> None:
+    """生成端两套提示词都要求一切特殊符号逐字保留，禁止 ASCII/文字近似替代。"""
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    for rendered in (template_rendered, param_rendered):
+        assert "覆盖一切特殊符号" in rendered.system_prompt
+        assert "逐字原样保留" in rendered.system_prompt
+        # “不当作重要性标识/标识”绝不等于“可以丢”。
+        assert "可以丢" in rendered.system_prompt
+
+    # template 显式给出 ASCII/文字近似反例（≥→>=、≥→大于等于）。
+    assert "大于等于" in template_rendered.system_prompt
+
+
+def test_verify_and_revise_prompts_enforce_special_symbol_fidelity() -> None:
+    """审核/重写提示词固化“特殊符号保真”通用口径（覆盖一切特殊符号、禁 ASCII 近似）。"""
+    # verify 新增第 14 条总则，且明确禁止改写成近义文字 / ASCII 近似。
+    assert "特殊符号保真总则" in VERIFY_SYSTEM_PROMPT
+    assert "改写成近义文字或 ASCII 近似" in VERIFY_SYSTEM_PROMPT
+    # revise 第 6 条通用化为“特殊符号保真”，要求按原文恢复、不得用近义/ASCII 替代。
+    assert "特殊符号保真" in REVISE_SYSTEM_PROMPT
+    assert "不得用文字近义词或 ASCII 近似" in REVISE_SYSTEM_PROMPT
+
+
+def test_verify_prompt_includes_symbol_loss_few_shots() -> None:
+    """verify few-shot 覆盖符号丢失：≥/℃ 被改写、± 丢失各有样例。"""
+    assert "工作温度：≥-20℃" in VERIFY_SYSTEM_PROMPT
+    assert "测量精度：±0.5%" in VERIFY_SYSTEM_PROMPT
+
+
+def test_verify_user_prompt_states_symbol_and_overview_checks() -> None:
+    """verify user prompt 写入“特殊符号保真”与“项目概述关键字段完整性”检查项。"""
+    from backend.agents.generation.verify_agent_graph import _render_verify_user_prompt
+
+    user_prompt = _render_verify_user_prompt(
+        generation_style="template",
+        project_info="项目基础信息",
+        template_reference_text="模板",
+        tender_params="技术参数",
+        current_text="待审核正文",
+    )
+    assert "特殊符号保真" in user_prompt
+    assert "项目概述关键字段完整性" in user_prompt

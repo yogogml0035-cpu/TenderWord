@@ -5,6 +5,7 @@ import re
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from langchain.agents.middleware import ToolCallLimitMiddleware
 from langchain_core.messages import AIMessage, ToolMessage
 
@@ -139,7 +140,7 @@ def test_create_comment_agent_runner_uses_named_agent_and_tool_limits(monkeypatc
     middleware = captured["middleware"]
     assert all(isinstance(item, ToolCallLimitMiddleware) for item in middleware)
     assert [(item.tool_name, item.run_limit) for item in middleware] == [
-        (VALIDATE_COMMENT_REFERENCES_TOOL, 2),
+        (VALIDATE_COMMENT_REFERENCES_TOOL, 1),
         (WRITE_VALIDATED_COMMENTS_TOOL, 1),
     ]
 
@@ -333,6 +334,51 @@ def test_write_tool_counts_existing_comment_as_skipped() -> None:
     assert writeback["issues"][0]["reason"] == "overlapping_comment_exists"
     assert doc.Comments.Count == 1
 
+def test_write_validated_comment_candidates_to_word_reuses_shared_helper_for_duplicate_anchors() -> None:
+    """write_validated_comment_candidates_to_word 复用共享 helper，重复锚点不会返回
+    reference_text_not_unique_in_word_bound，而是对所有重复位置写入同一条批注。"""
+    doc = _FakeDocument("开头配置项说明。中间配置项结尾。")
+    proposed = [
+        {
+            "reference_text": "配置项",
+            "comment_text": "建议删除：主观表述。",
+        }
+    ]
+
+    _validation, writeback = write_validated_comment_candidates_to_word(
+        doc=doc,
+        initial_comments=proposed,
+        proposed_comments=proposed,
+        polished_text=doc.text,
+        bound_start=0,
+        bound_end=len(doc.text),
+    )
+
+    # 不应出现 reference_text_not_unique_in_word_bound
+    reasons = {issue["reason"] for issue in writeback["issues"]}
+    assert "reference_text_not_unique_in_word_bound" not in reasons
+    assert writeback["failed"] == 0
+    assert writeback["added"] == 2
+    assert doc.Comments.Count == 2
+    for idx in range(1, 3):
+        assert doc.Comments(idx).Text == "建议删除：主观表述。"
+
+def test_validate_treats_non_unique_anchor_as_writable_not_failed() -> None:
+    """锚点在正文中出现多次不再进入 failed，而是可写入状态并带扩展 reason label。"""
+    result = validate_comment_reference_candidates(
+        initial_comments=[
+            {"reference_text": "配置项", "comment_text": "建议删除。"},
+        ],
+        proposed_comments=[
+            {"reference_text": "配置项", "comment_text": "建议删除。"},
+        ],
+        polished_text="开头配置项。结尾配置项。",
+    )
+
+    assert result.failed_count == 0
+    assert result.passed_count == 1
+    assert result.passed[0].reason == "reference_text_non_unique_will_expand_on_writeback"
+
 def test_write_validated_comments_tool_submits_candidates_without_touching_word_doc() -> None:
     doc = _FakeDocument("投标人须提供原厂授权函，并承诺售后。")
     context = CommentAgentToolContext(
@@ -368,42 +414,19 @@ def test_write_validated_comments_tool_submits_candidates_without_touching_word_
     assert context.writeback_result is None
     assert doc.Comments.Count == 0
 
-def test_run_comment_agent_pushes_tool_snapshots_and_writes_word_after_runner(tmp_path) -> None:
+def test_run_comment_agent_skips_runner_and_writes_word_deterministically_when_initial_comments_exist(
+    tmp_path,
+) -> None:
+    """initial_comments 非空（非自主生成）时不调用 runner，直接确定性校验和写回。"""
     doc = _FakeDocument("投标人须提供原厂授权函，并承诺售后。")
     audit_path = tmp_path / "comment-agent-audit.json"
 
+    runner_invocations = {"count": 0}
+
     class FakeRunner:
-        def stream(self, _payload, config, **_kwargs):
-            context = config["configurable"]["comment_agent_tool_context"]
-            proposed = [
-                {
-                    "reference_text": "投标人须提供原厂授权函",
-                    "comment_text": "建议提示：不得要求原厂授权函。",
-                }
-            ]
-            yield AIMessage(content="开始校验批注锚点")
-            assert doc.Comments.Count == 0
-            context.final_proposed_comments = [
-                {
-                    "reference_text": proposed[0]["reference_text"],
-                    "comment_text": proposed[0]["comment_text"],
-                }
-            ]
-            validation = validate_comment_reference_candidates(
-                initial_comments=context.initial_comments,
-                proposed_comments=proposed,
-                polished_text=context.polished_text,
-            )
-            context.validation_results.append(validation.model_dump(mode="json"))
-            context.tool_snapshots.append(
-                CommentAgentToolSnapshot(
-                    round=1,
-                    proposed_comments=context.final_proposed_comments,
-                    validation=validation,
-                )
-            )
-            yield ToolMessage(content="工具内部输出不应展示", tool_call_id="tool-1")
-            yield AIMessage(content="批注锚点校验完成")
+        def stream(self, _payload, _config, **_kwargs):
+            runner_invocations["count"] += 1
+            yield AIMessage(content="不应被调用")
 
     events = []
     result = run_comment_agent(
@@ -423,31 +446,23 @@ def test_run_comment_agent_pushes_tool_snapshots_and_writes_word_after_runner(tm
         audit_log_path=audit_path,
     )
 
-    assert result.ai_messages == ["开始校验批注锚点", "批注锚点校验完成"]
-    assert not any(event.content in result.ai_messages for event in events)
+    # 模型未被调用，ai_messages 为空
+    assert runner_invocations["count"] == 0
+    assert result.ai_messages == []
+    # 仍产生一次确定性校验快照
     assert events[0].step_type == "tool_snapshot"
     assert events[0].comment_agent["phase"] == "validation_round"
-    assert events[0].comment_agent["rounds"][0]["label"] == "第 1 轮锚点校验"
-    assert "第 1 轮锚点校验" in str(events[0].content)
-    assert "投标人须提供原厂授权函" not in str(events[0].content)
+    assert events[0].comment_agent["rounds"][0]["label"] == "首版锚点校验"
     assert events[0].comment_agent["rounds"][0]["passed"] == 1
-    assert events[0].comment_agent["rounds"][0]["highlights"] == []
-    assert events[-1].node == COMMENT_AGENT_NODE
     assert events[-1].step_type == "final"
-    assert events[-1].is_complete is True
-    assert events[-1].comment_agent["phase"] == "final"
-    assert events[-1].comment_agent["final_validation"]["passed"] == 1
     assert events[-1].comment_agent["writeback"]["added"] == 1
-    assert "comment_agent 最终写入统计" in str(events[-1].content)
     assert doc.Comments.Count == 1
 
     audit = json.loads(audit_path.read_text(encoding="utf-8"))
     assert audit["task_id"] == "task-1"
-    assert audit["initial_comments"][0]["comment_text"] == "建议提示：不得要求原厂授权函。"
-    assert audit["ai_messages"] == result.ai_messages
-    assert audit["tool_snapshots"][0]["validation"]["passed"][0]["reference_text"] == "投标人须提供原厂授权函"
-    assert audit["final_proposed_comments"][0]["reference_text"] == "投标人须提供原厂授权函"
-    assert audit["final_passed"][0]["reference_text"] == "投标人须提供原厂授权函"
+    assert audit["ai_messages"] == []
+    assert audit["tool_snapshots"][0]["validation"]["passed"][0]["reference_text"] == "原厂授权"
+    assert audit["final_proposed_comments"][0]["reference_text"] == "原厂授权"
     assert audit["writeback_result"]["added"] == 1
 
 def test_run_comment_agent_can_generate_candidates_in_generation_mode(tmp_path) -> None:
@@ -540,68 +555,45 @@ def test_run_comment_agent_reports_missing_generation_tool_candidates(tmp_path) 
     assert audit["ai_messages"] == [raw_candidate_text]
     assert audit["final_proposed_comments"] == []
 
-def test_run_comment_agent_shows_two_validation_rounds_and_silent_final_recheck(tmp_path) -> None:
+def test_run_comment_agent_autonomous_generation_emits_single_validation_round(tmp_path) -> None:
+    """自主生成模式只出现一轮校验快照，不再出现'第 2 轮修复复核'。"""
     doc = _FakeDocument("7.投标人须提供售后服务承诺。")
     audit_path = tmp_path / "comment-agent-audit.json"
 
     class FakeRunner:
         def stream(self, _payload, config, **_kwargs):
             context = config["configurable"]["comment_agent_tool_context"]
+            proposed = [
+                {
+                    "reference_text": "7.投标人须提供售后服务承诺",
+                    "comment_text": "建议提示：不得设置星号条款。",
+                }
+            ]
+            context.initial_comments = [
+                {
+                    "reference_text": proposed[0]["reference_text"],
+                    "comment_text": proposed[0]["comment_text"],
+                }
+            ]
             validation_1 = validate_comment_reference_candidates(
                 initial_comments=context.initial_comments,
-                proposed_comments=[
-                    {
-                        "reference_text": "★7.投标人须提供售后服务承诺",
-                        "comment_text": "建议提示：不得设置星号条款。",
-                    }
-                ],
+                proposed_comments=proposed,
                 polished_text=context.polished_text,
             )
             context.validation_results.append(validation_1.model_dump(mode="json"))
             context.tool_snapshots.append(
                 CommentAgentToolSnapshot(
                     round=1,
-                    proposed_comments=[
-                        {
-                            "reference_text": "★7.投标人须提供售后服务承诺",
-                            "comment_text": "建议提示：不得设置星号条款。",
-                        }
-                    ],
+                    proposed_comments=proposed,
                     validation=validation_1,
                 )
             )
-            yield ToolMessage(content="round-1", tool_call_id="tool-1")
-
-            final_comments = [
-                {
-                    "reference_text": "7.投标人须提供售后服务承诺",
-                    "comment_text": "建议提示：不得设置星号条款。",
-                }
-            ]
-            validation_2 = validate_comment_reference_candidates(
-                initial_comments=context.initial_comments,
-                proposed_comments=final_comments,
-                polished_text=context.polished_text,
-            )
-            context.validation_results.append(validation_2.model_dump(mode="json"))
-            context.tool_snapshots.append(
-                CommentAgentToolSnapshot(
-                    round=2,
-                    proposed_comments=final_comments,
-                    validation=validation_2,
-                )
-            )
-            context.final_proposed_comments = final_comments
-            yield ToolMessage(content="round-2", tool_call_id="tool-2")
+            context.final_proposed_comments = proposed
+            yield AIMessage(content="补充批注生成完成")
 
     events = []
     result = run_comment_agent(
-        initial_comments=[
-            {
-                "reference_text": "★7.投标人须提供售后服务承诺",
-                "comment_text": "建议提示：不得设置星号条款。",
-            }
-        ],
+        initial_comments=[],
         polished_text=doc.text,
         doc=doc,
         bound_start=0,
@@ -610,17 +602,89 @@ def test_run_comment_agent_shows_two_validation_rounds_and_silent_final_recheck(
         runner=FakeRunner(),
         step_callback=events.append,
         audit_log_path=audit_path,
+        allow_comment_generation=True,
+        comment_generation_instruction="请仅依据修改文本生成纯净 JSON 数组。",
     )
 
     visible_round_events = [event for event in events if event.step_type == "tool_snapshot"]
-    assert len(visible_round_events) == 2
-    assert visible_round_events[0].comment_agent["rounds"][-1]["label"] == "第 1 轮锚点校验"
-    assert visible_round_events[0].comment_agent["rounds"][-1]["failed"] == 1
-    assert visible_round_events[1].comment_agent["rounds"][-1]["label"] == "第 2 轮修复复核"
-    assert visible_round_events[1].comment_agent["rounds"][-1]["highlights"][0]["status"] == "已修复"
-    assert visible_round_events[1].comment_agent["rounds"][-1]["highlights"][0]["reference_text"] == "7.投标人须提供售后服务承诺"
+    assert len(visible_round_events) == 1
+    assert visible_round_events[0].comment_agent["rounds"][-1]["label"] == "首版锚点校验"
+    assert visible_round_events[0].comment_agent["rounds"][-1]["passed"] == 1
     assert events[-1].comment_agent["phase"] == "final"
-    assert len(events[-1].comment_agent["rounds"]) == 2
-    assert events[-1].comment_agent["final_validation"]["passed"] == 1
+    assert len(events[-1].comment_agent["rounds"]) == 1
     assert result.writeback_result["added"] == 1
     assert doc.Comments.Count == 1
+
+
+def test_run_comment_agent_blocks_second_validate_call_and_writes_audit(tmp_path) -> None:
+    """模型第二次调用 validate_comment_references 会被工具限制拦住，并落审计。"""
+    from langchain.agents.middleware.tool_call_limit import ToolCallLimitExceededError
+
+    doc = _FakeDocument("7.投标人须提供售后服务承诺。")
+    audit_path = tmp_path / "comment-agent-audit.json"
+
+    class FakeRunner:
+        def stream(self, _payload, config, **_kwargs):
+            context = config["configurable"]["comment_agent_tool_context"]
+            proposed = [
+                {
+                    "reference_text": "7.投标人须提供售后服务承诺",
+                    "comment_text": "建议提示：不得设置星号条款。",
+                }
+            ]
+            context.initial_comments = [
+                {
+                    "reference_text": proposed[0]["reference_text"],
+                    "comment_text": proposed[0]["comment_text"],
+                }
+            ]
+            validation_1 = validate_comment_reference_candidates(
+                initial_comments=context.initial_comments,
+                proposed_comments=proposed,
+                polished_text=context.polished_text,
+            )
+            context.validation_results.append(validation_1.model_dump(mode="json"))
+            context.tool_snapshots.append(
+                CommentAgentToolSnapshot(
+                    round=1,
+                    proposed_comments=proposed,
+                    validation=validation_1,
+                )
+            )
+            # 模拟模型无视工具限制，第二次调用校验工具 —— middleware 应拦截并抛错
+            raise ToolCallLimitExceededError(
+                thread_count=2,
+                run_count=2,
+                thread_limit=None,
+                run_limit=1,
+                tool_name=VALIDATE_COMMENT_REFERENCES_TOOL,
+            )
+
+    events = []
+    with pytest.raises(ToolCallLimitExceededError):
+        run_comment_agent(
+            initial_comments=[],
+            polished_text=doc.text,
+            doc=doc,
+            bound_start=0,
+            bound_end=len(doc.text),
+            task_id="task-6",
+            runner=FakeRunner(),
+            step_callback=events.append,
+            audit_log_path=audit_path,
+            allow_comment_generation=True,
+            comment_generation_instruction="请仅依据修改文本生成纯净 JSON 数组。",
+        )
+
+    # 异常分支仍写出审计 JSON，包含 tool_snapshots、validation_results、writeback_result 与错误文本
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert audit["task_id"] == "task-6"
+    assert audit["tool_snapshots"][0]["validation"]["passed"][0]["reference_text"] == (
+        "7.投标人须提供售后服务承诺"
+    )
+    assert audit["validation_results"]
+    assert audit["writeback_result"] is not None
+    assert "ToolCallLimitExceededError" in audit["notice"] or "运行异常" in audit["notice"]
+    # 异常分支也发出 final 事件
+    assert events[-1].step_type == "final"
+    assert events[-1].is_complete is True
