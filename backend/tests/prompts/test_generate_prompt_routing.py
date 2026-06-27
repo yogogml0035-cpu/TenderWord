@@ -202,8 +202,8 @@ def test_generate_prompts_forbid_ai_preamble_and_filler() -> None:
 
 def test_generate_prompts_flip_table_placeholder_to_internal_entry() -> None:
     """`[[TABLE:id]]` 被描述为内部写回入口；param 模式要求模型原样保留占位符
-    作为真实表格的写回锚点；template 模式按容器主权分情况（表格容器保留、
-    纯文本容器降维丢弃）。两者都不为缺失的表补占位句。"""
+    作为真实表格的写回锚点；template 模式也不能因纯文本容器丢弃采购需求表
+    锚点。两者都不为缺失的表补占位句。"""
     template_rendered = render_generate_by_template_prompt(build_prompt_input())
     param_rendered = render_generate_by_param_prompt(build_prompt_input(generation_style="param"))
 
@@ -219,11 +219,33 @@ def test_generate_prompts_flip_table_placeholder_to_internal_entry() -> None:
     assert "一旦你删掉它" in param_rendered.system_prompt
     assert "结构化表锚点红线" in param_rendered.system_prompt
 
-    # template 模式按容器主权分情况：表格容器保留占位符，纯文本容器降维丢弃。
-    assert "表格容器" in template_rendered.system_prompt
-    assert "纯文本容器" in template_rendered.system_prompt
+    # template 模式现在要求有锚点的采购需求表优先保留占位符，不被纯文本容器降维。
+    assert "采购需求表" in template_rendered.system_prompt
+    assert "不能拆成纯文本列表" in template_rendered.system_prompt
     assert "原样、独占一行保留" in template_rendered.system_prompt
     assert "唯一可靠锚点" in template_rendered.system_prompt
+
+
+def test_generate_prompts_forbid_structured_table_projection_as_text() -> None:
+    """带 `[[TABLE:id]]` 的源表只能留锚点，不能把投影表散文化输出。"""
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    assert "表格输出三步判定" in param_rendered.system_prompt
+    assert "锚点表禁止散文化" in param_rendered.system_prompt
+    assert "不能把表格行转写成 `1 设备用途`" in param_rendered.system_prompt
+    assert "重复转写则会破坏表格输出" in param_rendered.system_prompt
+    assert "先处理结构化表" in param_rendered.user_prompt
+    assert "输出只能是 `二、技术需求" in param_rendered.user_prompt
+    assert "[[TABLE:TP1_1]]`" in param_rendered.user_prompt
+
+    assert "不要逐行重绘，不要转成纯文本列表" in template_rendered.system_prompt
+    assert "不得把有锚点表当作普通表降维" in template_rendered.system_prompt
+    assert "不手工重绘、不散文化" in template_rendered.system_prompt
+    assert "先执行结构化表判定" in template_rendered.user_prompt
+    assert "不得因参考内容是纯文本而把锚点表降维成普通列表" in template_rendered.user_prompt
 
 
 def test_generate_param_prompt_preserves_field_shell_protection() -> None:
@@ -255,6 +277,20 @@ def test_verify_prompt_describes_table_placeholder_as_internal_entry() -> None:
     # 现在还明确：保留占位符是正确行为，不要报 finding 要求删除占位符。
     assert "正确且被要求" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
     assert "要求删除它" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+    assert "必须检查锚点表是否被重复散文化" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+    assert "有锚点时它们是重复投影内容" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+
+
+def test_verify_and_revise_prompts_reject_textified_structured_tables() -> None:
+    """审核必须报出锚点表散文化；修订只删除重复投影行、保留锚点。"""
+    assert "结构化表审核总则" in VERIFY_SYSTEM_PROMPT
+    assert "锚点 + 散文化投影表" in VERIFY_SYSTEM_PROMPT
+    assert "1 设备用途" in VERIFY_SYSTEM_PROMPT
+    assert "删除该锚点表对应的普通文本/手绘投影行" in VERIFY_SYSTEM_PROMPT
+
+    assert "锚点表被重复转写成普通文本" in REVISE_SYSTEM_PROMPT
+    assert "删除这些重复投影行" in REVISE_SYSTEM_PROMPT
+    assert "不得把投影行改写成另一种表格" in REVISE_SYSTEM_PROMPT
 
 
 def test_verify_prompt_states_protected_field_non_deletion_contract() -> None:
