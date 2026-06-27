@@ -20,7 +20,7 @@ guard 直接返回原 findings，不介入。
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable
+from typing import Any
 
 from backend.agents.generation.types import AuditFinding
 from backend.config.tender_config import (
@@ -51,6 +51,29 @@ _BASIC_INFO_FIELD_NAMES = (
     "包号",
     "标段号",
 )
+# “第N包/包件N/标段N”包标题匹配；多包场景按包切分参考模板与待审核正文。
+_PACKAGE_MARKER_PATTERN = re.compile(
+    r"^\s*(?:第\s*[一二三四五六七八九十0-9]+\s*包"
+    r"|包\s*件?\s*[一二三四五六七八九十0-9]+"
+    r"|标\s*段\s*[一二三四五六七八九十0-9]+).*$",
+)
+_PACKAGE_MARKER_INDEX_PATTERN = re.compile(
+    r"^\s*(?:第\s*([一二三四五六七八九十0-9]+)\s*包"
+    r"|包\s*件?\s*([一二三四五六七八九十0-9]+)"
+    r"|标\s*段\s*([一二三四五六七八九十0-9]+)).*$",
+)
+_CHINESE_NUMBERS = {
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+}
 
 
 def resolve_protected_field_profile(
@@ -113,6 +136,24 @@ def _current_text_has_field(current_text: str, field_names: tuple[str, ...]) -> 
     return present
 
 
+def _parse_package_index(line: str, *, fallback: int) -> int:
+    match = _PACKAGE_MARKER_INDEX_PATTERN.match(str(line or ""))
+    if not match:
+        return fallback
+    raw = next((part for part in match.groups() if part), "")
+    if raw.isdigit():
+        return int(raw)
+    if raw in _CHINESE_NUMBERS:
+        return _CHINESE_NUMBERS[raw]
+    if raw.startswith("十") and len(raw) == 2:
+        return 10 + _CHINESE_NUMBERS.get(raw[1], 0)
+    if raw.endswith("十") and len(raw) == 2:
+        return _CHINESE_NUMBERS.get(raw[0], 0) * 10
+    if "十" in raw and len(raw) == 3:
+        return _CHINESE_NUMBERS.get(raw[0], 0) * 10 + _CHINESE_NUMBERS.get(raw[2], 0)
+    return fallback
+
+
 def _resolve_template_field_line(
     template_reference_text: str,
     field_name: str,
@@ -164,56 +205,80 @@ def _split_by_package_markers(text: str) -> list[list[str]]:
     """把参考文本按包/标段标题切分成段；识别不到任何包标题时返回空列表。"""
     lines = str(text or "").split("\n")
 
-    package_pattern = re.compile(
-        r"^\s*(?:第\s*[一二三四五六七八九十0-9]+\s*包"
-        r"|包\s*件?\s*[一二三四五六七八九十0-9]+"
-        r"|标\s*段\s*[一二三四五六七八九十0-9]+).*$",
-    )
     segments: list[list[str]] = []
     current: list[str] | None = None
     saw_package = False
     for line in lines:
-        if package_pattern.match(line):
+        if _PACKAGE_MARKER_PATTERN.match(line):
             saw_package = True
             current = []
             segments.append(current)
-        if current is None:
-            current = []
-            segments.append(current)
-        current.append(line)
+        if current is not None:
+            current.append(line)
     return segments if saw_package else []
+
+
+def _iter_current_text_packages(text: str) -> list[tuple[int, list[str]]]:
+    """把待审核正文按“第N包”切成 [(包序号, 该包行)]。
+
+    包标题之前的抬头/前导行（如裸采购人名称）会被忽略，不归入任何包；
+    识别不到任何包标题时返回空列表，调用方退化为全文判断。
+    """
+    lines = str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    segments: list[tuple[int, list[str]]] = []
+    current: list[str] | None = None
+    index = 0
+    for line in lines:
+        if _PACKAGE_MARKER_PATTERN.match(line):
+            index += 1
+            package_index = _parse_package_index(line, fallback=index)
+            current = [line]
+            segments.append((package_index, current))
+        elif current is not None:
+            current.append(line)
+    return segments
 
 
 def _backfill_findings(
     *,
-    missing_field_names: Iterable[str],
+    specs: list[tuple[int | None, str]],
     template_reference_text: str,
-    package_index: int | None,
 ) -> list[AuditFinding]:
+    """按 (包序号, 字段名) 规格生成“补回受保护字段”的确定性 finding。
+
+    包序号为正整数时，evidence/fix_hint 会明确指向“第N包”，便于 revise
+    把字段补回到正确的那个包；包序号为 None 时退化为全文级补回。
+    """
     findings: list[AuditFinding] = []
-    for field_name in missing_field_names:
+    for package_index, field_name in specs:
         template_line = _resolve_template_field_line(
             template_reference_text,
             field_name,
             package_index=package_index,
         )
+        pkg_hint = (
+            f"第{package_index}包"
+            if isinstance(package_index, int) and package_index > 0
+            else ""
+        )
+        scope = f"{pkg_hint}的" if pkg_hint else ""
         if template_line:
             evidence = (
-                f"待审核正文缺少受保护基础信息字段 `{field_name}：`，"
+                f"待审核正文{scope}项目概述缺少受保护基础信息字段 `{field_name}：`，"
                 f"该字段来自参考模板 `{template_line}`，受保护字段不得删除。"
             )
             fix_hint = (
-                f"按参考模板同包字段行恢复 `{template_line}` 这类字段行，"
+                f"按参考模板同包字段行在{scope}项目概述恢复 `{template_line}` 这类字段行，"
                 "保留模板字段名、冒号和相对顺序；当前项目材料未提供新值时"
                 "保留模板原值或占位表达，保持其它内容不变。"
             )
         else:
             evidence = (
-                f"待审核正文缺少受保护基础信息字段 `{field_name}：`，"
+                f"待审核正文{scope}项目概述缺少受保护基础信息字段 `{field_name}：`，"
                 "该字段属于受保护字段，不得删除。"
             )
             fix_hint = (
-                f"恢复 `{field_name}：` 字段行，保留字段名和冒号；"
+                f"在{scope}项目概述恢复 `{field_name}：` 字段行，保留字段名和冒号；"
                 "当前项目材料未提供新值时保留模板占位/固定表达，保持其它内容不变。"
             )
         findings.append(AuditFinding(evidence=evidence, fix_hint=fix_hint))
@@ -267,26 +332,44 @@ def sanitize_protected_field_findings(
 
     normalized_reference = str(template_reference_text or "")
     reference_lines = normalized_reference.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    present_fields = _current_text_has_field(current_text, field_names)
-    # 回填启发式：只在参考模板里存在对应字段行时才要求补回该字段。
-    # 这样避免对抽象测试文本或不含字段的旧正文误报；真实流水线里参考模板
-    # 始终含受保护字段（字段壳来自模板），不会漏报。
-    missing_field_names: list[str] = []
-    for field_name in field_names:
-        if field_name in present_fields:
-            continue
-        if not any(
+
+    def _reference_has_field(field_name: str) -> bool:
+        # 回填启发式：只在参考模板里存在对应字段行时才要求补回该字段，避免对
+        # 抽象测试文本或不含字段的旧正文误报；真实流水线里参考模板始终含受保护
+        # 字段（字段壳来自模板），不会漏报。
+        return any(
             match_protected_field_line(line, f"{field_name}：") is not None
             for line in reference_lines
-        ):
-            continue
-        missing_field_names.append(field_name)
-    if missing_field_names:
+        )
+
+    # 逐包收集缺失的受保护字段：多包场景按“第N包”独立判断，避免“某个包自带该
+    # 字段”就误判全文都有、放过其它缺字段的包（多包确定性盲区修复）。识别不到
+    # 包结构时退化为全文级判断（沿用传入的 package_index）。
+    specs: list[tuple[int | None, str]] = []
+    packages = _iter_current_text_packages(current_text)
+    if packages:
+        for pkg_index, pkg_lines in packages:
+            present_in_pkg = _current_text_has_field("\n".join(pkg_lines), field_names)
+            for field_name in field_names:
+                if field_name in present_in_pkg:
+                    continue
+                if not _reference_has_field(field_name):
+                    continue
+                specs.append((pkg_index, field_name))
+    else:
+        present_fields = _current_text_has_field(current_text, field_names)
+        for field_name in field_names:
+            if field_name in present_fields:
+                continue
+            if not _reference_has_field(field_name):
+                continue
+            specs.append((package_index, field_name))
+
+    if specs:
         sanitized.extend(
             _backfill_findings(
-                missing_field_names=missing_field_names,
+                specs=specs,
                 template_reference_text=normalized_reference,
-                package_index=package_index,
             )
         )
     return sanitized

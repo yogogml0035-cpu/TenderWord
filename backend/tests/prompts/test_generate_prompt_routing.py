@@ -280,6 +280,22 @@ def test_generate_param_prompt_preserves_field_shell_protection() -> None:
     assert "交付地点" in rendered.system_prompt
 
 
+def test_generate_prompts_enforce_per_package_overview_completion() -> None:
+    """生成端两套提示词都要求逐包补齐项目概述字段，并清洗包头裸机构行。"""
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    assert "逐包项目概述字段补全" in template_rendered.system_prompt
+    assert "不能因为第2包有 `付款方式`" in template_rendered.system_prompt
+    assert "项目技术参数/技术参数/参数要求" in template_rendered.system_prompt
+
+    assert "多包项目概述逐包补全与包头清洗" in param_rendered.system_prompt
+    assert "不得因为某一包已经有 `付款方式`" in param_rendered.system_prompt
+    assert "上海市第六人民医院" in param_rendered.system_prompt
+
+
 def test_verify_prompt_describes_table_placeholder_as_internal_entry() -> None:
     """审核规则泛化重要性标识并排除技术符号；占位符硬契约（附加到 user prompt）
     把占位符描述为内部写回入口：保留占位符是正确行为，既不要求补回也不要求删除。"""
@@ -347,6 +363,18 @@ def test_verify_prompt_includes_protected_field_few_shots() -> None:
     assert "缺少受保护基础字段 `付款方式：`" in VERIFY_SYSTEM_PROMPT
     # 审核意见要求删除付款方式时 -> []
     assert "无新材料支撑的旧事实" in VERIFY_SYSTEM_PROMPT
+
+
+def test_verify_and_revise_prompts_cover_per_package_overview_and_bare_org_lines() -> None:
+    """审核/修订端提示词覆盖逐包字段缺失和包头裸机构行。"""
+    assert "多包场景必须逐包判断字段存在性" in VERIFY_SYSTEM_PROMPT
+    assert "包头裸机构行检查" in VERIFY_SYSTEM_PROMPT
+    assert "上海市第六人民医院" in VERIFY_SYSTEM_PROMPT
+    assert "不能因第2包已出现付款方式" in VERIFY_SYSTEM_PROMPT
+
+    assert "某个具体包的项目概述缺少受保护基础字段" in REVISE_SYSTEM_PROMPT
+    assert "裸采购人/单位/医院/学校/公司名称行" in REVISE_SYSTEM_PROMPT
+    assert "交付地点/服务地点" in REVISE_SYSTEM_PROMPT
 
 
 def test_revise_prompt_ignores_delete_protected_field_audit_item() -> None:

@@ -1536,6 +1536,49 @@ def test_verify_inherits_template_field_per_package_for_multi_package(monkeypatc
     assert "设备验收合格后30天内付清全款" in payment_findings[0].fix_hint
 
 
+def test_verify_guard_backfills_missing_field_for_each_current_package() -> None:
+    """多包正文按包独立判断字段存在性，不能因某包已有付款方式放过其它包。"""
+    from backend.agents.generation.protected_field_guard import (
+        sanitize_protected_field_findings,
+    )
+
+    template = (
+        "采购需求\n"
+        "第1包：模板设备一\n"
+        "1、交付日期：合同签订后30天内到货\n"
+        "2、付款方式：货到验收合格后3个月内支付货款的100%\n"
+        "第2包：模板设备二\n"
+        "1、交付日期：合同签订后30天内到货\n"
+        "2、付款方式：货到验收合格后3个月内支付货款的100%\n"
+    )
+    current_text = (
+        "上海市第六人民医院\n"
+        "第1包：病人监护仪项目技术参数\n"
+        "1、交付日期：合同签订后30天内到货\n"
+        "第2包：头灯放大镜项目技术参数\n"
+        "1、交付日期：合同签订后30天内到货\n"
+        "2、付款方式：货到验收合格后3个月内支付货款的100%\n"
+        "第3包：骨科脊柱手术工具项目技术参数\n"
+        "1、交付日期：合同签订后60天内到货\n"
+    )
+
+    findings = sanitize_protected_field_findings(
+        findings=[],
+        tender_type="xjcg",
+        current_text=current_text,
+        template_reference_text=template,
+    )
+
+    payment_findings = [finding for finding in findings if "付款方式" in finding.evidence]
+    assert len(payment_findings) == 2
+    assert "第1包" in payment_findings[0].evidence
+    assert "第3包" in payment_findings[1].evidence
+    assert all(
+        "货到验收合格后3个月内支付货款的100%" in finding.fix_hint
+        for finding in payment_findings
+    )
+
+
 def test_verify_guard_skips_direct_replace_tender_type(monkeypatch) -> None:
     """`gngk_hw_cz` 这类 direct_replace 类型不进入 protected-field guard。"""
     from backend.agents.generation.protected_field_guard import (
