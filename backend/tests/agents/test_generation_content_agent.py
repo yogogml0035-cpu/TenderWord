@@ -532,6 +532,169 @@ def test_content_runner_creates_workspace_and_reads_final_file(
     assert events[-1].content_agent["final_result"]["content"] == "final text"
 
 
+def test_content_runner_copies_draft_to_final_when_first_audit_passes(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    draft_text = "二、人员要求\n[[TABLE:TP1_1]]\n注：保留非表格正文"
+    calls: list[str] = []
+
+    def fake_generate_graph():
+        class Graph:
+            def invoke(self, _state, config=None):  # type: ignore[no-untyped-def]
+                backend = config["configurable"]["content_agent_backend"]
+                backend.write("/drafts/round-1.md", draft_text)
+                callback = config["configurable"].get("agent_step_callback")
+                if callable(callback):
+                    callback(
+                        {
+                            "step_type": "draft",
+                            "round": 1,
+                            "node": "content_generate_agent",
+                            "content": draft_text,
+                            "is_complete": True,
+                        }
+                    )
+                calls.append("generate")
+                return {"draft_path": "/drafts/round-1.md"}
+
+        return Graph()
+
+    def fake_verify_graph():
+        class Graph:
+            def invoke(self, state, config=None):  # type: ignore[no-untyped-def]
+                backend = config["configurable"]["content_agent_backend"]
+                round_index = int(state["revision_round"])
+                backend.write(audit_path(round_index), "[]")
+                callback = config["configurable"].get("agent_step_callback")
+                if callable(callback):
+                    callback(
+                        {
+                            "step_type": "audit",
+                            "round": round_index,
+                            "node": "content_verify_agent",
+                            "content": "[]",
+                            "is_complete": True,
+                        }
+                    )
+                calls.append(f"verify-{round_index}")
+                return {"findings": [], "audit_path": audit_path(round_index)}
+
+        return Graph()
+
+    def fake_revise_graph():
+        class Graph:
+            def invoke(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+                calls.append("revise")
+                raise AssertionError("empty audit must not invoke revise")
+
+        return Graph()
+
+    monkeypatch.setattr(content_agent_module, "create_generate_agent_graph", fake_generate_graph)
+    monkeypatch.setattr(content_agent_module, "create_verify_agent_graph", fake_verify_graph)
+    monkeypatch.setattr(content_agent_module, "create_revise_agent_graph", fake_revise_graph)
+
+    events: list[AgentStepPayload] = []
+    result = run_content_agent_generation(
+        {
+            "generation_style": "param",
+            "project_number": "P-001",
+            "project_name": "审核通过复制",
+            "project_content": "project",
+            "tender_params": _TABLE_PARAM_FIXTURE,
+            "template_reference_text": "origin",
+        },
+        {"configurable": {"model_provider": "deepseek", "task_id": "task-copy-draft"}},
+        step_callback=events.append,
+    )
+
+    workspace_dir = result.workspace_dir
+    assert calls == ["generate", "verify-1"]
+    assert result.polished_text == draft_text
+    assert (workspace_dir / "final" / "polished_text.md").read_text(encoding="utf-8") == draft_text
+    assert not (workspace_dir / "audits" / "round-2.json").exists()
+    assert not (workspace_dir / "revisions").exists()
+    assert result.revision_rounds == 0
+    assert [event.node for event in events] == [
+        "content_generate_agent",
+        "content_verify_agent",
+        "content_agent",
+    ]
+
+
+def test_content_runner_copies_revision_to_final_after_second_audit_passes(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    calls: list[str] = []
+
+    def fake_generate_graph():
+        class Graph:
+            def invoke(self, _state, config=None):  # type: ignore[no-untyped-def]
+                config["configurable"]["content_agent_backend"].write(
+                    "/drafts/round-1.md", "draft"
+                )
+                calls.append("generate")
+                return {"draft_path": "/drafts/round-1.md"}
+
+        return Graph()
+
+    def fake_verify_graph():
+        class Graph:
+            def invoke(self, state, config=None):  # type: ignore[no-untyped-def]
+                backend = config["configurable"]["content_agent_backend"]
+                round_index = int(state["revision_round"])
+                payload = (
+                    [{"evidence": "缺少字段", "fix_hint": "补充字段"}]
+                    if round_index == 1
+                    else []
+                )
+                backend.write(audit_path(round_index), json.dumps(payload, ensure_ascii=False))
+                calls.append(f"verify-{round_index}:{state['current_text_path']}")
+                return {"findings": payload, "audit_path": audit_path(round_index)}
+
+        return Graph()
+
+    def fake_revise_graph():
+        class Graph:
+            def invoke(self, state, config=None):  # type: ignore[no-untyped-def]
+                backend = config["configurable"]["content_agent_backend"]
+                round_index = int(state["revision_round"])
+                backend.write(f"/revisions/round-{round_index}.md", "revised")
+                calls.append(f"revise-{round_index}:{state['current_text_path']}")
+                return {"revision_path": f"/revisions/round-{round_index}.md"}
+
+        return Graph()
+
+    monkeypatch.setattr(content_agent_module, "create_generate_agent_graph", fake_generate_graph)
+    monkeypatch.setattr(content_agent_module, "create_verify_agent_graph", fake_verify_graph)
+    monkeypatch.setattr(content_agent_module, "create_revise_agent_graph", fake_revise_graph)
+
+    result = run_content_agent_generation(
+        {
+            "generation_style": "param",
+            "project_number": "P-002",
+            "project_name": "二轮通过",
+            "project_content": "project",
+            "tender_params": "params",
+            "template_reference_text": "origin",
+        },
+        {"configurable": {"model_provider": "deepseek", "task_id": "task-copy-revision"}},
+    )
+
+    workspace_dir = result.workspace_dir
+    assert calls == [
+        "generate",
+        "verify-1:/drafts/round-1.md",
+        "revise-1:/drafts/round-1.md",
+        "verify-2:/revisions/round-1.md",
+    ]
+    assert result.polished_text == "revised"
+    assert (workspace_dir / "final" / "polished_text.md").read_text(encoding="utf-8") == "revised"
+    assert not (workspace_dir / "audits" / "round-3.json").exists()
+    assert result.revision_rounds == 1
+
+
 def test_content_agent_tracker_preserves_completed_audit_after_late_empty_update() -> None:
     tracker = content_agent_module.ContentAgentProcessTracker()
     finding = {"evidence": "缺少 ★ 指标", "fix_hint": "补充 ★ 符号"}

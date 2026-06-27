@@ -43,11 +43,13 @@ from backend.agents.generation.workspace import (
     create_workspace_backend,
     create_workspace_dir,
     ensure_round_within_protocol,
+    infer_current_text_path,
     infer_next_audit_round,
     infer_next_revision_round,
     overwrite_backend_text,
     read_backend_text,
     read_backend_text_optional,
+    revision_path,
     validate_round_protocol,
     write_generation_context,
 )
@@ -71,10 +73,10 @@ CONTENT_AGENT_SYSTEM_PROMPT = f"""
 硬性协议：
 1. 所有输入、草稿、审核、修订和最终正文都只通过文件系统路径交接，不要把完整正文塞进 task 描述。
 2. 先调用 content_generate_agent 生成初稿，再调用 content_verify_agent 审核；审核最多 3 轮，路径只能是 /audits/round-1.json 到 /audits/round-3.json。
-3. 如果审核 JSON 是 []，不要调用 content_revise_agent，直接把当前正文完整写入 {FINAL_POLISHED_TEXT_PATH}。
+3. 如果审核 JSON 是 []，不要调用 content_revise_agent，也不要再次审核；必须把当前正文文件逐字复制到 {FINAL_POLISHED_TEXT_PATH}，不得凭记忆重写、整理、扩写、补表或改格式。
 4. 如果审核 JSON 非空，调用 content_revise_agent 写 /revisions/round-N.md，然后继续下一轮审核；修订路径只能是 /revisions/round-1.md 到 /revisions/round-3.md。
 5. 只有 content_agent 可以写 {FINAL_POLISHED_TEXT_PATH}；子智能体不得写 final。
-6. 第 3 轮修订后必须停止返修；修订时必须逐条解决第 3 轮审核问题，再把当前修订正文写入 {FINAL_POLISHED_TEXT_PATH}。
+6. 第 3 轮修订后必须停止返修；修订时必须逐条解决第 3 轮审核问题，再把当前修订正文逐字复制到 {FINAL_POLISHED_TEXT_PATH}。
 7. 最终回复只输出简短验收说明，不要重复最终正文，不要展示隐藏 reasoning。
 8. 不得要求用户补充信息，不得自动回退 workflow。
 9. 最终正文只生成采购需求；评标方法、评审办法、评分标准、投标评分细则、评分索引等投标阶段打分内容必须删除，不得要求子智能体补回。
@@ -312,9 +314,9 @@ def _build_main_agent_user_prompt() -> str:
 1. 先用 TodoList 写出 generate、verify、revise/final 的计划。
 2. 调用 content_generate_agent 生成初稿。
 3. 第 N 轮审核时调用 content_verify_agent，让它读取当前正文文件并写 /audits/round-N.json。
-4. 如果审核 JSON 为 []，由你读取当前正文并写入 {FINAL_POLISHED_TEXT_PATH}。
+4. 如果审核 JSON 为 []，由你读取当前正文并逐字写入 {FINAL_POLISHED_TEXT_PATH}；不得再次审核、不得调用修订、不得重新生成正文。
 5. 如果审核 JSON 非空且 N <= 3，调用 content_revise_agent 写 /revisions/round-N.md；然后继续下一轮审核。
-6. 第 3 轮修订后必须逐条解决第 3 轮审核问题，再把 /revisions/round-3.md 写入 {FINAL_POLISHED_TEXT_PATH}。
+6. 第 3 轮修订后必须逐条解决第 3 轮审核问题，再把 /revisions/round-3.md 逐字写入 {FINAL_POLISHED_TEXT_PATH}。
 7. 最终只回复简短验收说明，不重复正文。
 """.strip()
 
@@ -812,6 +814,71 @@ def _relay_runner_stream(
         raise
 
 
+def _invoke_subagent_runnable(
+    subagent: CompiledSubAgent,
+    state: dict[str, Any],
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    runnable = subagent["runnable"]
+    result = runnable.invoke(state, config)
+    return result if isinstance(result, dict) else {}
+
+
+def _write_current_text_to_final(
+    backend: BackendProtocol,
+    current_text_path: str,
+) -> None:
+    overwrite_backend_text(
+        backend,
+        FINAL_POLISHED_TEXT_PATH,
+        read_backend_text(backend, current_text_path),
+    )
+
+
+def _run_file_protocol(
+    *,
+    config: dict[str, Any],
+    backend: BackendProtocol,
+) -> None:
+    subagents = build_generation_subagents()
+    _invoke_subagent_runnable(subagents.content_generate_agent, {}, config)
+
+    for round_index in range(1, MAX_REVISION_ROUNDS + 1):
+        current_path = infer_current_text_path(backend)
+
+        _invoke_subagent_runnable(
+            subagents.content_verify_agent,
+            {
+                "revision_round": round_index,
+                "current_text_path": current_path,
+            },
+            config,
+        )
+        findings = coerce_audit_findings(
+            read_backend_text(backend, audit_path(round_index)),
+            fallback_on_error=True,
+        )
+        if not findings:
+            _write_current_text_to_final(backend, current_path)
+            return
+
+        _invoke_subagent_runnable(
+            subagents.content_revise_agent,
+            {
+                "revision_round": round_index,
+                "current_text_path": current_path,
+            },
+            config,
+        )
+        next_path = revision_path(round_index)
+        if read_backend_text_optional(backend, next_path) is None:
+            _write_current_text_to_final(backend, current_path)
+            return
+        if round_index == MAX_REVISION_ROUNDS:
+            _write_current_text_to_final(backend, next_path)
+            return
+
+
 def _is_protocol_round_exhausted(exc: BaseException) -> bool:
     """判断异常是否来自轮次用尽的协议校验（越界审核/修订请求）。"""
     return isinstance(exc, GenerationAgentProtocolError) and "协议轮次已用尽" in str(exc)
@@ -916,10 +983,7 @@ def run_content_agent_generation(
         workspace_dir=workspace_dir,
         step_callback=step_emitter,
     )
-    selected_runner = runner or _fake_runner or create_content_agent_runner(
-        model_provider,
-        backend=backend,
-    )
+    selected_runner = runner or _fake_runner
 
     write_generation_context(backend, base_payload)
 
@@ -937,12 +1001,15 @@ def run_content_agent_generation(
     )
 
     try:
-        _relay_runner_stream(
-            selected_runner,
-            {"messages": [{"role": "user", "content": _build_main_agent_user_prompt()}]},
-            runner_config,
-            step_emitter,
-        )
+        if selected_runner is None:
+            _run_file_protocol(config=runner_config, backend=backend)
+        else:
+            _relay_runner_stream(
+                selected_runner,
+                {"messages": [{"role": "user", "content": _build_main_agent_user_prompt()}]},
+                runner_config,
+                step_emitter,
+            )
     except GenerationAgentProtocolError as exc:
         if not _is_protocol_round_exhausted(exc):
             raise
