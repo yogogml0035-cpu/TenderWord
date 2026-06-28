@@ -984,7 +984,32 @@ class DocumentService:
 
         # 文件路径
         state["template_path"] = file_paths.template
-        state["tender_param_paths"] = list(file_paths.tender_params)
+        tender_param_items = list(file_paths.tender_params or [])
+        tender_param_paths: List[str] = []
+        tender_param_files: List[Dict[str, str]] = []
+        for item in tender_param_items:
+            # 兼容纯路径字符串和 {file_path, original_name} 对象两种形式。
+            if isinstance(item, str):
+                path = str(item or "").strip()
+                if not path:
+                    continue
+                tender_param_paths.append(path)
+                tender_param_files.append({"file_path": path})
+                continue
+
+            raw_path = str(getattr(item, "file_path", "") or "").strip()
+            if not raw_path:
+                continue
+            tender_param_paths.append(raw_path)
+            original_name = str(getattr(item, "original_name", "") or "").strip()
+            file_meta: Dict[str, str] = {"file_path": raw_path}
+            if original_name:
+                file_meta["original_name"] = original_name
+            tender_param_files.append(file_meta)
+
+        state["tender_param_paths"] = tender_param_paths
+        # tender_param_files 保留路径与上传原名的有序元数据，供抽取节点按顺序拼接来源块。
+        state["tender_param_files"] = tender_param_files
 
         return state
 

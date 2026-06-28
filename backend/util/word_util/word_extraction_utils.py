@@ -68,6 +68,31 @@ SUBSCRIPT_MAP = {
 
 WORD_XML_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 
+# WordOpenXML 的表格片段（<w:tbl>...内容...</w:tbl>）在重新解析时，
+# 原始的 <w:document> 根元素上声明的扩展命名空间已经丢失。
+# 若 fragment 内的元素带这些前缀的属性（例如 <w:tr w14:paraId="..." w14:textId="..."/>），
+# ElementTree 会因 "unbound prefix" 抛 ParseError，导致 _parse_table_model_from_table_xml
+# 返回 None，整张表被静默跳过。这里把 Word 常见扩展命名空间一并补到 fragment 包装上，
+# w14 至少覆盖 paraId/textId；其余前缀按需补齐以避免同类回归。
+WORD_FRAGMENT_EXTRA_XMLNS = (
+    " xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\""
+    " xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\""
+    " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
+    " xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\""
+)
+
+
+def _wrap_table_xml_fragment(content: str) -> str:
+    """把表格片段包装成可被 ElementTree 解析的 <w:tbl> XML，补齐 Word 扩展命名空间。
+
+    content 是 <w:tbl> 与 </w:tbl> 之间的内部内容（不含 <w:tbl> 标签本身）。
+    返回包含 w 与常见扩展命名空间的完整 <w:tbl> XML 字符串。
+    """
+    return (
+        f"<w:tbl xmlns:w=\"{WORD_XML_NS['w']}\""
+        f"{WORD_FRAGMENT_EXTRA_XMLNS}>{content}</w:tbl>"
+    )
+
 # Symbol 字体（w:font="Symbol"）通过 <w:sym w:char="xxxx"/> 表示特殊字符，
 # char 是十六进制私有区码位（Symbol 字体内部编码），需要在抽取阶段映射回可见字符，
 # 否则下游会看到乱码或空。这里覆盖常见的标书/技术参数符号。
@@ -510,7 +535,7 @@ def extract_text_from_xml(xml_content, preserve_structure=False):
 
                 elif elem_type == "table":
                     table_model = _parse_table_model_from_table_xml(
-                        f"<w:tbl xmlns:w=\"{WORD_XML_NS['w']}\">{content}</w:tbl>",
+                        _wrap_table_xml_fragment(content),
                         table_id="XML_TABLE",
                     )
                     if table_model is not None:
@@ -1096,7 +1121,7 @@ def extract_content_with_table_models(
 
             table_index += 1
             table_model = _parse_table_model_from_table_xml(
-                f"<w:tbl xmlns:w=\"{WORD_XML_NS['w']}\">{content}</w:tbl>",
+                _wrap_table_xml_fragment(content),
                 table_id=f"{table_id_prefix}{table_index}",
             )
             if table_model is None:

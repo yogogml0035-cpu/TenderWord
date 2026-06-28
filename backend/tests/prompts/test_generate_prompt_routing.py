@@ -69,7 +69,7 @@ def test_render_generate_by_param_prompt_prefers_tender_params_as_final_body() -
     assert "最终结果应尽量等于“【技术参数】原文删除评分污染、去掉已被项目概述消耗的裸元数据行后的版本”" in rendered.system_prompt
     assert "附件与表单原位保留" in rendered.system_prompt
     assert "反格式改写红线" in rendered.system_prompt
-    assert "【技术参数】（先读；正文默认直接以它为准，只删除评分/评审污染）" in rendered.user_prompt
+    assert "【技术参数】（先读；正文默认直接以它为准，只删除评分/评审污染和来源标记行）" in rendered.user_prompt
 
 
 def test_render_generate_by_param_prompt_preserves_basic_info_shells() -> None:
@@ -202,8 +202,8 @@ def test_generate_prompts_forbid_ai_preamble_and_filler() -> None:
 
 def test_generate_prompts_flip_table_placeholder_to_internal_entry() -> None:
     """`[[TABLE:id]]` 被描述为内部写回入口；param 模式要求模型原样保留占位符
-    作为真实表格的写回锚点；template 模式按容器主权分情况（表格容器保留、
-    纯文本容器降维丢弃）。两者都不为缺失的表补占位句。"""
+    作为真实表格的写回锚点；template 模式也不能因纯文本容器丢弃采购需求表
+    锚点。两者都不为缺失的表补占位句。"""
     template_rendered = render_generate_by_template_prompt(build_prompt_input())
     param_rendered = render_generate_by_param_prompt(build_prompt_input(generation_style="param"))
 
@@ -219,11 +219,53 @@ def test_generate_prompts_flip_table_placeholder_to_internal_entry() -> None:
     assert "一旦你删掉它" in param_rendered.system_prompt
     assert "结构化表锚点红线" in param_rendered.system_prompt
 
-    # template 模式按容器主权分情况：表格容器保留占位符，纯文本容器降维丢弃。
-    assert "表格容器" in template_rendered.system_prompt
-    assert "纯文本容器" in template_rendered.system_prompt
+    # template 模式现在要求有锚点的采购需求表优先保留占位符，不被纯文本容器降维。
+    assert "采购需求表" in template_rendered.system_prompt
+    assert "不能拆成纯文本列表" in template_rendered.system_prompt
     assert "原样、独占一行保留" in template_rendered.system_prompt
     assert "唯一可靠锚点" in template_rendered.system_prompt
+
+
+def test_generate_prompts_forbid_structured_table_projection_as_text() -> None:
+    """带 `[[TABLE:id]]` 的源表只能留锚点，不能把投影表散文化输出。"""
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    assert "表格输出三步判定" in param_rendered.system_prompt
+    assert "锚点表禁止散文化" in param_rendered.system_prompt
+    assert "不能把表格行转写成 `1 设备用途`" in param_rendered.system_prompt
+    assert "重复转写则会破坏表格输出" in param_rendered.system_prompt
+    assert "先处理结构化表" in param_rendered.user_prompt
+    assert "输出只能是 `二、技术需求" in param_rendered.user_prompt
+    assert "[[TABLE:TP1_1]]`" in param_rendered.user_prompt
+
+    assert "不要逐行重绘，不要转成纯文本列表" in template_rendered.system_prompt
+    assert "不得把有锚点表当作普通表降维" in template_rendered.system_prompt
+    assert "不手工重绘、不散文化" in template_rendered.system_prompt
+    assert "先执行结构化表判定" in template_rendered.user_prompt
+    assert "不得因参考内容是纯文本而把锚点表降维成普通列表" in template_rendered.user_prompt
+
+
+def test_generate_prompts_preserve_text_around_structured_table_placeholders() -> None:
+    """结构化表占位符只替代表格本体，不能吞掉前后非表格正文。"""
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    assert "锚点不吞正文" in param_rendered.system_prompt
+    assert "只替换“紧邻它之前的一张表格”" in param_rendered.system_prompt
+    assert "禁止集中堆叠占位符" in param_rendered.system_prompt
+    assert "锚点邻接正文红线" in param_rendered.system_prompt
+    assert "附件5：《专项保洁报价单》" in param_rendered.user_prompt
+    assert "投标人授权代表签字或盖章" in VERIFY_SYSTEM_PROMPT
+
+    assert "锚点不吞正文" in template_rendered.system_prompt
+    assert "锚点邻接正文保留" in template_rendered.system_prompt
+    assert "表格前后的非表格正文必须按原位置继续输出" in template_rendered.system_prompt
+    assert "不能只输出 `[[TABLE:TP1_2]]`" in template_rendered.user_prompt
 
 
 def test_generate_param_prompt_preserves_field_shell_protection() -> None:
@@ -236,6 +278,22 @@ def test_generate_param_prompt_preserves_field_shell_protection() -> None:
     assert "交付日期" in rendered.system_prompt
     assert "付款方式" in rendered.system_prompt
     assert "交付地点" in rendered.system_prompt
+
+
+def test_generate_prompts_enforce_per_package_overview_completion() -> None:
+    """生成端两套提示词都要求逐包补齐项目概述字段，并清洗包头裸机构行。"""
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    assert "逐包项目概述字段补全" in template_rendered.system_prompt
+    assert "不能因为第2包有 `付款方式`" in template_rendered.system_prompt
+    assert "项目技术参数/技术参数/参数要求" in template_rendered.system_prompt
+
+    assert "多包项目概述逐包补全与包头清洗" in param_rendered.system_prompt
+    assert "不得因为某一包已经有 `付款方式`" in param_rendered.system_prompt
+    assert "上海市第六人民医院" in param_rendered.system_prompt
 
 
 def test_verify_prompt_describes_table_placeholder_as_internal_entry() -> None:
@@ -255,6 +313,36 @@ def test_verify_prompt_describes_table_placeholder_as_internal_entry() -> None:
     # 现在还明确：保留占位符是正确行为，不要报 finding 要求删除占位符。
     assert "正确且被要求" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
     assert "要求删除它" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+    assert "必须检查锚点表是否被重复散文化" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+    assert "必须检查锚点邻接正文是否丢失或挪位" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+    assert "有锚点时它们是重复投影内容" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+
+
+def test_verify_and_revise_prompts_reject_textified_structured_tables() -> None:
+    """审核必须报出锚点表散文化；修订只删除重复投影行、保留锚点。"""
+    assert "结构化表审核总则" in VERIFY_SYSTEM_PROMPT
+    assert "锚点 + 散文化投影表" in VERIFY_SYSTEM_PROMPT
+    assert "1 设备用途" in VERIFY_SYSTEM_PROMPT
+    assert "删除该锚点表对应的普通文本/手绘投影行" in VERIFY_SYSTEM_PROMPT
+    assert "结构化表邻接正文审核总则" in VERIFY_SYSTEM_PROMPT
+    assert "多个锚点集中到文末" in VERIFY_SYSTEM_PROMPT
+    assert "只在文末连续输出两个表格锚点" in VERIFY_SYSTEM_PROMPT
+
+    assert "锚点表被重复转写成普通文本" in REVISE_SYSTEM_PROMPT
+    assert "删除这些重复投影行" in REVISE_SYSTEM_PROMPT
+    assert "不得把投影行改写成另一种表格" in REVISE_SYSTEM_PROMPT
+    assert "锚点之间/锚点之后缺失附件标题" in REVISE_SYSTEM_PROMPT
+    assert "把对应锚点放回原位置" in REVISE_SYSTEM_PROMPT
+
+
+def test_verify_prompt_filters_passed_checks_before_output() -> None:
+    """DeepSeek-Flash 非思考模式需要显式输出前过滤门，避免把通过项写成 fix_hint=无。"""
+    assert "输出前过滤门" in VERIFY_SYSTEM_PROMPT
+    assert "fix_hint 必须是可执行编辑动作" in VERIFY_SYSTEM_PROMPT
+    assert "禁止写“无”" in VERIFY_SYSTEM_PROMPT
+    assert "禁止把审核过程、匹配结果或合格项写入 evidence" in VERIFY_SYSTEM_PROMPT
+    assert "详细配置清单参数如下" in VERIFY_SYSTEM_PROMPT
+    assert "没有把投影表行转成可见正文" in VERIFY_SYSTEM_PROMPT
 
 
 def test_verify_prompt_states_protected_field_non_deletion_contract() -> None:
@@ -287,6 +375,18 @@ def test_verify_prompt_includes_protected_field_few_shots() -> None:
     assert "无新材料支撑的旧事实" in VERIFY_SYSTEM_PROMPT
 
 
+def test_verify_and_revise_prompts_cover_per_package_overview_and_bare_org_lines() -> None:
+    """审核/修订端提示词覆盖逐包字段缺失和包头裸机构行。"""
+    assert "多包场景必须逐包判断字段存在性" in VERIFY_SYSTEM_PROMPT
+    assert "包头裸机构行检查" in VERIFY_SYSTEM_PROMPT
+    assert "上海市第六人民医院" in VERIFY_SYSTEM_PROMPT
+    assert "不能因第2包已出现付款方式" in VERIFY_SYSTEM_PROMPT
+
+    assert "某个具体包的项目概述缺少受保护基础字段" in REVISE_SYSTEM_PROMPT
+    assert "裸采购人/单位/医院/学校/公司名称行" in REVISE_SYSTEM_PROMPT
+    assert "交付地点/服务地点" in REVISE_SYSTEM_PROMPT
+
+
 def test_revise_prompt_ignores_delete_protected_field_audit_item() -> None:
     """revise prompt 明确：忽略要求删除受保护字段的 audit item。"""
     assert "受保护基础字段" in REVISE_SYSTEM_PROMPT
@@ -310,3 +410,73 @@ def test_verify_user_prompt_states_protected_field_hard_contract() -> None:
     assert "缺值继承模板同包字段原句" in user_prompt
     assert "删除建议无效" in user_prompt
     assert "受保护字段硬契约" in user_prompt
+
+
+def test_generate_prompts_enforce_special_symbol_fidelity() -> None:
+    """生成端两套提示词都要求一切特殊符号逐字保留，禁止 ASCII/文字近似替代。"""
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    for rendered in (template_rendered, param_rendered):
+        assert "覆盖一切特殊符号" in rendered.system_prompt
+        assert "逐字原样保留" in rendered.system_prompt
+        # “不当作重要性标识/标识”绝不等于“可以丢”。
+        assert "可以丢" in rendered.system_prompt
+
+    # template 显式给出 ASCII/文字近似反例（≥→>=、≥→大于等于）。
+    assert "大于等于" in template_rendered.system_prompt
+
+
+def test_verify_and_revise_prompts_enforce_special_symbol_fidelity() -> None:
+    """审核/重写提示词固化“特殊符号保真”通用口径（覆盖一切特殊符号、禁 ASCII 近似）。"""
+    # verify 新增第 14 条总则，且明确禁止改写成近义文字 / ASCII 近似。
+    assert "特殊符号保真总则" in VERIFY_SYSTEM_PROMPT
+    assert "改写成近义文字或 ASCII 近似" in VERIFY_SYSTEM_PROMPT
+    # revise 第 6 条通用化为“特殊符号保真”，要求按原文恢复、不得用近义/ASCII 替代。
+    assert "特殊符号保真" in REVISE_SYSTEM_PROMPT
+    assert "不得用文字近义词或 ASCII 近似" in REVISE_SYSTEM_PROMPT
+
+
+def test_verify_prompt_includes_symbol_loss_few_shots() -> None:
+    """verify few-shot 覆盖符号丢失：≥/℃ 被改写、± 丢失各有样例。"""
+    assert "工作温度：≥-20℃" in VERIFY_SYSTEM_PROMPT
+    assert "测量精度：±0.5%" in VERIFY_SYSTEM_PROMPT
+
+
+def test_verify_user_prompt_states_symbol_and_overview_checks() -> None:
+    """verify user prompt 写入“特殊符号保真”与“项目概述关键字段完整性”检查项。"""
+    from backend.agents.generation.verify_agent_graph import _render_verify_user_prompt
+
+    user_prompt = _render_verify_user_prompt(
+        generation_style="template",
+        project_info="项目基础信息",
+        template_reference_text="模板",
+        tender_params="技术参数",
+        current_text="待审核正文",
+    )
+    assert "特殊符号保真" in user_prompt
+    assert "项目概述关键字段完整性" in user_prompt
+
+
+def test_generate_prompts_cover_tender_param_source_markers() -> None:
+    """两套生成 prompt 都包含技术参数文件来源标记处理规则。
+
+    节点会按界面顺序把每份技术参数文件拼成
+    `第N份技术参数文件名称为：xxx\\n内容：\\n...` 来源块；prompt 必须指导模型
+    把这些来源标记当作非正文删除，同时保留各文件 `内容：` 之后的真实正文。
+    """
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    for rendered in (template_rendered, param_rendered):
+        assert "技术参数来源标记规则" in rendered.user_prompt
+        assert "第N份技术参数文件名称为：xxx" in rendered.user_prompt
+        assert "系统拼接的" in rendered.user_prompt
+        assert "不是采购需求正文" in rendered.user_prompt
+        assert "辅助判断包件边界" in rendered.user_prompt
+        assert "最终标题以**文件内容为准**" in rendered.user_prompt
+        assert "第一份技术参数文件名称为..." in rendered.user_prompt

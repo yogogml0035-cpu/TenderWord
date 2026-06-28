@@ -10,7 +10,7 @@ from typing import Any
 from deepagents.backends import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol
 
-from backend.agents.log_naming import build_agent_log_stem, sanitize_agent_log_part
+from backend.agents.log_naming import sanitize_agent_log_part
 from backend.agents.generation.types import GenerationAgentProtocolError
 
 
@@ -45,12 +45,15 @@ def create_workspace_dir(
 ) -> Path:
     CONTENT_AGENT_WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now or time.time()))
-    stem = build_agent_log_stem(
-        task_id,
-        project_number=project_number,
-        project_name=project_name,
-        fallback="content-agent",
-    )
+    # 命名只体现项目编号和项目名；task_id 不再作为前缀，仅在 project 信息全空时兜底，
+    # 以保证目录可追溯且不与 task_id 前缀耦合。
+    parts: list[str] = []
+    for value in (project_number, project_name):
+        text = str(value or "").strip()
+        if not text:
+            continue
+        parts.append(sanitize_workspace_part(text))
+    stem = "_".join(parts) if parts else sanitize_workspace_part(task_id)
     base = CONTENT_AGENT_WORKSPACE_ROOT / f"{stem}_{timestamp}"
     if not base.exists():
         base.mkdir(parents=True, exist_ok=True)

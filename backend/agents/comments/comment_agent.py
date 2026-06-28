@@ -32,29 +32,26 @@ from backend.nodes.common_word_nodes.comment_writeback import CommentWritebackRe
 from backend.util.log_util.progress_log import progress_log
 
 COMMENT_AGENT_SYSTEM_PROMPT = """
-你是批注锚点修复智能体 comment_agent，只负责校验和修复批注候选的 reference_text。
+你是批注锚点智能体 comment_agent，只负责提交批注候选的首版校验，不做多轮修复。
 
 硬性规则：
-1. 必须先调用 validate_comment_references，输入 proposed_comments。
-2. 你最多可以根据校验反馈修复 reference_text 并再次调用校验工具；校验工具最多 2 次。
-3. 同 index 的 comment_text 必须和初始 JSON 完全一致，不得改写、润色、删减或新增批注意见。
-4. 只能修改 reference_text，使它精确来自 polished_text；不得改写正文、不得凭空新增批注。
-5. 完成校验后最多调用 1 次 write_validated_comments_to_word 提交最终候选；该工具不直接写 Word，真正写入由运行时在 graph 节点线程执行。
-6. 最终只输出简短中文结果摘要，不展示工具消息或排障细节。
+1. 必须先调用 validate_comment_references，把当前 proposed_comments 作为工具参数提交；校验工具只能调用 1 次。
+2. 同 index 的 comment_text 必须和初始 JSON 完全一致，不得改写、润色、删减或新增批注意见。
+3. reference_text 必须精确来自 polished_text，连续、逐字、原标点一致，不得跨段拼接；不得改写正文或凭空新增批注。
+4. 校验完成后最多调用 1 次 write_validated_comments_to_word 提交最终候选；该工具不直接写 Word，真正写入由运行时在 graph 节点线程执行。重复锚点由写回层确定性扩展，不需要你再修复。
+5. 最终只输出简短中文结果摘要，不展示工具消息或排障细节。
 """.strip()
 
 COMMENT_AGENT_GENERATION_SYSTEM_PROMPT = """
-你是批注生成智能体 comment_agent，负责先生成批注候选，再校验锚点并提交写回。
+你是批注生成智能体 comment_agent，负责生成批注候选首版，再校验锚点并提交写回，不做多轮修复。
 
 硬性规则：
 1. 先在内部基于 polished_text 和批注生成规则生成 proposed_comments，元素只能包含 reference_text 与 comment_text。
 2. 严禁把 proposed_comments、JSON 数组、候选清单或推理过程写在普通回复正文里；候选只能作为工具参数提交。
-3. 生成首版候选后，下一步必须调用 validate_comment_references，并把完整 proposed_comments 放入工具参数；如果未发现任何候选，也必须用 proposed_comments=[] 调用该工具。
-4. 你最多可以根据校验反馈修复 reference_text 并再次调用校验工具；校验工具最多 2 次。
-5. 第一次校验后的同 index comment_text 不得改写、润色、删减或新增；后续只能修改 reference_text。
-6. 每条 reference_text 必须精确来自 polished_text，连续、逐字、原标点一致，不得跨段拼接。
-7. 完成校验后必须调用 1 次 write_validated_comments_to_word，把最终 proposed_comments 作为工具参数提交；该工具不直接写 Word，真正写入由运行时在 graph 节点线程执行。
-8. 工具提交完成后，最终只输出简短中文结果摘要，不展示工具消息、候选 JSON 或排障细节。
+3. 生成首版候选后，必须调用 validate_comment_references，把完整 proposed_comments 放入工具参数；校验工具只能调用 1 次。如果未发现任何候选，也必须用 proposed_comments=[] 调用该工具。
+4. 同 index 的 comment_text 在校验后不得改写、润色、删减或新增；reference_text 必须精确来自 polished_text，连续、逐字、原标点一致。
+5. 校验完成后必须调用 1 次 write_validated_comments_to_word，把最终 proposed_comments 作为工具参数提交；该工具不直接写 Word，真正写入由运行时在 graph 节点线程执行。重复锚点由写回层确定性扩展，不需要你再修复。
+6. 工具提交完成后，最终只输出简短中文结果摘要，不展示工具消息、候选 JSON 或排障细节。
 """.strip()
 
 NO_VALID_GENERATED_COMMENTS_NOTICE = (
@@ -79,7 +76,7 @@ def build_comment_agent_middleware() -> list[ToolCallLimitMiddleware]:
     return [
         ToolCallLimitMiddleware(
             tool_name=VALIDATE_COMMENT_REFERENCES_TOOL,
-            run_limit=2,
+            run_limit=1,
             exit_behavior="error",
         ),
         ToolCallLimitMiddleware(
@@ -173,23 +170,25 @@ STATUS_LABELS = {
 
 REASON_LABELS = {
     "passed": "锚点已通过校验",
+    "reference_text_non_unique_will_expand_on_writeback": "锚点在正文中出现多处，写回时将确定性扩展",
     "reference_text_not_found_in_polished_text": "当前锚点未在最终正文中精确匹配",
-    "reference_text_not_unique_in_polished_text": "当前锚点在最终正文中出现多次",
     "comment_text_changed": "批注意见被改写，已拒绝",
     "missing_candidate": "缺少对应批注候选",
     "missing_reference_text": "缺少当前锚点文本",
     "unexpected_candidate": "存在多余批注候选",
     "missing_initial_reference_or_comment_text": "原始锚点或批注意见为空，已跳过",
+    "reference_text_not_found": "当前锚点未在 Word 写入范围内匹配",
     "reference_text_not_found_in_word_bound": "当前锚点未在 Word 写入范围内匹配",
-    "reference_text_not_unique_in_word_bound": "当前锚点在 Word 写入范围内出现多次",
+    "reference_text_not_unique_in_word_bound": "当前锚点在 Word 写入范围内出现多处",
+    "normalized_reference_not_unique": "规范化匹配在范围内命中多处，已跳过",
     "overlapping_comment_exists": "目标位置已有批注，已跳过",
     "comment_add_failed": "Word 批注写入失败",
     "missing_word_document": "缺少 Word 文档实例",
 }
 
 ROUND_LABELS = {
-    1: "第 1 轮锚点校验",
-    2: "第 2 轮修复复核",
+    1: "首版锚点校验",
+    2: "第 2 轮锚点校验",
 }
 
 
@@ -561,16 +560,16 @@ def _build_user_prompt(
             "请直接接手批注生成任务：先生成批注候选 proposed_comments，"
             "但不要在普通回复正文中输出候选、JSON 或推理过程；"
             "必须把完整 proposed_comments 作为 validate_comment_references 的工具参数提交，"
-            "再调用工具完成锚点校验、必要修复和最终候选提交。"
-            "Word 写入由运行时完成，工具线程不会直接操作 Word。\n\n"
+            "再调用工具完成首版校验和最终候选提交。"
+            "Word 写入由运行时完成，工具线程不会直接操作 Word；重复锚点由写回层确定性扩展，无需修复。\n\n"
             f"{instruction_block}"
             "【polished_text】\n"
             f"{polished_text}"
         )
 
     return (
-        "请修复以下批注候选的 reference_text，并用工具完成校验与最终候选提交。"
-        "Word 写入由运行时完成，工具线程不会直接操作 Word。\n\n"
+        "请提交以下批注候选的首版校验，并用工具完成校验与最终候选提交。"
+        "Word 写入由运行时完成，工具线程不会直接操作 Word；重复锚点由写回层确定性扩展，无需修复。\n\n"
         "【初始批注 JSON】\n"
         f"{json.dumps(initial_comments, ensure_ascii=False, indent=2)}\n\n"
         "【polished_text】\n"
@@ -677,8 +676,33 @@ def run_comment_agent(
         len(normalized_initial),
     )
 
+    # initial_comments 已存在（非自主生成）时，模型不再做锚点修复：
+    # 直接进入确定性校验和写回，避免无谓的二轮 LLM 调用。
+    skip_runner = bool(normalized_initial) and not context.allow_comment_generation
+
     try:
-        if _runner_supports_stream(selected_runner):
+        if skip_runner:
+            deterministic_validation = validate_comment_reference_candidates(
+                initial_comments=normalized_initial,
+                proposed_comments=normalized_initial,
+                polished_text=str(polished_text or ""),
+            )
+            context.validation_results.append(
+                deterministic_validation.model_dump(mode="json")
+            )
+            context.tool_snapshots.append(
+                CommentAgentToolSnapshot(
+                    round=1,
+                    proposed_comments=normalized_initial,
+                    validation=deterministic_validation,
+                )
+            )
+            _emit_tool_snapshots(
+                context=context,
+                emitted_count=0,
+                step_callback=step_callback,
+            )
+        elif _runner_supports_stream(selected_runner):
             _stream_runner(
                 selected_runner,
                 payload,
@@ -699,8 +723,34 @@ def run_comment_agent(
                 step_callback=step_callback,
             )
     except Exception as error:
-        validation = CommentValidationResult()
+        if context.validation_results:
+            validation = CommentValidationResult.model_validate(
+                context.validation_results[-1]
+            )
+        else:
+            validation = CommentValidationResult()
         writeback_result = _default_writeback_result(validation)
+        audit_payload = _build_audit_payload(
+            task_id=task_id,
+            notice=f"comment_agent 运行异常：{error}",
+            initial_comments=context.initial_comments or normalized_initial,
+            ai_messages=ai_messages,
+            validation=validation,
+            validation_results=context.validation_results,
+            tool_snapshots=[
+                snapshot.model_dump(mode="json")
+                for snapshot in context.tool_snapshots
+            ],
+            final_proposed_comments=context.final_proposed_comments,
+            writeback_result=writeback_result,
+        )
+        write_comment_agent_audit_log(
+            audit_payload,
+            task_id=task_id,
+            path=audit_log_path,
+            project_number=project_number,
+            project_name=project_name,
+        )
         _emit_final_snapshot(
             validation=validation,
             writeback_result=writeback_result,
@@ -803,6 +853,27 @@ def run_comment_agent(
         )
     except Exception as error:
         writeback_result = _default_writeback_result(validation)
+        audit_payload = _build_audit_payload(
+            task_id=task_id,
+            notice=f"comment_agent 写回异常：{error}",
+            initial_comments=effective_initial_comments,
+            ai_messages=ai_messages,
+            validation=validation,
+            validation_results=context.validation_results,
+            tool_snapshots=[
+                snapshot.model_dump(mode="json")
+                for snapshot in context.tool_snapshots
+            ],
+            final_proposed_comments=final_proposed_comments,
+            writeback_result=writeback_result,
+        )
+        write_comment_agent_audit_log(
+            audit_payload,
+            task_id=task_id,
+            path=audit_log_path,
+            project_number=project_number,
+            project_name=project_name,
+        )
         _emit_final_snapshot(
             validation=validation,
             writeback_result=writeback_result,

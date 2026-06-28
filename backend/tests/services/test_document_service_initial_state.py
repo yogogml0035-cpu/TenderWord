@@ -91,9 +91,65 @@ def test_build_initial_state_uses_template_and_tender_params_only() -> None:
         "D:/UploadFiles/params1.docx",
         "D:/UploadFiles/params2.docx",
     ]
+    # 旧字符串形式：文件名元数据只保留路径，original_name 缺省。
+    assert state["tender_param_files"] == [
+        {"file_path": "D:/UploadFiles/params1.docx"},
+        {"file_path": "D:/UploadFiles/params2.docx"},
+    ]
     assert "source_document_path" not in state
     assert state["project_number"] == "254DSITC2512"
     assert "254DSITC2512" in state["tender_invitation"]
+
+
+def test_build_initial_state_preserves_tender_param_order_and_original_names() -> None:
+    """对象形式的技术参数按界面顺序写入路径列表与原始文件名元数据。"""
+    from backend.models.generate import GenerateFilePaths
+
+    service = object.__new__(DocumentService)
+    request = GenerateRequest(
+        form_type=FormType.GJGK_TENDER,
+        tender_data=TenderData(
+            project_name="国际公开测试项目",
+            project_number="0811-254DSITC2512",
+            project_content="采购内容",
+            buyer_name="采购人",
+            investment="140",
+            bzj_rule="规则",
+            project_zbr_xbr="张三",
+            zbr_xbr_tel="13800000000",
+            zbr_pinyin="zhangsan",
+            shell_start_date="2026-04-01",
+            shell_end_date="2026-04-08",
+            submit_date="2026-04-09",
+            platform="平台",
+            service_fee="1000",
+            tender_lx=0,
+            fund_source_lx=1,
+        ),
+        file_paths=GenerateFilePaths(
+            template="D:/UploadFiles/template.docx",
+            tender_params=[
+                {"file_path": "D:/UploadFiles/uuid-1.docx", "original_name": "第一包技术参数.docx"},
+                {"file_path": "D:/UploadFiles/uuid-2.docx", "original_name": "第二包技术参数.docx"},
+                {"file_path": "D:/UploadFiles/uuid-3.docx"},  # 无 original_name
+            ],
+        ),
+        model=LLMModel.DEEPSEEK,
+    )
+
+    state = service._build_initial_state(request, task_id="task-files")
+
+    assert state["tender_param_paths"] == [
+        "D:/UploadFiles/uuid-1.docx",
+        "D:/UploadFiles/uuid-2.docx",
+        "D:/UploadFiles/uuid-3.docx",
+    ]
+    # original_name 保留；缺失时不写入该键（节点侧按文件名兜底）。
+    assert state["tender_param_files"] == [
+        {"file_path": "D:/UploadFiles/uuid-1.docx", "original_name": "第一包技术参数.docx"},
+        {"file_path": "D:/UploadFiles/uuid-2.docx", "original_name": "第二包技术参数.docx"},
+        {"file_path": "D:/UploadFiles/uuid-3.docx"},
+    ]
 
 
 def test_build_initial_state_carries_generation_style() -> None:

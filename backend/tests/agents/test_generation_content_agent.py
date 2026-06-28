@@ -30,7 +30,6 @@ from backend.agents.generation.workspace import (
     validate_round_protocol,
     write_generation_context,
 )
-from backend.agents.log_naming import build_agent_log_stem
 
 
 @pytest.fixture(autouse=True)
@@ -44,12 +43,14 @@ def _redirect_content_agent_workspace(tmp_path, monkeypatch) -> Path:
         project_name: str | None = None,
         now: float | None = None,
     ) -> Path:
-        stem = build_agent_log_stem(
-            task_id,
-            project_number=project_number,
-            project_name=project_name,
-            fallback="content-agent",
-        )
+        parts: list[str] = []
+        for value in (project_number, project_name):
+            text = str(value or "").strip()
+            if text:
+                parts.append(
+                    re.sub(r'[<>:"/\\|?*\x00-\x1f\s]+', "_", text).strip("._")
+                )
+        stem = "_".join(parts) if parts else task_id
         workspace_dir = workspace_root / f"{stem}_20260529-153000"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         return workspace_dir
@@ -268,6 +269,31 @@ def test_content_verify_agent_drops_noop_findings(monkeypatch) -> None:
 
     result = verify_agent_graph_module.create_verify_agent_graph().invoke(
         {"current_text": "采购需求正文", "model_provider": "deepseek"}
+    )
+
+    assert len(calls) == 1
+    assert result["structured_response"] == []
+    assert json.loads(result["messages"][-1].content) == []
+
+
+def test_content_verify_agent_drops_fix_hint_none_findings(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fake_stream_llm_completion(**kwargs):
+        calls.append(kwargs)
+        return (
+            '[{"evidence":"待审核正文第1包中 [[TABLE:TP1_1]] 已正确保留，'
+            '投影行省略符合要求。","fix_hint":"无"}]'
+        )
+
+    monkeypatch.setattr(
+        verify_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    result = verify_agent_graph_module.create_verify_agent_graph().invoke(
+        {"current_text": "采购需求正文\n[[TABLE:TP1_1]]", "model_provider": "deepseek"}
     )
 
     assert len(calls) == 1
@@ -511,7 +537,7 @@ def test_content_runner_creates_workspace_and_reads_final_file(
     workspace_dir = result.workspace_dir
     assert workspace_dir == (
         _redirect_content_agent_workspace
-        / "task-agent-42_XJ-001_测试_项目_20260529-153000"
+        / "XJ-001_测试_项目_20260529-153000"
     )
     assert (workspace_dir / "drafts" / "round-1.md").read_text(encoding="utf-8") == "draft text"
     assert (workspace_dir / "revisions" / "round-1.md").read_text(encoding="utf-8") == "revised text"
@@ -529,6 +555,224 @@ def test_content_runner_creates_workspace_and_reads_final_file(
     assert [event.round for event in events] == [1, 1, 1, 2, 2]
     assert events[-1].step_type == "final"
     assert events[-1].content_agent["final_result"]["content"] == "final text"
+
+
+def test_content_runner_copies_draft_to_final_when_first_audit_passes(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    draft_text = "二、人员要求\n[[TABLE:TP1_1]]\n注：保留非表格正文"
+    calls: list[str] = []
+
+    def fake_generate_graph():
+        class Graph:
+            def invoke(self, _state, config=None):  # type: ignore[no-untyped-def]
+                backend = config["configurable"]["content_agent_backend"]
+                backend.write("/drafts/round-1.md", draft_text)
+                callback = config["configurable"].get("agent_step_callback")
+                if callable(callback):
+                    callback(
+                        {
+                            "step_type": "draft",
+                            "round": 1,
+                            "node": "content_generate_agent",
+                            "content": draft_text,
+                            "is_complete": True,
+                        }
+                    )
+                calls.append("generate")
+                return {"draft_path": "/drafts/round-1.md"}
+
+        return Graph()
+
+    def fake_verify_graph():
+        class Graph:
+            def invoke(self, state, config=None):  # type: ignore[no-untyped-def]
+                backend = config["configurable"]["content_agent_backend"]
+                round_index = int(state["revision_round"])
+                backend.write(audit_path(round_index), "[]")
+                callback = config["configurable"].get("agent_step_callback")
+                if callable(callback):
+                    callback(
+                        {
+                            "step_type": "audit",
+                            "round": round_index,
+                            "node": "content_verify_agent",
+                            "content": "[]",
+                            "is_complete": True,
+                        }
+                    )
+                calls.append(f"verify-{round_index}")
+                return {"findings": [], "audit_path": audit_path(round_index)}
+
+        return Graph()
+
+    def fake_revise_graph():
+        class Graph:
+            def invoke(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+                calls.append("revise")
+                raise AssertionError("empty audit must not invoke revise")
+
+        return Graph()
+
+    monkeypatch.setattr(content_agent_module, "create_generate_agent_graph", fake_generate_graph)
+    monkeypatch.setattr(content_agent_module, "create_verify_agent_graph", fake_verify_graph)
+    monkeypatch.setattr(content_agent_module, "create_revise_agent_graph", fake_revise_graph)
+
+    events: list[AgentStepPayload] = []
+    result = run_content_agent_generation(
+        {
+            "generation_style": "param",
+            "project_number": "P-001",
+            "project_name": "审核通过复制",
+            "project_content": "project",
+            "tender_params": _TABLE_PARAM_FIXTURE,
+            "template_reference_text": "origin",
+        },
+        {"configurable": {"model_provider": "deepseek", "task_id": "task-copy-draft"}},
+        step_callback=events.append,
+    )
+
+    workspace_dir = result.workspace_dir
+    assert calls == ["generate", "verify-1"]
+    assert result.polished_text == draft_text
+    assert (workspace_dir / "final" / "polished_text.md").read_text(encoding="utf-8") == draft_text
+    assert not (workspace_dir / "audits" / "round-2.json").exists()
+    assert not (workspace_dir / "revisions").exists()
+    assert result.revision_rounds == 0
+    assert [event.node for event in events] == [
+        "content_generate_agent",
+        "content_verify_agent",
+        "content_agent",
+    ]
+
+
+def test_content_runner_copies_revision_to_final_after_second_audit_passes(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    calls: list[str] = []
+
+    def fake_generate_graph():
+        class Graph:
+            def invoke(self, _state, config=None):  # type: ignore[no-untyped-def]
+                config["configurable"]["content_agent_backend"].write(
+                    "/drafts/round-1.md", "draft"
+                )
+                calls.append("generate")
+                return {"draft_path": "/drafts/round-1.md"}
+
+        return Graph()
+
+    def fake_verify_graph():
+        class Graph:
+            def invoke(self, state, config=None):  # type: ignore[no-untyped-def]
+                backend = config["configurable"]["content_agent_backend"]
+                round_index = int(state["revision_round"])
+                payload = (
+                    [{"evidence": "缺少字段", "fix_hint": "补充字段"}]
+                    if round_index == 1
+                    else []
+                )
+                backend.write(audit_path(round_index), json.dumps(payload, ensure_ascii=False))
+                calls.append(f"verify-{round_index}:{state['current_text_path']}")
+                return {"findings": payload, "audit_path": audit_path(round_index)}
+
+        return Graph()
+
+    def fake_revise_graph():
+        class Graph:
+            def invoke(self, state, config=None):  # type: ignore[no-untyped-def]
+                backend = config["configurable"]["content_agent_backend"]
+                round_index = int(state["revision_round"])
+                backend.write(f"/revisions/round-{round_index}.md", "revised")
+                calls.append(f"revise-{round_index}:{state['current_text_path']}")
+                return {"revision_path": f"/revisions/round-{round_index}.md"}
+
+        return Graph()
+
+    monkeypatch.setattr(content_agent_module, "create_generate_agent_graph", fake_generate_graph)
+    monkeypatch.setattr(content_agent_module, "create_verify_agent_graph", fake_verify_graph)
+    monkeypatch.setattr(content_agent_module, "create_revise_agent_graph", fake_revise_graph)
+
+    result = run_content_agent_generation(
+        {
+            "generation_style": "param",
+            "project_number": "P-002",
+            "project_name": "二轮通过",
+            "project_content": "project",
+            "tender_params": "params",
+            "template_reference_text": "origin",
+        },
+        {"configurable": {"model_provider": "deepseek", "task_id": "task-copy-revision"}},
+    )
+
+    workspace_dir = result.workspace_dir
+    assert calls == [
+        "generate",
+        "verify-1:/drafts/round-1.md",
+        "revise-1:/drafts/round-1.md",
+        "verify-2:/revisions/round-1.md",
+    ]
+    assert result.polished_text == "revised"
+    assert (workspace_dir / "final" / "polished_text.md").read_text(encoding="utf-8") == "revised"
+    assert not (workspace_dir / "audits" / "round-3.json").exists()
+    assert result.revision_rounds == 1
+
+
+def test_file_protocol_fails_when_revision_missing_after_non_empty_audit(
+    monkeypatch,
+    _redirect_content_agent_workspace,
+) -> None:
+    def fake_generate_graph():
+        class Graph:
+            def invoke(self, _state, config=None):  # type: ignore[no-untyped-def]
+                config["configurable"]["content_agent_backend"].write(
+                    "/drafts/round-1.md", "draft"
+                )
+                return {"draft_path": "/drafts/round-1.md"}
+
+        return Graph()
+
+    def fake_verify_graph():
+        class Graph:
+            def invoke(self, state, config=None):  # type: ignore[no-untyped-def]
+                backend = config["configurable"]["content_agent_backend"]
+                round_index = int(state["revision_round"])
+                backend.write(
+                    audit_path(round_index),
+                    json.dumps(
+                        [{"evidence": "缺少付款方式", "fix_hint": "补回付款方式"}],
+                        ensure_ascii=False,
+                    ),
+                )
+                return {"audit_path": audit_path(round_index)}
+
+        return Graph()
+
+    def fake_revise_graph():
+        class Graph:
+            def invoke(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+                return {"no_revision": True}
+
+        return Graph()
+
+    monkeypatch.setattr(content_agent_module, "create_generate_agent_graph", fake_generate_graph)
+    monkeypatch.setattr(content_agent_module, "create_verify_agent_graph", fake_verify_graph)
+    monkeypatch.setattr(content_agent_module, "create_revise_agent_graph", fake_revise_graph)
+
+    with pytest.raises(GenerationAgentProtocolError, match="修订智能体未写入"):
+        run_content_agent_generation(
+            {
+                "generation_style": "template",
+                "project_number": "P-003",
+                "project_name": "缺修订文件",
+                "project_content": "project",
+                "tender_params": "params",
+                "template_reference_text": "origin",
+            },
+            {"configurable": {"model_provider": "deepseek", "task_id": "task-missing-revision"}},
+        )
 
 
 def test_content_agent_tracker_preserves_completed_audit_after_late_empty_update() -> None:
@@ -708,6 +952,51 @@ def test_content_runner_returns_warning_findings_when_final_recheck_still_has_fi
         AuditFinding(evidence="正文仍有多余内容", fix_hint="删除多余内容")
     ]
     assert any("最终复核未通过" in message for message in warnings)
+
+
+def test_content_runner_fails_when_final_written_after_non_empty_audit_without_revision() -> None:
+    runner = FakeRunner(
+        [
+            {"draft": "draft"},
+            {"audit": [{"evidence": "缺少付款方式", "fix_hint": "补回付款方式"}], "round": 1},
+            {"final": "draft"},
+        ]
+    )
+
+    with pytest.raises(GenerationAgentProtocolError, match="缺少 /revisions/round-1.md"):
+        run_content_agent_generation(
+            {
+                "generation_style": "template",
+                "project_content": "project",
+                "tender_params": "params",
+                "template_reference_text": "origin",
+            },
+            {"configurable": {"model_provider": "deepseek", "task_id": "task-premature-final"}},
+            runner=runner,
+        )
+
+
+def test_content_runner_fails_when_revision_is_not_followed_by_next_audit() -> None:
+    runner = FakeRunner(
+        [
+            {"draft": "draft"},
+            {"audit": [{"evidence": "缺少付款方式", "fix_hint": "补回付款方式"}], "round": 1},
+            {"revision": "revision 1", "round": 1},
+            {"final": "revision 1"},
+        ]
+    )
+
+    with pytest.raises(GenerationAgentProtocolError, match="缺少第 2 轮审核"):
+        run_content_agent_generation(
+            {
+                "generation_style": "template",
+                "project_content": "project",
+                "tender_params": "params",
+                "template_reference_text": "origin",
+            },
+            {"configurable": {"model_provider": "deepseek", "task_id": "task-missing-recheck"}},
+            runner=runner,
+        )
 
 
 def test_content_runner_accepts_invoke_only_test_runner() -> None:
@@ -1372,6 +1661,71 @@ def test_verify_inherits_template_field_per_package_for_multi_package(monkeypatc
     assert "设备验收合格后30天内付清全款" in payment_findings[0].fix_hint
 
 
+def test_verify_guard_backfills_missing_field_for_each_current_package() -> None:
+    """多包正文按包独立判断字段存在性，不能因某包已有付款方式放过其它包。"""
+    from backend.agents.generation.protected_field_guard import (
+        sanitize_protected_field_findings,
+    )
+
+    template = (
+        "采购需求\n"
+        "第1包：模板设备一\n"
+        "1、交付日期：合同签订后30天内到货\n"
+        "2、付款方式：货到验收合格后3个月内支付货款的100%\n"
+        "第2包：模板设备二\n"
+        "1、交付日期：合同签订后30天内到货\n"
+        "2、付款方式：货到验收合格后3个月内支付货款的100%\n"
+    )
+    current_text = (
+        "上海市第六人民医院\n"
+        "第1包：病人监护仪项目技术参数\n"
+        "1、交付日期：合同签订后30天内到货\n"
+        "第2包：头灯放大镜项目技术参数\n"
+        "1、交付日期：合同签订后30天内到货\n"
+        "2、付款方式：货到验收合格后3个月内支付货款的100%\n"
+        "第3包：骨科脊柱手术工具项目技术参数\n"
+        "1、交付日期：合同签订后60天内到货\n"
+    )
+
+    findings = sanitize_protected_field_findings(
+        findings=[],
+        tender_type="xjcg",
+        current_text=current_text,
+        template_reference_text=template,
+    )
+
+    payment_findings = [finding for finding in findings if "付款方式" in finding.evidence]
+    assert len(payment_findings) == 2
+    assert "第1包" in payment_findings[0].evidence
+    assert "第3包" in payment_findings[1].evidence
+    assert all(
+        "货到验收合格后3个月内支付货款的100%" in finding.fix_hint
+        for finding in payment_findings
+    )
+
+
+def test_verify_guard_keeps_backfill_finding_that_says_field_must_not_be_deleted() -> None:
+    """补回字段的 finding 可能包含“不得删除”，不能误判成删除建议。"""
+    from backend.agents.generation.protected_field_guard import (
+        sanitize_protected_field_findings,
+    )
+
+    finding = AuditFinding(
+        evidence="待审核正文第1包项目概述缺少受保护基础信息字段 `付款方式：`，该字段属于受保护字段，不得删除。",
+        fix_hint="在第1包的项目概述恢复 `付款方式：` 字段行，保持其它内容不变。",
+    )
+
+    findings = sanitize_protected_field_findings(
+        findings=[finding],
+        tender_type="xjcg",
+        current_text="第1包：病人监护仪\n1、交付日期：合同签订后30天内到货\n",
+        template_reference_text=_XJCG_PAYMENT_TEMPLATE,
+        backfill_missing=False,
+    )
+
+    assert findings == [finding]
+
+
 def test_verify_guard_skips_direct_replace_tender_type(monkeypatch) -> None:
     """`gngk_hw_cz` 这类 direct_replace 类型不进入 protected-field guard。"""
     from backend.agents.generation.protected_field_guard import (
@@ -1504,6 +1858,49 @@ def test_revise_keeps_real_audit_after_protected_field_filter(monkeypatch) -> No
     # 传给 LLM 的 audit JSON 只保留 ★ 符号 finding。
     assert "补充 ★ 符号" in captured_audits[0]
     assert "删除付款方式" not in captured_audits[0]
+
+
+def test_revise_keeps_missing_payment_audit_when_evidence_says_not_delete(monkeypatch) -> None:
+    """修订阶段不能把“缺付款方式，不得删除”的补回意见过滤成空审核。"""
+    captured_audits: list[str] = []
+
+    async def fake_stream_llm_completion(**kwargs):
+        captured_audits.append(str(kwargs.get("user_prompt", "")))
+        return (
+            "一、项目概述\n"
+            "2、交付日期：合同签订后两个月内交货\n"
+            "3、付款方式：设备安装验收合格后的三个月内付清全款。\n"
+        )
+
+    monkeypatch.setattr(
+        revise_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    result = revise_agent_graph_module.create_revise_agent_graph().invoke(
+        {
+            "current_text": (
+                "一、项目概述\n"
+                "2、交付日期：合同签订后两个月内交货\n"
+            ),
+            "tender_type": "xjcg",
+            "template_reference_text": _XJCG_PAYMENT_TEMPLATE,
+            "audit_findings": [
+                {
+                    "evidence": "待审核正文第1包项目概述缺少受保护基础信息字段 `付款方式：`，该字段属于受保护字段，不得删除。",
+                    "fix_hint": "在第1包的项目概述恢复 `付款方式：` 字段行，保持其它内容不变。",
+                }
+            ],
+            "revision_round": 1,
+            "model_provider": "deepseek",
+        }
+    )
+
+    assert "revision_path" in result["structured_response"]
+    assert result["polished_text"].count("付款方式") == 1
+    assert captured_audits
+    assert "不得删除" in captured_audits[0]
 
 
 def test_verify_final_text_findings_appends_backfill_for_missing_payment(monkeypatch) -> None:

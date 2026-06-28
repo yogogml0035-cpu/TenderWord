@@ -419,10 +419,15 @@ def write_polished_comments(
             continue
 
         result["attempted"] += 1
-        inserted_here = False
-        overlapped_existing_comment = False
+        added_here = 0
+        skipped_overlap_here = 0
+        failed_here = 0
 
         for find_text in _build_search_texts(reference_text):
+            # 一旦某个搜索变体已经匹配到至少一处，就不再尝试其它变体，
+            # 避免对同一锚点的不同文本表示重复写入。
+            if added_here > 0 or skipped_overlap_here > 0 or failed_here > 0:
+                break
             current_start = int(last_used_end_by_ref.get(reference_text, search_start))
 
             while current_start < search_end:
@@ -445,7 +450,7 @@ def write_polished_comments(
                     break
 
                 if _has_comment_on_range(doc, find_range):
-                    overlapped_existing_comment = True
+                    skipped_overlap_here += 1
                     log_parts.append(
                         f"  批注 [{idx}] 位置已存在批注，继续向后查找 reference_text={reference_text[:40]}..."
                     )
@@ -454,7 +459,7 @@ def write_polished_comments(
 
                 add_exc = _add_comment_with_retries(doc, find_range, comment_text)
                 if add_exc is not None:
-                    result["failed"] += 1
+                    failed_here += 1
                     _append_issue(
                         result["issues"],
                         index=idx,
@@ -466,80 +471,92 @@ def write_polished_comments(
                     log_parts.append(
                         f"  批注 [{idx}] 添加失败 (重试 {MAX_COMMENT_ADD_RETRIES} 次后仍失败, reference_text={reference_text[:40]}...): {add_exc}"
                     )
-                    inserted_here = True
                 else:
-                    result["added"] += 1
+                    added_here += 1
                     last_used_end_by_ref[reference_text] = match_end
                     log_parts.append(
                         f"  批注 [{idx}] 已添加: reference_text={reference_text[:40]}... -> comment_text={comment_text[:40]}..."
                     )
-                    inserted_here = True
-                break
+                current_start = max(match_end, current_start + 1)
 
-            if inserted_here:
-                break
-
-        if inserted_here:
-            continue
-
-        normalized_status, normalized_end = _try_normalized_comment_insert(
-            doc=doc,
-            reference_text=reference_text,
-            comment_text=comment_text,
-            current_start=int(last_used_end_by_ref.get(reference_text, search_start)),
-            search_start=search_start,
-            search_end=search_end,
-            log_parts=log_parts,
-            idx=idx,
+        normalized_attempted = (
+            added_here == 0 and skipped_overlap_here == 0 and failed_here == 0
         )
-        if normalized_status == "added":
-            result["added"] += 1
-            last_used_end_by_ref[reference_text] = int(normalized_end)
-            continue
-        if normalized_status.startswith("comment_add_failed:"):
-            result["failed"] += 1
-            _append_issue(
-                result["issues"],
-                index=idx,
-                reason="comment_add_failed",
+        if normalized_attempted:
+            normalized_status, normalized_end = _try_normalized_comment_insert(
+                doc=doc,
                 reference_text=reference_text,
                 comment_text=comment_text,
-                error=normalized_status.split(":", 1)[1],
+                current_start=int(last_used_end_by_ref.get(reference_text, search_start)),
+                search_start=search_start,
+                search_end=search_end,
+                log_parts=log_parts,
+                idx=idx,
             )
-            continue
-        if normalized_status == "normalized_reference_not_unique":
-            result["failed"] += 1
-            _append_issue(
-                result["issues"],
-                index=idx,
-                reason="normalized_reference_not_unique",
-                reference_text=reference_text,
-                comment_text=comment_text,
-            )
-            continue
-        if normalized_status == "overlapping_comment_exists":
-            overlapped_existing_comment = True
+            if normalized_status == "added":
+                added_here += 1
+                last_used_end_by_ref[reference_text] = int(normalized_end)
+            elif normalized_status.startswith("comment_add_failed:"):
+                failed_here += 1
+                _append_issue(
+                    result["issues"],
+                    index=idx,
+                    reason="comment_add_failed",
+                    reference_text=reference_text,
+                    comment_text=comment_text,
+                    error=normalized_status.split(":", 1)[1],
+                )
+            elif normalized_status == "normalized_reference_not_unique":
+                failed_here += 1
+                _append_issue(
+                    result["issues"],
+                    index=idx,
+                    reason="normalized_reference_not_unique",
+                    reference_text=reference_text,
+                    comment_text=comment_text,
+                )
+            elif normalized_status == "overlapping_comment_exists":
+                skipped_overlap_here += 1
 
-        if overlapped_existing_comment:
+        result["added"] += added_here
+        result["failed"] += failed_here
+
+        if added_here > 0:
+            # 已成功写入：既有批注位置已自然被跳过，不重复计入 skipped。
+            if added_here > 1:
+                log_parts.append(
+                    f"  批注 [{idx}] 锚点在范围内出现多处，已在 {added_here} 个未批注位置分别写入同一条批注。"
+                )
+        elif failed_here > 0:
+            # 添加失败已经追加过 issue，无需额外处理。
+            pass
+        elif skipped_overlap_here > 0:
+            # 所有匹配位置均已存在批注：按本条候选计一次 skipped，
+            # 不按重叠位置累加，保持与既有摘要（按候选条数）口径一致。
             result["skipped"] += 1
-            reason = "overlapping_comment_exists"
+            _append_issue(
+                result["issues"],
+                index=idx,
+                reason="overlapping_comment_exists",
+                reference_text=reference_text,
+                comment_text=comment_text,
+            )
             log_parts.append(
-                f"  批注 [{idx}] 目标范围已存在批注，按保守去重策略跳过: {reference_text[:50]}..."
+                f"  批注 [{idx}] 所有匹配位置均已存在批注，按保守去重策略跳过: {reference_text[:50]}..."
             )
         else:
+            # 无任何匹配，记为未找到。
             result["failed"] += 1
-            reason = "reference_text_not_found"
+            _append_issue(
+                result["issues"],
+                index=idx,
+                reason="reference_text_not_found",
+                reference_text=reference_text,
+                comment_text=comment_text,
+            )
             log_parts.append(
                 f"  批注 [{idx}] 未找到可插入的位置或未匹配到引用文本: {reference_text[:50]}..."
             )
-
-        _append_issue(
-            result["issues"],
-            index=idx,
-            reason=reason,
-            reference_text=reference_text,
-            comment_text=comment_text,
-        )
 
     log_parts.append(
         f"{step_label}完成：成功添加 {result['added']}/{len(comments)} 条批注，失败 {result['failed']} 条，跳过 {result['skipped']} 条。"

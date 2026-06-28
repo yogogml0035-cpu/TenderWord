@@ -67,7 +67,7 @@
 | Word helper | 承载段落边界、正文操作、删除、cleanup、样式回填、受保护字段、range 等业务 helper | `backend/helper/word_helper/` |
 | Word util | 承载 COM lock/retry、Word app 生命周期、锚点工具、文档检查、常量和诊断 | `backend/util/word_util/word_com_manager.py:100`, `backend/util/word_util/word_application_util.py:132` |
 | Generation agents | `generation_mode=agent` 的 DeepAgents 主/子智能体、workspace、协议校验和 `agent_step` | `backend/agents/generation/content_agents.py`, `backend/nodes/common_word_nodes/content_agent_generate.py` |
-| Comment agents | 批注候选生成/校验/修复、工具门禁、Word 写回和审计 | `backend/agents/comments/comment_agent.py`, `backend/nodes/common_word_nodes/comment_agent.py` |
+| Comment agents | 批注候选首版生成/校验、工具门禁、确定性 Word 写回和审计（模型不再做二轮锚点修复） | `backend/agents/comments/comment_agent.py`, `backend/nodes/common_word_nodes/comment_agent.py` |
 | Task context assistant | 右侧 agent run 前置流，只用受控上下文和白名单工具创建 rewrite 任务 | `backend/services/agent_run_service.py`, `backend/agents/task_context_assistant/tools.py`, `backend/agents/task_context_assistant/factory.py` |
 | Prompt layer | 只做 prompt 渲染和机器契约解析，不承载副作用、SSE、COM 或 session state | `backend/prompts/` |
 | Retrieval layer | 为批注生成注入 bad case prompt context，hybrid 失败时降级 | `backend/retrieval/comment_bad_case_runtime.py`, `backend/retrieval/hybrid.py`, `backend/retrieval/qdrant_store.py` |

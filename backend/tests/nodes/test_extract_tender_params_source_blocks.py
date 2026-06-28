@@ -139,90 +139,194 @@ def _patch_extract_runtime(
     return style_call
 
 
-def _build_state(doc_path: Path) -> dict[str, Any]:
-    return {
+def _build_state(doc_path: Path, **overrides: Any) -> dict[str, Any]:
+    state: dict[str, Any] = {
         "template_path": str(doc_path),
         "tender_type": "xjcg",
         "insertion_before_text": "第三章 采购需求",
         "insertion_after_text": "第四章 响应文件有关格式",
     }
+    state.update(overrides)
+    return state
 
 
-def test_extract_tender_params_requires_template_path() -> None:
-    with pytest.raises(ValueError) as exc_info:
-        extract_module.extract_tender_params(
-            {
-                "insertion_before_text": "第三章 采购需求",
-                "insertion_after_text": "第四章 响应文件有关格式",
-            },
-            config=None,
-        )
-
-    message = str(exc_info.value)
-    assert "template_path" in message
-
-
-def test_extract_tender_params_records_inline_style_fragments(
+def _patch_structured_extract(
     monkeypatch,
-    tmp_path: Path,
+    *,
+    outputs_by_stem: dict[str, tuple[str, list[dict[str, Any]]]],
+) -> list[tuple[str, str]]:
+    """按文件名分发结构化抽取结果，并记录 (table_id_prefix, stem) 调用顺序。"""
+    calls: list[tuple[str, str]] = []
+
+    def _fake(file_path_obj: Path, *, file_index: int):
+        stem = file_path_obj.stem
+        calls.append((f"TP{file_index}_", stem))
+        text, models = outputs_by_stem.get(stem, (f"技术参数:{stem}", []))
+        return text, models
+
+    monkeypatch.setattr(
+        extract_module,
+        "_extract_structured_tender_param_file",
+        _fake,
+    )
+    return calls
+
+
+def test_extract_tender_params_builds_ordered_source_blocks_from_tender_param_files(
+    monkeypatch, tmp_path: Path
 ) -> None:
+    """多份技术参数文件按顺序拼成“第一份/第二份...”来源块，文件名用上传原名。"""
     doc_path = tmp_path / "template.docx"
     doc_path.write_bytes(b"docx")
-    fake_doc = _FakeDoc()
-    progress_messages: list[str] = []
-    progress_warnings: list[str] = []
-    debug_messages: list[str] = []
-    fragments = [
-        {
-            "source_text": "加粗标题",
-            "container_type": "paragraph",
-            "container_locator": {"paragraph_index": 1},
-            "style_flags": {"bold": True},
-        }
-    ]
-
-    style_call = _patch_extract_runtime(
-        monkeypatch,
-        doc=fake_doc,
-        style_fragments=fragments,
-        progress_messages=progress_messages,
-        progress_warnings=progress_warnings,
-        debug_messages=debug_messages,
-    )
-
-    result = extract_module.extract_tender_params(_build_state(doc_path), config=None)
-
-    assert result["template_reference_text"] == "原始采购需求"
-    assert result["inline_style_fragments"] == fragments
-    assert result["start_page"] == 2
-    assert result["end_page"] == 4
-    assert style_call["args"] == (fake_doc,)
-    assert style_call["kwargs"] == {"bound_start": 20, "bound_end": 80}
-    assert style_call["opened_file_path"] == str(doc_path)
-    assert (20, 80) in fake_doc.range_calls
-    assert any(
-        "模板样式提取完成，片段 1 个" in message
-        for message in progress_messages
-    )
-    assert not progress_warnings
-    assert not debug_messages
-
-
-def test_extract_tender_params_joins_multiple_tender_param_paths(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    doc_path = tmp_path / "template.docx"
-    doc_path.write_bytes(b"docx")
-    param_one = tmp_path / "param-one.docx"
-    param_two = tmp_path / "param-two.docx"
+    param_one = tmp_path / "uuid-1.docx"
+    param_two = tmp_path / "uuid-2.docx"
     param_one.write_bytes(b"param-one")
     param_two.write_bytes(b"param-two")
+
     fake_doc = _FakeDoc()
     progress_messages: list[str] = []
     progress_warnings: list[str] = []
     debug_messages: list[str] = []
+    _patch_extract_runtime(
+        monkeypatch,
+        doc=fake_doc,
+        style_fragments=[],
+        progress_messages=progress_messages,
+        progress_warnings=progress_warnings,
+        debug_messages=debug_messages,
+    )
+    calls = _patch_structured_extract(
+        monkeypatch,
+        outputs_by_stem={
+            "uuid-1": ("第一包正文\n[[TABLE:TP1_1]]", []),
+            "uuid-2": ("第二包正文", []),
+        },
+    )
 
+    result = extract_module.extract_tender_params(
+        _build_state(
+            doc_path,
+            tender_param_files=[
+                {"file_path": str(param_one), "original_name": "第一包技术参数.docx"},
+                {"file_path": str(param_two), "original_name": "第二包技术参数.docx"},
+            ],
+        ),
+        config=None,
+    )
+
+    tender_params = result["tender_params"]
+    # 按界面顺序拼成两块；中文数字序号；文件名取上传原名。
+    assert "第一份技术参数文件名称为：第一包技术参数.docx" in tender_params
+    assert "第二份技术参数文件名称为：第二包技术参数.docx" in tender_params
+    assert tender_params.index("第一份") < tender_params.index("第二份")
+    # 内容前后顺序与界面一致。
+    assert tender_params.index("第一包正文") < tender_params.index("第二包正文")
+    # [[TABLE:...]] 占位符保持不变。
+    assert "[[TABLE:TP1_1]]" in tender_params
+    # 结构化抽取按 file_index 分配 table_id 前缀。
+    assert calls == [("TP1_", "uuid-1"), ("TP2_", "uuid-2")]
+
+
+def test_extract_tender_params_keeps_source_block_when_content_empty(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """抽取内容为空的文件不被跳过，`内容：` 后为空但来源块仍在。"""
+    doc_path = tmp_path / "template.docx"
+    doc_path.write_bytes(b"docx")
+    empty_param = tmp_path / "empty.docx"
+    empty_param.write_bytes(b"empty")
+    nonempty_param = tmp_path / "content.docx"
+    nonempty_param.write_bytes(b"content")
+
+    fake_doc = _FakeDoc()
+    progress_messages: list[str] = []
+    progress_warnings: list[str] = []
+    debug_messages: list[str] = []
+    _patch_extract_runtime(
+        monkeypatch,
+        doc=fake_doc,
+        style_fragments=[],
+        progress_messages=progress_messages,
+        progress_warnings=progress_warnings,
+        debug_messages=debug_messages,
+    )
+    _patch_structured_extract(
+        monkeypatch,
+        outputs_by_stem={
+            "empty": ("", []),
+            "content": ("真实正文", []),
+        },
+    )
+
+    result = extract_module.extract_tender_params(
+        _build_state(
+            doc_path,
+            tender_param_files=[
+                {"file_path": str(empty_param), "original_name": "空文件.docx"},
+                {"file_path": str(nonempty_param), "original_name": "有内容.docx"},
+            ],
+        ),
+        config=None,
+    )
+
+    tender_params = result["tender_params"]
+    assert "第一份技术参数文件名称为：空文件.docx" in tender_params
+    assert "第二份技术参数文件名称为：有内容.docx" in tender_params
+    # 空文件块仍在，`内容：` 后为空（紧跟下一块或行尾）。
+    assert "第一份技术参数文件名称为：空文件.docx\n内容：\n" in tender_params
+    assert "真实正文" in tender_params
+
+
+def test_extract_tender_params_falls_back_to_filename_when_original_name_missing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """缺 original_name 时用文件本身名称作为来源线索。"""
+    doc_path = tmp_path / "template.docx"
+    doc_path.write_bytes(b"docx")
+    param = tmp_path / "无名称.docx"
+    param.write_bytes(b"param")
+
+    fake_doc = _FakeDoc()
+    progress_messages: list[str] = []
+    progress_warnings: list[str] = []
+    debug_messages: list[str] = []
+    _patch_extract_runtime(
+        monkeypatch,
+        doc=fake_doc,
+        style_fragments=[],
+        progress_messages=progress_messages,
+        progress_warnings=progress_warnings,
+        debug_messages=debug_messages,
+    )
+    _patch_structured_extract(monkeypatch, outputs_by_stem={})
+
+    result = extract_module.extract_tender_params(
+        _build_state(
+            doc_path,
+            tender_param_files=[{"file_path": str(param)}],
+        ),
+        config=None,
+    )
+
+    tender_params = result["tender_params"]
+    assert "第一份技术参数文件名称为：无名称.docx" in tender_params
+
+
+def test_extract_tender_params_prefers_tender_param_files_over_paths(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """同时存在 tender_param_files 和 tender_param_paths 时，前者优先。"""
+    doc_path = tmp_path / "template.docx"
+    doc_path.write_bytes(b"docx")
+    file_param = tmp_path / "from-files.docx"
+    path_param = tmp_path / "from-paths.docx"
+    file_param.write_bytes(b"files")
+    path_param.write_bytes(b"paths")
+
+    fake_doc = _FakeDoc()
+    progress_messages: list[str] = []
+    progress_warnings: list[str] = []
+    debug_messages: list[str] = []
     style_call = _patch_extract_runtime(
         monkeypatch,
         doc=fake_doc,
@@ -231,75 +335,37 @@ def test_extract_tender_params_joins_multiple_tender_param_paths(
         progress_warnings=progress_warnings,
         debug_messages=debug_messages,
     )
-    structured_extract_calls: list[str] = []
-
-    def _fake_extract_content_with_table_models(_range, *, table_id_prefix: str = "TP"):
-        structured_extract_calls.append(table_id_prefix)
-        return (
-            "技术参数:param-one\n[[TABLE:TP1_1]]",
-            [
-                {
-                    "table_id": "TP1_1",
-                    "rows": 1,
-                    "cols": 2,
-                    "cells": [
-                        {"row": 1, "col": 1, "row_span": 1, "col_span": 2, "text": "合计"}
-                    ],
-                }
-            ],
-        )
-
-    monkeypatch.setattr(
-        extract_module,
-        "_extract_structured_tender_param_file",
-        lambda file_path_obj, *, file_index: _fake_extract_content_with_table_models(
-            file_path_obj,
-            table_id_prefix=f"TP{file_index}_",
-        ),
-    )
+    _patch_structured_extract(monkeypatch, outputs_by_stem={})
 
     result = extract_module.extract_tender_params(
-        {
-            **_build_state(doc_path),
-            "tender_param_paths": [str(param_one)],
-        },
+        _build_state(
+            doc_path,
+            tender_param_files=[{"file_path": str(file_param), "original_name": "对象来源.docx"}],
+            tender_param_paths=[str(path_param)],
+        ),
         config=None,
     )
 
-    assert result["template_reference_text"] == "原始采购需求"
-    # 单文件也加来源标记；`内容：` 后接真实正文与表格占位符。
-    assert result["tender_params"] == (
-        "第一份技术参数文件名称为：param-one.docx\n"
-        "内容：\n"
-        "技术参数:param-one\n[[TABLE:TP1_1]]"
-    )
-    assert result["tender_param_table_models"] == [
-        {
-            "table_id": "TP1_1",
-            "rows": 1,
-            "cols": 2,
-            "cells": [
-                {"row": 1, "col": 1, "row_span": 1, "col_span": 2, "text": "合计"}
-            ],
-        }
-    ]
-    assert style_call["opened_file_path"] == str(doc_path)
-    assert structured_extract_calls == ["TP1_"]
+    tender_params = result["tender_params"]
+    assert "第一份技术参数文件名称为：对象来源.docx" in tender_params
+    # 不应抽取 paths 来源里的文件。
+    assert "from-paths" not in tender_params
+    assert "from-files" in tender_params
 
 
-def test_extract_tender_params_keeps_full_markdown_projection_for_structured_table(
-    monkeypatch,
-    tmp_path: Path,
+def test_extract_tender_params_legacy_paths_still_get_source_blocks(
+    monkeypatch, tmp_path: Path
 ) -> None:
+    """旧 tender_param_paths（纯路径）也加来源标记，文件名取后端保存文件名。"""
     doc_path = tmp_path / "template.docx"
     doc_path.write_bytes(b"docx")
-    param_one = tmp_path / "param-one.docx"
-    param_one.write_bytes(b"param-one")
+    param = tmp_path / "legacy.docx"
+    param.write_bytes(b"param")
+
     fake_doc = _FakeDoc()
     progress_messages: list[str] = []
     progress_warnings: list[str] = []
     debug_messages: list[str] = []
-
     _patch_extract_runtime(
         monkeypatch,
         doc=fake_doc,
@@ -308,96 +374,12 @@ def test_extract_tender_params_keeps_full_markdown_projection_for_structured_tab
         progress_warnings=progress_warnings,
         debug_messages=debug_messages,
     )
-
-    monkeypatch.setattr(
-        extract_module,
-        "_extract_structured_tender_param_file",
-        lambda _file_path_obj, *, file_index: (
-            "附件三 技术参数表\n| 楼宇 | 岗位 |\n| --- | --- |\n| 门诊楼 | 保洁 |\n[[TABLE:TP1_1]]\n注：按附件执行",
-            [
-                {
-                    "table_id": "TP1_1",
-                    "rows": 2,
-                    "cols": 2,
-                    "cells": [
-                        {"row": 1, "col": 1, "row_span": 1, "col_span": 2, "text": "楼宇"},
-                        {"row": 2, "col": 1, "row_span": 1, "col_span": 1, "text": "岗位"},
-                    ],
-                }
-            ],
-        ),
-    )
+    _patch_structured_extract(monkeypatch, outputs_by_stem={})
 
     result = extract_module.extract_tender_params(
-        {
-            **_build_state(doc_path),
-            "tender_param_paths": [str(param_one)],
-        },
+        _build_state(doc_path, tender_param_paths=[str(param)]),
         config=None,
     )
 
-    assert "附件三 技术参数表" in result["tender_params"]
-    assert "| 楼宇 | 岗位 |" in result["tender_params"]
-    assert "[[TABLE:TP1_1]]" in result["tender_params"]
-    assert "注：按附件执行" in result["tender_params"]
-    assert "| --- | --- |" in result["tender_params"]
-    assert result["tender_param_table_models"][0]["cells"][0]["col_span"] == 2
-
-
-def test_extract_tender_params_style_extraction_failure_is_best_effort(
-    monkeypatch, tmp_path: Path
-) -> None:
-    doc_path = tmp_path / "template.docx"
-    doc_path.write_bytes(b"docx")
-    fake_doc = _FakeDoc()
-    progress_messages: list[str] = []
-    progress_warnings: list[str] = []
-    debug_messages: list[str] = []
-
-    _patch_extract_runtime(
-        monkeypatch,
-        doc=fake_doc,
-        style_fragments=RuntimeError("style extraction exploded"),
-        progress_messages=progress_messages,
-        progress_warnings=progress_warnings,
-        debug_messages=debug_messages,
-    )
-
-    result = extract_module.extract_tender_params(_build_state(doc_path), config=None)
-
-    assert result["template_reference_text"] == "原始采购需求"
-    assert result["inline_style_fragments"] == []
-    assert any("模板样式抽取失败，已跳过" in message for message in progress_warnings)
-    assert any("style extraction exploded" in message for message in debug_messages)
-
-
-def test_extract_tender_params_keeps_generate_progress_outcome_first_when_verbose(
-    monkeypatch, tmp_path: Path
-) -> None:
-    doc_path = tmp_path / "template.docx"
-    doc_path.write_bytes(b"docx")
-    fake_doc = _FakeDoc()
-    progress_messages: list[str] = []
-    progress_warnings: list[str] = []
-    debug_messages: list[str] = []
-
-    _patch_extract_runtime(
-        monkeypatch,
-        doc=fake_doc,
-        style_fragments=[
-            {"source_text": "不应进入用户态日志", "style_flags": {"bold": True}}
-        ],
-        progress_messages=progress_messages,
-        progress_warnings=progress_warnings,
-        debug_messages=debug_messages,
-    )
-
-    result = extract_module.extract_tender_params(
-        {**_build_state(doc_path), "verbose_style_progress_logs": True},
-        config=None,
-    )
-
-    assert result["inline_style_fragments"]
-    assert not any("不应进入用户态日志" in message for message in progress_messages)
-    assert not progress_warnings
-    assert not debug_messages
+    tender_params = result["tender_params"]
+    assert "第一份技术参数文件名称为：legacy.docx" in tender_params

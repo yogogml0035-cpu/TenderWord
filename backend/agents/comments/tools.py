@@ -19,11 +19,8 @@ from backend.agents.comments.types import (
 from backend.nodes.common_word_nodes.comment_writeback import (
     CommentWritebackIssue,
     CommentWritebackResult,
-    _add_comment_with_retries,
-    _build_search_texts,
-    _has_comment_on_range,
+    write_polished_comments,
 )
-from backend.util.word_util import wdFindStop
 
 MAX_CANDIDATE_FRAGMENTS = 3
 
@@ -254,25 +251,18 @@ def validate_comment_reference_candidates(
                 )
             )
             continue
-        if len(occurrences) > 1:
-            result.failed.append(
-                _validation_issue(
-                    index=index,
-                    status="failed",
-                    reason="reference_text_not_unique_in_polished_text",
-                    initial=initial_item,
-                    proposed=proposed_item,
-                    polished_text=polished,
-                )
-            )
-            continue
-
         start, end = occurrences[0]
+        # 锚点在正文中出现多处不再视为失败：共享写回层会确定性扩展并写入所有未批注位置。
+        reason = (
+            "reference_text_non_unique_will_expand_on_writeback"
+            if len(occurrences) > 1
+            else "passed"
+        )
         result.passed.append(
             _validation_issue(
                 index=index,
                 status="passed",
-                reason="passed",
+                reason=reason,
                 initial=initial_item,
                 proposed=proposed_item,
                 polished_text=polished,
@@ -315,44 +305,6 @@ def _append_write_issue(
         issue["error"] = str(error)
     issues.append(issue)
 
-def _find_word_anchor_ranges(
-    *,
-    doc,
-    reference_text: str,
-    search_start: int,
-    search_end: int,
-) -> list[Any]:
-    matches: list[Any] = []
-    if int(search_end) <= int(search_start):
-        return matches
-
-    for find_text in _build_search_texts(reference_text):
-        current_start = int(search_start)
-        while current_start < int(search_end):
-            find_range = doc.Range(current_start, int(search_end))
-            finder = find_range.Find
-            finder.ClearFormatting()
-            finder.Text = find_text
-            finder.Forward = True
-            finder.Wrap = wdFindStop
-            finder.MatchCase = False
-            finder.MatchWholeWord = False
-
-            if not finder.Execute():
-                break
-
-            match_start = int(find_range.Start)
-            match_end = int(find_range.End)
-            if match_end <= match_start:
-                break
-            if not any(
-                int(existing.Start) == match_start and int(existing.End) == match_end
-                for existing in matches
-            ):
-                matches.append(find_range.Duplicate)
-            current_start = max(match_end, current_start + 1)
-    return matches
-
 def write_validated_comment_candidates_to_word(
     *,
     doc,
@@ -368,112 +320,86 @@ def write_validated_comment_candidates_to_word(
         proposed_comments=proposed_comments,
         polished_text=polished_text,
     )
-    comments_by_index = {
-        item.index: item
+    logs = log_parts if log_parts is not None else []
+
+    # 校验通过（含锚点重复但可扩展写入）的候选交给共享写回层处理；
+    # 失败和跳过的候选保持确定性 reason，不再进入 Word 写入。
+    passed_comments = [
+        {"reference_text": item.reference_text, "comment_text": item.comment_text}
         for item in validation.passed
-    }
-    result: CommentWritebackResult = {
-        "total": len(comments_by_index),
-        "attempted": 0,
-        "added": 0,
-        "failed": len(validation.failed),
-        "skipped": len(validation.skipped),
-        "issues": [],
-    }
-    for issue in validation.failed:
-        _append_write_issue(
-            result["issues"],
-            index=issue.index,
-            reason=issue.reason,
-            reference_text=issue.reference_text,
-            comment_text=issue.comment_text,
-        )
-    for issue in validation.skipped:
-        _append_write_issue(
-            result["issues"],
-            index=issue.index,
-            reason=issue.reason,
-            reference_text=issue.reference_text,
-            comment_text=issue.comment_text,
-        )
+    ]
 
     if doc is None:
-        for item in validation.passed:
-            result["failed"] += 1
+        result: CommentWritebackResult = {
+            "total": len(validation.passed),
+            "attempted": 0,
+            "added": 0,
+            "failed": len(validation.failed) + len(validation.passed),
+            "skipped": len(validation.skipped),
+            "issues": [],
+        }
+        for issue in validation.failed:
             _append_write_issue(
                 result["issues"],
-                index=item.index,
+                index=issue.index,
+                reason=issue.reason,
+                reference_text=issue.reference_text,
+                comment_text=issue.comment_text,
+            )
+        for issue in validation.skipped:
+            _append_write_issue(
+                result["issues"],
+                index=issue.index,
+                reason=issue.reason,
+                reference_text=issue.reference_text,
+                comment_text=issue.comment_text,
+            )
+        for issue in validation.passed:
+            _append_write_issue(
+                result["issues"],
+                index=issue.index,
                 reason="missing_word_document",
-                reference_text=item.reference_text,
-                comment_text=item.comment_text,
+                reference_text=issue.reference_text,
+                comment_text=issue.comment_text,
             )
         return validation, result
 
     doc_end = int(bound_end) if bound_end is not None else int(getattr(doc.Content, "End", 0))
     search_start = max(0, int(bound_start))
     search_end = max(search_start, doc_end)
-    logs = log_parts if log_parts is not None else []
 
-    for index, item in comments_by_index.items():
-        result["attempted"] += 1
-        ranges = _find_word_anchor_ranges(
-            doc=doc,
-            reference_text=item.reference_text,
-            search_start=search_start,
-            search_end=search_end,
+    writeback_result = write_polished_comments(
+        doc=doc,
+        polished_comments=passed_comments,
+        bound_start=search_start,
+        bound_end=search_end,
+        log_parts=logs,
+        step_label="comment_agent",
+    )
+
+    # 合并失败/跳过候选的确定性 issue，保留按 index 可追溯的审计。
+    for issue in validation.failed:
+        writeback_result["total"] += 1
+        writeback_result["failed"] += 1
+        _append_write_issue(
+            writeback_result["issues"],
+            index=issue.index,
+            reason=issue.reason,
+            reference_text=issue.reference_text,
+            comment_text=issue.comment_text,
         )
-        if not ranges:
-            result["failed"] += 1
-            _append_write_issue(
-                result["issues"],
-                index=index,
-                reason="reference_text_not_found_in_word_bound",
-                reference_text=item.reference_text,
-                comment_text=item.comment_text,
-            )
-            continue
-        if len(ranges) > 1:
-            result["failed"] += 1
-            _append_write_issue(
-                result["issues"],
-                index=index,
-                reason="reference_text_not_unique_in_word_bound",
-                reference_text=item.reference_text,
-                comment_text=item.comment_text,
-            )
-            continue
-
-        target_range = ranges[0]
-        if _has_comment_on_range(doc, target_range):
-            result["skipped"] += 1
-            _append_write_issue(
-                result["issues"],
-                index=index,
-                reason="overlapping_comment_exists",
-                reference_text=item.reference_text,
-                comment_text=item.comment_text,
-            )
-            continue
-
-        add_exc = _add_comment_with_retries(doc, target_range, item.comment_text)
-        if add_exc is not None:
-            result["failed"] += 1
-            _append_write_issue(
-                result["issues"],
-                index=index,
-                reason="comment_add_failed",
-                reference_text=item.reference_text,
-                comment_text=item.comment_text,
-                error=str(add_exc),
-            )
-            continue
-
-        result["added"] += 1
-        logs.append(
-            f"comment_agent 批注 [{index}] 已写入: reference_text={item.reference_text[:40]}..."
+    for issue in validation.skipped:
+        writeback_result["total"] += 1
+        writeback_result["skipped"] += 1
+        _append_write_issue(
+            writeback_result["issues"],
+            index=issue.index,
+            reason=issue.reason,
+            reference_text=issue.reference_text,
+            comment_text=issue.comment_text,
         )
 
-    return validation, result
+    return validation, writeback_result
 
 def create_comment_agent_tools(context: CommentAgentToolContext) -> list[StructuredTool]:
     def _record_snapshot(

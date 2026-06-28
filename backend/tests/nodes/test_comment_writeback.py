@@ -736,6 +736,111 @@ class TestExistingCommentWriteback:
 
 
 # =============================================================================
+# Test Group 4: Duplicate Anchor Multi-Write Behavior
+# =============================================================================
+
+
+class TestCommentWritebackDuplicateAnchorMultiWrite:
+    """Tests for duplicate anchor handling: write to all non-overlapping positions."""
+
+    def test_write_polished_comments_writes_all_non_overlapping_duplicate_anchors(self) -> None:
+        """锚点在多处出现且都没有批注时，对所有重复位置分别写入同一条批注。"""
+        doc = _FakeDocument("开头配置项。中间配置项说明。结尾配置项。")
+        log_parts: list[str] = []
+
+        result = write_polished_comments(
+            doc=doc,
+            polished_comments=[
+                {"reference_text": "配置项", "comment_text": "建议删除：主观表述。"},
+            ],
+            bound_start=0,
+            bound_end=len(doc.text),
+            log_parts=log_parts,
+        )
+
+        assert result["added"] == 3
+        assert result["failed"] == 0
+        assert doc.Comments.Count == 3
+        # 三处批注内容一致
+        for idx in range(1, 4):
+            assert doc.Comments(idx).Text == "建议删除：主观表述。"
+        assert any("已在 3 个未批注位置" in part for part in log_parts)
+
+    def test_write_polished_comments_skips_overlapping_and_writes_remaining_duplicates(self) -> None:
+        """重复锚点中已有批注的位置跳过，未批注的重复位置继续写入。"""
+        doc = _FakeDocument("开头配置项。中间配置项说明。结尾配置项。")
+        # 预先在第一个“配置项”位置添加批注
+        first_pos = doc.text.find("配置项")
+        doc.Comments._items.append(
+            _FakeComment(doc, first_pos, first_pos + len("配置项"), "existing")
+        )
+        log_parts: list[str] = []
+
+        result = write_polished_comments(
+            doc=doc,
+            polished_comments=[
+                {"reference_text": "配置项", "comment_text": "建议删除：主观表述。"},
+            ],
+            bound_start=0,
+            bound_end=len(doc.text),
+            log_parts=log_parts,
+        )
+
+        # 已有 1 条，本条候选在另外 2 个未批注位置写入，不重复计入 skipped
+        assert result["added"] == 2
+        assert result["failed"] == 0
+        assert doc.Comments.Count == 3
+
+    def test_write_polished_comments_all_duplicate_positions_overlapped_counts_skipped(self) -> None:
+        """所有重复位置都已存在批注时，计为 skipped。"""
+        doc = _FakeDocument("配置项一 配置项二")
+        pos1 = doc.text.find("配置项")
+        pos2 = doc.text.rfind("配置项")
+        doc.Comments._items.append(
+            _FakeComment(doc, pos1, pos1 + len("配置项"), "existing-1")
+        )
+        doc.Comments._items.append(
+            _FakeComment(doc, pos2, pos2 + len("配置项"), "existing-2")
+        )
+        log_parts: list[str] = []
+
+        result = write_polished_comments(
+            doc=doc,
+            polished_comments=[
+                {"reference_text": "配置项", "comment_text": "建议删除：主观表述。"},
+            ],
+            bound_start=0,
+            bound_end=len(doc.text),
+            log_parts=log_parts,
+        )
+
+        assert result["added"] == 0
+        assert result["skipped"] == 1
+        assert result["failed"] == 0
+        assert doc.Comments.Count == 2
+        assert result["issues"][0]["reason"] == "overlapping_comment_exists"
+
+    def test_write_polished_comments_markdown_pipe_row_matched_across_duplicates(self) -> None:
+        """规范化匹配（Markdown pipe 行）仍能处理标点、换行、pipe 表格行。"""
+        doc = _FakeDocument("A B 说明，另含 A B 结尾。")
+        log_parts: list[str] = []
+
+        result = write_polished_comments(
+            doc=doc,
+            polished_comments=[
+                {"reference_text": "A | B", "comment_text": "表格行批注"},
+            ],
+            bound_start=0,
+            bound_end=len(doc.text),
+            log_parts=log_parts,
+        )
+
+        # 规范化后 "A B" 在两处出现，都写入
+        assert result["added"] >= 1
+        assert result["failed"] == 0
+
+
+# =============================================================================
 # Integration Test with gjgk_update_word
 # =============================================================================
 

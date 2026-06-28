@@ -342,6 +342,10 @@ function ContentAgentRoundBlock({ round }: { round: SSEContentAgentRound }) {
 
 function ContentAgentProcessView({ contentAgent }: { contentAgent: SSEContentAgentStep }) {
   const finalResult = contentAgent.final_result || null;
+  const finalIssuePrefix =
+    finalResult && finalResult.revision_rounds >= 3
+      ? '第 3 轮后'
+      : `最终复核`;
 
   return (
     <div className="space-y-3 text-sm text-gray-700">
@@ -370,7 +374,7 @@ function ContentAgentProcessView({ contentAgent }: { contentAgent: SSEContentAge
           {contentAgent.highlights.length > 0 && (
             <div className="mt-2">
               <p className="text-xs font-medium text-amber-800">
-                第 3 轮后仍有 {contentAgent.highlights.length} 个问题未通过，请按依据/修复建议人工核对：
+                {finalIssuePrefix}仍有 {contentAgent.highlights.length} 个问题未通过，请按依据/修复建议人工核对：
               </p>
               <ul className="mt-2 space-y-2">
                 {contentAgent.highlights.map((finding, index) => (
