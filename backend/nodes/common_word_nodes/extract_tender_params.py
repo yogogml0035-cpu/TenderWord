@@ -43,6 +43,21 @@ from backend.util.word_util.anchor_utils import resolve_anchor_content_range
 
 NODE_NAME = "extract_tender_params"
 
+# 来源块序号使用中文数字，便于正文阅读并保持与 prompt 来源标记规则一致。
+# 技术参数文件数量远超两位数的概率极低，这里只覆盖常见范围，超出回退阿拉伯数字。
+_CHINESE_NUMERALS = {
+    1: "一",
+    2: "二",
+    3: "三",
+    4: "四",
+    5: "五",
+    6: "六",
+    7: "七",
+    8: "八",
+    9: "九",
+    10: "十",
+}
+
 
 def _extract_structured_tender_param_file(
     file_path_obj: pathlib.Path,
@@ -302,17 +317,46 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
         updates["end_page"] = end_page
 
     # 处理技术参数文件
+    tender_param_files = state.get("tender_param_files")
     tender_param_paths = state.get("tender_param_paths")
     if tender_param_paths and not isinstance(tender_param_paths, (list, tuple)):
         tender_param_paths = [tender_param_paths]
 
-    if tender_param_paths:
+    # tender_param_files 优先；它携带路径与上传原名，能按界面顺序拼出来源块。
+    if tender_param_files and not isinstance(tender_param_files, (list, tuple)):
+        tender_param_files = [tender_param_files]
+
+    ordered_files: List[Dict[str, str]] = []
+    if tender_param_files:
+        for item in tender_param_files:
+            if isinstance(item, str):
+                path = str(item or "").strip()
+                if path:
+                    ordered_files.append({"file_path": path})
+                continue
+            raw_path = str(item.get("file_path") or "").strip()
+            if not raw_path:
+                continue
+            original_name = str(item.get("original_name") or "").strip()
+            file_meta: Dict[str, str] = {"file_path": raw_path}
+            if original_name:
+                file_meta["original_name"] = original_name
+            ordered_files.append(file_meta)
+    elif tender_param_paths:
+        for raw_path in tender_param_paths:
+            path = str(raw_path or "").strip()
+            if path:
+                ordered_files.append({"file_path": path})
+
+    if ordered_files:
         print(f"[extract_tender_params] 检测到技术参数文件，开始提取...")
-        _visible_log(f"开始提取 {len(tender_param_paths)} 份技术参数文件")
+        _visible_log(f"开始提取 {len(ordered_files)} 份技术参数文件")
         tender_params_parts: List[str] = []
         tender_param_table_models: List[Dict[str, Any]] = []
 
-        for file_index, tender_param_file_path in enumerate(tender_param_paths, start=1):
+        for file_index, file_meta in enumerate(ordered_files, start=1):
+            tender_param_file_path = file_meta.get("file_path", "")
+            original_name = file_meta.get("original_name")
             if not tender_param_file_path:
                 continue
 
@@ -343,7 +387,17 @@ def extract_tender_params(state: TenderGraphStateBase, config) -> TenderGraphSta
                 f"[extract_tender_params] 从文件提取完成: {file_path_obj.name}，长度: {len(file_text)}"
             )
             _visible_log(f"技术参数文件提取完成: {file_path_obj.name}")
-            tender_params_parts.append(file_text)
+
+            # 每份文件独立成块：文件名只作来源/包件线索，单文件也加来源说明。
+            # 中文数字序号便于正文阅读，与 prompt 里的来源标记规则保持一致。
+            cn_index = _CHINESE_NUMERALS.get(
+                file_index, str(file_index)
+            )
+            source_label = (
+                f"第{cn_index}份技术参数文件名称为：{original_name or file_path_obj.name}"
+            )
+            block = f"{source_label}\n内容：\n{file_text}"
+            tender_params_parts.append(block)
             tender_param_table_models.extend(file_table_models)
 
         tender_params = "\n\n".join([p for p in tender_params_parts if p]).strip()

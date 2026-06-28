@@ -123,9 +123,22 @@ export type FileType = 'template' | 'rewrite_source' | 'params' | 'qualification
 // Generate Task Types
 // ============================================
 
+export interface TenderParamFileRef {
+  /** 技术参数文件路径，与上传返回的 file_path 一致 */
+  file_path: string;
+  /** 上传原始文件名，仅作为来源/包件边界线索；与界面显示顺序一致 */
+  original_name?: string;
+}
+
+/**
+ * 技术参数项：兼容旧 string[]（纯路径）和对象形式（路径 + 原名）。
+ * 后端 GenerateFilePaths.tender_params 同步支持这两种形式。
+ */
+export type TenderParamItem = string | TenderParamFileRef;
+
 export interface FilesConfig {
   template: string;
-  tender_params: string[];
+  tender_params: TenderParamItem[];
 }
 
 export interface InsertionConfig {

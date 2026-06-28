@@ -104,7 +104,7 @@ describe('formDataConverter', () => {
       expect(request.style_writeback_mode).toBe('bold_only');
       expect(request.file_paths).toEqual({
         template: '/uploads/template.docx',
-        tender_params: ['/uploads/params.docx'],
+        tender_params: [{ file_path: '/uploads/params.docx', original_name: 'params.docx' }],
       });
       expect(Object.keys(request.file_paths).sort()).toEqual(['template', 'tender_params']);
     }
@@ -293,5 +293,59 @@ describe('formDataConverter', () => {
     expect(request.form_type).toBe('gjgk_tender');
     expect(request.tender_data.tender_lx).toBe(1);
     expect(request.tender_data.fund_source_lx).toBe(1);
+  });
+
+  it('forwards tender_params as ordered { file_path, original_name } objects', () => {
+    const multiFiles = {
+      template: baseFiles.template,
+      tender_params: [
+        {
+          id: 'params-1',
+          file_path: '/uploads/uuid-1.docx',
+          file_name: 'uuid-1.docx',
+          original_name: '第一包技术参数.docx',
+          size: 100,
+          upload_time: '2026-03-01T00:00:00.000Z',
+        },
+        {
+          id: 'params-2',
+          file_path: '/uploads/uuid-2.docx',
+          file_name: 'uuid-2.docx',
+          original_name: '第二包技术参数.docx',
+          size: 100,
+          upload_time: '2026-03-01T00:00:00.000Z',
+        },
+        {
+          id: 'params-3',
+          file_path: '/uploads/uuid-3.docx',
+          file_name: 'uuid-3.docx',
+          original_name: '第三包技术参数.docx',
+          size: 100,
+          upload_time: '2026-03-01T00:00:00.000Z',
+        },
+      ],
+    };
+
+    const request = convertXjcgFormToApiRequest({
+      tender_no: 'XJCG-001',
+      tender_lx: 0,
+      fund_lx: 0,
+      generation_style: 'template',
+      style_writeback_mode: 'full',
+      tender_data: baseTenderData,
+      model: 'deepseek',
+      files: multiFiles,
+      insertion_config: {
+        before_text: '第三章  采购需求',
+        after_text: '第四章  响应文件有关格式',
+      },
+    });
+
+    // 按界面显示顺序发送对象形式；original_name 用上传原名（非后端保存文件名）。
+    expect(request.file_paths.tender_params).toEqual([
+      { file_path: '/uploads/uuid-1.docx', original_name: '第一包技术参数.docx' },
+      { file_path: '/uploads/uuid-2.docx', original_name: '第二包技术参数.docx' },
+      { file_path: '/uploads/uuid-3.docx', original_name: '第三包技术参数.docx' },
+    ]);
   });
 });

@@ -208,3 +208,50 @@ def test_extract_content_with_table_models_ignores_non_symbol_font_sym() -> None
     assert "正文" in content
     assert "Δ" not in content
     assert models == []
+
+
+def test_extract_content_with_table_models_keeps_table_with_w14_paraId_textId() -> None:
+    """带 w14:paraId / w14:textId 的表格行不得被静默跳过。
+
+    回归场景：真实 DOCX 的 <w:document> 根声明了 xmlns:w14，但重新解析
+    <w:tbl> 片段时该声明丢失，<w:tr w14:paraId="..."> 会让 ElementTree
+    抛 unbound prefix，导致整张表被丢弃，正文只剩表格前的文字、
+    缺少 [[TABLE:TP1]]。
+    """
+    xml = """
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml">
+      <w:body>
+        <w:p>
+          <w:r><w:t>本表为技术参数一览表。</w:t></w:r>
+        </w:p>
+        <w:tbl>
+          <w:tr w14:paraId="0A1B2C3D" w14:textId="77777777" rsidR="00112233">
+            <w:tc><w:p><w:r><w:t>序号</w:t></w:r></w:p></w:tc>
+            <w:tc><w:p><w:r><w:t>通用名称</w:t></w:r></w:p></w:tc>
+            <w:tc><w:p><w:r><w:t>技术参数</w:t></w:r></w:p></w:tc>
+          </w:tr>
+          <w:tr w14:paraId="1B2C3D4E" w14:textId="77777777" rsidR="00112233">
+            <w:tc><w:p><w:r><w:t>1</w:t></w:r></w:p></w:tc>
+            <w:tc><w:p><w:r><w:t>卡线圈</w:t></w:r></w:p></w:tc>
+            <w:tc><w:p><w:r><w:t>工作电压：DC 12V</w:t></w:r></w:p></w:tc>
+          </w:tr>
+        </w:tbl>
+      </w:body>
+    </w:document>
+    """
+
+    content, models = extract_content_with_table_models(_FakeRange(xml), table_id_prefix="TP")
+
+    assert "本表为技术参数一览表。" in content
+    assert "[[TABLE:TP1]]" in content
+    assert len(models) == 1
+    model = models[0]
+    assert model["table_id"] == "TP1"
+    cell_texts = [cell["text"] for cell in model["cells"]]
+    assert "通用名称" in cell_texts
+    assert "卡线圈" in cell_texts
+    assert any("工作电压：DC 12V" in text for text in cell_texts)
+    # 表格 markdown 投影也应包含行内容，证明整张表被正确解析。
+    assert "| 序号 | 通用名称 | 技术参数 |" in content
+    assert "| 1 | 卡线圈 | 工作电压：DC 12V |" in content

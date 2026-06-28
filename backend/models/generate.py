@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -73,16 +73,35 @@ class InsertionConfig(BaseModel):
     after_text: Optional[str] = Field(default=None, description="插入位置后文本（锚点）")
 
 
+class TenderParamFile(BaseModel):
+    """技术参数文件元数据（路径 + 上传原名）。
+
+    文件顺序与界面显示顺序一致；`original_name` 仅作为来源/包件边界线索，
+    真正的包名/标题以文件内容为准。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    file_path: str = Field(..., min_length=1, description="技术参数文件路径")
+    original_name: Optional[str] = Field(
+        default=None, description="上传原始文件名，仅作来源线索"
+    )
+
+
+# 技术参数项既兼容旧 string[]（纯路径），也接受对象形式（路径 + 原名）。
+TenderParamItem = Union[TenderParamFile, str]
+
+
 class GenerateFilePaths(BaseModel):
     """初次生成文件路径配置。"""
 
     model_config = ConfigDict(extra="forbid")
 
     template: str = Field(..., min_length=1, description="模板文件路径")
-    tender_params: List[str] = Field(
+    tender_params: List[TenderParamItem] = Field(
         ...,
         min_length=1,
-        description="技术参数文件路径列表",
+        description="技术参数文件列表，支持纯路径字符串或 {file_path, original_name} 对象",
     )
 
     @model_validator(mode="before")
@@ -105,11 +124,43 @@ class GenerateFilePaths(BaseModel):
             raise ValueError("请上传模板文件")
         return normalized
 
-    @field_validator("tender_params")
+    @field_validator("tender_params", mode="before")
     @classmethod
-    def _normalize_tender_params(cls, value: List[str]) -> List[str]:
-        normalized = [str(path or "").strip() for path in value]
-        if not normalized or any(not path for path in normalized):
+    def _normalize_tender_params(
+        cls, value: Any
+    ) -> List[TenderParamItem]:
+        if not isinstance(value, list) or not value:
+            raise ValueError("请上传至少一个技术参数文件")
+
+        normalized: List[Any] = []
+        for item in value:
+            if isinstance(item, str):
+                path = str(item or "").strip()
+                if not path:
+                    raise ValueError("请上传至少一个技术参数文件")
+                normalized.append(path)
+                continue
+
+            if isinstance(item, dict):
+                raw_path = str(item.get("file_path") or "").strip()
+                if not raw_path:
+                    raise ValueError("技术参数文件路径不能为空")
+                raw_name = item.get("original_name")
+                original_name = (
+                    str(raw_name).strip() if raw_name is not None else None
+                )
+                normalized.append(
+                    {
+                        "file_path": raw_path,
+                        "original_name": original_name or None,
+                    }
+                )
+                continue
+
+            # 既不是 str 也不是 dict（例如已由 pydantic 解析为 TenderParamFile）
+            normalized.append(item)
+
+        if not normalized:
             raise ValueError("请上传至少一个技术参数文件")
         return normalized
 

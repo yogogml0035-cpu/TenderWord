@@ -69,7 +69,7 @@ def test_render_generate_by_param_prompt_prefers_tender_params_as_final_body() -
     assert "最终结果应尽量等于“【技术参数】原文删除评分污染、去掉已被项目概述消耗的裸元数据行后的版本”" in rendered.system_prompt
     assert "附件与表单原位保留" in rendered.system_prompt
     assert "反格式改写红线" in rendered.system_prompt
-    assert "【技术参数】（先读；正文默认直接以它为准，只删除评分/评审污染）" in rendered.user_prompt
+    assert "【技术参数】（先读；正文默认直接以它为准，只删除评分/评审污染和来源标记行）" in rendered.user_prompt
 
 
 def test_render_generate_by_param_prompt_preserves_basic_info_shells() -> None:
@@ -448,3 +448,25 @@ def test_verify_user_prompt_states_symbol_and_overview_checks() -> None:
     )
     assert "特殊符号保真" in user_prompt
     assert "项目概述关键字段完整性" in user_prompt
+
+
+def test_generate_prompts_cover_tender_param_source_markers() -> None:
+    """两套生成 prompt 都包含技术参数文件来源标记处理规则。
+
+    节点会按界面顺序把每份技术参数文件拼成
+    `第N份技术参数文件名称为：xxx\\n内容：\\n...` 来源块；prompt 必须指导模型
+    把这些来源标记当作非正文删除，同时保留各文件 `内容：` 之后的真实正文。
+    """
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    for rendered in (template_rendered, param_rendered):
+        assert "技术参数来源标记规则" in rendered.user_prompt
+        assert "第N份技术参数文件名称为：xxx" in rendered.user_prompt
+        assert "系统拼接的" in rendered.user_prompt
+        assert "不是采购需求正文" in rendered.user_prompt
+        assert "辅助判断包件边界" in rendered.user_prompt
+        assert "最终标题以**文件内容为准**" in rendered.user_prompt
+        assert "第一份技术参数文件名称为..." in rendered.user_prompt

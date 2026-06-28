@@ -15,6 +15,7 @@ import type {
   GenerateRequest,
   FilesConfig,
   GenerationMode,
+  TenderParamFileRef,
 } from '@/types/api';
 import { resolveGngkFormType } from '@/lib/gngkFormType';
 
@@ -41,15 +42,21 @@ function extractFilePath(file: UploadedFile | undefined | null): string | undefi
 }
 
 /**
- * 从 UploadedFile 数组中提取 file_path 数组
+ * 把 UploadedFile 数组按界面显示顺序转换为 { file_path, original_name } 元数据。
+ * original_name 用上传原名（而非后端保存文件名），仅作为来源/包件边界线索。
  * @param files - 上传的文件对象数组
- * @returns 文件路径数组，如果输入为空则返回空数组
+ * @returns 技术参数元数据数组，输入为空时返回空数组
  */
-function extractFilePaths(files: UploadedFile[] | undefined | null): string[] {
+function extractTenderParamRefs(
+  files: UploadedFile[] | undefined | null
+): TenderParamFileRef[] {
   if (!files || files.length === 0) {
     return [];
   }
-  return files.map((file) => file.file_path);
+  return files.map((file) => ({
+    file_path: file.file_path,
+    original_name: file.original_name,
+  }));
 }
 
 /**
@@ -64,7 +71,7 @@ function buildFilesConfig(
 ): FilesConfig {
   return {
     template: extractFilePath(template) ?? '',
-    tender_params: extractFilePaths(tenderParams),
+    tender_params: extractTenderParamRefs(tenderParams),
   };
 }
 

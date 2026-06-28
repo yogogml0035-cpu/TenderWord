@@ -44,6 +44,7 @@ class TenderGraphStateBase(BaseState, total=False):
     template_path: str
     source_document_path: str
     tender_param_paths: List[str]
+    tender_param_files: List[Dict[str, str]]
     prepared_doc_path: str
     source_prepared_doc_path: str
     comment_supplement_source_file: str
