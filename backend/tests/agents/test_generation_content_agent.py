@@ -276,6 +276,31 @@ def test_content_verify_agent_drops_noop_findings(monkeypatch) -> None:
     assert json.loads(result["messages"][-1].content) == []
 
 
+def test_content_verify_agent_drops_fix_hint_none_findings(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fake_stream_llm_completion(**kwargs):
+        calls.append(kwargs)
+        return (
+            '[{"evidence":"待审核正文第1包中 [[TABLE:TP1_1]] 已正确保留，'
+            '投影行省略符合要求。","fix_hint":"无"}]'
+        )
+
+    monkeypatch.setattr(
+        verify_agent_graph_module,
+        "stream_llm_completion",
+        fake_stream_llm_completion,
+    )
+
+    result = verify_agent_graph_module.create_verify_agent_graph().invoke(
+        {"current_text": "采购需求正文\n[[TABLE:TP1_1]]", "model_provider": "deepseek"}
+    )
+
+    assert len(calls) == 1
+    assert result["structured_response"] == []
+    assert json.loads(result["messages"][-1].content) == []
+
+
 def test_content_verify_agent_flags_placeholder_current_text_without_llm(monkeypatch) -> None:
     monkeypatch.setattr(
         verify_agent_graph_module,

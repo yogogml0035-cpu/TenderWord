@@ -335,6 +335,16 @@ def test_verify_and_revise_prompts_reject_textified_structured_tables() -> None:
     assert "把对应锚点放回原位置" in REVISE_SYSTEM_PROMPT
 
 
+def test_verify_prompt_filters_passed_checks_before_output() -> None:
+    """DeepSeek-Flash 非思考模式需要显式输出前过滤门，避免把通过项写成 fix_hint=无。"""
+    assert "输出前过滤门" in VERIFY_SYSTEM_PROMPT
+    assert "fix_hint 必须是可执行编辑动作" in VERIFY_SYSTEM_PROMPT
+    assert "禁止写“无”" in VERIFY_SYSTEM_PROMPT
+    assert "禁止把审核过程、匹配结果或合格项写入 evidence" in VERIFY_SYSTEM_PROMPT
+    assert "详细配置清单参数如下" in VERIFY_SYSTEM_PROMPT
+    assert "没有把投影表行转成可见正文" in VERIFY_SYSTEM_PROMPT
+
+
 def test_verify_prompt_states_protected_field_non_deletion_contract() -> None:
     """verify prompt 固化受保护字段口径：字段壳来自模板、字段值优先级、不得删除。"""
     # 系统提示词固化业务口径。

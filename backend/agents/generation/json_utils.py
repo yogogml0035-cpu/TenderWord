@@ -75,6 +75,7 @@ AUDIT_NOOP_FIX_HINT_MARKERS = (
     "不需变更",
     "不需要变更",
 )
+AUDIT_NOOP_FIX_HINT_EXACT = {"无"}
 
 
 def is_contract_placeholder_text(value: Any) -> bool:
@@ -93,6 +94,8 @@ def _is_noop_audit_finding(finding: AuditFinding) -> bool:
     fix_hint = _normalize_audit_noop_text(finding.fix_hint)
     if not evidence or not fix_hint:
         return False
+    if fix_hint in AUDIT_NOOP_FIX_HINT_EXACT:
+        return True
     return any(marker in evidence for marker in AUDIT_NOOP_EVIDENCE_MARKERS) and any(
         marker in fix_hint for marker in AUDIT_NOOP_FIX_HINT_MARKERS
     )
