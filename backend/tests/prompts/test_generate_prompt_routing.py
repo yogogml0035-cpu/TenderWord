@@ -200,34 +200,29 @@ def test_generate_prompts_forbid_ai_preamble_and_filler() -> None:
     assert "须提供详细技术参数要求" in REVISE_SYSTEM_PROMPT
 
 
-def test_generate_prompts_flip_table_placeholder_to_internal_entry() -> None:
-    """`[[TABLE:id]]` 被描述为内部写回入口；param 模式要求模型原样保留占位符
-    作为真实表格的写回锚点；template 模式也不能因纯文本容器丢弃采购需求表
-    锚点。两者都不为缺失的表补占位句。"""
+def test_generate_prompts_handle_table_placeholders_by_generation_style() -> None:
+    """template 展开一列参数表并删锚点；param 直接保留锚点给写回层。"""
     template_rendered = render_generate_by_template_prompt(build_prompt_input())
     param_rendered = render_generate_by_param_prompt(build_prompt_input(generation_style="param"))
 
-    for rendered in (template_rendered, param_rendered):
-        assert "内部结构化写回入口" in rendered.system_prompt
-        assert "不是最终正文的可见内容" in rendered.system_prompt or "不是最终正文可见内容" in rendered.system_prompt
-        assert "不要" in rendered.system_prompt and "占位句" in rendered.system_prompt
-
-    # param 模式现在要求模型必须原样保留 [[TABLE:id]] 占位符（写回锚点），而不是删除它。
-    assert "必须" in param_rendered.system_prompt
+    # param 模式要求非评分结构化表锚点直通，包括一列表格技术参数。
+    assert "内部结构化写回入口" in param_rendered.system_prompt
     assert "原样、独占一行" in param_rendered.system_prompt
     assert "唯一可靠锚点" in param_rendered.system_prompt
-    assert "一旦你删掉它" in param_rendered.system_prompt
+    assert "一列表格技术参数也按本条处理" in param_rendered.system_prompt
     assert "结构化表锚点红线" in param_rendered.system_prompt
 
-    # template 模式现在要求有锚点的采购需求表优先保留占位符，不被纯文本容器降维。
-    assert "采购需求表" in template_rendered.system_prompt
-    assert "不能拆成纯文本列表" in template_rendered.system_prompt
+    # template 模式对一列表格技术参数展开正文并删除对应锚点。
+    assert "文本容器表" in template_rendered.system_prompt
+    assert "带锚点表 `[[TABLE:<id>]]` 三分类处理" in template_rendered.system_prompt
+    assert "Word 抽取形成的版式容器" in template_rendered.system_prompt
+    assert "最终绝对禁止输出这个 `<id>`" in template_rendered.system_prompt
     assert "原样、独占一行保留" in template_rendered.system_prompt
     assert "唯一可靠锚点" in template_rendered.system_prompt
 
 
-def test_generate_prompts_forbid_structured_table_projection_as_text() -> None:
-    """带 `[[TABLE:id]]` 的源表只能留锚点，不能把投影表散文化输出。"""
+def test_generate_prompts_examples_match_template_and_param_table_behavior() -> None:
+    """示例明确区分 template 展开 TP1_1、param 保留 TP1_1。"""
     template_rendered = render_generate_by_template_prompt(build_prompt_input())
     param_rendered = render_generate_by_param_prompt(
         build_prompt_input(generation_style="param")
@@ -239,13 +234,14 @@ def test_generate_prompts_forbid_structured_table_projection_as_text() -> None:
     assert "重复转写则会破坏表格输出" in param_rendered.system_prompt
     assert "先处理结构化表" in param_rendered.user_prompt
     assert "输出只能是 `二、技术需求" in param_rendered.user_prompt
-    assert "[[TABLE:TP1_1]]`" in param_rendered.user_prompt
+    assert "输出必须是 `[[TABLE:TP1_1]]" in param_rendered.user_prompt
+    assert "不能把 `TP1_1` 前的一列表格展开成普通正文" in param_rendered.user_prompt
 
-    assert "不要逐行重绘，不要转成纯文本列表" in template_rendered.system_prompt
-    assert "不得把有锚点表当作普通表降维" in template_rendered.system_prompt
-    assert "不手工重绘、不散文化" in template_rendered.system_prompt
-    assert "先执行结构化表判定" in template_rendered.user_prompt
-    assert "不得因参考内容是纯文本而把锚点表降维成普通列表" in template_rendered.user_prompt
+    assert "文本容器表展开正文并删除锚点" in template_rendered.system_prompt
+    assert "真实数据表保留占位符" in template_rendered.system_prompt
+    assert "不能一律保留或一律降维" in template_rendered.system_prompt
+    assert "先执行带锚点表三分类" in template_rendered.user_prompt
+    assert "禁止 `1.49 引导鞘管直径≤2.6mm` 后又输出同一技术参数表的 `[[TABLE:TP1_1]]`" in template_rendered.user_prompt
 
 
 def test_generate_prompts_preserve_text_around_structured_table_placeholders() -> None:
@@ -298,7 +294,7 @@ def test_generate_prompts_enforce_per_package_overview_completion() -> None:
 
 def test_verify_prompt_describes_table_placeholder_as_internal_entry() -> None:
     """审核规则泛化重要性标识并排除技术符号；占位符硬契约（附加到 user prompt）
-    把占位符描述为内部写回入口：保留占位符是正确行为，既不要求补回也不要求删除。"""
+    按生成风格区分 template 展开和 param 锚点直通。"""
     from backend.agents.generation.verify_agent_graph import (
         TABLE_PLACEHOLDER_CONTRACT_PROMPT,
     )
@@ -310,25 +306,26 @@ def test_verify_prompt_describes_table_placeholder_as_internal_entry() -> None:
     assert "内部写回入口" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
     assert "不应作为可见行" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
     assert "不要**为缺失" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
-    # 现在还明确：保留占位符是正确行为，不要报 finding 要求删除占位符。
-    assert "正确且被要求" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
-    assert "要求删除它" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+    assert "param 生成风格" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+    assert "template 生成风格" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+    assert "即使锚点前是一列表格包住整段技术参数，也应保留锚点" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
+    assert "一列表格技术参数属于文本容器表时，可以展开为普通正文" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
     assert "必须检查锚点表是否被重复散文化" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
     assert "必须检查锚点邻接正文是否丢失或挪位" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
-    assert "有锚点时它们是重复投影内容" in TABLE_PLACEHOLDER_CONTRACT_PROMPT
 
 
 def test_verify_and_revise_prompts_reject_textified_structured_tables() -> None:
-    """审核必须报出锚点表散文化；修订只删除重复投影行、保留锚点。"""
-    assert "结构化表审核总则" in VERIFY_SYSTEM_PROMPT
-    assert "锚点 + 散文化投影表" in VERIFY_SYSTEM_PROMPT
-    assert "1 设备用途" in VERIFY_SYSTEM_PROMPT
-    assert "删除该锚点表对应的普通文本/手绘投影行" in VERIFY_SYSTEM_PROMPT
-    assert "结构化表邻接正文审核总则" in VERIFY_SYSTEM_PROMPT
+    """审核/修订按生成风格处理结构化表。"""
+    assert "带锚点表审核总则" in VERIFY_SYSTEM_PROMPT
+    assert "template 生成风格" in VERIFY_SYSTEM_PROMPT
+    assert "param 生成风格" in VERIFY_SYSTEM_PROMPT
+    assert "即使锚点前是一列表格包住整段技术参数，也应保留" in VERIFY_SYSTEM_PROMPT
+    assert "已经展开成正文但仍保留同一 `[[TABLE:id]]`" in REVISE_SYSTEM_PROMPT
+    assert "应锚点直通的 `[[TABLE:id]]` 表被重复转写" in REVISE_SYSTEM_PROMPT
+    assert "锚点邻接正文审核总则" in VERIFY_SYSTEM_PROMPT
     assert "多个锚点集中到文末" in VERIFY_SYSTEM_PROMPT
     assert "只在文末连续输出两个表格锚点" in VERIFY_SYSTEM_PROMPT
 
-    assert "锚点表被重复转写成普通文本" in REVISE_SYSTEM_PROMPT
     assert "删除这些重复投影行" in REVISE_SYSTEM_PROMPT
     assert "不得把投影行改写成另一种表格" in REVISE_SYSTEM_PROMPT
     assert "锚点之间/锚点之后缺失附件标题" in REVISE_SYSTEM_PROMPT

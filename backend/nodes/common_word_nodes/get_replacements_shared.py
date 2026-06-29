@@ -365,25 +365,46 @@ def format_public_tender_investment_value(value: Any) -> str:
     return normalized
 
 
+# 预算/限价类字段行标签，investment 旧值只从这些标签所在行提取。
+INVESTMENT_FIELD_LABELS: Tuple[str, ...] = (
+    "预算金额",
+    "项目预算",
+    "最高限价",
+    "最高投标限价",
+)
+
+
+def _investment_field_label_pattern() -> str:
+    """Build a regex alternation matching any investment field label followed by a colon."""
+    return "|".join(re.escape(label) for label in INVESTMENT_FIELD_LABELS)
+
+
 def extract_public_tender_investment(
     doc_content: str, state: Any, log_parts: List[str]
 ) -> Optional[str]:
-    """Extract the budget amount only from explicit 预算金额 lines."""
+    """Extract the budget amount only from explicit 预算/限价 field lines.
+
+    旧值只从 `预算金额`、`项目预算`、`最高限价`、`最高投标限价` 这些字段标签所在行提取，
+    避免从普通正文数字里误提旧金额。生成数字到数字的替换对（旧单位与句式保留不变）。
+    标签后允许直接跟冒号、`人民币`、`￥`、`¥` 等金额前缀，覆盖 `最高投标限价人民币 19.8 万元`
+    这类无冒号的真实模板写法。
+    """
     if not doc_content or state.get("investment") in (None, ""):
         return None
 
+    label_pattern = rf"(?:{_investment_field_label_pattern()})\s*(?:[：:]|人民币|￥|¥)"
     for raw_line in re.split(r"[\r\n\x07]+", doc_content):
         line = raw_line.strip()
-        if not re.search(r"预算金额\s*[：:]", line):
+        if not re.search(label_pattern, line):
             continue
 
-        value_part = re.split(r"预算金额\s*[：:]", line, maxsplit=1)[1]
+        value_part = re.split(label_pattern, line, maxsplit=1)[1]
         extracted = format_public_tender_investment_value(value_part)
         if extracted:
-            log_parts.append(f"提取预算金额: {extracted}")
+            log_parts.append(f"提取预算/限价金额: {extracted}")
             return extracted
 
-    log_parts.append("未找到 '预算金额' 行，跳过 investment 提取")
+    log_parts.append("未找到预算/限价字段行，跳过 investment 提取")
     return None
 
 
@@ -428,6 +449,8 @@ def extract_public_tender_project_content(
         "供应商",
         "项目交付地点",
         "项目交付日期",
+        "项目实施地点",
+        "项目实施时间",
     ]
 
     found_positions = []
@@ -747,6 +770,7 @@ def build_common_replacement_fields() -> List[ReplacementFieldSpec]:
 __all__ = [
     "COMMON_REPLACEMENT_FIELD_NAMES",
     "ExtractorSpec",
+    "INVESTMENT_FIELD_LABELS",
     "ReplacementFieldSpec",
     "build_common_replacement_fields",
     "extract_public_tender_buyer_name",

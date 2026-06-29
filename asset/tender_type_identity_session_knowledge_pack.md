@@ -118,8 +118,9 @@
 - 当前 graph wrapper 真名是 `gngk_hw_zc_get_replacements` 与 `gngk_fw_zc_get_replacements`。
 - `gngk_hw_zc_get_replacements` 当前保持薄 wrapper，直接复用 `build_gngk_common_extractors()` 与 `build_gngk_common_replacement_fields()`；不要为货物自筹重新插入 `project_content_v1` 或 `similar_project_performance_date` 这两个历史特殊字段。
 - 公开招标 family 的 `buyer_name` 旧值支持 `采购人：...` 与 `招标人：...` 双标签；命中后在采购代理、招标代理、地址、联系人、电话等后续标签前截断。
-- `investment` 是预算金额替换字段，旧值只能来自显式 `预算金额：...` 行；`最高限价` 不作为 `investment` 旧值来源。替换对只提供旧数字到新数字，正文中同数字的全局替换范围继续由 `replace_content` 负责。
-- `investment` 新值格式化由 `ReplacementFieldSpec.new_value_formatter` 绑定 `format_public_tender_investment_value()` 完成：`140.0` 归一为 `140`，`140.5` / `140.05` 等有效小数保持。
+- `investment` 是预算/限价金额替换字段，旧值只能来自显式预算/限价字段标签行：`预算金额`、`项目预算`、`最高限价`、`最高投标限价`；标签后允许直接跟冒号、`人民币`、`￥`、`¥`，覆盖 `最高投标限价人民币 19.8 万元` 这类无冒号的真实模板写法。不再从普通正文数字里提取旧金额；替换对只提供旧数字到新数字（`19.8 -> 18`），模板原句式与单位保留不变，同数字的全局替换范围继续由 `replace_content` 负责。
+- `investment` 新值格式化由 `ReplacementFieldSpec.new_value_formatter` 绑定 `format_public_tender_investment_value()` 完成：`140.0` 归一为 `140`，`140.5` / `140.05` 等有效小数保持，`18.50` 归一为 `18.5`。
+- `project_content` 必须按整行替换项目基础信息里的采购内容，例如 `便携式肌骨超声仪	壹台` 直接替换为 ERP `project_content`。不要为公开招标 family 增加单独的数量词替换字段；整行提取失败后只替换 `壹台 -> 壹批` 会把项目内容和预算拆坏。`项目实施地点`、`项目实施时间`、`项目交付地点`、`项目交付日期` 等都应作为项目内容行后的边界。
 - `project_zbr_xbr` 旧值支持 `项目联系人：...` 与 `联系人：...`，并在 `电话`、`电 话`、`电　话`、`联系电话`、`联系方式`、`传真`、`邮箱`、`电子邮箱` 等联系方式标签前停止；修改该边界时要同时锁定 `zbr_xbr_tel` 与 `zbr_pinyin` 既有提取结果。
 - 采购代理机构范围内的 `邮编：` 只能作为当前代理机构块的二级锚点；若它出现在联系人标签之后，应视为后文投标人格式等无关标记，不能把 `project_zbr_xbr` 搜索范围跳到后文。
 - 受保护字段 profile 与 `direct_replace` 边界详见 `asset/shared_runtime_word_skill_knowledge_pack.md`。
@@ -237,7 +238,8 @@
 
 - 类型元数据仍分散在前后端多个位置；新增类型不能只改一侧。
 - `gngk_hw_zc` replacement 边界回归时，容易把服务/国际公开历史字段误带回货物自筹；必须确认 `project_content_v1` 与 `similar_project_performance_date` 不在提取器、字段列表或模拟替换结果中。
-- 预算金额提取不能为了覆盖正文最高限价而反向读取 `最高限价` 行；同金额联动应保持在后续全局替换机制内。
+- 预算/限价金额提取现在覆盖 `预算金额`、`项目预算`、`最高限价`、`最高投标限价` 四类字段行；不得为了覆盖正文其它金额而放宽到普通正文数字。同金额联动应保持在后续全局替换机制内。
+- 不要恢复 `project_quantity_unit` 这类数量词单独替换；公开招标项目内容应走整行 `project_content` 替换，否则会把项目名称、数量和预算拆坏。
 - 联系人姓名与联系方式可能被 Word 文本读成同一行；`project_zbr_xbr` 需要依赖停止标签截断，而不是假设换行一定存在。
 - 公开招标模板后文常有“投标人基本情况简介格式”里的 `邮编：`、`电话/传真：` 空表字段；联系人提取的二级锚点必须限制在当前代理机构块内，避免跳过首页或前附表的真实联系人。
 - `tender_config.py` 与 `DocumentService.REWRITE_DEFAULT_ANCHORS` 当前存在双份默认锚点语义，只改其中一处会导致 rewrite 与 generate 漂移。

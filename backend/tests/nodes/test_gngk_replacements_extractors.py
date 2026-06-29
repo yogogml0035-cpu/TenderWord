@@ -15,6 +15,7 @@ from backend.nodes.common_word_nodes.get_replacements_shared import (
     extract_public_tender_contact_fields,
     extract_public_tender_investment,
     extract_public_tender_platform,
+    extract_public_tender_project_content,
     format_public_tender_investment_value,
 )
 from backend.nodes.gngk_word_nodes.gngk_fw_zc_get_replacements import (
@@ -123,6 +124,28 @@ def test_extract_gngk_fw_zc_project_content_keeps_service_line_with_budget() -> 
     assert extracted == "项目名称：信息系统开发运维服务          壹套（项目预算：人民币50万元）"
 
 
+def test_extract_public_tender_project_content_stops_before_implementation_line() -> None:
+    log_parts: list[str] = []
+
+    extracted = extract_public_tender_project_content(
+        """
+2、项目基本信息
+上海东松医疗科技股份有限公司受上海市浦东新区老年医院的委托，现以公开招标方式
+邀请合格的投标人就下列货物或服务前来投标。
+
+便携式肌骨超声仪	壹台
+项目实施地点：招标人指定地点
+项目实施时间：合同签订后 30 天内
+
+3、合格投标人资格条件：
+""".strip(),
+        {"project_content": "病房及办公家具\t壹批（项目预算：人民币18万元）"},
+        log_parts,
+    )
+
+    assert extracted == "便携式肌骨超声仪\t壹台"
+
+
 def test_extract_public_tender_buyer_name_matches_service_template() -> None:
     log_parts: list[str] = []
 
@@ -159,7 +182,7 @@ def test_extract_public_tender_buyer_name_supports_bidder_label() -> None:
     assert extracted == "复旦大学附属中山医院"
 
 
-def test_extract_public_tender_investment_reads_budget_amount_only() -> None:
+def test_extract_public_tender_investment_reads_budget_amount_line() -> None:
     log_parts: list[str] = []
 
     extracted = extract_public_tender_investment(
@@ -171,22 +194,48 @@ def test_extract_public_tender_investment_reads_budget_amount_only() -> None:
     assert extracted == "450"
 
 
-def test_extract_public_tender_investment_ignores_ceiling_amount() -> None:
+def test_extract_public_tender_investment_reads_ceiling_field_line() -> None:
     log_parts: list[str] = []
 
     extracted = extract_public_tender_investment(
-        "最高限价：450 万元",
+        "最高投标限价人民币 19.8 万元",
+        {"investment": "18.0"},
+        log_parts,
+    )
+
+    assert extracted == "19.8"
+
+
+def test_extract_public_tender_investment_reads_project_budget_line() -> None:
+    log_parts: list[str] = []
+
+    extracted = extract_public_tender_investment(
+        "项目预算：人民币450万元",
         {"investment": "140.0"},
         log_parts,
     )
 
-    assert extracted is None
+    assert extracted == "450"
 
 
 def test_format_public_tender_investment_value_strips_only_invalid_trailing_zeroes() -> None:
     assert format_public_tender_investment_value("140.0") == "140"
     assert format_public_tender_investment_value("140.5") == "140.5"
     assert format_public_tender_investment_value("140.05") == "140.05"
+    assert format_public_tender_investment_value("18.50") == "18.5"
+
+
+def test_extract_public_tender_investment_ignores_plain_body_numbers() -> None:
+    log_parts: list[str] = []
+
+    # 没有任何预算/限价字段标签行，普通正文里的数字不得作为 investment 旧值。
+    extracted = extract_public_tender_investment(
+        "本项目合同金额为 19.8 万元，交货期 12 个月。",
+        {"investment": "18.0"},
+        log_parts,
+    )
+
+    assert extracted is None
 
 
 def test_extract_public_tender_contact_fields_matches_service_template() -> None:
@@ -328,6 +377,8 @@ def test_gngk_hw_and_fw_zc_replacement_fields_keep_type_boundary() -> None:
     assert "project_content" in hw_extractor_names
     assert "investment" in hw_field_names
     assert "investment" in hw_extractor_names
+    assert "project_quantity_unit" not in hw_field_names
+    assert "project_quantity_unit" not in hw_extractor_names
     assert "project_content_v1" not in hw_field_names
     assert "similar_project_performance_date" not in hw_field_names
     assert "project_content_v1" not in fw_field_names
