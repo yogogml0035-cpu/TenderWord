@@ -507,6 +507,105 @@ def extract_public_tender_project_content(
     return None
 
 
+PROJECT_CONTENT_FIELD_LABELS: Tuple[str, ...] = (
+    "项目名称",
+    "设备名称及数量",
+    "采购内容",
+)
+PROJECT_CONTENT_FIELD_STOP_LABELS: Tuple[str, ...] = (
+    "招标人",
+    "采购人",
+    "地址",
+    "邮编",
+    "联系人",
+    "联系电话",
+    "电话",
+    "传真",
+    "招标代理机构",
+    "采购代理机构",
+)
+
+
+def _strip_project_content_field_label(value: Any) -> str:
+    text = str(value or "").strip()
+    label_pattern = "|".join(re.escape(label) for label in PROJECT_CONTENT_FIELD_LABELS)
+    return re.sub(rf"^(?:{label_pattern})\s*[：:]\s*", "", text).strip()
+
+
+def make_public_tender_project_content_labeled_line_extractor(
+    label: str,
+) -> Callable[[str, Any, List[str]], Optional[str]]:
+    """Build an extractor for a field-shell project content line."""
+
+    def extract_labeled_line(
+        doc_content: str, state: Any, log_parts: List[str]
+    ) -> Optional[str]:
+        if not doc_content or not state.get("project_content"):
+            return None
+
+        stop_pattern = "|".join(
+            re.escape(stop_label) for stop_label in PROJECT_CONTENT_FIELD_STOP_LABELS
+        )
+        pattern = (
+            rf"{re.escape(label)}\s*[：:]\s*.+?"
+            rf"(?=\s*(?:{stop_pattern})\s*[：:]|$)"
+        )
+        for raw_line in re.split(r"[\r\n\x07]+", doc_content):
+            line = raw_line.strip()
+            if not line:
+                continue
+            match = re.search(pattern, line)
+            if match:
+                extracted = match.group(0).strip()
+                log_parts.append(f"提取项目内容字段行: {extracted}")
+                return extracted
+
+        log_parts.append(f"未找到项目内容字段行 '{label}：...'")
+        return None
+
+    extract_labeled_line.__name__ = f"extract_public_tender_{label}_project_content_line"
+    return extract_labeled_line
+
+
+def extract_public_tender_project_content_v2(
+    doc_content: str, state: Any, log_parts: List[str]
+) -> Optional[str]:
+    """Extract project content from the table cell between '项目名称：' and bidder labels."""
+    if not doc_content or not state.get("project_content"):
+        return None
+
+    search_text = doc_content[:5000] if len(doc_content) > 5000 else doc_content
+    pattern = re.compile(
+        r"项目名称\s*[：:]\s*(?P<value>.*?)"
+        r"(?=(?:[\r\n\x07\t ]*\d+(?:\.\d+)?[\r\n\x07\t ]*)?(?:招标人|采购人)\s*[：:])",
+        re.DOTALL,
+    )
+    match = pattern.search(search_text)
+    if not match:
+        log_parts.append("未找到 project_content_v2 范围 '项目名称：...招标人/采购人：'")
+        return None
+
+    extracted = match.group("value").strip().rstrip("\x07").strip()
+    if extracted:
+        log_parts.append(f"提取 project_content_v2: {extracted}")
+        return extracted
+
+    log_parts.append("project_content_v2 提取结果为空")
+    return None
+
+
+def make_public_tender_project_content_labeled_line_formatter(
+    label: str,
+) -> Callable[[Any], str]:
+    def format_labeled_line(value: Any) -> str:
+        content = _strip_project_content_field_label(value)
+        if not content:
+            return ""
+        return f"{label}：{content}"
+
+    return format_labeled_line
+
+
 def extract_public_tender_bzj_rule(
     doc_content: str, state: Any, log_parts: List[str]
 ) -> Optional[str]:
@@ -771,6 +870,7 @@ __all__ = [
     "COMMON_REPLACEMENT_FIELD_NAMES",
     "ExtractorSpec",
     "INVESTMENT_FIELD_LABELS",
+    "PROJECT_CONTENT_FIELD_LABELS",
     "ReplacementFieldSpec",
     "build_common_replacement_fields",
     "extract_public_tender_buyer_name",
@@ -778,6 +878,7 @@ __all__ = [
     "extract_public_tender_contact_fields",
     "extract_public_tender_investment",
     "extract_public_tender_project_content",
+    "extract_public_tender_project_content_v2",
     "extract_procurement_platform",
     "extract_project_name",
     "extract_project_number_from_bid_header",
@@ -787,6 +888,8 @@ __all__ = [
     "format_public_tender_investment_value",
     "extract_shell_dates",
     "extract_submit_date",
+    "make_public_tender_project_content_labeled_line_extractor",
+    "make_public_tender_project_content_labeled_line_formatter",
     "make_platform_extractor",
     "make_project_number_extractor",
 ]

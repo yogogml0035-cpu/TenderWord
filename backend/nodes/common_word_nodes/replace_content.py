@@ -373,6 +373,17 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
         # 通过 placeholder_mapping 来判断
         project_content_placeholder = placeholder_mapping.get("project_content")
         project_content_v1_placeholder = placeholder_mapping.get("project_content_v1")
+        project_content_labeled_placeholders = {
+            value
+            for key, value in placeholder_mapping.items()
+            if (
+                (
+                    key.startswith("project_content_") and key.endswith("_line")
+                )
+                or key == "project_content_v2"
+            )
+            and value
+        }
         project_number_placeholder = placeholder_mapping.get("project_number")
         project_name_placeholder = placeholder_mapping.get("project_name")
         enable_project_name_first_hit_comment = bool(
@@ -405,6 +416,7 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
             if (
                 entry.search_text == project_content_placeholder
                 or entry.search_text == project_content_v1_placeholder
+                or entry.search_text in project_content_labeled_placeholders
             ):
                 project_content_replacements.append(entry)
             elif (

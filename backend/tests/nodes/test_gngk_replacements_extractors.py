@@ -16,7 +16,10 @@ from backend.nodes.common_word_nodes.get_replacements_shared import (
     extract_public_tender_investment,
     extract_public_tender_platform,
     extract_public_tender_project_content,
+    extract_public_tender_project_content_v2,
     format_public_tender_investment_value,
+    make_public_tender_project_content_labeled_line_extractor,
+    make_public_tender_project_content_labeled_line_formatter,
 )
 from backend.nodes.gngk_word_nodes.gngk_fw_zc_get_replacements import (
     GNGK_FW_ZC_EXTRACTORS,
@@ -112,6 +115,19 @@ def test_extract_gngk_project_name_keeps_header_priority() -> None:
     assert extracted == "页眉项目"
 
 
+def test_extract_gngk_project_name_strips_quantity_after_slash() -> None:
+    log_parts: list[str] = []
+
+    extracted = extract_gngk_project_name(
+        "项目名称：便携式肌骨超声仪/壹台\n招标人：上海市浦东新区老年医院",
+        "",
+        {"project_name": "新项目名称"},
+        log_parts,
+    )
+
+    assert extracted == "便携式肌骨超声仪"
+
+
 def test_extract_gngk_fw_zc_project_content_keeps_service_line_with_budget() -> None:
     log_parts: list[str] = []
 
@@ -144,6 +160,37 @@ def test_extract_public_tender_project_content_stops_before_implementation_line(
     )
 
     assert extracted == "便携式肌骨超声仪\t壹台"
+
+
+def test_extract_public_tender_project_content_labeled_line_stops_before_bidder() -> None:
+    log_parts: list[str] = []
+    extractor = make_public_tender_project_content_labeled_line_extractor("项目名称")
+
+    extracted = extractor(
+        "项目名称：便携式肌骨超声仪/壹台\n招标人：上海市浦东新区老年医院",
+        {"project_content": "病房及办公家具\t壹批（项目预算：人民币18万元）"},
+        log_parts,
+    )
+
+    assert extracted == "项目名称：便携式肌骨超声仪/壹台"
+    assert (
+        make_public_tender_project_content_labeled_line_formatter("项目名称")(
+            "病房及办公家具\t壹批（项目预算：人民币18万元）"
+        )
+        == "项目名称：病房及办公家具\t壹批（项目预算：人民币18万元）"
+    )
+
+
+def test_extract_public_tender_project_content_v2_between_project_name_and_bidder() -> None:
+    log_parts: list[str] = []
+
+    extracted = extract_public_tender_project_content_v2(
+        "1\r\x07项目名称：便携式肌骨超声仪/壹台\r\x072.1\r\x07招标人：上海市浦东新区老年医院",
+        {"project_content": "病房及办公家具\t壹批（项目预算：人民币18万元）"},
+        log_parts,
+    )
+
+    assert extracted == "便携式肌骨超声仪/壹台"
 
 
 def test_extract_public_tender_buyer_name_matches_service_template() -> None:
@@ -375,6 +422,8 @@ def test_gngk_hw_and_fw_zc_replacement_fields_keep_type_boundary() -> None:
 
     assert "project_content" in hw_field_names
     assert "project_content" in hw_extractor_names
+    assert "project_content_v2" in hw_field_names
+    assert "project_content_v2" in hw_extractor_names
     assert "investment" in hw_field_names
     assert "investment" in hw_extractor_names
     assert "project_quantity_unit" not in hw_field_names
@@ -519,3 +568,107 @@ def test_gngk_hw_zc_mock_replacement_run_omits_removed_special_fields(
     assert ("450", "140") in replacements
     assert ("史倩倩、刘宇昂", "新联系人") in replacements
     assert all("不应参与替换" not in value for pair in replacements for value in pair)
+
+
+def test_gngk_hw_zc_mock_replacement_run_replaces_project_name_labeled_line(
+    monkeypatch,
+) -> None:
+    doc_content = """
+本附表有关本项目采购的内容是对“第二章投标人须知”的具体补充和修改。
+项目名称：便携式肌骨超声仪/壹台
+招标人：上海市浦东新区老年医院
+地址：上海市浦东新区宣桥镇张家桥路119号
+
+2、项目基本信息
+上海东松医疗科技股份有限公司受上海市浦东新区老年医院的委托，现以公开招标方式邀请合格的投标人就下列货物或服务前来投标。
+
+便携式肌骨超声仪	壹台
+项目实施地点：招标人指定地点
+项目实施时间：合同签订后 30 天内
+
+3、合格投标人资格条件：
+""".strip()
+
+    def fake_run_get_replacements(
+        state,
+        config,
+        extractors,
+        replacement_fields,
+    ):
+        del config
+        placeholder_mapping = {}
+        log_parts: list[str] = []
+
+        for spec in extractors:
+            if not spec.enabled_if(state):
+                continue
+            result = _call_mock_extractor(
+                spec.extract_callable,
+                doc_content,
+                state,
+                log_parts,
+            )
+            if spec.output_field_names is not None and isinstance(result, tuple):
+                for field_name, value in zip(spec.output_field_names, result):
+                    if value:
+                        placeholder_mapping[field_name] = value
+            elif result:
+                placeholder_mapping[spec.name] = (
+                    result[0] if isinstance(result, tuple) else result
+                )
+
+        replacements = []
+        for field_spec in replacement_fields:
+            old_value = placeholder_mapping.get(field_spec.field_name)
+            if not old_value:
+                continue
+
+            new_value = state.get(field_spec.field_name)
+            if not new_value and field_spec.fallback_fields:
+                for fallback_field in field_spec.fallback_fields:
+                    new_value = state.get(fallback_field)
+                    if new_value:
+                        break
+            if not new_value:
+                continue
+
+            if field_spec.new_value_formatter is not None:
+                new_value = field_spec.new_value_formatter(new_value)
+                if not new_value:
+                    continue
+            if field_spec.skip_if_equal and old_value == new_value:
+                continue
+            replacements.append((old_value, new_value))
+
+        return {
+            "placeholder_mapping": placeholder_mapping,
+            "replacements": replacements,
+            "replacement_log": "; ".join(log_parts),
+        }
+
+    monkeypatch.setattr(
+        hw_zc_module,
+        "run_get_replacements",
+        fake_run_get_replacements,
+    )
+
+    result = hw_zc_module.gngk_hw_zc_get_replacements(
+        {
+            "prepared_doc_path": "mock.doc",
+            "project_name": "病房及办公家具",
+            "project_content": "病房及办公家具\t壹批（项目预算：人民币18万元）",
+        },
+        config=None,
+    )
+
+    placeholder_mapping = result["placeholder_mapping"]
+    replacements = result["replacements"]
+
+    assert (
+        placeholder_mapping["project_content_v2"] == "便携式肌骨超声仪/壹台"
+    )
+    assert (
+        "便携式肌骨超声仪/壹台",
+        "病房及办公家具\t壹批（项目预算：人民币18万元）",
+    ) in replacements
+    assert ("便携式肌骨超声仪", "病房及办公家具") in replacements
