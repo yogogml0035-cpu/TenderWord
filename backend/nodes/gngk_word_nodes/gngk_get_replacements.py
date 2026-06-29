@@ -17,10 +17,14 @@ from backend.nodes.common_word_nodes.get_replacements_shared import (
     extract_public_tender_investment,
     extract_public_tender_platform,
     extract_public_tender_project_content,
+    extract_public_tender_project_content_v2,
     extract_service_fee,
     extract_shell_dates,
     extract_submit_date,
     format_public_tender_investment_value,
+    make_public_tender_project_content_labeled_line_extractor,
+    make_public_tender_project_content_labeled_line_formatter,
+    _strip_project_content_field_label,
 )
 from backend.states import GngkTenderGraphState
 from backend.util.common_util.tender_number import extract_numeric_tail_project_number
@@ -51,7 +55,7 @@ def _clean_project_name_candidate(value: str) -> str:
     cleaned = _strip_optional_wrappers(_clean_word_line(value))
     cleaned = re.sub(r"采购$", "", cleaned).strip()
     cleaned = re.split(
-        r"\s{2,}|[（(]\s*项目预算|(?:壹|一)\s*套|项目预算",
+        r"\s{2,}|[（(]\s*项目预算|[\/／]?\s*(?:壹|一|贰|二|两|叁|三|肆|四|伍|五|陆|六|柒|七|捌|八|玖|九|拾|十)\s*(?:批|套|台|项|件|只|个|组|节|辆|台/套|台套)|项目预算",
         cleaned,
         maxsplit=1,
     )[0].strip()
@@ -144,6 +148,25 @@ def build_gngk_common_extractors(
             extract_callable=project_content_extractor,
         ),
         ExtractorSpec(
+            name="project_content_v2",
+            enabled_if=lambda state: state.get("project_content") is not None,
+            extract_callable=extract_public_tender_project_content_v2,
+        ),
+        ExtractorSpec(
+            name="project_content_equipment_line",
+            enabled_if=lambda state: state.get("project_content") is not None,
+            extract_callable=make_public_tender_project_content_labeled_line_extractor(
+                "设备名称及数量"
+            ),
+        ),
+        ExtractorSpec(
+            name="project_content_procurement_line",
+            enabled_if=lambda state: state.get("project_content") is not None,
+            extract_callable=make_public_tender_project_content_labeled_line_extractor(
+                "采购内容"
+            ),
+        ),
+        ExtractorSpec(
             name="project_number",
             enabled_if=lambda state: state.get("project_number") is not None,
             extract_callable=extract_gngk_project_number,
@@ -211,6 +234,34 @@ def build_gngk_common_replacement_fields() -> List[ReplacementFieldSpec]:
         field_name="investment",
         new_value_formatter=format_public_tender_investment_value,
     )
+    project_content_labeled_fields = [
+        ReplacementFieldSpec(
+            field_name="project_content_v2",
+            fallback_fields=["project_content"],
+            new_value_formatter=_strip_project_content_field_label,
+        ),
+        ReplacementFieldSpec(
+            field_name="project_content_equipment_line",
+            fallback_fields=["project_content"],
+            new_value_formatter=make_public_tender_project_content_labeled_line_formatter(
+                "设备名称及数量"
+            ),
+        ),
+        ReplacementFieldSpec(
+            field_name="project_content_procurement_line",
+            fallback_fields=["project_content"],
+            new_value_formatter=make_public_tender_project_content_labeled_line_formatter(
+                "采购内容"
+            ),
+        ),
+    ]
+    for index, field in enumerate(fields):
+        if field.field_name == "project_content":
+            fields[index + 1:index + 1] = project_content_labeled_fields
+            break
+    else:
+        fields.extend(project_content_labeled_fields)
+
     for index, field in enumerate(fields):
         if field.field_name == "buyer_name":
             fields.insert(index + 1, investment_field)

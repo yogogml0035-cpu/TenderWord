@@ -386,3 +386,38 @@ def test_non_project_name_replacements_keep_erp_comment_behavior(monkeypatch, tm
     assert doc.Comments(1).Text == replace_content_module.ERP_COMMENT_LABEL
     assert doc.Comments(2).Text == replace_content_module.ERP_COMMENT_LABEL
     assert replace_content_module.PROJECT_NAME_FIRST_HIT_COMMENT not in result["replacement_log"]
+
+
+def test_project_content_labeled_line_replaces_before_project_name(monkeypatch, tmp_path) -> None:
+    body = _FakeStory(
+        story_type=1,
+        text="项目名称：便携式肌骨超声仪/壹台\n其它位置：便携式肌骨超声仪",
+        page_number=2,
+        offset=0,
+    )
+    doc = _FakeDocument([body])
+
+    _run_replace_content(
+        monkeypatch,
+        tmp_path=tmp_path,
+        doc=doc,
+        state_overrides={
+            "placeholder_mapping": {
+                "project_content_v2": "便携式肌骨超声仪/壹台",
+                "project_name": "便携式肌骨超声仪",
+                "project_number": "<NO>",
+            },
+            "replacements": [
+                (
+                    "便携式肌骨超声仪/壹台",
+                    "病房及办公家具\t壹批（项目预算：人民币18万元）",
+                ),
+                ("便携式肌骨超声仪", "病房及办公家具"),
+            ],
+        },
+    )
+
+    assert body.text == (
+        "项目名称：病房及办公家具\t壹批（项目预算：人民币18万元）\n"
+        "其它位置：病房及办公家具"
+    )
