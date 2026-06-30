@@ -26,6 +26,10 @@ TenderWord 是招标文档生成、修改、补充批注和模板复用系统；
 - rewrite 任务由显式 `RewriteSkillGraph` 承载；不要恢复 `SkillGraph.for_skill + TaskSkillWorkflow` 元数据驱动框架。
 - Agent run 只负责任务创建前置流；审计日志和摘要工具只暴露 scrub 后白名单信息，不记录或返回完整客户原文、真实密钥、私有路径、traceback 或下载路径。
 
+## 常用命令
+
+非显而易见的环境信息：后端开发服跑在 8000、前端开发服跑在 8502；后端在 `backend/` 下用 `python -m uvicorn main:app --reload --port 8000`，测试用 `python -m pytest tests -v`（async 用例需显式 `@pytest.mark.asyncio`）；前端在 `frontend/` 下用 npm（`npm run dev/lint/type-check/test/test:e2e`，具体 scripts 见 `frontend/package.json`）。
+
 ## 验证与维护
 
 - 文档型变更至少运行 `git diff --check`，并扫描本轮改动文档中的密钥/token 模式；仅文档变更不需要跑代码测试或 E2E。

@@ -1,6 +1,6 @@
 # 前端风险事实地图
 
-**分析日期：** 2026-06-25
+**分析日期：** 2026-06-29
 
 **范围：** `frontend/` 前端风险事实地图。必要时引用后端契约源文件来说明前后端同步边界；未读取 `frontend/.env.local`、`frontend/.npmrc` 或任何凭据文件内容。
 
@@ -18,23 +18,29 @@
 - 影响： 字段名、枚举、响应包装或 SSE/NDJSON event 只改一端会造成前端解析失败、后端 422、任务卡状态错误或下载卡缺失。
 - 修复方向： 修改 `GenerateRequest`、`AgentRunStreamRequest`、`TaskKind`、`TaskStatus`、SSE `done/error/agent_step` 时同步前端类型、API client、转换器、UI 处理和测试。
 
-**直接 fetch 边界靠约定维护：**
-- 问题： 实现层检索到的 `fetch()` 调用集中在 `frontend/lib/api.ts`，组件和 hooks 通过 API helper 访问后端；但代码中没有 lint 规则阻止后续在 `frontend/components/` 或 `frontend/hooks/` 新增裸 `fetch()`。
-- 相关文件： `frontend/lib/api.ts`, `frontend/lib/apiBaseUrl.ts`, `frontend/components/chat/ChatPanel.tsx`, `frontend/components/chat/FormPanel.tsx`, `frontend/components/forms/TenderFormShared.tsx`
-- 影响： 裸 `fetch()` 会绕过 `resolveApiBaseUrl()`、统一 `ApiError`、FormData 头处理、NDJSON parser、下载 URL 编码和测试 mock 入口。
-- 修复方向： 新后端请求必须先加到 `frontend/lib/api.ts`，调用点只使用导出的 helper；必要时补 ESLint 规则或 code review checklist 约束组件层不写裸 `fetch()`。
+**直接 fetch 边界靠约定维护（已确认零残留）：**
+- 问题： 本次审计 grep 确认 `frontend/app`、`frontend/components`、`frontend/hooks`、`frontend/stores`、`frontend/utils`、`frontend/types` 目录下无裸 `fetch()` 调用；所有后端请求集中在 `frontend/lib/api.ts`（`request()`、`streamNdjson()`、`fetchTenderDataWithType()`、`downloadFile()`），SSE 连接集中在 `frontend/lib/sse.ts`。但代码中没有 lint 规则阻止后续在组件或 hooks 层新增裸 `fetch()`。
+- 相关文件： `frontend/lib/api.ts`, `frontend/lib/apiBaseUrl.ts`, `frontend/lib/sse.ts`, `frontend/eslint.config.mjs`
+- 影响： 裸 `fetch()` 会绕过 `resolveApiBaseUrl()`、统一 `ApiError`、FormData 头处理、NDJSON parser、下载 URL 编码和测试 mock 入口；组件直接 `new EventSource()` 会绕过 SSE 重连/心跳/`seenEventIds` 去重。
+- 修复方向： 新后端请求必须先加到 `frontend/lib/api.ts`，SSE 必须走 `createSSEConnection()`，调用点只使用导出的 helper；必要时补 ESLint `no-restricted-globals`/`no-restricted-syntax` 规则约束组件层不写裸 `fetch()` 和 `EventSource()`。
 
 **generate-only 字段边界容易被误用：**
-- 问题： `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 只属于初次 generate 请求；上传文件 rewrite 的 agent run 请求只应携带 `selected_skills`、`uploaded_files` 和 `rewrite_context`。
+- 问题： `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 只属于初次 generate 请求；上传文件 rewrite 的 agent run 请求只应携带 `selected_skills`、`uploaded_files`（通过 `context_snapshot`）和 `rewrite_context`。
 - 相关文件： `frontend/types/api.ts`, `frontend/lib/formDataConverter.ts`, `frontend/components/forms/TenderFormShared.tsx`, `frontend/components/chat/ChatPanel.tsx`, `backend/models/generate.py`, `backend/models/agent_run.py`
 - 影响： 把 generate-only 字段放进 rewrite 请求会污染 rewrite 语义，且 `backend/models/agent_run.py` 使用 `extra="forbid"`，多余字段会直接触发接口失败。
-- 修复方向： generate 字段只改 `GenerateRequest` 链路；rewrite 能力只改 `AgentRunStreamRequest` 与 `AgentRunContextSnapshot` 明确存在的字段。
+- 修复方向： generate 字段只改 `GenerateRequest` 链路；rewrite 能力只改 `AgentRunStreamRequest` 与 `AgentRunContextSnapshot` 明确存在的字段；不要把 generate-only 字段塞进 `context_snapshot` 或任何 skill state / prompt surface。
 
-**`gngk` form type 分派是共享业务规则：**
-- 问题： `gngk` 在前端是 UI 类型，提交到后端需要由 `tender_lx + fund_lx + ifzgcg` 分派到具体 `form_type`。
+**`gngk` form type 分派是共享业务规则（已确认双调用方一致）：**
+- 问题： `gngk` 在前端是 UI 类型，提交到后端需要由 `tender_lx + fund_lx + ifzgcg` 分派到具体 `form_type`。本次确认 `frontend/lib/gngkFormType.ts` 的 `resolveGngkFormType()` 被两条链路共同调用：generate 链路在 `formDataConverter.ts:209`，rewrite 链路在 `ChatPanel.tsx:181`。
 - 相关文件： `frontend/lib/gngkFormType.ts`, `frontend/lib/formDataConverter.ts`, `frontend/components/chat/ChatPanel.tsx`, `frontend/utils/tenderTypeMapper.ts`, `backend/models/generate.py`
-- 影响： generate 和上传文件 rewrite 如果各自实现分派，会出现同一页面生成和重写落到不同 graph 的问题。
-- 修复方向： 分派规则只通过 `frontend/lib/gngkFormType.ts` 修改，并同步 `frontend/__tests__/unit/lib/test_form_data_converter.test.ts`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx` 和后端对应 graph/service 测试。
+- 影响： 分派规则集中但带「工程类当前复用服务链路」的临时注释（`tender_lx === 1 || 2` 走 `gngk_fw_*`），后续若新增独立工程 graph 而忘记同步 helper，会导致同一页面 generate 和 rewrite 落到不同 graph。
+- 修复方向： 分派规则只通过 `frontend/lib/gngkFormType.ts` 修改，两个调用方自动受益；改动时同步 `frontend/__tests__/unit/lib/test_form_data_converter.test.ts`、`frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx` 和后端对应 graph/service 测试。
+
+**招标详情拉取逻辑已抽到独立 helper：**
+- 问题： `frontend/lib/tenderFetch.ts`（旧版地图未收录）封装了 `fetchTenderDataWithType()` 的调用、`gjgk`（政府采购，`purchase_method === 0`）项目编号归一化、draft 同步与 loading/error/warning 状态机。
+- 相关文件： `frontend/lib/tenderFetch.ts`, `frontend/lib/api.ts`, `frontend/components/forms/TenderFormShared.tsx`
+- 影响： 招标号前缀剥离、`project_number` 归一化和 warning 回填的真相源在 `tenderFetch.ts` + `api.ts` 的 `fetchTenderDataWithType()`；若组件层重新内联这些逻辑会重复实现归一化和状态机。
+- 修复方向： 新增招标详情相关 UI 行为优先复用 `syncTenderDataDraft()`、`createTenderFetchState()`、`resolveTenderFetchState()`，不要在表单组件内重写归一化。
 
 **通用 SSE hook 与业务 SSE hook 并存：**
 - 问题： `frontend/hooks/useSSE.ts` 提供通用 `useTaskProgress()`，实际聊天任务进度走 `frontend/hooks/useChatSSE.ts`，两者对事件 payload 和任务终态的处理粒度不同。
@@ -67,7 +73,7 @@
 **模板候选 URL 必须继续由后端代理：**
 - 风险： UI 直接请求外部候选文件 URL 会绕过后端白名单、年份规则、文件名清洗、下载代理和落盘逻辑。
 - 相关文件： `frontend/components/forms/TenderFormShared.tsx`, `frontend/components/forms/TemplateCandidateDialog.tsx`, `frontend/lib/api.ts`, `backend/api/template_candidates.py`
-- Current mitigation: 前端通过 `fetchTemplateCandidates()`、`selectTemplateCandidate()`、`getTemplateCandidateDownloadUrl()` 访问 `/api/template-candidates*`。
+- Current mitigation: 前端通过 `fetchTemplateCandidates()`、`selectTemplateCandidate()`、`getTemplateCandidateDownloadUrl()` 访问 `/api/template-candidates*`，外部 `file_url` 仅作为后端 download 端点 query 参数透传，组件不直接 fetch 该 URL。
 - Recommendations: 候选列表、选择和下载继续走项目内 API；不要在组件内直接请求后端返回的外部文件 URL。
 
 **Agent run 可见信息必须保持最小化：**
@@ -91,7 +97,7 @@
 - 改进路径： 扩展多会话或长任务前，先定义消息截断、任务摘要保留和 storage 上限测试；不要把运行中 `chatStreamStore` 的完整快照持久化到 `chatStore`。
 
 **SSE 高事件流会放大内存和重放成本：**
-- 问题： `frontend/lib/sse.ts` 为每条连接保留 `seenEventIds` 去重，上限 5000；`frontend/hooks/useChatSSE.ts` 把日志、AI 文本、进度和 agent step 写入 `chatStreamStore`。
+- 问题： `frontend/lib/sse.ts` 为每条连接保留 `seenEventIds` 去重，上限 5000（`MAX_SEEN_EVENT_IDS`）；`frontend/hooks/useChatSSE.ts` 把日志、AI 文本、进度和 agent step 写入 `chatStreamStore`。
 - 相关文件： `frontend/lib/sse.ts`, `frontend/hooks/useChatSSE.ts`, `frontend/stores/chatStreamStore.ts`, `backend/core/sse_manager.ts`, `backend/api/stream.ts`
 - Cause: 断线重连、Last-Event-ID 回放、过程卡实时展示都依赖运行时缓存。
 - 改进路径： 新增高频 SSE event 前定义采样、压缩或摘要策略，并补长流重连测试。
@@ -119,24 +125,24 @@
 **Rewrite 上传文件链路：**
 - 相关文件： `frontend/components/chat/ChatPanel.tsx`, `frontend/components/chat/ChatInput.tsx`, `frontend/stores/chatStore.ts`, `frontend/types/api.ts`, `frontend/lib/api.ts`, `backend/models/agent_run.py`, `backend/nodes/skills_nodes/rewrite_nodes.py`
 - 脆弱点： 上传文件 rewrite 通过 `uploadFile(file, 'rewrite_source')` 进入草稿，agent run 再携带 `selected_skills: ['rewrite']`、`uploaded_files` 和 `rewrite_context`；`task_accepted` 后才进入后台 task/SSE/下载卡链路。
-- 安全修改： 不要恢复旧 edit 入口，不要复用 generate 文件槽位；缺 `form_type`、锚点、`tender_lx` 或 `fund_source_lx` 时让 agent run 返回 `needs_input`。
+- 安全修改： 不要恢复旧 edit 入口，不要复用 generate 文件槽位，不要为 rewrite 建第二套任务链路；缺 `form_type`、锚点、`tender_lx` 或 `fund_source_lx` 时让 agent run 返回 `needs_input`。
 - 测试覆盖： `frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`, `frontend/e2e/test_agent_run_chat_panel.spec.ts`
 
-**SSE 终态收口和后端重启恢复：**
+**SSE 断连处理与终态收口：**
 - 相关文件： `frontend/lib/sse.ts`, `frontend/hooks/useSSE.ts`, `frontend/hooks/useChatSSE.ts`, `frontend/hooks/useTaskHeartbeat.ts`, `frontend/components/chat/FormPanel.tsx`, `frontend/stores/chatStore.ts`, `frontend/stores/chatStreamStore.ts`, `frontend/stores/chatTaskSessionStore.ts`, `backend/api/stream.py`
-- 脆弱点： `done`、`error`、heartbeat、`getTaskStatus()` fallback、`cancelTask()` noop 和 `TASK_NOT_FOUND` 都可能触发终态收口；同一个 task id 同时存在于 `conversations`、`activeTaskIds`、`taskMessageMap`、`taskSummaries`、`chatStreamStore`、`chatTaskSessionStore`。
-- 安全修改： 新增终态或重连分支时必须同时清理三类 store，并补 `useChatSSE`、heartbeat、取消和 stale task 测试。
-- 测试覆盖： `frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`, `frontend/__tests__/unit/hooks/test_use_task_heartbeat.test.tsx`, `frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`, `frontend/e2e/test_url_conversation.spec.ts`
+- 脆弱点： `sse.ts` 通过 `autoReconnect` + 指数退避（`reconnectDelay`/`reconnectDelayMultiplier`/`maxReconnectDelay`，默认 5 次）+ `heartbeatTimeout` + `lastEventId` query 回放应对断连；`done`、`error`、heartbeat 超时、`getTaskStatus()` fallback、`cancelTask()` noop（`TASK_CANNOT_CANCEL`）和 `TASK_NOT_FOUND` 都可能触发终态收口。同一个 task id 同时存在于 `conversations`、`activeTaskIds`、`taskMessageMap`、`taskSummaries`、`chatStreamStore`、`chatTaskSessionStore`。
+- 安全修改： 新增终态或重连分支时必须同时清理三类 store，并补 `useChatSSE`、heartbeat、取消和 stale task 测试；重连上限与心跳超时是易回归参数。
+- 测试覆盖： `frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`, `frontend/__tests__/unit/hooks/test_use_task_heartbeat.test.ts`, `frontend/__tests__/unit/stores/test_chat_store_task_messages.test.ts`, `frontend/e2e/test_url_conversation.spec.ts`
 
 **Agent run NDJSON 前置流：**
 - 相关文件： `frontend/lib/api.ts`, `frontend/components/chat/ChatPanel.tsx`, `frontend/lib/agentThinking.ts`, `frontend/types/api.ts`, `backend/api/agent.py`, `backend/models/agent_run.py`
-- 脆弱点： `run_started`、`thinking_stage`、`tool_call`、`needs_input`、`task_accepted`、`done`、`error` 的含义不同；只有 `task_accepted` 创建后台任务，`needs_input` 和非任务 `done` 只是聊天消息。
+- 脆弱点： `run_started`、`thinking_stage`、`tool_call`、`needs_input`、`task_accepted`、`done`、`error` 的含义不同；`parseAgentRunEvent()` 对 `model`（`deepseek`/`qwen`/`doubao`）、`runtime`（`fake`/`deepagents`）等字段做白名单校验，无法解析的 event 静默丢弃；只有 `task_accepted` 创建后台任务，`needs_input` 和非任务 `done` 只是聊天消息。
 - 安全修改： 新增 NDJSON event 要同步 parser、类型、UI 处理和测试；不要在 agent run 自己复制第二套任务状态机。
 - 测试覆盖： `frontend/__tests__/unit/components/chat/test_chat_panel.test.tsx`, `frontend/__tests__/unit/components/chat/test_agent_thinking_message.test.tsx`, `frontend/e2e/test_agent_run_chat_panel.spec.ts`
 
 **URL、draft 和招标类型 identity：**
 - 相关文件： `frontend/app/tender/page.tsx`, `frontend/hooks/useUrlParams.ts`, `frontend/utils/tenderTypeMapper.ts`, `frontend/stores/chatStore.ts`, `frontend/components/forms/TenderFormShared.tsx`
-- 脆弱点： 页面启动状态由 URL 参数、会话 draft、招标详情预取和 `gngk` 子类型共同决定；`gngk` 的 `tender_lx`/`fund_lx` 是 UI 子状态，不直接决定顶层 `TenderType`。
+- 脆弱点： 页面启动状态由 URL 参数、会话 draft、招标详情预取和 `gngk` 子类型共同决定；`gngk` 的 `tender_lx`/`fund_lx` 是 UI 子状态，不直接决定顶层 `TenderType`（`xjcg`/`gngk`/`gjgk`）。
 - 安全修改： URL 构造只走 `frontend/utils/tenderTypeMapper.ts`；深链参数先写入 draft；改动同步 URL、store 和 E2E 测试。
 - 测试覆盖： `frontend/__tests__/unit/utils/test_tender_type_mapper.test.ts`, `frontend/__tests__/unit/stores/test_chat_store_conversation_scope.test.ts`, `frontend/e2e/test_url_conversation.spec.ts`
 
@@ -159,7 +165,7 @@
 - 扩展路径： 发布验收需要在后端 Windows + Word/WPS COM 环境执行；前端只验证请求、状态、SSE 和下载入口。
 
 **SSE 重放窗口和客户端去重有限：**
-- 当前能力： `frontend/lib/sse.ts` 的 `seenEventIds` 上限为 5000，后端 `backend/core/sse_manager.py` 保存任务事件并支持 `lastEventId` 回放。
+- 当前能力： `frontend/lib/sse.ts` 的 `seenEventIds` 上限为 5000，重连默认 5 次、指数退避，后端 `backend/core/sse_manager.py` 保存任务事件并支持 `lastEventId` 回放。
 - 限制： 超长任务、高频日志和多轮 agent step 会放大前后端事件缓存与重放成本。
 - 扩展路径： 增加高频事件前先设计摘要 event 或分页查询，避免把完整过程都塞进 SSE。
 
@@ -229,10 +235,10 @@
 - 风险： 用户只能在后端错误后得到反馈，前端无法提前阻止明显错误文件。
 - Priority: Medium
 
-**直接 fetch 边界缺少静态测试：**
-- 未覆盖测试： `frontend/components/`、`frontend/hooks/`、`frontend/stores/` 不允许裸 `fetch()` 的静态约束。
-- 相关文件： `frontend/lib/api.ts`, `frontend/components/`, `frontend/hooks/`, `frontend/stores/`, `frontend/eslint.config.mjs`
-- 风险： 新功能可能绕过 API client，导致 base URL、错误包装、FormData、SSE/NDJSON 和测试 mock 行为不一致。
+**直接 fetch / EventSource 边界缺少静态测试：**
+- 未覆盖测试： `frontend/components/`、`frontend/hooks/`、`frontend/stores/` 不允许裸 `fetch()` 和 `new EventSource()` 的静态约束。
+- 相关文件： `frontend/lib/api.ts`, `frontend/lib/sse.ts`, `frontend/components/`, `frontend/hooks/`, `frontend/stores/`, `frontend/eslint.config.mjs`
+- 风险： 新功能可能绕过 API client / SSE helper，导致 base URL、错误包装、FormData、NDJSON parser、SSE 重连去重和测试 mock 行为不一致。
 - Priority: Medium
 
 **长流和大消息性能缺少压力测试：**
@@ -255,4 +261,4 @@
 
 ---
 
-*前端风险分析：2026-06-25*
+*前端风险分析：2026-06-29*

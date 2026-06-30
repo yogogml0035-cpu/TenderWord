@@ -27,6 +27,7 @@
 - 任务失败必须最终表现为 `error` 或 `done`，不能让 SSE 静默中断。
 - `comment_writeback_*` 和 `style_writeback_*` 摘要属于任务结果契约，不得在 state、任务结果或 `done` 事件中丢失。
 - bad case retrieval JSON 属于后端 prompt/retrieval 审计文件，不进入 SSE、下载卡、任务结果或 `agent_step` 前端展示。
+- `content_agent` 的 `agent_step` 过程数据按 `draft → audit → revision → final` 阶段和轮次暴露（`SSEContentAgentStep` 的 `phase` 与 `rounds[].phase`）；审核轮次上限固定 3 轮，新增/改阶段或轮次结构必须同步 `backend/models/sse.py`、写回 node、service 序列化和前端过程卡类型。
 
 ## Agent Run 与 Rewrite
 

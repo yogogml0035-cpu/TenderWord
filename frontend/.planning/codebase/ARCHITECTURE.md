@@ -1,6 +1,6 @@
 # 前端架构事实地图
 
-**分析日期：** 2026-06-25
+**分析日期：** 2026-06-29
 
 **范围：** `frontend/` 子项目。分析覆盖 App Router 工作台、API client、hooks、Zustand 状态流、上传、generate/rewrite/comment_supplement UI 边界、SSE 与目录分层。未读取 `.env`、`.env.*`、`.npmrc`、凭据或真实密钥文件。
 
@@ -10,9 +10,9 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                    Next.js App Router                        │
 │      `frontend/app/page.tsx`, `frontend/app/tender/page.tsx`  │
-└───────────────┬─────────────────────────────┬───────────────┘
-                │                             │
-                ▼                             ▼
+└───────────────┬─────────────────────────────────┬───────────┘
+                │                                 │
+                ▼                                 ▼
 ┌───────────────────────────────┐ ┌───────────────────────────┐
 │ 三栏工作台 UI                  │ │ URL / hydration / heartbeat │
 │ `frontend/components/chat/`    │ │ `frontend/hooks/`           │
@@ -50,14 +50,18 @@
 | Form panel | 挂载当前招标表单、创建 generate task、绑定 SSE/heartbeat/任务状态、取消任务 | `frontend/components/chat/FormPanel.tsx` |
 | Chat panel | 右侧聊天、agent run、上传文件 rewrite、补充批注、下载、取消和重试 | `frontend/components/chat/ChatPanel.tsx` |
 | Chat input | 普通消息输入、`/rewrite` skill、上传文件 rewrite 文件选择、模型选择 | `frontend/components/chat/ChatInput.tsx` |
+| Chat model picker | 聊天输入区的模型下拉，复用 `ModelSelector` 的 `MODEL_OPTIONS` | `frontend/components/chat/ChatModelPicker.tsx` |
 | Message list | 按 `messageKind` 分派普通消息、任务日志、AI 正文、agent-step、下载卡和 thinking card | `frontend/components/chat/MessageList.tsx` |
 | Task content card | 展示普通 AI 正文、rewrite 正文、`content_agent` 和 `comment_agent` 过程 | `frontend/components/chat/TaskContentMessage.tsx` |
 | Task download card | 展示下载入口、批注写回警告、generate 产物的补充批注按钮 | `frontend/components/chat/TaskDownloadMessage.tsx` |
+| Dual column message | 左进度日志 / 右 AI 内容的双列消息卡（含复制、下载、重试）；当前未接入主消息分派 | `frontend/components/chat/DualColumnMessage.tsx` |
+| New chat popup | 类型侧栏的悬浮"新建对话/最近对话"弹窗，含重命名/删除右键菜单；当前未接入侧栏 | `frontend/components/chat/NewChatPopup.tsx` |
+| Skeleton | shimmer 占位与页面/消息/双列骨架组件；当前未接入主流程 | `frontend/components/chat/Skeleton.tsx` |
 | Shared tender form | 招标信息、模板/参数上传、模板候选、插入锚点、生成模式和 draft 同步 | `frontend/components/forms/TenderFormShared.tsx` |
 | Form registry | `TenderType` 到显示名、表单组件、converter 的映射 | `frontend/components/chat/tenderFormRegistry.ts` |
 | API client | JSON、上传、下载、NDJSON agent run、任务、模板候选 API helper | `frontend/lib/api.ts` |
 | SSE runtime | `EventSource` 包装、named events、重连、heartbeat、last event id 去重 | `frontend/lib/sse.ts` |
-| Task SSE hook | 任务状态确认、SSE 事件到 stream/store/messages 的映射 | `frontend/hooks/useChatSSE.ts` |
+| SSE hook 层 | `useSSE` 封装 `createSSEConnection` 生命周期；`useChatSSE` 把事件映射到 store/messages | `frontend/hooks/useSSE.ts`, `frontend/hooks/useChatSSE.ts` |
 | Main chat store | 会话、草稿、任务摘要、任务消息组、URL 同步、后端重启收敛 | `frontend/stores/chatStore.ts` |
 | Stream store | 运行中日志、AI 文本、agent step 快照、进度和 last event id | `frontend/stores/chatStreamStore.ts` |
 | URL mapper | URL 参数解析、`TenderType` 判定、canonical query 构造 | `frontend/utils/tenderTypeMapper.ts` |
@@ -69,8 +73,8 @@
 
 **Key Characteristics:**
 - 页面层只组合路由、三栏 UI 和启动副作用；长期业务状态放在 `frontend/stores/`。
-- 后端请求集中到 `frontend/lib/api.ts`；组件调用 helper，不在组件内实现请求协议。
-- `TenderType` 是前端 UI 类型；后端 `GenerateRequest.form_type` 由 `frontend/lib/formDataConverter.ts` 和 `frontend/lib/gngkFormType.ts` 生成。
+- 后端请求集中到 `frontend/lib/api.ts`；组件调用 helper，不在组件内实现请求协议或裸 `fetch`。
+- `TenderType`（`xjcg`/`gngk`/`gjgk`）是前端 UI 类型；后端 `GenerateRequest.form_type` 由 `frontend/lib/formDataConverter.ts` 和 `frontend/lib/gngkFormType.ts` 生成。
 - 任务链路以 `task_id` 为主键，SSE、任务消息组、下载卡、补充批注和 rewrite 产物续写都围绕 task summary 收敛。
 - 会话、草稿、任务摘要和未读结果持久化到 `sessionStorage`；SSE stream runtime 是内存态，task resume metadata 单独持久化。
 
@@ -86,7 +90,7 @@
 **Workbench UI Layer:**
 - 职责： 展示三栏招标操作界面、聊天消息、表单、上传、下载和任务状态。
 - Location: `frontend/components/chat/`、`frontend/components/forms/`、`frontend/components/layout/`
-- 包含： `ChatPanel`、`FormPanel`、`MessageList`、`TaskLogMessage`、`TaskContentMessage`、`TaskDownloadMessage`、`TenderFormShared`、`FileUploader`、`TemplateCandidateDialog`。
+- 包含： `ChatPanel`、`ChatInput`、`ChatModelPicker`、`FormPanel`、`MessageList`、`TaskLogMessage`、`TaskContentMessage`、`TaskDownloadMessage`、`TenderFormShared`、`FileUploader`、`TemplateCandidateDialog`。
 - Depends on: `frontend/stores/`、`frontend/hooks/`、`frontend/lib/api.ts`、`frontend/types/`。
 - Used by: `frontend/app/tender/page.tsx`。
 
@@ -100,7 +104,7 @@
 **Integration Layer:**
 - 职责： 后端 API、SSE、NDJSON、上传下载、表单 payload 转换、URL canonical 化。
 - Location: `frontend/lib/`、`frontend/hooks/`、`frontend/utils/`
-- 包含： `api.ts`、`apiBaseUrl.ts`、`sse.ts`、`formDataConverter.ts`、`gngkFormType.ts`、`tenderFetch.ts`、`useChatSSE.ts`、`tenderTypeMapper.ts`。
+- 包含： `api.ts`、`apiBaseUrl.ts`、`sse.ts`、`formDataConverter.ts`、`gngkFormType.ts`、`tenderFetch.ts`、`agentThinking.ts`、`chat-utils.ts`、`useSSE.ts`、`useChatSSE.ts`、`tenderTypeMapper.ts`。
 - Depends on: 浏览器 `fetch`、`EventSource`、`URL`、`FormData` APIs 和 `frontend/types/`。
 - Used by: 工作台 UI 和 stores。
 
@@ -115,69 +119,70 @@
 
 ### 初次生成主链路
 
-1. `/` 通过 `redirect('/tender')` 进入工作台 (`frontend/app/page.tsx:3`)。
-2. `TenderPageContent` 解析 URL、建立或选择 conversation，并按需预取招标数据 (`frontend/app/tender/page.tsx:34`, `frontend/app/tender/page.tsx:58`)。
-3. `TenderFormShared` 以 `draft > URL > default` 初始化表单状态、文件状态、生成模式和插入锚点 (`frontend/components/forms/TenderFormShared.tsx:632`, `frontend/components/forms/TenderFormShared.tsx:679`)。
-4. `TenderFormShared` 校验招标编号、招标信息、模板文件、技术参数文件和插入锚点，组装 `BaseTenderFormData` (`frontend/components/forms/TenderFormShared.tsx:1544`)。
-5. `FormPanel` 使用 `tenderFormConverterMap` 生成 `GenerateRequest` 并附加 `conversation_id` (`frontend/components/chat/FormPanel.tsx:368`)。
-6. `createGenerateTask()` 调用 `/api/generate`；`chatStore.startTask()` 建立任务摘要和消息组 (`frontend/lib/api.ts:807`, `frontend/components/chat/FormPanel.tsx:392`)。
-7. `useCurrentConversationTaskStatus()`、`useTaskHeartbeat()` 和 `useChatSSE()` 同步 queue/running/terminal 状态 (`frontend/hooks/useCurrentConversationTaskStatus.ts:88`, `frontend/hooks/useTaskHeartbeat.ts:16`, `frontend/hooks/useChatSSE.ts:175`)。
+1. `/` 通过 `redirect('/tender')` 进入工作台 (`frontend/app/page.tsx`)。
+2. `TenderPageContent` 解析 URL、建立或选择 conversation，并按需预取招标数据 (`frontend/app/tender/page.tsx:34`, `frontend/app/tender/page.tsx:35`)。
+3. `TenderFormShared` 以 `draft > URL > default` 初始化表单状态、文件状态、生成模式和插入锚点。
+4. `TenderFormShared` 校验招标编号、招标信息、模板文件、技术参数文件和插入锚点，组装 `BaseTenderFormData`。
+5. `FormPanel` 使用 `tenderFormConverterMap[conversation.tenderType]` 生成 `GenerateRequest` 并附加 `conversation_id` (`frontend/components/chat/FormPanel.tsx:388`, `frontend/components/chat/FormPanel.tsx:389`)。
+6. `createGenerateTask()` 调用 `/api/generate`；`chatStore.startTask()` 建立任务摘要和消息组 (`frontend/lib/api.ts:807`, `frontend/components/chat/FormPanel.tsx:392`, `frontend/components/chat/FormPanel.tsx:393`)。
+7. `useCurrentConversationTaskStatus()`、`useTaskHeartbeat()` 和 `useChatSSE()` 同步 queue/running/terminal 状态 (`frontend/hooks/useCurrentConversationTaskStatus.ts`, `frontend/hooks/useTaskHeartbeat.ts:321`, `frontend/hooks/useChatSSE.ts:175`)。
 8. `chatStore.completeTask()` 创建或更新 `task-download` 下载卡，保留 `style_writeback` 和 `comment_writeback` 摘要 (`frontend/stores/chatStore.ts:1536`)。
 
 ### URL 与会话链路
 
-1. `useUrlParams()` 使用 `useSearchParams()` 读取 `tender_lx`、`purchase_method`、`fund_lx`、`tenderno` (`frontend/hooks/useUrlParams.ts:66`)。
-2. `parseTenderUrlParams()` 只按 `purchase_method` 判定前端 `TenderType` (`frontend/utils/tenderTypeMapper.ts:205`)。
-3. `TenderPageContent` 对 `gngk` 使用 tenderno + `tender_lx` + `fund_lx` 查找会话，避免不同子类型复用同一 draft (`frontend/app/tender/page.tsx:78`, `frontend/stores/chatStore.ts:870`)。
+1. `useUrlParams()` 使用 `useSearchParams()` 读取 `tender_lx`、`purchase_method`、`fund_lx`、`tenderno` (`frontend/hooks/useUrlParams.ts`)。
+2. `getTenderTypeFromParams()` 只按 `purchase_method` 判定前端 `TenderType`（`0`→`gjgk`、`2`→`gngk`、`5`→`xjcg`） (`frontend/utils/tenderTypeMapper.ts:118`)。
+3. `TenderPageContent` 对 `gngk` 使用 tenderno + `tender_lx` + `fund_lx` 查找会话，避免不同子类型复用同一 draft (`frontend/app/tender/page.tsx:77`, `frontend/app/tender/page.tsx:88`)。
 4. `syncBrowserUrlToConversation()` 和 `chatStore.syncUrlToCurrentConversation()` 维护 canonical query (`frontend/utils/tenderTypeMapper.ts:72`, `frontend/stores/chatStore.ts:2375`)。
 
 ### 生成请求载荷链路
 
 1. 表单 wrapper 只传入 `tenderType`，具体 UI 复用 `TenderFormShared` (`frontend/components/forms/XjcgTenderForm.tsx`, `frontend/components/forms/GngkTenderForm.tsx`, `frontend/components/forms/GjgkTenderForm.tsx`)。
-2. 模板文件使用 `fileType="template"` 上传，技术参数文件使用 `fileType="params"` 上传 (`frontend/components/forms/TenderFormShared.tsx:1737`, `frontend/components/forms/TenderFormShared.tsx:1753`)。
-3. `convertXjcgFormToApiRequest()`、`convertGngkFormToApiRequest()`、`convertGjgkFormToApiRequest()` 生成后端 payload (`frontend/lib/formDataConverter.ts:117`, `frontend/lib/formDataConverter.ts:193`, `frontend/lib/formDataConverter.ts:225`)。
-4. `gngk` 后端 `form_type` 由 `resolveGngkFormType()` 按 `tender_lx + fund_lx + ifzgcg` 分派；工程类和服务类进入 `gngk_fw_*` form type (`frontend/lib/gngkFormType.ts:18`)。
+2. 模板文件使用 `fileType="template"` 上传，技术参数文件使用 `fileType="params"` 上传。
+3. `convertXjcgFormToApiRequest()`、`convertGngkFormToApiRequest()`、`convertGjgkFormToApiRequest()` 生成后端 payload (`frontend/lib/formDataConverter.ts:124`, `frontend/lib/formDataConverter.ts:200`, `frontend/lib/formDataConverter.ts:232`)。
+4. `gngk` 后端 `form_type` 由 `resolveGngkFormType()` 按 `tender_lx + fund_lx + ifzgcg` 分派：工程类（`tender_lx` 1/2）先复用服务链路 `gngk_fw_*`；货物类按 `fund_lx` + `ifzgcg` 分 `gngk_hw_cz`/`gngk_hw_zc` (`frontend/lib/gngkFormType.ts:18`, `frontend/lib/gngkFormType.ts:24`)。
 
 ### Agent Run 与聊天链路
 
-1. `ChatInput` 解析 `$rewrite` / `/rewrite` 前缀，或通过加号菜单选择上传文件 rewrite (`frontend/components/chat/ChatInput.tsx:37`, `frontend/components/chat/ChatInput.tsx:482`)。
-2. `ChatPanel` 构造 `AgentRunStreamRequest`，包含模型、消息、`selected_skills` 和 `context_snapshot` (`frontend/components/chat/ChatPanel.tsx:393`, `frontend/components/chat/ChatPanel.tsx:423`)。
+1. `ChatInput` 解析 `$rewrite` / `/rewrite` 前缀，或通过加号菜单选择上传文件 rewrite (`frontend/components/chat/ChatInput.tsx:37`)。
+2. `ChatPanel` 构造 `AgentRunStreamRequest`，包含模型、消息、`selected_skills` 和 `context_snapshot` (`frontend/components/chat/ChatPanel.tsx:423`, `frontend/components/chat/ChatPanel.tsx:655`)。
 3. `streamAgentRun()` 以 NDJSON 调用 `/api/agent/runs/stream` (`frontend/lib/api.ts:589`)。
-4. `run_started`、`thinking_stage`、`tool_call` 更新 thinking card 或普通 AI 消息；`needs_input` 不创建后台 task (`frontend/components/chat/ChatPanel.tsx:553`)。
+4. `run_started`、`thinking_stage`、`tool_call` 更新 thinking card 或普通 AI 消息；`needs_input`/`done`/`error` 只更新普通消息，不创建后台 task (`frontend/components/chat/ChatPanel.tsx:553`, `frontend/components/chat/ChatPanel.tsx:594`, `frontend/components/chat/ChatPanel.tsx:608`)。
 5. 只有 `task_accepted` 调用 `startTask()` 并进入任务/SSE 体系 (`frontend/components/chat/ChatPanel.tsx:559`)。
 
 ### 上传文件 Rewrite 链路
 
-1. `ChatInput` 的隐藏文件输入只接受 `.doc` / `.docx` (`frontend/components/chat/ChatInput.tsx:308`)。
-2. `ChatPanel.handleRewriteFileSelect()` 调用 `uploadFile(file, 'rewrite_source')`，把返回文件写入 conversation draft 的 `rewrite_file`，并设置 `selected_skills: ['rewrite']` (`frontend/components/chat/ChatPanel.tsx:338`)。
-3. `buildAgentRunContextSnapshot()` 把 `rewrite_available`、`uploaded_files` 和 `rewrite_context` 放入 agent run context (`frontend/components/chat/ChatPanel.tsx:123`)。
-4. `resolveRewriteFormType()` 为上传 rewrite 计算后端 `form_type`，`gngk` 继续复用 `resolveGngkFormType()` (`frontend/components/chat/ChatPanel.tsx:162`)。
-5. rewrite task 完成后，`ChatPanel` 用下载卡产物回写 draft 的 `rewrite_file`，让下一轮 rewrite 基于最新文档 (`frontend/components/chat/ChatPanel.tsx:955`)。
+1. `ChatInput` 的隐藏文件输入只接受 `.doc` / `.docx` (`frontend/components/chat/ChatInput.tsx:306`)。
+2. `ChatPanel.handleRewriteFileSelect()` 调用 `uploadFile(file, 'rewrite_source')`，把返回文件写入 conversation draft 的 `rewrite_file`，并设置 `selected_skills: ['rewrite']` (`frontend/components/chat/ChatPanel.tsx:347`)。
+3. `buildAgentRunContextSnapshot()` 把 `rewrite_available`、`uploaded_files` 和 `rewrite_context`（含 `resolveRewriteFormType()` 算出的 form type）放入 agent run context (`frontend/components/chat/ChatPanel.tsx:123`, `frontend/components/chat/ChatPanel.tsx:162`)。
+4. `resolveRewriteFormType()` 为上传 rewrite 计算后端 `form_type`，`gngk` 继续复用 `resolveGngkFormType()` (`frontend/components/chat/ChatPanel.tsx:162`, `frontend/components/chat/ChatPanel.tsx:181`)。
+5. rewrite task 完成后，`ChatPanel` 通过 `pending_rewrite_task_id` 监听终态，用下载卡产物回写 draft 的 `rewrite_file`，让下一轮 rewrite 基于最新文档 (`frontend/components/chat/ChatPanel.tsx:960`, `frontend/components/chat/ChatPanel.tsx:984`)。
 
 ### 任务 SSE 与产物流转
 
-1. `createSSEConnection()` 注册 `connected`、`log`、`llm`、`progress`、`agent_step`、`status`、`error`、`done`、`heartbeat` named events (`frontend/lib/sse.ts:77`, `frontend/lib/sse.ts:193`)。
-2. `useChatSSE()` 在连接前查询 `getTaskStatus()`，queued 不连 SSE，terminal 直接终态收敛 (`frontend/hooks/useChatSSE.ts:667`, `frontend/hooks/useChatSSE.ts:710`)。
-3. `log` / `llm` / `agent_step` / `progress` 更新 `chatStreamStore` 和 task summary (`frontend/hooks/useChatSSE.ts:371`, `frontend/hooks/useChatSSE.ts:399`, `frontend/hooks/useChatSSE.ts:441`, `frontend/hooks/useChatSSE.ts:488`)。
-4. `done` / `error` 关闭连接并调用 `completeTask()` / `failTask()` / `cancelTask()` (`frontend/hooks/useChatSSE.ts:530`, `frontend/hooks/useChatSSE.ts:568`)。
-5. `MessageList` 按 `message.metadata.messageKind` 渲染任务日志、AI 正文、agent-step、下载卡或 thinking card (`frontend/components/chat/MessageList.tsx`)。
+1. SSE 调用链：`useChatSSE` → `useSSE` → `createSSEConnection` (`frontend/hooks/useChatSSE.ts:766`, `frontend/hooks/useSSE.ts:198`, `frontend/lib/sse.ts:77`)。
+2. `createSSEConnection()` 注册 `connected`、`log`、`llm`、`progress`、`agent_step`、`status`、`error`、`done`、`heartbeat` named events (`frontend/lib/sse.ts:193`)。
+3. `useChatSSE()` 在连接前查询 `getTaskStatus()`，queued 不连 SSE，terminal 直接终态收敛 (`frontend/hooks/useChatSSE.ts:667`, `frontend/hooks/useChatSSE.ts:710`)。
+4. `log` / `llm` / `agent_step` / `progress` 更新 `chatStreamStore` 和 task summary (`frontend/hooks/useChatSSE.ts:371`, `frontend/hooks/useChatSSE.ts:399`, `frontend/hooks/useChatSSE.ts:441`, `frontend/hooks/useChatSSE.ts:488`)。
+5. `done` / `error` 关闭连接并调用 `completeTask()` / `failTask()` / `cancelTask()` (`frontend/hooks/useChatSSE.ts:530`, `frontend/hooks/useChatSSE.ts:568`)。
+6. `MessageList` 按 `message.metadata.messageKind` 渲染 `task-log`、`task-content`、`agent-step`、`task-download` 或 thinking card，其余为普通消息 (`frontend/components/chat/MessageList.tsx:307`)。
 
 ### 模板候选链路
 
-1. `TenderFormShared` 用招标编号和项目名维护候选缓存，并调用 `fetchTemplateCandidates()` (`frontend/components/forms/TenderFormShared.tsx:1378`, `frontend/lib/api.ts:734`)。
-2. 候选选择使用 `selectTemplateCandidate()`，后端返回 selected file 后写入模板上传槽 (`frontend/components/forms/TenderFormShared.tsx:1485`, `frontend/lib/api.ts:748`)。
-3. 候选模板下载 URL 必须由 `getTemplateCandidateDownloadUrl()` 生成项目内代理 URL (`frontend/lib/api.ts:757`, `frontend/components/forms/TemplateCandidateDialog.tsx:62`)。
+1. `TenderFormShared` 用招标编号和项目名维护候选缓存，并调用 `fetchTemplateCandidates()` (`frontend/lib/api.ts:734`)。
+2. 候选选择使用 `selectTemplateCandidate()`，后端返回 selected file 后写入模板上传槽 (`frontend/lib/api.ts:748`)。
+3. 候选模板下载 URL 必须由 `getTemplateCandidateDownloadUrl()` 生成项目内代理 URL (`frontend/lib/api.ts:757`)。
 
 ### 补充批注链路
 
-1. `TaskDownloadMessage` 只对 `taskKind === 'generate'` 显示补充批注入口 (`frontend/components/chat/TaskDownloadMessage.tsx:15`)。
-2. `ChatPanel.handleCommentSupplement()` 从下载卡读取 `metadata.outputFile`，调用 `createCommentSupplementTask()` (`frontend/components/chat/ChatPanel.tsx:847`, `frontend/lib/api.ts:814`)。
-3. `comment_supplement` 复用 task summary、SSE、agent-step 和下载卡，不引入第二套任务流 (`frontend/hooks/useChatSSE.ts:175`)。
+1. `TaskDownloadMessage` 只对 `taskKind === 'generate'` 显示补充批注入口 (`frontend/components/chat/TaskDownloadMessage.tsx`)。
+2. `ChatPanel.handleCommentSupplement()` 从下载卡读取 `metadata.outputFile`，调用 `createCommentSupplementTask()` (`frontend/components/chat/ChatPanel.tsx:847`, `frontend/components/chat/ChatPanel.tsx:871`, `frontend/lib/api.ts:814`)。
+3. `comment_supplement` 复用 task summary、SSE、agent-step 和下载卡，不引入第二套任务流 (`frontend/hooks/useChatSSE.ts:57`)。
 
 **状态管理：**
-- `chatStore` 是持久化主状态，storage name 为 `chat-storage`，持久化 `conversations`、`currentConversationId`、`selectedTenderType`、`conversationDrafts`、`taskSummaries`、`unreadConversationResults` (`frontend/stores/chatStore.ts:994`, `frontend/stores/chatStore.ts:2408`)。
+- `chatStore` 是持久化主状态，storage name 为 `chat-storage`，持久化 `conversations`、`currentConversationId`、`selectedTenderType`、`conversationDrafts`、`taskSummaries`、`unreadConversationResults` (`frontend/stores/chatStore.ts:2408`, `frontend/stores/chatStore.ts:2410`)。
 - `chatStreamStore` 是运行时内存状态，保存 `logs`、`aiText`、`agentSteps`、progress 和 `lastEventId` (`frontend/stores/chatStreamStore.ts:5`)。
-- `chatTaskSessionStore` 只持久化 task resume 元数据，storage name 为 `chat-task-session-storage` (`frontend/stores/chatTaskSessionStore.ts:16`, `frontend/stores/chatTaskSessionStore.ts:43`)。
+- `chatTaskSessionStore` 只持久化 task resume 元数据，storage name 为 `chat-task-session-storage` (`frontend/stores/chatTaskSessionStore.ts`)。
 - `historyStore` 和 `useAppStore` 存在，但工作台主流程以 `chatStore` 为准 (`frontend/stores/historyStore.ts`, `frontend/stores/useAppStore.ts`)。
 
 ## 关键抽象
@@ -189,11 +194,11 @@
 
 **`GenerateRequest`:**
 - 职责： 初次生成任务 payload。
-- Examples: `frontend/types/api.ts`, `frontend/lib/formDataConverter.ts`
+- Examples: `frontend/types/api.ts:154`, `frontend/lib/formDataConverter.ts`
 - Pattern: converter 负责默认值、文件路径提取、generate-only 字段和 `gngk` form type 分派。
 
 **`ConversationFormDraft`:**
-- 职责： 会话级表单草稿、上传文件、生成字段、rewrite 文件、一次性 skill 和 pending rewrite 恢复状态。
+- 职责： 会话级表单草稿、上传文件、生成字段、rewrite 文件、一次性 skill、pending rewrite 恢复状态和模型。
 - Examples: `frontend/stores/chatStore.ts`, `frontend/components/forms/TenderFormShared.tsx`, `frontend/components/chat/ChatPanel.tsx`
 - Pattern: draft 是表单恢复、URL 同步和 agent run context 的共享来源。
 
@@ -204,7 +209,7 @@
 
 **`agent-step` message:**
 - 职责： 智能体过程卡，展示 `content_agent`、`comment_agent` 和 rewrite 过程。
-- Examples: `frontend/types/chat.ts`, `frontend/types/api.ts`, `frontend/stores/chatStore.ts`, `frontend/components/chat/TaskContentMessage.tsx`
+- Examples: `frontend/types/chat.ts`, `frontend/types/api.ts:605`, `frontend/stores/chatStore.ts`, `frontend/components/chat/TaskContentMessage.tsx`
 - Pattern: 运行中快照在 `chatStreamStore.agentSteps`，完成态 upsert 到 conversation messages。
 
 **`AgentThinkingCardState`:**
@@ -222,7 +227,7 @@
 **Workbench Page:**
 - Location: `frontend/app/tender/page.tsx`
 - Triggers: 用户访问 `/tender` 或带查询参数的深链。
-- Responsibilities: 三栏 UI、URL 参数处理、会话创建、招标数据预取、conversation heartbeat。
+- Responsibilities: 三栏 UI、URL 参数处理、会话创建、招标数据预取、conversation heartbeat (`frontend/app/tender/page.tsx:210`)。
 
 **Generate Task Entry:**
 - Location: `frontend/components/chat/FormPanel.tsx`
@@ -240,7 +245,7 @@
 - Responsibilities: 构造请求、解析 wrapped/unwrapped response、抛出 `ApiError`、解析 NDJSON agent run。
 
 **SSE Entry:**
-- Location: `frontend/hooks/useChatSSE.ts`
+- Location: `frontend/hooks/useChatSSE.ts`（底层 `frontend/lib/sse.ts`，封装层 `frontend/hooks/useSSE.ts`）
 - Triggers: 任务创建、恢复或进入 running 后绑定 `task_id`。
 - Responsibilities: 状态确认、连接 SSE、映射事件、终态收敛。
 
@@ -249,7 +254,7 @@
 - **Threading:** 浏览器单线程 React 渲染；异步 `fetch`、`EventSource`、timer、focus、pageshow、online 和 visibility 事件驱动任务状态。
 - **Global state:** Zustand stores 是模块级 singleton，见 `frontend/stores/chatStore.ts`、`frontend/stores/chatStreamStore.ts`、`frontend/stores/chatTaskSessionStore.ts`、`frontend/stores/historyStore.ts`、`frontend/stores/useAppStore.ts`。
 - **Circular imports:** `frontend/types/` 保持无运行时副作用；修改 `stores/types/lib` 边界时避免让类型层反向依赖组件或 store runtime。
-- **API boundary:** 新增后端请求放到 `frontend/lib/api.ts`；组件负责用户交互和调用 API helper，不实现协议解析。
+- **API boundary:** 新增后端请求放到 `frontend/lib/api.ts`；组件负责用户交互和调用 API helper，不实现协议解析或裸 `fetch`。
 - **Generate-only fields:** `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 只属于 generate 请求和会话 draft，不进入 rewrite request、skill state 或 prompt surface。
 - **GNGK dispatch:** `gngk` 后端 `form_type` 分派集中到 `frontend/lib/gngkFormType.ts`，generate 和上传文件 rewrite 复用同一 helper。
 - **Agent run:** `POST /api/agent/runs/stream` 是右侧聊天唯一流式入口；rewrite 通过 agent run 接受任务，不使用第二套任务状态机。
@@ -299,11 +304,11 @@
 **Strategy:** API 层统一转换为 `ApiError`，任务层通过状态确认、SSE 终态、heartbeat 和本地中断态收敛 UI。
 
 **Patterns:**
-- `frontend/lib/api.ts` 从 HTTP status、wrapped `success: false`、嵌套 `detail` 和 network failure 提取 message/code/status。
-- `frontend/hooks/useChatSSE.ts` 先 `getTaskStatus()`，再连接 SSE；terminal 或 missing task 直接收敛。
+- `frontend/lib/api.ts` 从 HTTP status、wrapped `success: false`、嵌套 `detail` 和 network failure 提取 message/code/status (`frontend/lib/api.ts:73`, `frontend/lib/api.ts:91`)。
+- `frontend/hooks/useChatSSE.ts` 先 `getTaskStatus()`，再连接 SSE；terminal 或 missing task 直接收敛 (`frontend/hooks/useChatSSE.ts:667`)。
 - `frontend/hooks/useCurrentConversationTaskStatus.ts` 轮询当前任务，`TASK_NOT_FOUND` 或 404 调用 `discardStaleTask()`。
-- `frontend/hooks/useTaskHeartbeat.ts` 对活跃 task 发 heartbeat，终态回调给 `FormPanel` 做补拉收敛。
-- `frontend/app/tender/page.tsx` 用 conversation heartbeat 检测后端 `instance_id` 变化，并调用 `handleBackendRestart()`。
+- `frontend/hooks/useTaskHeartbeat.ts` 对活跃 task 发 heartbeat，终态回调给 `FormPanel` 做补拉收敛 (`frontend/components/chat/FormPanel.tsx:321`)。
+- `frontend/app/tender/page.tsx` 用 conversation heartbeat 检测后端 `instance_id` 变化，并调用 `handleBackendRestart()` (`frontend/app/tender/page.tsx:221`, `frontend/app/tender/page.tsx:231`)。
 - UI 组件展示用户可读错误；下载失败路径在 `frontend/components/chat/ChatPanel.tsx` 使用 alert + console 错误。
 
 ## 横切关注点
@@ -320,4 +325,4 @@
 
 ---
 
-*前端架构分析：2026-06-25*
+*前端架构分析：2026-06-29*
