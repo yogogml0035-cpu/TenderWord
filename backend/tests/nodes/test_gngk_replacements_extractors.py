@@ -162,6 +162,48 @@ def test_extract_public_tender_project_content_stops_before_implementation_line(
     assert extracted == "便携式肌骨超声仪\t壹台"
 
 
+def test_extract_public_tender_project_content_stops_at_same_line_budget() -> None:
+    log_parts: list[str] = []
+
+    extracted = extract_public_tender_project_content(
+        """
+2、项目基本信息
+上海东松医疗科技股份有限公司受复旦大学附属中山医院的委托，现以公开招标方式
+邀请合格的投标人就下列货物或服务前来投标。
+
+电视机和高清显示器         玖拾套\t（项目预算：人民币33万元）
+项目实施地点：采购人指定地点
+
+3、合格投标人资格条件：
+""".strip(),
+        {"project_content": "仓储设备\t壹套"},
+        log_parts,
+    )
+
+    assert extracted == "电视机和高清显示器         玖拾套"
+
+
+def test_extract_public_tender_project_content_keeps_same_line_budget() -> None:
+    log_parts: list[str] = []
+
+    extracted = extract_public_tender_project_content(
+        """
+2、项目基本信息
+上海东松医疗科技股份有限公司受复旦大学附属中山医院的委托，现以公开招标方式
+邀请合格的投标人就下列货物或服务前来投标。
+
+电视机和高清显示器         玖拾套\t（项目预算：人民币33万元）
+项目实施地点：采购人指定地点
+
+3、合格投标人资格条件：
+""".strip(),
+        {"project_content": "仓储设备\t壹套（项目预算：人民币20万元）"},
+        log_parts,
+    )
+
+    assert extracted == "电视机和高清显示器         玖拾套\t（项目预算：人民币33万元）"
+
+
 def test_extract_public_tender_project_content_labeled_line_stops_before_bidder() -> None:
     log_parts: list[str] = []
     extractor = make_public_tender_project_content_labeled_line_extractor("项目名称")
