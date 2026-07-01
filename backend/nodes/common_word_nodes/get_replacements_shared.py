@@ -452,13 +452,80 @@ def extract_public_tender_project_content(
         "项目实施地点",
         "项目实施时间",
     ]
+    inline_budget_markers = {"项目预算", "最高投标限价"}
+    new_project_content = str(state.get("project_content") or "")
+    new_project_content_has_budget = any(
+        marker in new_project_content for marker in inline_budget_markers
+    )
+
+    def _line_start_for(position: int) -> int:
+        line_start = position
+        while line_start > front_end_pos and doc_content[line_start - 1] not in [
+            "\n",
+            "\r",
+            "\x07",
+        ]:
+            line_start -= 1
+        return line_start
+
+    def _line_end_for(position: int) -> int:
+        line_end = position
+        while line_end < end_pos1 and doc_content[line_end] not in [
+            "\n",
+            "\r",
+            "\x07",
+        ]:
+            line_end += 1
+        return line_end
+
+    def _line_has_content_before_marker(line_start: int, marker_pos: int) -> bool:
+        prefix = doc_content[line_start:marker_pos].replace("\x07", "").strip()
+        prefix = prefix.rstrip("（(").strip()
+        return bool(prefix) and not re.fullmatch(
+            r"\d+(?:[、.．]|\.\d+)?", prefix
+        )
+
+    def _trim_inline_budget_prefix_end(line_start: int, marker_pos: int) -> int:
+        end_pos = marker_pos
+        while end_pos > line_start and doc_content[end_pos - 1] in [" ", "\t"]:
+            end_pos -= 1
+        if end_pos > line_start and doc_content[end_pos - 1] in ["（", "("]:
+            end_pos -= 1
+            while end_pos > line_start and doc_content[end_pos - 1] in [" ", "\t"]:
+                end_pos -= 1
+        return end_pos
+
+    def _line_starts_with_stop_marker(line: str) -> bool:
+        stripped = line.replace("\x07", "").strip()
+        if not stripped:
+            return False
+        return any(
+            re.match(rf"^(?:\d+(?:[、.．]|\.\d+)?\s*)?{re.escape(marker)}", stripped)
+            for marker in end_markers
+        )
 
     found_positions = []
     for marker in end_markers:
         pos = doc_content.find(marker, front_end_pos, end_pos1)
         if pos != -1:
-            found_positions.append((pos, marker))
-            log_parts.append(f"在位置 {pos} 找到结束标记 '{marker}'")
+            marker_line_start = _line_start_for(pos)
+            if marker in inline_budget_markers and _line_has_content_before_marker(
+                marker_line_start, pos
+            ):
+                if new_project_content_has_budget:
+                    boundary_pos = _line_end_for(pos)
+                    log_parts.append(
+                        f"在位置 {pos} 找到行内结束标记 '{marker}'，按 project_content 整行提取"
+                    )
+                else:
+                    boundary_pos = _trim_inline_budget_prefix_end(marker_line_start, pos)
+                    log_parts.append(
+                        f"在位置 {pos} 找到行内结束标记 '{marker}'，边界位置: {boundary_pos}"
+                    )
+            else:
+                boundary_pos = marker_line_start
+                log_parts.append(f"在位置 {pos} 找到结束标记 '{marker}'")
+            found_positions.append((boundary_pos, marker))
 
     if not found_positions:
         log_parts.append("在 front_end 和 end_marker1 之间未找到任何结束标记")
@@ -470,12 +537,7 @@ def extract_public_tender_project_content(
     )
 
     marker_line_start = earliest_pos
-    while marker_line_start > front_end_pos and doc_content[
-        marker_line_start - 1
-    ] not in ["\n", "\r"]:
-        marker_line_start -= 1
-
-    log_parts.append(f"结束标记行起始位置: {marker_line_start}")
+    log_parts.append(f"项目内容结束位置: {marker_line_start}")
 
     content_start = front_end_pos
     while content_start < len(doc_content) and doc_content[content_start] in [
@@ -491,11 +553,11 @@ def extract_public_tender_project_content(
     raw_extracted = doc_content[content_start:marker_line_start]
     log_parts.append(f"原始提取长度: {len(raw_extracted)} 个字符")
 
-    lines = raw_extracted.split("\n")
+    lines = re.split(r"[\r\n]+", raw_extracted)
     cleaned_lines = []
     for line in lines:
         line_stripped = line.strip("\r")
-        if line_stripped and not any(marker in line_stripped for marker in end_markers):
+        if line_stripped and not _line_starts_with_stop_marker(line_stripped):
             cleaned_lines.append(line_stripped)
 
     extracted_content = "\n".join(cleaned_lines)

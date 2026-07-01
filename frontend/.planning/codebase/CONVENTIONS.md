@@ -1,8 +1,8 @@
 # 前端编码约定
 
-**分析日期：** 2026-06-25
+**分析日期：** 2026-06-29
 
-**范围：** `frontend/` 的组件、hooks、stores、API client、类型、表单、上传、测试和配置文件。`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc` 仅确认存在，不读取内容，不在文档中记录任何密钥、token、客户原文或私有下载路径。
+**范围：** `frontend/` 的组件、hooks、stores、API client、类型、表单、上传、SSE/agent run、测试和配置文件。`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc` 仅确认存在，不读取内容，不在文档中记录任何密钥、token、客户原文或私有下载路径。
 
 ## 命名模式
 
@@ -10,7 +10,7 @@
 - React 组件文件使用 PascalCase，例如 `frontend/components/chat/ChatPanel.tsx`、`frontend/components/forms/TenderFormShared.tsx`、`frontend/components/forms/FileUploader.tsx`。
 - hooks 使用 `useXxx.ts`，例如 `frontend/hooks/useChatSSE.ts`、`frontend/hooks/useCurrentConversationTaskStatus.ts`、`frontend/hooks/useTaskHeartbeat.ts`。
 - Zustand store 使用语义化 camelCase 文件名，例如 `frontend/stores/chatStore.ts`、`frontend/stores/chatStreamStore.ts`、`frontend/stores/chatTaskSessionStore.ts`。
-- 纯 helper 放在 `frontend/lib/` 或 `frontend/utils/`，文件名使用 camelCase 或领域名，例如 `frontend/lib/formDataConverter.ts`、`frontend/lib/apiBaseUrl.ts`、`frontend/lib/gngkFormType.ts`、`frontend/utils/tenderTypeMapper.ts`。
+- 纯 helper 放在 `frontend/lib/` 或 `frontend/utils/`，文件名使用 camelCase 或领域名，例如 `frontend/lib/formDataConverter.ts`、`frontend/lib/apiBaseUrl.ts`、`frontend/lib/gngkFormType.ts`、`frontend/lib/tenderFetch.ts`、`frontend/lib/agentThinking.ts`、`frontend/utils/tenderTypeMapper.ts`。
 - Jest 文件集中在 `frontend/__tests__/unit/`，命名为 `test_*.test.ts` 或 `test_*.test.tsx`，例如 `frontend/__tests__/unit/lib/test_api.test.ts`。
 - Playwright 文件集中在 `frontend/e2e/`，命名为 `test_*.spec.ts`，例如 `frontend/e2e/test_generation_mode_agent.spec.ts`。
 
@@ -20,6 +20,7 @@
 - 事件处理函数使用 `handleXxx`：`handleRewriteFileUpload`、`handleGenerationModeChange`、`handleTemplateCandidateSelect`。
 - 表单转换函数使用 `convertXxxFormToApiRequest`：`convertXjcgFormToApiRequest()`、`convertGngkFormToApiRequest()`、`convertGjgkFormToApiRequest()`，实现位于 `frontend/lib/formDataConverter.ts`。
 - 解析、归一化、分派、构造函数使用 `parseXxx`、`normalizeXxx`、`resolveXxx`、`buildXxx`，例如 `parseTenderUrlParams()`、`normalizeApiBaseUrl()`、`resolveGngkFormType()`、`buildCanonicalSearchParams()`。
+- Tailwind class 合并使用 `cn()`，实现位于 `frontend/lib/utils.ts`（`twMerge(clsx(...))`）。
 
 **变量：**
 - 前端本地变量使用 camelCase，例如 `conversationId`、`taskId`、`selectedSkillsForRequest`、`templateDialogOpen`。
@@ -31,7 +32,7 @@
 - interface、type、union 使用 PascalCase：`GenerateRequest`、`AgentRunStreamRequest`、`ConversationFormDraft`、`SSEAgentStepEvent`。
 - API、SSE、agent run、任务状态和上传契约集中在 `frontend/types/api.ts`。
 - 聊天消息、任务卡片、会话和 message metadata 类型集中在 `frontend/types/chat.ts`。
-- 前端 UI 全局类型在 `frontend/types/index.ts`，该文件可以 re-export `./api`，但新增后端契约字段的真源仍是 `frontend/types/api.ts`。
+- 前端 UI 全局类型在 `frontend/types/index.ts`，该文件 re-export `./api`（`export * from './api'`），但新增后端契约字段的真源仍是 `frontend/types/api.ts`。
 
 ## 代码风格
 
@@ -46,10 +47,11 @@
 - 继承 `eslint-config-next/core-web-vitals` 和 `eslint-config-next/typescript`。
 - 启用 `eslint-plugin-react-hooks`，`react-hooks/set-state-in-effect` 为 `warn`。
 - ESLint 忽略 `.next/**`、`out/**`、`build/**`、`next-env.d.ts`、`node_modules-*/**`、`coverage/**`、`playwright-report/**`、`test-results/**`。
+- 运行命令：`npm run lint`（即 `eslint`）。
 
 **TypeScript:**
 - `frontend/tsconfig.json` 启用 `strict: true`、`jsx: "react-jsx"`、`moduleResolution: "bundler"`、`baseUrl: "."` 和 `@/*` alias。
-- 类型检查入口是 `frontend/tsconfig.typecheck.json`，命令为 `npm run type-check`。
+- 类型检查入口是 `frontend/tsconfig.typecheck.json`（继承 `tsconfig.json`，排除 `.next/dev`），命令为 `npm run type-check`（即 `tsc -p tsconfig.typecheck.json --noEmit`）。
 - `frontend/next.config.ts` 中 `typescript.ignoreBuildErrors` 为 `false`，不要依赖构建跳过类型错误。
 
 ## 导入组织
@@ -116,7 +118,7 @@ export async function createGenerateTask(params: GenerateRequest): Promise<Creat
 ## 函数设计
 
 **规模：**
-- 纯转换、解析、归一化逻辑放入 `frontend/lib/` 或 `frontend/utils/` 并补单测，例如 `frontend/lib/formDataConverter.ts`、`frontend/lib/apiBaseUrl.ts`、`frontend/utils/tenderTypeMapper.ts`。
+- 纯转换、解析、归一化逻辑放入 `frontend/lib/` 或 `frontend/utils/` 并补单测，例如 `frontend/lib/formDataConverter.ts`、`frontend/lib/apiBaseUrl.ts`、`frontend/lib/tenderFetch.ts`、`frontend/utils/tenderTypeMapper.ts`。
 - 大组件只做 UI 编排和事件分发。修改 `frontend/components/chat/ChatPanel.tsx`、`frontend/components/forms/TenderFormShared.tsx`、`frontend/stores/chatStore.ts` 时保持局部修改。
 - 不在 JSX 中拼复杂后端 payload；先在 helper 或局部 builder 中构造，再交给 API client。
 
@@ -133,7 +135,7 @@ export async function createGenerateTask(params: GenerateRequest): Promise<Creat
 ## 模块设计
 
 **导出：**
-- API client 统一从 `frontend/lib/api.ts` 导出具名 helper、`ApiError` 和 `API_BASE_URL`。
+- API client 统一从 `frontend/lib/api.ts` 导出具名 helper、`api` 对象（`get/post/put/delete`）、`streamNdjson`、`streamAgentRun`、`ApiError` 和 `API_BASE_URL`。
 - Zustand store 文件导出 `useXxxStore`，并保留 default export 的既有写法。
 - 类型模块只放类型、常量和类型守卫，不引入 UI 组件。
 - 表单注册集中在 `frontend/components/chat/tenderFormRegistry.ts`，新增招标类型必须同步 component map、display name map 和 converter map。
@@ -159,26 +161,28 @@ export async function createGenerateTask(params: GenerateRequest): Promise<Creat
 ## API Client 约定
 
 - 所有后端 JSON、上传、下载、NDJSON、模板候选、任务状态和 heartbeat 请求统一走 `frontend/lib/api.ts`。
-- 组件不得裸写后端 `fetch()`；当前源码中 `fetch(` 只出现在 `frontend/lib/api.ts`。
+- 组件不得裸写后端 `fetch()`；当前源码中 `fetch(` 只出现在 `frontend/lib/api.ts`（`request()`、`streamNdjson()`、`fetchTenderDataWithType()`、`downloadFile()`）。组件/hooks/stores 中无裸 `fetch`。
 - `NEXT_PUBLIC_API_URL` 解析集中在 `frontend/lib/apiBaseUrl.ts`；修改该链路时同时检查 `frontend/next.config.ts` 的 `rewrites()` 和 `allowedDevOrigins`。
 - SSE URL 由 `frontend/lib/api.ts` 的 `getTaskStreamUrl()` 或 `frontend/hooks/useChatSSE.ts` 经 `frontend/lib/sse.ts` 创建，不在组件里拼后端 stream URL。
 - 模板候选只通过项目内 API helper：`fetchTemplateCandidates()`、`selectTemplateCandidate()`、`getTemplateCandidateDownloadUrl()`。组件不直接访问外部模板候选 URL。
 - 文件上传使用 `uploadFile()` / `uploadFiles()`；下载使用 `downloadFile()` / `getDownloadUrl()`。
 - `POST /api/agent/runs/stream` 是右侧聊天的 NDJSON 入口，前端解析在 `frontend/lib/api.ts` 的 `streamAgentRun()` 和 `parseAgentRunEvent()`。
+- 招标数据拉取的 draft 同步逻辑封装在 `frontend/lib/tenderFetch.ts` 的 `syncTenderDataDraft()`，调用 `fetchTenderDataWithType()`，组件不直接拼 `/api/tender/{tender_no}`。
 
 ## 类型同步与跨端契约
 
 - API shape 变化必须同步 `frontend/types/api.ts`、`frontend/lib/api.ts`、相关 component/store/hook 和测试。
-- SSE 事件变化必须同步 `frontend/types/api.ts`、`frontend/lib/sse.ts` named event 注册、`frontend/hooks/useChatSSE.ts` 事件映射、`frontend/__tests__/unit/lib/test_sse.test.ts` 和 `frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`。
-- `TaskKind`、`TaskStatus`、`SSEDoneEvent`、`TaskResult`、`StyleWritebackSummary`、`CommentWritebackSummary` 改动必须同步 `frontend/types/chat.ts`、下载卡和消息列表相关测试。
+- SSE 事件变化必须同步 `frontend/types/api.ts`、`frontend/lib/sse.ts` named event 注册（`connected`、`log`、`llm`、`progress`、`agent_step`、`status`、`error`、`done`、`heartbeat`）、`frontend/hooks/useChatSSE.ts` 事件映射、`frontend/__tests__/unit/lib/test_sse.test.ts` 和 `frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`。
+- `TaskKind`（`generate | rewrite | comment_supplement`）、`TaskStatus`、`SSEDoneEvent`、`TaskResult`、`StyleWritebackSummary`、`CommentWritebackSummary` 改动必须同步 `frontend/types/chat.ts`、下载卡和消息列表相关测试。
 - 新增或修改招标类型必须同步 `frontend/types/index.ts`、`frontend/types/api.ts`、`frontend/utils/tenderTypeMapper.ts`、`frontend/components/chat/tenderFormRegistry.ts`、`frontend/components/forms/tenderFormConfig.ts`、`frontend/lib/formDataConverter.ts` 和相关测试。
 - `gngk` 在前端只是一种 UI 类型，后端 `form_type` 必须由 `frontend/lib/gngkFormType.ts` 按 `tender_lx + fund_lx + ifzgcg` 分派。
+- agent run 的 `model` 联合为 `'deepseek' | 'qwen' | 'doubao'`，`runtime` 联合为 `'fake' | 'deepagents'`；改动需同步 `frontend/types/api.ts`、`parseAgentRunEvent()`、`AgentRunStartedEventData` 和测试夹具。
 
 ## 表单与上传约定
 
 - `TenderFormShared` 的初始化优先级保持 `draft > URL > default`，实现位于 `frontend/components/forms/TenderFormShared.tsx`。
 - 表单上传槽位只保留模板文件和技术参数文件：`file_paths.template` 与 `file_paths.tender_params`，转换逻辑在 `frontend/lib/formDataConverter.ts`。
-- `FileUploader` 通过 `fileType` 传递上传类型，常用值为 `template`、`params`、`rewrite_source`，类型定义在 `frontend/types/api.ts`。
+- `FileUploader` 通过 `fileType` 传递上传类型，常用值为 `template`、`params`、`rewrite_source`（`FileType` 另含 `qualification`），类型定义在 `frontend/types/api.ts`。
 - 生成表单中的 `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 只属于 generate payload。
 - `ChatPanel` 构造 `AgentRunStreamRequest` 时不得携带 `generation_mode`、`comment_generation_mode`、`style_writeback_mode`。
 - 上传文件 rewrite 使用 `uploadFile(file, 'rewrite_source')`，并在 draft 中写入 `rewrite_file` 和一次性 `selected_skills: ['rewrite']`，实现位于 `frontend/components/chat/ChatPanel.tsx`。
@@ -191,15 +195,23 @@ export async function createGenerateTask(params: GenerateRequest): Promise<Creat
 - `agent_step` 过程卡由 `frontend/hooks/useChatSSE.ts` 映射到 `frontend/stores/chatStore.ts` 的 task message group；运行中快照先放 `frontend/stores/chatStreamStore.ts`。
 - `content_agent` 和 `comment_agent` 过程卡复用 `agent_step` 事件族；generate workflow 不应渲染 `comment_agent` 过程卡。
 - rewrite 和 `comment_supplement` 任务使用 agent-step 卡，不再创建普通 `task-content` 卡。
+- thinking 卡阶段标签与视图状态映射在 `frontend/lib/agentThinking.ts`（如 `understand`、`execute`、`tool`、`retry`），与 `AgentThinkingViewStageKey` 对齐。
 - SSE reconnect、`lastEventId`、heartbeat 和后端重启恢复由 `frontend/lib/sse.ts`、`frontend/hooks/useChatSSE.ts`、`frontend/stores/chatTaskSessionStore.ts` 管理。
+
+## i18n / 语言约定
+
+- 当前前端未引入 i18n 框架（无 `next-intl` / `react-i18next`），UI 中文文案以字面量直接写在组件中（如 `components/chat/ChatPanel.tsx`、`components/forms/ModelSelector.tsx`）。
+- 后端约定的中文提示串作为 `default*Message` 写在 `frontend/lib/api.ts`（如 `defaultErrorMessage`、`protocolErrorMessage`、`noBodyMessage`），不要随意改写。
+- 前端事实文档使用简体中文说明正文；代码标识符、路径、命令、配置键和 API 名称保持原文。
 
 ## 项目技能与文档约束
 
-- 前端事实文档使用简体中文说明正文；代码标识符、路径、命令、配置键和 API 名称保持原文。
 - 代码和配置是真源；长期文档只沉淀稳定边界和可执行约定。
+- 前端代码改动至少运行 `npm run lint`、`npm run type-check` 和相关测试（具体命令见 `TESTING.md`）。
 - 只改与当前任务直接相关的文件；quality focus 只维护 `frontend/.planning/codebase/CONVENTIONS.md` 和 `frontend/.planning/codebase/TESTING.md`。
 - 文档型变更至少运行 `git diff --check`，并扫描本轮改动文档中的密钥/token 模式。
+- `.env`、token、客户原文不得写入文档、日志或测试夹具。
 
 ---
 
-*前端约定分析：2026-06-25*
+*前端约定分析：2026-06-29*

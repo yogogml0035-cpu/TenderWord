@@ -1,48 +1,50 @@
 # 前端外部集成事实地图
 
-**分析日期：** 2026-06-25
+**分析日期：** 2026-06-29
 
-**范围：** 仅 `frontend/` 对后端 API、SSE、NDJSON、浏览器运行时、本地存储、上传下载、模板候选、agent run 前置流、测试工具和开发服务器的集成边界。`frontend/.env.local`、`frontend/.env.local.example` 和 `frontend/.npmrc` 文件存在；只记录存在性，不读取内容。
+**范围：** 仅 `frontend/` 对后端 API、SSE、NDJSON、浏览器运行时、本地存储、上传下载、模板候选、agent run 前置流、测试工具和开发服务器的集成边界。`frontend/.env.local`、`frontend/.env.local.example` 文件存在；只记录配置键名，不读取 `.env.local` 真实值。
 
 ## API 与外部服务
 
 **TenderWord 后端 API：**
-- 服务用途：招标数据查询、模板候选、文件上传、生成任务、补充批注任务、任务状态、任务取消、心跳、下载、agent run 前置流和任务 SSE。
-- SDK/Client：无第三方 SDK；JSON、上传、下载、NDJSON 和 SSE URL 主入口统一封装在 `frontend/lib/api.ts`。
+- 服务用途：招标数据查询、模板候选、文件上传、生成任务、补充批注任务、任务状态、任务列表、任务取消、心跳、下载、agent run 前置流和任务 SSE。
+- SDK/Client：无第三方 SDK；JSON、上传、下载、NDJSON 和 SSE URL 主入口统一封装在 `frontend/lib/api.ts`。所有后端请求必须走该 API client，组件层不写裸 `fetch`，也不直接访问外部模板候选 URL。
 - 认证：未检测到登录 provider、JWT 注入、OAuth SDK 或稳定 `Authorization` header；`frontend/lib/api.ts` 不注入 auth。
-- 基础 URL：`frontend/lib/apiBaseUrl.ts` 解析 `NEXT_PUBLIC_API_URL`，无配置时使用 `http://localhost:8000`，浏览器环境还会按当前 hostname 推导 `:8000` 后端地址。
-- 开发代理：`frontend/next.config.ts` 将 `/api/:path*` rewrite 到后端 API base URL，并将 `NEXT_PUBLIC_API_URL` 候选 hostname 纳入 `allowedDevOrigins`。
-- Next route：`frontend/app/api/` 未检测到；前端自身不实现 API route。
+- 基础 URL：`frontend/lib/apiBaseUrl.ts` 解析 `NEXT_PUBLIC_API_URL`（支持逗号分隔多候选），无配置时使用 `http://localhost:8000`；浏览器环境还会按当前 hostname 推导 `:8000` 后端地址，并与配置候选按 host 别名（`localhost`/`127.0.0.1` 互通）优先匹配。
+- 开发代理：`frontend/next.config.ts` 将 `/api/:path*` rewrite 到 `resolveApiBaseUrl()` 结果，并将 `NEXT_PUBLIC_API_URL` 候选 hostname 纳入 `allowedDevOrigins`。
+- Next route：`frontend/app/api/` 不存在；前端自身不实现 API route。
 
 **后端 API endpoints：**
 - 招标查询：`GET /api/tender/{tender_no}`，helper 为 `fetchTenderDataWithType()` / `fetchTenderData()`，见 `frontend/lib/api.ts`、`frontend/lib/tenderFetch.ts`。
 - 模板候选列表：`GET /api/template-candidates`，helper 为 `fetchTemplateCandidates()`，见 `frontend/lib/api.ts`、`frontend/components/forms/TenderFormShared.tsx`。
 - 模板候选选择：`POST /api/template-candidates/select`，helper 为 `selectTemplateCandidate()`，见 `frontend/lib/api.ts`。
 - 模板候选下载代理：`GET /api/template-candidates/download`，helper 为 `getTemplateCandidateDownloadUrl()`，见 `frontend/lib/api.ts`、`frontend/components/forms/TenderFormShared.tsx`、`frontend/components/forms/TemplateCandidateDialog.tsx`。
-- 文件上传：`POST /api/upload`、`POST /api/upload/multiple`，使用 `FormData`，见 `frontend/lib/api.ts`、`frontend/components/forms/FileUploader.tsx`。
+- 文件上传：`POST /api/upload`、`POST /api/upload/multiple`，使用 `FormData`，helper 为 `uploadFile()` / `uploadFiles()`，见 `frontend/lib/api.ts`、`frontend/components/forms/FileUploader.tsx`。
 - 生成任务创建：`POST /api/generate`，helper 为 `createGenerateTask()`，见 `frontend/lib/api.ts`、`frontend/components/chat/FormPanel.tsx`。
 - 补充批注任务创建：`POST /api/comment-supplement`，helper 为 `createCommentSupplementTask()`，见 `frontend/lib/api.ts`、`frontend/components/chat/ChatPanel.tsx`。
-- 任务状态与列表：`GET /api/tasks/{taskId}`、`GET /api/tasks`，见 `frontend/lib/api.ts`、`frontend/hooks/useCurrentConversationTaskStatus.ts`、`frontend/hooks/useLatestActiveTaskSummary.ts`。
+- 任务状态：`GET /api/tasks/{taskId}`，helper 为 `getTaskStatus()`，见 `frontend/lib/api.ts`、`frontend/hooks/useCurrentConversationTaskStatus.ts`。
+- 任务列表：`GET /api/tasks`，helper 为 `getTaskList()`，见 `frontend/lib/api.ts`、`frontend/hooks/useLatestActiveTaskSummary.ts`。
 - 任务取消：`DELETE /api/tasks/{taskId}`，helper 为 `cancelTask()`，见 `frontend/lib/api.ts`、`frontend/components/chat/FormPanel.tsx`、`frontend/components/chat/ChatPanel.tsx`。
 - 任务心跳：`POST /api/tasks/{taskId}/heartbeat`，helper 为 `sendTaskHeartbeat()`，见 `frontend/lib/api.ts`、`frontend/hooks/useTaskHeartbeat.ts`。
 - 会话心跳：`POST /api/conversations/{conversationId}/heartbeat`，helper 为 `sendConversationHeartbeat()`，见 `frontend/lib/api.ts`、`frontend/app/tender/page.tsx`。
 - 文件下载：`GET /api/download/{file_path}`，helper 为 `downloadFile()` / `getDownloadUrl()`，见 `frontend/lib/api.ts`、`frontend/components/chat/ChatPanel.tsx`；`frontend/components/layout/Sidebar.tsx` 也使用相对 `href="/api/download/..."` 交给 Next rewrite 代理。
+- 任务 SSE：`GET /api/stream/{taskId}`，helper 为 `getTaskStreamUrl()`，见 `frontend/lib/api.ts`、`frontend/lib/sse.ts`。
 
 **Agent run 前置流：**
 - 服务用途：右侧聊天输入先经任务上下文助手判定 rewrite 能力、需求补充和任务创建。
 - 入口：`streamAgentRun()` 调用 `POST /api/agent/runs/stream`，见 `frontend/lib/api.ts`、`frontend/components/chat/ChatPanel.tsx`。
-- 协议：`streamNdjson()` 使用 `fetch` 读取 NDJSON response body，每行 JSON 由 `parseAgentRunEvent()` 过滤为类型化事件，见 `frontend/lib/api.ts`。
+- 协议：底层 `streamNdjson()` 使用 `fetch` 读取 NDJSON response body，每行 JSON 由 `parseAgentRunEvent()` 过滤为类型化事件，见 `frontend/lib/api.ts`。
 - 请求字段：`conversation_id`、`message`、`model`、`selected_skills`、`context_snapshot`，类型为 `AgentRunStreamRequest`，见 `frontend/types/api.ts`。
-- 技能范围：`AgentSkill` 当前只有 `rewrite`；`selected_skills` 在 `frontend/stores/chatStore.ts` 和 `frontend/components/chat/ChatPanel.tsx` 中归一化为最多一个技能，消息发出后清空。
-- 上传文件 rewrite：`frontend/components/chat/ChatPanel.tsx` 使用 `uploadFile(file, 'rewrite_source')`，再把 `uploaded_files` 与 `rewrite_context` 放入 `context_snapshot`。
-- 事件类型：`run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`needs_input`、`done`、`error`，类型位于 `frontend/types/api.ts`。
+- 技能范围：`AgentSkill` 当前只有 `rewrite`；`selected_skills` 在 `frontend/stores/chatStore.ts`（`normalizeDraftSelectedSkills`）和 `frontend/components/chat/ChatPanel.tsx`（`normalizeSelectedSkills`）中被归一化为最多一个技能，消息发出后清空为 `undefined`。
+- 上传文件 rewrite：`frontend/components/chat/ChatPanel.tsx` 使用 `uploadFile(file, 'rewrite_source')`，再把 `uploaded_files` 与 `rewrite_context` 放入 `context_snapshot`（`buildAgentRunContextSnapshot` / `buildAgentRunRewriteContext`）。
+- 事件类型：`run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`needs_input`、`done`、`error`，类型位于 `frontend/types/api.ts`，解析位于 `frontend/lib/api.ts` 的 `parseAgentRunEvent()`。
 - 任务边界：`task_accepted` 进入 task summary、SSE、取消和下载链路；`needs_input` 与非任务 `done` 只更新聊天消息，不创建后台任务。
 
 **任务 SSE：**
 - 服务用途：生成、rewrite、补充批注任务的实时日志、进度、LLM 文本、agent step、终态和 heartbeat。
 - 入口：`getTaskStreamUrl()`、`createSSEConnection()`、`useSSE()`、`useChatSSE()`，见 `frontend/lib/api.ts`、`frontend/lib/sse.ts`、`frontend/hooks/useSSE.ts`、`frontend/hooks/useChatSSE.ts`。
-- 运行时：`frontend/lib/sse.ts` 包装浏览器 `EventSource`，支持 `lastEventId` query 参数、事件去重、heartbeat timeout 和可选重连。
-- 命名事件：`connected`、`log`、`llm`、`progress`、`agent_step`、`status`、`error`、`done`、`heartbeat`。
+- 运行时：`frontend/lib/sse.ts` 包装浏览器 `EventSource`，支持 `lastEventId` query 参数、事件去重（`seenEventIds`，上限 5000）、heartbeat timeout 和可选指数退避重连（默认关闭）。
+- 命名事件：`connected`、`log`、`llm`、`progress`、`agent_step`、`status`、`error`、`done`、`heartbeat`（在 `sse.ts` 中显式 `addEventListener` 注册）。
 - 状态映射：`frontend/hooks/useChatSSE.ts` 将 SSE 事件写入 `frontend/stores/chatStreamStore.ts` 和 `frontend/stores/chatStore.ts`，并在终态后清理 `frontend/stores/chatTaskSessionStore.ts`。
 
 **模板候选：**
@@ -54,9 +56,16 @@
 - 约束：前端只消费后端返回的候选、ranking、`selectable` 和 `blocked_reason`；不得直接访问外部模板候选 URL。
 
 **模型选择：**
-- UI 选项：`deepseek`、`qwen`、`doubao`，定义在 `frontend/components/forms/ModelSelector.tsx`。
+- UI 选项：`deepseek`、`qwen`、`doubao`，定义在 `frontend/components/forms/ModelSelector.tsx` 的 `MODEL_OPTIONS`（含 label/描述/badge/icon）。
 - 前端职责：仅把模型枚举传给 `GenerateRequest`、`CommentSupplementTaskRequest` 或 `AgentRunStreamRequest`，见 `frontend/types/api.ts`、`frontend/lib/api.ts`、`frontend/components/chat/FormPanel.tsx`、`frontend/components/chat/ChatPanel.tsx`。
 - Provider 密钥和真实 LLM 调用不在前端；前端不保存 provider key。
+
+## 跨层约定（task type / tender type / form type）
+
+- `TaskKind`（task type）跨层枚举：`generate` / `rewrite` / `comment_supplement`，定义在 `frontend/types/api.ts`，被 `frontend/lib/api.ts`（`parseTaskKind`）、SSE/agent 事件解析、`frontend/stores/chatStore.ts` 共享使用。
+- `TenderType`（tender type，UI 层）：`xjcg` / `gngk` / `gjgk`，由 `frontend/utils/tenderTypeMapper.ts` 做 URL canonical 化，与会话恢复、`frontend/hooks/useUrlParams.ts`、`frontend/stores/chatStore.ts`、`frontend/app/tender/page.tsx` 协作。
+- `gngk` 在前端是 UI 类型；提交后端时由共享 helper `frontend/lib/gngkFormType.ts` 的 `resolveGngkFormType({ tender_lx, fund_lx, ifzgcg })` 分派到后端 `form_type`（`gngk_hw_zc_tender` / `gngk_hw_cz_tender` / `gngk_fw_zc_tender` / `gngk_fw_cz_tender`）。分派规则：工程类（`tender_lx` 1/2）当前复用服务链路；否则按 `fund_lx` 与 `ifzgcg !== 2` 区分采购/服务。
+- 两个调用方都走该 helper：generate 链路在 `frontend/lib/formDataConverter.ts`（`convertGngkFormToApiRequest`），rewrite 链路在 `frontend/components/chat/ChatPanel.tsx`（`resolveRewriteFormType` → `resolveGngkFormType`）。`xjcg`→`xjcg_tender`、`gjgk`→`gjgk_tender` 为直接映射。
 
 ## 数据存储
 
@@ -65,10 +74,10 @@
 - 招标数据、任务数据、上传文件、模板候选和会话心跳都通过 `frontend/lib/api.ts` 或相对 `/api/download/...` 链路访问后端。
 
 **浏览器存储：**
-- `chat-storage` - `frontend/stores/chatStore.ts` 使用 Zustand persist + `sessionStorage` 保存会话、草稿、任务摘要和未读结果。
-- `chat-task-session-storage` - `frontend/stores/chatTaskSessionStore.ts` 使用 Zustand persist + `sessionStorage` 保存 task id 与 last event id。
-- `tender-history-storage` - `frontend/stores/historyStore.ts` 使用 Zustand persist + `sessionStorage` 保存最近历史条目。
-- `tender-app-storage` - `frontend/stores/useAppStore.ts` 使用 Zustand persist 保存 `sidebarOpen`；该 store 未显式指定 `sessionStorage` adapter。
+- `chat-storage` - `frontend/stores/chatStore.ts` 使用 Zustand `persist` + `createJSONStorage(() => sessionStorage)` 保存会话、草稿、任务摘要和未读结果。
+- `chat-task-session-storage` - `frontend/stores/chatTaskSessionStore.ts` 使用 Zustand `persist` + `createJSONStorage(() => sessionStorage)` 保存 task id 与 last event id。
+- `tender-history-storage` - `frontend/stores/historyStore.ts` 使用 Zustand `persist` + `createJSONStorage(() => sessionStorage)` 保存最近历史条目。
+- `tender-app-storage` - `frontend/stores/useAppStore.ts` 使用 Zustand `persist` 保存 `sidebarOpen`；该 store 未显式指定 storage adapter（Zustand 默认 `localStorage`），`partialize` 仅持久化 `sidebarOpen`。
 - `frontend/stores/chatStreamStore.ts` 是内存 store，不持久化完整 stream payload。
 
 **文件存储：**
@@ -110,27 +119,26 @@
 
 **CI 流水线：**
 - 仓库级 `.github/workflows/` 未检测到。
-- `frontend/playwright.config.ts` 在 E2E 运行时可启动 `npm run dev -- --webpack`；`CI` 环境下启用 forbidOnly、retry 和单 worker。
+- `frontend/playwright.config.ts` 在 E2E 运行时可启动 `npm run dev -- --webpack`；`CI` 环境下启用 forbidOnly、retry 和单 worker，且不复用已运行的 server。
 
 ## 环境配置
 
 **必需 env vars：**
 - 无必须前端密钥变量。
-- `NEXT_PUBLIC_API_URL` 是可选配置；配置后影响浏览器 API base URL、Next rewrite 目标和开发期 allowed origins。
+- `NEXT_PUBLIC_API_URL` 是可选配置（支持逗号分隔多候选）；配置后影响浏览器 API base URL、Next rewrite 目标和开发期 allowed origins。
 
 **测试 env vars：**
 - `CI` - 影响 Playwright forbidOnly、retries、workers 和 server reuse，见 `frontend/playwright.config.ts`。
-- `PLAYWRIGHT_USE_SYSTEM_CHROME` - 非 CI 环境下控制是否使用系统 Chrome channel，见 `frontend/playwright.config.ts`。
+- `PLAYWRIGHT_USE_SYSTEM_CHROME` - 非 CI 环境下控制是否使用系统 Chrome channel（默认开启，设为 `'0'` 关闭），见 `frontend/playwright.config.ts`。
 
 **密钥位置：**
 - `frontend/.env.local` 文件存在，作为本地环境配置；内容不读取。
-- `frontend/.env.local.example` 文件存在，作为示例环境文件；内容不读取。
-- `frontend/.npmrc` 文件存在；内容不读取。
+- `frontend/.env.local.example` 文件存在，记录 `NEXT_PUBLIC_API_URL` 配置键名（示例值可多候选、逗号分隔）。
 
 ## Webhook 与回调
 
 **入站：**
-- 前端没有自定义后端回调 endpoint；`frontend/app/api/` 未检测到。
+- 前端没有自定义后端回调 endpoint；`frontend/app/api/` 不存在。
 
 **出站：**
 - JSON / upload / binary download / NDJSON：由 `frontend/lib/api.ts` 发起。
@@ -143,11 +151,11 @@
 - 新后端接口必须同步 `frontend/types/api.ts`、`frontend/lib/api.ts` 和相关测试。
 - 新 SSE 事件必须同步后端事件模型/发送方、`frontend/types/api.ts` union 类型、`frontend/lib/sse.ts` named event 注册、`frontend/hooks/useChatSSE.ts` 映射和 hook/store 测试。
 - 新 agent run NDJSON 事件必须同步 `frontend/types/api.ts`、`frontend/lib/api.ts` 的 `parseAgentRunEvent()` 和 `frontend/components/chat/ChatPanel.tsx` 事件处理。
-- `generation_style`、`generation_mode`、`comment_generation_mode` 和 `style_writeback_mode` 是 generate-only 字段，不得进入 rewrite 请求模型、skill state 或 prompt surface。
-- 上传文件 rewrite 使用 `fileType: 'rewrite_source'`，并通过 `uploaded_files` + `rewrite_context` 向 agent run 提供上下文；不要恢复旧 edit 入口或创建第二套任务链路。
-- `gngk` 提交和上传文件 rewrite 都必须走 `frontend/lib/gngkFormType.ts` 分派到后端 form type。
+- `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 是 generate-only 字段，仅出现在 `GenerateRequest`（`frontend/lib/formDataConverter.ts` 构造）和生成表单 draft（`frontend/components/forms/TenderFormShared.tsx`）；不得进入 rewrite 请求模型（`AgentRunStreamRequest` / `AgentRunRewriteContextSnapshot`）、skill state 或 prompt surface。
+- 上传文件 rewrite 使用 `fileType: 'rewrite_source'`，并通过 `uploaded_files` + `rewrite_context`（`buildAgentRunContextSnapshot`）向 agent run 提供上下文；不要恢复旧 edit 入口或创建第二套任务链路。
+- `gngk` 提交和上传文件 rewrite 的 `form_type` 都必须走 `frontend/lib/gngkFormType.ts` 分派（generate 经 `formDataConverter.ts`，rewrite 经 `ChatPanel.tsx`）。
 - 模板候选外部 URL 必须继续通过后端 API 代理，不得从组件直接请求。
 
 ---
 
-*前端集成分析：2026-06-25*
+*前端集成分析：2026-06-29*
