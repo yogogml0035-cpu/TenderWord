@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 import pathlib
 import sys
@@ -74,6 +75,7 @@ class ReplacementEntry:
 
 ERP_COMMENT_LABEL = "ERP数据"
 PROJECT_NAME_FIRST_HIT_COMMENT = "此次文件由AI生成，请业务员不要删除该条批注，由管理组统一删除"
+INVESTMENT_SUFFIX_PATTERN = re.compile(r"^\s*万\s*元")
 
 
 def _ranges_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
@@ -138,6 +140,21 @@ def _get_overlapping_comments(doc, target_rng) -> list[Any]:
             overlapping_comments.append(comment)
 
     return overlapping_comments
+
+
+def _range_following_text(match_rng, story_rng, lookahead_chars: int = 8) -> str:
+    try:
+        start = int(match_rng.End)
+        story_end = int(story_rng.End)
+        if start >= story_end:
+            return ""
+
+        tail_rng = story_rng.Duplicate
+        tail_rng.Start = start
+        tail_rng.End = min(start + int(lookahead_chars), story_end)
+        return str(tail_rng.Text or "")
+    except Exception:
+        return ""
 
 
 def _normalize_comment_text(text: Any) -> str:
@@ -386,6 +403,7 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
         }
         project_number_placeholder = placeholder_mapping.get("project_number")
         project_name_placeholder = placeholder_mapping.get("project_name")
+        investment_placeholder = placeholder_mapping.get("investment")
         enable_project_name_first_hit_comment = bool(
             enable_erp_comments
             and project_name_placeholder
@@ -472,13 +490,22 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
                 count = 0
                 # Execute 返回 True 如果找到
                 while find.Execute():
-                    count += 1
-                    total_stats["total_found"] += 1
-                    found_any_replacements[normalized_search_text] = True
-                    
                     # 获取页数
                     page_num = _get_page_number(search_rng)
                     page_info = f"第 {page_num} 页" if page_num > 0 else "未知页码"
+
+                    if entry.search_text == investment_placeholder:
+                        following_text = _range_following_text(search_rng, rng)
+                        if not INVESTMENT_SUFFIX_PATTERN.match(following_text):
+                            progress_log.debug(
+                                f"    [跳过] {repr(normalized_search_text)} 在 {page_info} 后缀不是 '万元': {repr(following_text)}"
+                            )
+                            search_rng.Collapse(wdCollapseEnd)
+                            continue
+
+                    count += 1
+                    total_stats["total_found"] += 1
+                    found_any_replacements[normalized_search_text] = True
                     
                     try:
                         search_rng.Text = normalized_replace_text

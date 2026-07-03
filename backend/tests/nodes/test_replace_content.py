@@ -410,7 +410,7 @@ def test_project_content_labeled_line_replaces_before_project_name(monkeypatch, 
             "replacements": [
                 (
                     "便携式肌骨超声仪/壹台",
-                    "病房及办公家具\t壹批（项目预算：人民币18万元）",
+                    "病房及办公家具\t壹批",
                 ),
                 ("便携式肌骨超声仪", "病房及办公家具"),
             ],
@@ -418,6 +418,36 @@ def test_project_content_labeled_line_replaces_before_project_name(monkeypatch, 
     )
 
     assert body.text == (
-        "项目名称：病房及办公家具\t壹批（项目预算：人民币18万元）\n"
+        "项目名称：病房及办公家具\t壹批\n"
         "其它位置：病房及办公家具"
     )
+
+
+def test_investment_replacement_only_applies_when_followed_by_wanyuan(monkeypatch, tmp_path) -> None:
+    body = _FakeStory(
+        story_type=1,
+        text="最高投标限价为人民币82.1万元，到场时间1小时，连续工作82.1小时。",
+        page_number=2,
+        offset=0,
+    )
+    doc = _FakeDocument([body])
+
+    _run_replace_content(
+        monkeypatch,
+        tmp_path=tmp_path,
+        doc=doc,
+        state_overrides={
+            "placeholder_mapping": {
+                "project_name": "<PN>",
+                "project_number": "<NO>",
+                "investment": "82.1",
+            },
+            "replacements": [
+                ("82.1", "140"),
+            ],
+        },
+    )
+
+    assert body.text == "最高投标限价为人民币140万元，到场时间1小时，连续工作82.1小时。"
+    assert doc.Comments.Count == 1
+    assert doc.Comments(1).Text == replace_content_module.ERP_COMMENT_LABEL

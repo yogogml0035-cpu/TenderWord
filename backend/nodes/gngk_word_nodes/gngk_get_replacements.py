@@ -22,6 +22,7 @@ from backend.nodes.common_word_nodes.get_replacements_shared import (
     extract_shell_dates,
     extract_submit_date,
     format_public_tender_investment_value,
+    format_public_tender_project_content_v2_value,
     make_public_tender_project_content_labeled_line_extractor,
     make_public_tender_project_content_labeled_line_formatter,
     _strip_project_content_field_label,
@@ -238,7 +239,7 @@ def build_gngk_common_replacement_fields() -> List[ReplacementFieldSpec]:
         ReplacementFieldSpec(
             field_name="project_content_v2",
             fallback_fields=["project_content"],
-            new_value_formatter=_strip_project_content_field_label,
+            new_value_formatter=format_public_tender_project_content_v2_value,
         ),
         ReplacementFieldSpec(
             field_name="project_content_equipment_line",
