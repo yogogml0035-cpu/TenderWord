@@ -594,6 +594,11 @@ def _strip_project_content_field_label(value: Any) -> str:
     return re.sub(rf"^(?:{label_pattern})\s*[：:]\s*", "", text).strip()
 
 
+def format_public_tender_project_content_v2_value(value: Any) -> str:
+    text = _strip_project_content_field_label(value)
+    return re.sub(r"(?:\s*[（(][^（）()]*[）)])+\s*$", "", text).rstrip()
+
+
 def make_public_tender_project_content_labeled_line_extractor(
     label: str,
 ) -> Callable[[str, Any, List[str]], Optional[str]]:
@@ -948,6 +953,7 @@ __all__ = [
     "extract_public_tender_platform",
     "extract_service_fee",
     "format_public_tender_investment_value",
+    "format_public_tender_project_content_v2_value",
     "extract_shell_dates",
     "extract_submit_date",
     "make_public_tender_project_content_labeled_line_extractor",

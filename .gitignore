@@ -28,7 +28,7 @@ env/
 ENV/
 .venv/
 .venv-*
-
+.pytest_tmp/
 # 环境变量（敏感信息）
 .env
 .env.local

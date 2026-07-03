@@ -18,6 +18,7 @@ from backend.nodes.common_word_nodes.get_replacements_shared import (
     extract_public_tender_project_content,
     extract_public_tender_project_content_v2,
     format_public_tender_investment_value,
+    format_public_tender_project_content_v2_value,
     make_public_tender_project_content_labeled_line_extractor,
     make_public_tender_project_content_labeled_line_formatter,
 )
@@ -233,6 +234,15 @@ def test_extract_public_tender_project_content_v2_between_project_name_and_bidde
     )
 
     assert extracted == "便携式肌骨超声仪/壹台"
+
+
+def test_format_public_tender_project_content_v2_value_strips_label_and_trailing_parenthetical() -> None:
+    assert (
+        format_public_tender_project_content_v2_value(
+            "项目名称：病房及办公家具\t壹批（项目预算：人民币18万元）"
+        )
+        == "病房及办公家具\t壹批"
+    )
 
 
 def test_extract_public_tender_buyer_name_matches_service_template() -> None:
@@ -711,6 +721,6 @@ def test_gngk_hw_zc_mock_replacement_run_replaces_project_name_labeled_line(
     )
     assert (
         "便携式肌骨超声仪/壹台",
-        "病房及办公家具\t壹批（项目预算：人民币18万元）",
+        "病房及办公家具\t壹批",
     ) in replacements
     assert ("便携式肌骨超声仪", "病房及办公家具") in replacements
