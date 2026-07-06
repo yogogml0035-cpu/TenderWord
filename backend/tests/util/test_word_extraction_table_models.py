@@ -8,6 +8,50 @@ class _FakeRange:
         self.WordOpenXML = xml
 
 
+class _FakeListFormat:
+    def __init__(self, list_string: str = "") -> None:
+        self.ListString = list_string
+        self.ListType = 1 if list_string else 0
+        value_text = list_string.rstrip(".")
+        self.ListValue = int(value_text or "0") if value_text.isdigit() else 0
+
+
+class _FakeParagraphRange:
+    def __init__(self, start: int, list_string: str = "") -> None:
+        self.Start = start
+        self.End = start + 1
+        self.ListFormat = _FakeListFormat(list_string)
+
+
+class _FakeParagraph:
+    def __init__(self, start: int, list_string: str = "") -> None:
+        self.Range = _FakeParagraphRange(start, list_string)
+
+
+class _FakeTableRange:
+    def __init__(self, start: int, end: int) -> None:
+        self.Start = start
+        self.End = end
+
+
+class _FakeTable:
+    def __init__(self, start: int, end: int) -> None:
+        self.Range = _FakeTableRange(start, end)
+
+
+class _FakeRangeWithParagraphs(_FakeRange):
+    def __init__(self, xml: str) -> None:
+        super().__init__(xml)
+        self.Paragraphs = [
+            _FakeParagraph(10),
+            _FakeParagraph(20, "1."),
+            _FakeParagraph(30, "2."),
+            _FakeParagraph(100, "99."),
+            _FakeParagraph(200),
+        ]
+        self.Tables = [_FakeTable(90, 150)]
+
+
 def test_extract_content_with_table_models_preserves_merge_topology() -> None:
     xml = """
     <pkg:package xmlns:pkg="http://schemas.microsoft.com/office/2006/xmlPackage">
@@ -255,3 +299,27 @@ def test_extract_content_with_table_models_keeps_table_with_w14_paraId_textId() 
     # 表格 markdown 投影也应包含行内容，证明整张表被正确解析。
     assert "| 序号 | 通用名称 | 技术参数 |" in content
     assert "| 1 | 卡线圈 | 工作电压：DC 12V |" in content
+
+
+def test_extract_content_with_table_models_preserves_top_level_auto_numbering() -> None:
+    xml = """
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body>
+        <w:p><w:r><w:t>超声诊断设备技术参数</w:t></w:r></w:p>
+        <w:p><w:r><w:t>成像模式：B模式</w:t></w:r></w:p>
+        <w:p><w:r><w:t>▲产品形态：一体便携式</w:t></w:r></w:p>
+        <w:tbl>
+          <w:tr><w:tc><w:p><w:r><w:t>表格单元格不消耗正文编号</w:t></w:r></w:p></w:tc></w:tr>
+        </w:tbl>
+        <w:p><w:r><w:t>配置清单</w:t></w:r></w:p>
+      </w:body>
+    </w:document>
+    """
+
+    content, models = extract_content_with_table_models(_FakeRangeWithParagraphs(xml))
+
+    assert "1. 成像模式：B模式" in content
+    assert "2. ▲产品形态：一体便携式" in content
+    assert "99. 配置清单" not in content
+    assert "配置清单" in content
+    assert len(models) == 1
