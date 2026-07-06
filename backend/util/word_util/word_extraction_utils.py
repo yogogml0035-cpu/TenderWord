@@ -1053,6 +1053,122 @@ def extract_content_with_tables(range_obj):
                 return ""
 
 
+def _iter_com_collection(collection) -> list[Any]:
+    try:
+        return list(collection)
+    except Exception:
+        pass
+
+    try:
+        count = int(collection.Count)
+        items = []
+        for index in range(1, count + 1):
+            try:
+                items.append(collection(index))
+            except Exception as exc:
+                logger.debug(
+                    f"[_iter_com_collection] 读取 COM 集合项失败（可忽略）: {exc}"
+                )
+        return items
+    except Exception as exc:
+        logger.debug(f"[_iter_com_collection] 读取 COM 集合失败（可忽略）: {exc}")
+        return []
+
+
+def _range_int(range_obj, attr_name: str) -> Optional[int]:
+    try:
+        return int(getattr(range_obj, attr_name))
+    except Exception:
+        return None
+
+
+def _collect_table_ranges(range_obj) -> list[tuple[int, int]]:
+    try:
+        tables = _iter_com_collection(range_obj.Tables)
+    except Exception:
+        return []
+
+    table_ranges: list[tuple[int, int]] = []
+    for table in tables:
+        table_range = getattr(table, "Range", None)
+        start = _range_int(table_range, "Start")
+        end = _range_int(table_range, "End")
+        if start is not None and end is not None:
+            table_ranges.append((start, end))
+    return table_ranges
+
+
+def _is_range_inside_table(
+    paragraph_range,
+    table_ranges: list[tuple[int, int]],
+) -> bool:
+    start = _range_int(paragraph_range, "Start")
+    if start is None:
+        return False
+    return any(
+        table_start <= start < table_end
+        for table_start, table_end in table_ranges
+    )
+
+
+def _paragraph_list_string(paragraph_range) -> str:
+    try:
+        list_format = paragraph_range.ListFormat
+    except Exception:
+        return ""
+
+    has_list = False
+    try:
+        has_list = int(list_format.ListType) > 0
+    except Exception:
+        has_list = False
+
+    try:
+        list_string = str(list_format.ListString or "").strip()
+    except Exception:
+        list_string = ""
+
+    if list_string:
+        return list_string
+    if not has_list:
+        return ""
+
+    try:
+        return f"{int(list_format.ListValue)}.".strip()
+    except Exception:
+        return ""
+
+
+def _collect_top_level_paragraph_list_strings(range_obj) -> list[str]:
+    try:
+        paragraphs = _iter_com_collection(range_obj.Paragraphs)
+    except Exception:
+        return []
+
+    if not paragraphs:
+        return []
+
+    table_ranges = _collect_table_ranges(range_obj)
+    list_strings: list[str] = []
+    for paragraph in paragraphs:
+        paragraph_range = getattr(paragraph, "Range", None)
+        if paragraph_range is None:
+            continue
+        if table_ranges and _is_range_inside_table(paragraph_range, table_ranges):
+            continue
+        list_strings.append(_paragraph_list_string(paragraph_range))
+    return list_strings
+
+
+def _prepend_list_string(para_text: str, list_string: str) -> str:
+    clean_list_string = str(list_string or "").strip()
+    if not clean_list_string:
+        return para_text
+    if para_text.lstrip().startswith(clean_list_string):
+        return para_text
+    return f"{clean_list_string} {para_text}"
+
+
 def extract_content_with_table_models(
     range_obj,
     *,
@@ -1100,6 +1216,8 @@ def extract_content_with_table_models(
             elements.append(("table", match.start(), match.group(1)))
 
         elements.sort(key=lambda value: value[1])
+        paragraph_list_strings = _collect_top_level_paragraph_list_strings(range_obj)
+        paragraph_index = 0
         table_index = 0
         for elem_type, _, content in elements:
             if elem_type == "para":
@@ -1115,8 +1233,14 @@ def extract_content_with_table_models(
                     if run_text:
                         para_texts.append(run_text)
                 para_text = "".join(para_texts)
+                list_string = (
+                    paragraph_list_strings[paragraph_index]
+                    if paragraph_index < len(paragraph_list_strings)
+                    else ""
+                )
+                paragraph_index += 1
                 if para_text.strip():
-                    result_parts.append(para_text)
+                    result_parts.append(_prepend_list_string(para_text, list_string))
                 continue
 
             table_index += 1
