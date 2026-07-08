@@ -193,7 +193,7 @@ def _normalize_comment_items(comments: object) -> list[dict[str, str]]:
     ]
 
 
-def _parse_comment_output(raw_content: str) -> list[dict[str, str]]:
+def parse_comment_output(raw_content: str) -> list[dict[str, str]]:
     last_error: Optional[Exception] = None
 
     for candidate in _build_json_candidates(raw_content):
@@ -476,7 +476,7 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
 
     polished_comments: list[dict[str, str]] = []
     try:
-        polished_comments = _parse_comment_output(content)
+        polished_comments = parse_comment_output(content)
         progress_log.info(
             f"[generate_comments] 生成了 {len(polished_comments)} 条批注指令"
         )
@@ -524,7 +524,7 @@ def generate_comments(state: TenderGraphStateBase, config) -> TenderGraphStateBa
                 progress_log.debug("")
 
             try:
-                repaired_comments = _parse_comment_output(repaired_content)
+                repaired_comments = parse_comment_output(repaired_content)
                 break
             except (json.JSONDecodeError, ValueError) as e:
                 repair_error = e
