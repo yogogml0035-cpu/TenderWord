@@ -64,6 +64,7 @@ class TenderGraphStateBase(BaseState, total=False):
     suppress_ai_comment_writeback: bool
 
     replacements: List[Tuple[str, str]]
+    replacement_fields: List[str]
     placeholder_mapping: Dict[str, str]
     insertion_before_text: str
     insertion_after_text: str

@@ -236,6 +236,20 @@ def test_extract_public_tender_project_content_v2_between_project_name_and_bidde
     assert extracted == "便携式肌骨超声仪/壹台"
 
 
+def test_extract_public_tender_project_content_v2_skips_overlong_capture() -> None:
+    log_parts: list[str] = []
+    long_middle = "A" * 257
+
+    extracted = extract_public_tender_project_content_v2(
+        f"项目名称：{long_middle}\r采购人：上海市浦东新区老年医院",
+        {"project_content": "病房及办公家具\t壹批（项目预算：人民币18万元）"},
+        log_parts,
+    )
+
+    assert extracted is None
+    assert "project_content_v2 命中过长（257 字符），疑似跨段误提取，跳过" in log_parts
+
+
 def test_format_public_tender_project_content_v2_value_strips_label_and_trailing_parenthetical() -> None:
     assert (
         format_public_tender_project_content_v2_value(

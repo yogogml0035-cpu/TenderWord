@@ -68,6 +68,7 @@ def _normalize_replace_text(text: str) -> str:
 
 @dataclass(frozen=True)
 class ReplacementEntry:
+    field_name: str | None
     search_text: str
     replace_text: str
     comment_label: str | None = None
@@ -76,6 +77,7 @@ class ReplacementEntry:
 ERP_COMMENT_LABEL = "ERP数据"
 PROJECT_NAME_FIRST_HIT_COMMENT = "此次文件由AI生成，请业务员不要删除该条批注，由管理组统一删除"
 INVESTMENT_SUFFIX_PATTERN = re.compile(r"^\s*万\s*元")
+WORD_FIND_TEXT_MAX_LEN = 256
 
 
 def _ranges_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
@@ -358,15 +360,34 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
         unprotect_document(doc, node_name="replace_content")
         
         placeholder_mapping = state.get("placeholder_mapping", {}) or {}
-        replacement_entries = [
-            ReplacementEntry(
-                search_text=str(search_text or ""),
-                replace_text=str(replace_text or ""),
-                comment_label=ERP_COMMENT_LABEL if enable_erp_comments else None,
+        replacement_field_names = state.get("replacement_fields") or []
+        replacement_entries: list[ReplacementEntry] = []
+        for idx, replacement in enumerate(replacements or []):
+            field_name = None
+            if idx < len(replacement_field_names):
+                field_name = str(replacement_field_names[idx] or "").strip() or None
+
+            if isinstance(replacement, dict):
+                search_text = replacement.get("search_text")
+                replace_text = replacement.get("replace_text")
+                field_name = str(replacement.get("field_name") or field_name or "").strip() or None
+            else:
+                try:
+                    search_text, replace_text = replacement
+                except Exception:
+                    continue
+
+            if not str(search_text or "").strip():
+                continue
+
+            replacement_entries.append(
+                ReplacementEntry(
+                    field_name=field_name,
+                    search_text=str(search_text or ""),
+                    replace_text=str(replace_text or ""),
+                    comment_label=ERP_COMMENT_LABEL if enable_erp_comments else None,
+                )
             )
-            for search_text, replace_text in (replacements or [])
-            if str(search_text or "").strip()
-        ]
 
         if tender_type_family == "gjgk":
             gjgk_entries, gjgk_state_updates, gjgk_logs = build_gjgk_special_replacements(state)
@@ -430,8 +451,24 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
         header_replacements = []  # 需要遍历页眉和正文的替换
         body_replacements = []    # 只需要遍历正文的替换
         
+        project_content_field_names = {
+            "project_content",
+            "project_content_v1",
+            "project_content_v2",
+        }
+        project_content_field_names.update(
+            key
+            for key in placeholder_mapping.keys()
+            if key.startswith("project_content_") and key.endswith("_line")
+        )
+        header_field_names = {"project_number", "project_name"}
+
         for entry in replacement_entries:
-            if (
+            if entry.field_name in project_content_field_names:
+                project_content_replacements.append(entry)
+            elif entry.field_name in header_field_names:
+                header_replacements.append(entry)
+            elif (
                 entry.search_text == project_content_placeholder
                 or entry.search_text == project_content_v1_placeholder
                 or entry.search_text in project_content_labeled_placeholders
@@ -476,6 +513,20 @@ def replace_content(state: TenderGraphStateBase, config) -> TenderGraphStateBase
                     and entry.search_text == project_name_placeholder
                 )
                 progress_log.debug(f"  [{rep_idx}/{len(replacements_to_process)}] 正在在 [{story_type_name}] 中搜索 {repr(normalized_search_text)}...")
+
+                if len(normalized_search_text) > WORD_FIND_TEXT_MAX_LEN:
+                    total_stats["total_error"] += 1
+                    failed_replacements.append(
+                        (
+                            normalized_search_text,
+                            -1,
+                            f"查找串长度 {len(normalized_search_text)} 超过 Word Find 上限 {WORD_FIND_TEXT_MAX_LEN}，已跳过",
+                        )
+                    )
+                    progress_log.warning(
+                        f"    [跳过] [{story_type_name}] 查找串长度 {len(normalized_search_text)} 超过 Word Find 上限 {WORD_FIND_TEXT_MAX_LEN}"
+                    )
+                    continue
                 
                 # 创建搜索范围的副本，避免丢失原始引用
                 search_rng = rng.Duplicate

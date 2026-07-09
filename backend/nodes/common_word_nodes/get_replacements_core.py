@@ -95,6 +95,19 @@ from backend.states import TenderGraphStateBase
 
 logger = logging.getLogger(__name__)
 
+
+def _replacement_priority(field_name: str) -> tuple[int, str]:
+    """Lower tuple sorts earlier and wins replacement conflicts."""
+    if field_name == "project_number":
+        return (0, field_name)
+    if field_name == "project_name":
+        return (1, field_name)
+    if field_name == "project_content":
+        return (10, field_name)
+    if field_name.startswith("project_content_"):
+        return (20, field_name)
+    return (30, field_name)
+
 def run_get_replacements(
     state: TenderGraphStateBase,
     config: Any,
@@ -256,7 +269,8 @@ def run_get_replacements(
                 log_parts.append("未在文档中找到任何占位符")
 
             # ========== 4. Replacements 生成逻辑 ==========
-            replacements: list[tuple[str, str]] = []
+            replacement_candidates: list[dict[str, str]] = []
+            candidate_index_by_old_value: dict[str, int] = {}
             
             if found_placeholders:
                 # 遍历 replacement_fields 列表生成替换
@@ -302,12 +316,62 @@ def run_get_replacements(
                             f"字段 '{field_name}': 旧值等于新值，跳过"
                         )
                         continue
-                    
-                    # 生成替换对 (old_value, new_value)
-                    replacements.append((old_value, new_value))
-                    log_parts.append(
-                        f"为字段 '{field_name}' 生成替换: '{old_value}' -> '{new_value}'"
-                    )
+
+                    old_value = str(old_value)
+                    new_value = str(new_value)
+                    replacement_candidate = {
+                        "field_name": field_name,
+                        "old_value": old_value,
+                        "new_value": new_value,
+                    }
+                    existing_index = candidate_index_by_old_value.get(old_value)
+                    if existing_index is None:
+                        candidate_index_by_old_value[old_value] = len(replacement_candidates)
+                        replacement_candidates.append(replacement_candidate)
+                        log_parts.append(
+                            f"为字段 '{field_name}' 生成替换: '{old_value}' -> '{new_value}'"
+                        )
+                        continue
+
+                    existing_candidate = replacement_candidates[existing_index]
+                    existing_field_name = existing_candidate["field_name"]
+                    existing_new_value = existing_candidate["new_value"]
+                    current_priority = _replacement_priority(field_name)
+                    existing_priority = _replacement_priority(existing_field_name)
+
+                    if existing_new_value == new_value:
+                        if current_priority < existing_priority:
+                            replacement_candidates[existing_index] = replacement_candidate
+                            log_parts.append(
+                                f"字段 '{field_name}' 与 '{existing_field_name}' 共享占位符 '{old_value}'，"
+                                f"新值一致，保留优先级更高的 '{field_name}'"
+                            )
+                        else:
+                            log_parts.append(
+                                f"字段 '{field_name}' 与 '{existing_field_name}' 共享占位符 '{old_value}'，"
+                                f"新值一致，沿用 '{existing_field_name}'"
+                            )
+                        continue
+
+                    if current_priority < existing_priority:
+                        replacement_candidates[existing_index] = replacement_candidate
+                        log_parts.append(
+                            f"字段 '{field_name}' 与 '{existing_field_name}' 共享占位符 '{old_value}'，"
+                            f"新值冲突，保留优先级更高的 '{field_name}'，跳过 '{existing_field_name}'"
+                        )
+                    else:
+                        log_parts.append(
+                            f"字段 '{field_name}' 与 '{existing_field_name}' 共享占位符 '{old_value}'，"
+                            f"新值冲突，保留 '{existing_field_name}'，跳过 '{field_name}'"
+                        )
+
+                replacements = [
+                    (candidate["old_value"], candidate["new_value"])
+                    for candidate in replacement_candidates
+                ]
+                replacement_fields_aligned = [
+                    candidate["field_name"] for candidate in replacement_candidates
+                ]
                 
                 # 汇总替换结果
                 if not replacements:
@@ -321,6 +385,8 @@ def run_get_replacements(
                         log_parts.append(f"  [{i}] ({old_display}, {new_display})")
             else:
                 log_parts.append("未找到占位符映射，跳过替换生成")
+                replacements = []
+                replacement_fields_aligned = []
             
             # 构建替换日志字符串
             replacement_log = "; ".join(log_parts)
@@ -329,6 +395,7 @@ def run_get_replacements(
             return TenderGraphStateBase(
                 placeholder_mapping=found_placeholders,
                 replacements=replacements,
+                replacement_fields=replacement_fields_aligned,
                 replacement_log=replacement_log
             )
 
