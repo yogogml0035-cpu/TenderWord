@@ -8,6 +8,7 @@ from backend.states import TenderGraphStateBase
 
 @dataclass(frozen=True)
 class GjgkReplacementEntry:
+    field_name: str | None
     search_text: str
     replace_text: str
     comment_label: str | None = None
@@ -58,6 +59,7 @@ def build_gjgk_special_replacements(
         if old_fund_source != mapped_fund_source:
             entries.append(
                 GjgkReplacementEntry(
+                    field_name="fund_source_lx",
                     search_text=old_fund_source,
                     replace_text=mapped_fund_source,
                     comment_label="ERP数据",
@@ -76,6 +78,7 @@ def build_gjgk_special_replacements(
         if old_tender_invitation != new_tender_invitation:
             entries.append(
                 GjgkReplacementEntry(
+                    field_name="tender_invitation",
                     search_text=old_tender_invitation,
                     replace_text=new_tender_invitation,
                     comment_label="ERP数据",
@@ -93,6 +96,7 @@ def build_gjgk_special_replacements(
         if old_delivery_location and old_delivery_location != extracted_delivery_location:
             entries.append(
                 GjgkReplacementEntry(
+                    field_name="delivery_location",
                     search_text=old_delivery_location,
                     replace_text=extracted_delivery_location,
                     comment_label="技术参数数据",

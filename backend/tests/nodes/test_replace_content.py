@@ -451,3 +451,53 @@ def test_investment_replacement_only_applies_when_followed_by_wanyuan(monkeypatc
     assert body.text == "最高投标限价为人民币140万元，到场时间1小时，连续工作82.1小时。"
     assert doc.Comments.Count == 1
     assert doc.Comments(1).Text == replace_content_module.ERP_COMMENT_LABEL
+
+
+def test_replace_content_skips_overlong_find_text(monkeypatch, tmp_path) -> None:
+    body = _FakeStory(story_type=1, text="正文内容", page_number=2, offset=0)
+    doc = _FakeDocument([body])
+
+    result = _run_replace_content(
+        monkeypatch,
+        tmp_path=tmp_path,
+        doc=doc,
+        state_overrides={
+            "placeholder_mapping": {
+                "project_name": "<PN>",
+                "project_number": "<NO>",
+            },
+            "replacements": [
+                ("A" * 257, "B"),
+            ],
+        },
+    )
+
+    assert result["replace_content_done"] is True
+    assert "查找串长度 257 超过 Word Find 上限 256，已跳过" in result["replacement_log"]
+    assert doc.saved is True
+
+
+def test_replace_content_uses_field_identity_for_header_grouping(monkeypatch, tmp_path) -> None:
+    body = _FakeStory(story_type=1, text="正文 <OLD>", page_number=2, offset=0)
+    header = _FakeStory(story_type=7, text="页眉 <OLD>", page_number=2, offset=10000)
+    doc = _FakeDocument([body, header])
+
+    _run_replace_content(
+        monkeypatch,
+        tmp_path=tmp_path,
+        doc=doc,
+        state_overrides={
+            "placeholder_mapping": {
+                "project_name": "<OLD>",
+                "project_content_v2": "<OLD>",
+                "project_number": "<NO>",
+            },
+            "replacements": [
+                ("<OLD>", "新项目名"),
+            ],
+            "replacement_fields": ["project_name"],
+        },
+    )
+
+    assert body.text == "正文 新项目名"
+    assert header.text == "页眉 新项目名"

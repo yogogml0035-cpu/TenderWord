@@ -641,6 +641,7 @@ def extract_public_tender_project_content_v2(
     if not doc_content or not state.get("project_content"):
         return None
 
+    max_safe_find_length = 256
     search_text = doc_content[:5000] if len(doc_content) > 5000 else doc_content
     pattern = re.compile(
         r"项目名称\s*[：:]\s*(?P<value>.*?)"
@@ -653,6 +654,11 @@ def extract_public_tender_project_content_v2(
         return None
 
     extracted = match.group("value").strip().rstrip("\x07").strip()
+    if len(extracted) > max_safe_find_length:
+        log_parts.append(
+            f"project_content_v2 命中过长（{len(extracted)} 字符），疑似跨段误提取，跳过"
+        )
+        return None
     if extracted:
         log_parts.append(f"提取 project_content_v2: {extracted}")
         return extracted
