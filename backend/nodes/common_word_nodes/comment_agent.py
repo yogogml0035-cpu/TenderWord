@@ -293,12 +293,40 @@ def _state_from_writeback(
         writeback_result=writeback_result,
     )
     summary = str(summary_payload["summary"])
+
+    # 累加 update_word 阶段已写入的更正批注计数，避免 agent 普通批注摘要覆盖。
+    prev_added = 0
+    prev_failed = 0
+    prev_skipped = 0
+    prev_summary = str(state.get("comment_writeback_summary") or "").strip()
+    try:
+        prev_added = max(0, int(state.get("comment_writeback_added") or 0))
+        prev_failed = max(0, int(state.get("comment_writeback_failed") or 0))
+        prev_skipped = max(0, int(state.get("comment_writeback_skipped") or 0))
+    except (TypeError, ValueError):
+        pass
+    if prev_added or prev_failed or prev_skipped:
+        summary_payload = {
+            **summary_payload,
+            "added": int(summary_payload["added"]) + prev_added,
+            "failed": int(summary_payload["failed"]) + prev_failed,
+            "skipped": int(summary_payload["skipped"]) + prev_skipped,
+            "generated": int(summary_payload["generated"]) + prev_added + prev_failed + prev_skipped,
+        }
+        summary_payload["warning"] = (
+            int(summary_payload["generated"]) > 0 and int(summary_payload["failed"]) > 0
+        )
+        prefix = f"含更正批注累计；{prev_summary}；" if prev_summary else "含更正批注累计；"
+        summary = f"{prefix}{summary_payload['summary']}"
+        summary_payload["summary"] = summary
+
     if summary_payload["warning"]:
         progress_log.warning(summary)
     else:
         progress_log.info(summary)
 
     issues = writeback_result.get("issues", [])
+    prev_errors = list(state.get("comment_writeback_errors") or [])
     new_state = dict(state)
     previous_log = str(new_state.get("insertion_log") or "").strip()
     log_text = "; ".join(part for part in insertion_log_parts if part)
@@ -310,7 +338,7 @@ def _state_from_writeback(
     new_state["comment_writeback_added"] = int(summary_payload["added"])
     new_state["comment_writeback_failed"] = int(summary_payload["failed"])
     new_state["comment_writeback_skipped"] = int(summary_payload["skipped"])
-    new_state["comment_writeback_errors"] = [
+    new_state["comment_writeback_errors"] = prev_errors + [
         {
             "reference_text": issue.get("reference_text", ""),
             "reason": issue.get("reason", ""),

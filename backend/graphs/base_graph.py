@@ -28,12 +28,14 @@ from typing import Callable, Any, Optional, TextIO, Type, TypedDict
 
 from backend.config.settings import settings
 from backend.util.log_util.progress_log import progress_log
+from backend.nodes.common_word_nodes.annotate_corrections import annotate_corrections
 from backend.nodes.common_word_nodes.comment_agent import comment_agent_writeback
 from backend.nodes.common_word_nodes.content_agent_generate import content_agent_generate
 
 
 NODE_GENERATE_POLISHED_TEXT = "generate_polished_text"
 NODE_CONTENT_AGENT = "content_agent"
+NODE_ANNOTATE_CORRECTIONS = "annotate_corrections"
 NODE_COMMENT_AGENT = "comment_agent"
 
 
@@ -220,6 +222,7 @@ TRACKED_PROGRESS_NODES = {
     "rewrite_text",
     NODE_GENERATE_POLISHED_TEXT,
     NODE_CONTENT_AGENT,
+    NODE_ANNOTATE_CORRECTIONS,
     "generate_comments",
     NODE_COMMENT_AGENT,
     "prepare_comment_supplement",
@@ -470,6 +473,7 @@ class StandardTenderWorkflowGraph(BaseGraph):
             "prepare_template",
             "extract_tender_params",
             generation_node,
+            NODE_ANNOTATE_CORRECTIONS,
             "update_word",
         }
         if generation_mode == "agent" and comment_generation_enabled:
@@ -520,6 +524,10 @@ class StandardTenderWorkflowGraph(BaseGraph):
         builder.add_node("generation_mode_gate", self.wrap_node("generation_mode_gate", generation_mode_gate))
         builder.add_node(NODE_GENERATE_POLISHED_TEXT, self.wrap_node(NODE_GENERATE_POLISHED_TEXT, node_generate_polished_text))
         builder.add_node(NODE_CONTENT_AGENT, self.wrap_node(NODE_CONTENT_AGENT, node_content_agent_generate))
+        builder.add_node(
+            NODE_ANNOTATE_CORRECTIONS,
+            self.wrap_node(NODE_ANNOTATE_CORRECTIONS, annotate_corrections),
+        )
         builder.add_node("comments_branch_done", self.wrap_node("comments_branch_done", comments_branch_done))
         builder.add_node("generate_comments", self.wrap_node("generate_comments", node_generate_comments))
         builder.add_node("update_word", self.wrap_node("update_word", node_update_word))
@@ -540,15 +548,17 @@ class StandardTenderWorkflowGraph(BaseGraph):
                 NODE_CONTENT_AGENT: NODE_CONTENT_AGENT,
             },
         )
+        # workflow / agent 最终正文汇合后，统一走条款标识规范化与更正批注标注。
+        builder.add_edge(NODE_GENERATE_POLISHED_TEXT, NODE_ANNOTATE_CORRECTIONS)
+        builder.add_edge(NODE_CONTENT_AGENT, NODE_ANNOTATE_CORRECTIONS)
         builder.add_conditional_edges(
-            NODE_GENERATE_POLISHED_TEXT,
-            self._select_after_workflow_generation_node,
+            NODE_ANNOTATE_CORRECTIONS,
+            self._select_after_annotate_node,
             {
                 "generate_comments": "generate_comments",
                 "comments_branch_done": "comments_branch_done",
             },
         )
-        builder.add_edge(NODE_CONTENT_AGENT, "comments_branch_done")
         builder.add_edge("generate_comments", "comments_branch_done")
         builder.add_edge(["word_operations_subgraph", "comments_branch_done"], "update_word")
         after_update_target = post_update_steps[0][0] if post_update_steps else END
@@ -574,7 +584,10 @@ class StandardTenderWorkflowGraph(BaseGraph):
         return NODE_CONTENT_AGENT if state.get("generation_mode") == "agent" else NODE_GENERATE_POLISHED_TEXT
 
     @classmethod
-    def _select_after_workflow_generation_node(cls, state) -> str:
+    def _select_after_annotate_node(cls, state) -> str:
+        # workflow 且开启普通批注时走 generate_comments；agent 的普通批注在 update_word 后由 comment_agent 写。
+        if state.get("generation_mode") == "agent":
+            return "comments_branch_done"
         return "generate_comments" if cls._is_comment_generation_enabled(state) else "comments_branch_done"
 
     @classmethod

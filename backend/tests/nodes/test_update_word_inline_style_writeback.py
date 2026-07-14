@@ -196,11 +196,39 @@ def _patch_update_runtime(
         lambda *args, **kwargs: (False, None),
     )
     monkeypatch.setattr(module, "multi_pass_cleanup", lambda *args, **kwargs: None)
+    def _fake_apply_comments(**kwargs):
+        result = comment_result or {
+            "total": 0,
+            "attempted": 0,
+            "added": 0,
+            "failed": 0,
+            "skipped": 0,
+            "issues": [],
+        }
+        state = kwargs.get("state") or {}
+        try:
+            generated = int(state.get("generated_comment_count") or 0)
+        except (TypeError, ValueError):
+            generated = 0
+        if generated <= 0:
+            generated = int(result.get("total") or 0)
+        added = int(result.get("added") or 0)
+        failed = int(result.get("failed") or 0)
+        skipped = int(result.get("skipped") or 0)
+        summary = {
+            "summary": f"AI批注写入: 生成={generated}, 成功={added}, 失败={failed}, 跳过={skipped}",
+            "generated": generated,
+            "added": added,
+            "failed": failed,
+            "skipped": skipped,
+            "warning": generated > 0 and failed > 0,
+        }
+        return result, summary
+
     monkeypatch.setattr(
         module,
-        "write_polished_comments",
-        lambda **_kwargs: comment_result
-        or {"added": 0, "failed": 0, "skipped": 0, "issues": []},
+        "apply_correction_and_ai_comments",
+        _fake_apply_comments,
     )
     monkeypatch.setattr(module, "close_word_application", lambda **_kwargs: None)
 
@@ -279,10 +307,29 @@ def _patch_gjgk_update_runtime(
         lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(gjgk_update_module, "cleanup_blank_paragraphs", lambda *args, **kwargs: None)
+    def _fake_gjgk_apply_comments(**_kwargs):
+        result = {
+            "total": 0,
+            "attempted": 0,
+            "added": 0,
+            "failed": 0,
+            "skipped": 0,
+            "issues": [],
+        }
+        summary = {
+            "summary": "AI批注写入: 生成=0, 成功=0, 失败=0, 跳过=0",
+            "generated": 0,
+            "added": 0,
+            "failed": 0,
+            "skipped": 0,
+            "warning": False,
+        }
+        return result, summary
+
     monkeypatch.setattr(
         gjgk_update_module,
-        "write_polished_comments",
-        lambda **_kwargs: {"added": 0, "failed": 0, "skipped": 0, "issues": []},
+        "apply_correction_and_ai_comments",
+        _fake_gjgk_apply_comments,
     )
     monkeypatch.setattr(
         gjgk_update_module,

@@ -161,18 +161,21 @@ def test_generation_agents_drop_scoring_sections() -> None:
 
 
 def test_generate_prompts_generalize_importance_markers_with_delta() -> None:
-    """重要性标识规则泛化为 ★/▲/△/Δ/*/#/※/●，并给出 Δ 示例。"""
+    """重要性标识规则泛化为 ★/▲/△/Δ/*/#/※/●，并要求规范为 ▲/★。"""
     template_rendered = render_generate_by_template_prompt(build_prompt_input())
     param_rendered = render_generate_by_param_prompt(build_prompt_input(generation_style="param"))
 
     for rendered in (template_rendered, param_rendered):
         assert "★/▲/△/Δ/*/#/※/●" in rendered.system_prompt
 
-    # template 的符号白名单显式列出 Δ，并给出 Symbol 字体示例。
+    # template 的符号白名单显式列出 Δ，并给出规范化 few-shot。
     assert "Symbol 字体抽取出的 `Δ`" in template_rendered.system_prompt
     assert "Δ3.1.1" in template_rendered.system_prompt
-    # param 的标识保留规则显式包含 Δ。
+    assert "标识字形规范化" in template_rendered.system_prompt
+    assert "`△1.1.1.4 管仓设计`→`▲1.1.1.4 管仓设计`" in template_rendered.system_prompt
+    # param 同样要求规范字形。
     assert "Symbol 字体抽取出的 `Δ`" in param_rendered.system_prompt
+    assert "△/Δ…" in param_rendered.system_prompt or "△/Δ" in param_rendered.system_prompt
 
 
 def test_generate_prompts_exclude_technical_symbols_from_marker_whitelist() -> None:

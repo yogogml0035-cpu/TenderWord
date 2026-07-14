@@ -152,8 +152,9 @@
 4. `_submit_graph_task()` 调用 `TaskQueueManager.add_task()` 并把 `_run_graph()` 提交到后台线程池 (`backend/services/document_service.py:709`)。
 5. `_run_graph()` 实例化 graph、估算节点总数、编译 graph、创建独立 event loop 并调用 `_invoke_graph_async()` (`backend/services/document_service.py:1016`)。
 6. `invoke_with_timing_async()` 先 `wait_for_turn()`，再获取 `CrossProcessFileLock`，登记运行中的 async task，并执行 compiled graph (`backend/graphs/base_graph.py`)。
-7. `StandardTenderWorkflowGraph.build_graph()` 执行 `prepare_template -> extract_tender_params`，并行进入 Word 子图（`word_operations_subgraph`）和生成分支，经 `generation_mode_gate` 选择 `generate_polished_text` 或 `content_agent`，汇合到 `comments_branch_done`，再进入 `update_word`，最后按 `_select_after_update_node` 决定是否走 `comment_agent` (`backend/graphs/base_graph.py:491`)。
-8. `DocumentService` 收敛 output file、file size、model、style/comment writeback summary，并通过 task queue 与 `SSEManager` 推送 `done` 或 `error` (`backend/core/sse_manager.py`)。
+7. `StandardTenderWorkflowGraph.build_graph()` 执行 `prepare_template -> extract_tender_params`，并行进入 Word 子图（`word_operations_subgraph`）和生成分支，经 `generation_mode_gate` 选择 `generate_polished_text` 或 `content_agent`；两路最终正文汇合到共享 `annotate_corrections`（条款标识规范化 + `correction_comments`），再进入普通批注分支/`comments_branch_done` 与 `update_word`，最后按 `_select_after_update_node` 决定是否走 `comment_agent`（`backend/graphs/base_graph.py`）。`annotate_corrections` 仅首次生成接入，rewrite 图不接入。
+8. `update_word`（含 gjgk/gngk 特化写回）先写 `correction_comments` 再写普通 `polished_comments`；`suppress_ai_comment_writeback` / `comment_generation_mode=off` 只跳过普通 AI 批注，不跳过更正批注。agent 模式下后续 `comment_agent` 累计写回统计时保留更正批注计数。
+9. `DocumentService` 收敛 output file、file size、model、style/comment writeback summary，并通过 task queue 与 `SSEManager` 推送 `done` 或 `error` (`backend/core/sse_manager.py`)。
 
 ### Rewrite 智能体链路
 

@@ -26,8 +26,7 @@ from backend.config.tender_config import (
     get_protected_field_profile,
 )
 from backend.nodes.common_word_nodes.comment_writeback import (
-    build_comment_writeback_summary_payload,
-    write_polished_comments,
+    apply_correction_and_ai_comments,
 )
 from backend.helper.word_helper.protected_fields import (
     collect_profile_protected_fields,
@@ -1093,52 +1092,38 @@ def gngk_fw_zc_update_word(
                     )
                     comment_step_label = "步骤6"
 
-                if suppress_ai_comment_writeback:
-                    insertion_log_parts.append(
-                        f"{comment_step_label}：agent 模式跳过确定性批注写入，交由 comment_agent 处理。"
-                    )
-                else:
-                    polished_comments = state.get("polished_comments") or []
-                    generated_count = state.get("generated_comment_count", 0)
-
-                    comment_writeback_result = write_polished_comments(
-                        doc=doc,
-                        polished_comments=polished_comments,
-                        bound_start=int(insertion_bound_start),
-                        bound_end=int(get_insertion_bound_end()),
-                        log_parts=insertion_log_parts,
-                        step_label=comment_step_label,
-                    )
-
-                    summary_payload = build_comment_writeback_summary_payload(
-                        generated_count=generated_count,
-                        writeback_result=comment_writeback_result,
-                    )
-                    added = summary_payload["added"]
-                    failed = summary_payload["failed"]
-                    skipped = summary_payload["skipped"]
-                    issues = comment_writeback_result.get("issues", [])
-
-                    summary = summary_payload["summary"]
-                    if not suppress_comment_progress_logs:
-                        if summary_payload["warning"]:
-                            progress_log.warning(summary)
-                        else:
-                            progress_log.info(summary)
-
-                    comment_writeback_summary = summary
-                    comment_writeback_result_payload = summary_payload
-                    comment_writeback_added = added
-                    comment_writeback_failed = failed
-                    comment_writeback_skipped = skipped
-                    comment_writeback_errors = [
-                        {
-                            "reference_text": issue.get("reference_text", ""),
-                            "reason": issue.get("reason", ""),
-                            "error": issue.get("error", ""),
-                        }
-                        for issue in issues
-                    ]
+                comment_writeback_result, summary_payload = apply_correction_and_ai_comments(
+                    doc=doc,
+                    state=state,
+                    bound_start=int(insertion_bound_start),
+                    bound_end=int(get_insertion_bound_end()),
+                    log_parts=insertion_log_parts,
+                    step_label=comment_step_label,
+                    suppress_ai_comment_writeback=suppress_ai_comment_writeback,
+                )
+                added = summary_payload["added"]
+                failed = summary_payload["failed"]
+                skipped = summary_payload["skipped"]
+                issues = comment_writeback_result.get("issues", [])
+                summary = summary_payload["summary"]
+                if not suppress_comment_progress_logs:
+                    if summary_payload["warning"]:
+                        progress_log.warning(summary)
+                    else:
+                        progress_log.info(summary)
+                comment_writeback_summary = summary
+                comment_writeback_result_payload = summary_payload
+                comment_writeback_added = added
+                comment_writeback_failed = failed
+                comment_writeback_skipped = skipped
+                comment_writeback_errors = [
+                    {
+                        "reference_text": issue.get("reference_text", ""),
+                        "reason": issue.get("reason", ""),
+                        "error": issue.get("error", ""),
+                    }
+                    for issue in issues
+                ]
 
             doc.Save()
             insertion_log_parts.append("文档已保存。")

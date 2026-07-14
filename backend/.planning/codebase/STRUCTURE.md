@@ -87,8 +87,9 @@ backend/
 
 **`backend/nodes/common_word_nodes/`:**
 - 职责： 共享 graph 节点，覆盖模板准备、抽参、删除、替换、正文生成、批注生成、agent 节点、补充批注和写回，以及公共招标正文抽取的共享能力。
-- 包含： `prepare_template.py`, `extract_tender_params.py`, `delete_tender_param.py`, `replace_content.py`, `generate_polished_text.py`, `generate_comments.py`, `content_agent_generate.py`, `comment_agent.py`, `comment_supplement.py`, `update_word.py`, `get_replacements_core.py`, `get_replacements_shared.py`（`extract_public_tender_project_content_v2` 与 labeled line extractor/formatter）, `get_rewrite_comments.py`
-- 关键文件： `backend/nodes/common_word_nodes/update_word.py`, `backend/nodes/common_word_nodes/generate_comments.py`, `backend/nodes/common_word_nodes/comment_agent.py`, `backend/nodes/common_word_nodes/get_replacements_shared.py`
+- 包含： `prepare_template.py`, `extract_tender_params.py`, `delete_tender_param.py`, `replace_content.py`, `generate_polished_text.py`, `annotate_corrections.py`（首次生成条款标识规范化与更正批注候选）, `generate_comments.py`, `content_agent_generate.py`, `comment_agent.py`, `comment_supplement.py`, `update_word.py`, `comment_writeback.py`（含更正批注优先写入）, `get_replacements_core.py`, `get_replacements_shared.py`（`extract_public_tender_project_content_v2` 与 labeled line extractor/formatter）, `get_rewrite_comments.py`
+- 关键文件： `backend/nodes/common_word_nodes/update_word.py`, `backend/nodes/common_word_nodes/annotate_corrections.py`, `backend/nodes/common_word_nodes/generate_comments.py`, `backend/nodes/common_word_nodes/comment_agent.py`, `backend/nodes/common_word_nodes/get_replacements_shared.py`
+- 条款标识规范化 helper：`backend/helper/word_helper/clause_marker_normalize.py`
 
 **`backend/nodes/gngk_word_nodes/`:**
 - 职责： 国内公开类型差异节点（货物/服务 × 自筹/财政）。
