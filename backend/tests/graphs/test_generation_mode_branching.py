@@ -233,3 +233,87 @@ def test_standard_graph_registers_current_comment_topology_only(monkeypatch) -> 
     }
     assert "annotate_corrections" in graph_nodes
     assert removed_nodes.isdisjoint(graph_nodes)
+
+
+def test_agent_comment_route_recovers_modes_from_configurable(monkeypatch) -> None:
+    """state 丢键时，comments_branch_done + 路由应从 configurable 恢复 agent 批注链路。"""
+    calls: list[str] = []
+
+    def _content_node(state, config=None):
+        calls.append("content_agent")
+        # 模拟节点只回写正文契约字段，不带回 generation_mode。
+        return {"polished_text": "agent text", "generate_polished_done": True}
+
+    def _annotate_node(state, config=None):
+        calls.append("annotate_corrections")
+        return {
+            "polished_text": state.get("polished_text"),
+            "correction_comments": [
+                {
+                    "reference_text": "▲1.1",
+                    "comment_text": '原技术参数为“△1.1”，现改为“▲1.1”',
+                }
+            ],
+        }
+
+    def _update_node(state, config=None):
+        calls.append("update_word")
+        # 模拟 fan-in 后 mode 丢失：仅保留写回结果。
+        return {
+            "prepared_doc_path": "D:/UploadFiles/output.docx",
+            "comment_writeback_added": 1,
+            "comment_writeback_failed": 0,
+        }
+
+    def _comment_agent_node(state, config=None):
+        calls.append("comment_agent")
+        assert state.get("generation_mode") == "agent"
+        assert state.get("comment_generation_mode") == "on"
+        return {"comment_writeback_result": {"generated": 1, "added": 1}}
+
+    def _identity(state, config=None):
+        return {}
+
+    monkeypatch.setattr(base_graph_module, "annotate_corrections", _annotate_node)
+
+    class _RecoveryGraph(StandardTenderWorkflowGraph):
+        STATE_CLS = TenderGraphStateBase
+        NODE_PREPARE_TEMPLATE = _identity
+        NODE_EXTRACT_TENDER_PARAMS = staticmethod(
+            lambda state, config=None: {
+                "tender_params": "params",
+                "template_reference_text": "template",
+            }
+        )
+        NODE_DELETE_TENDER_PARAM = _identity
+        NODE_GET_REPLACEMENTS = _identity
+        NODE_REPLACE_CONTENT = _identity
+        NODE_GENERATE_POLISHED_TEXT = _identity
+        NODE_CONTENT_AGENT_GENERATE = staticmethod(_content_node)
+        NODE_GENERATE_COMMENTS = _identity
+        NODE_UPDATE_WORD = staticmethod(_update_node)
+        NODE_COMMENT_AGENT = staticmethod(_comment_agent_node)
+
+    result = _RecoveryGraph().compile().invoke(
+        {
+            # 初始不带 mode，只靠 configurable 注入（模拟 state 丢键后的回退路径）。
+            "prepared_doc_path": "D:/UploadFiles/template.docx",
+            "insertion_before_text": "before",
+            "insertion_after_text": "after",
+        },
+        config={
+            "configurable": {
+                "generation_mode": "agent",
+                "comment_generation_mode": "on",
+                "model_provider": "deepseek",
+            }
+        },
+    )
+
+    assert "content_agent" in calls
+    assert "annotate_corrections" in calls
+    assert "comment_agent" in calls
+    assert calls[-2:] == ["update_word", "comment_agent"]
+    assert result["generation_mode"] == "agent"
+    assert result["comment_generation_mode"] == "on"
+    assert result["suppress_ai_comment_writeback"] is True

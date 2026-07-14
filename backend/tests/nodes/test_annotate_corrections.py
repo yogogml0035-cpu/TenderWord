@@ -78,3 +78,26 @@ def test_annotate_corrections_skips_llm_when_no_params(monkeypatch) -> None:
     assert called["n"] == 0
     assert result["polished_text"] == "▲1 条款"
     assert result["correction_comments"]
+
+
+def test_run_annotation_llm_passes_temperature_via_extra_params(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def _fake_stream(**kwargs):
+        captured.update(kwargs)
+        return "[]"
+
+    monkeypatch.setattr(
+        "backend.nodes.common_word_nodes.annotate_corrections.stream_llm_completion",
+        _fake_stream,
+    )
+    from backend.nodes.common_word_nodes.annotate_corrections import _run_annotation_llm
+
+    comments = _run_annotation_llm(
+        tender_params="原参数",
+        polished_text="现正文",
+        model_provider="deepseek",
+    )
+    assert comments == []
+    assert "temperature" not in captured
+    assert captured.get("extra_params_override") == {"temperature": 0.1}

@@ -1053,6 +1053,16 @@ class DocumentService:
         }.get(task_kind, "任务完成")
         callback.push_log(f"开始执行{task_label}: {task_id}")
         progress_log.info(f"[Task] 开始执行任务: {task_id}")
+        if task_kind == "generate":
+            generation_mode = str(initial_state.get("generation_mode") or "workflow").strip()
+            comment_generation_mode = str(
+                initial_state.get("comment_generation_mode") or "on"
+            ).strip()
+            progress_log.info(
+                f"[Task] generate 模式: generation_mode={generation_mode}, "
+                f"comment_generation_mode={comment_generation_mode}, "
+                f"tender_type={initial_state.get('tender_type')}"
+            )
         stdout_writer = _DiscardingWriter()
         stderr_writer = _DiscardingWriter()
         rewrite_cleanup_holder: Dict[str, str] = {}
@@ -1063,6 +1073,10 @@ class DocumentService:
             try:
                 total_nodes = graph_instance.estimate_total_nodes(initial_state)
                 self._task_queue.set_total_nodes(task_id, total_nodes)
+                if task_kind == "generate":
+                    progress_log.info(
+                        f"[Task] 预计进度节点数 total_nodes={total_nodes}"
+                    )
             except Exception:
                 # 总步数估算失败不影响主流程，回退默认值
                 pass
@@ -1423,11 +1437,17 @@ class DocumentService:
             task_audit_log_path or rewrite_log_path or ""
         ).strip()
 
-        # 配置
+        # 配置：generate-only 模式字段写入 configurable，供图路由在 state 丢键时回退。
+        generation_mode = str(initial_state.get("generation_mode") or "workflow").strip()
+        comment_generation_mode = str(
+            initial_state.get("comment_generation_mode") or "on"
+        ).strip()
         config = {
             "configurable": {
                 "task_id": task_id,
                 "task_kind": task_kind,
+                "generation_mode": generation_mode,
+                "comment_generation_mode": comment_generation_mode,
                 "llm_stream_callback": llm_relay.on_snapshot,
                 "llm_stream_complete_callback": llm_relay.flush,
                 "agent_step_callback": callback.push_agent_step,

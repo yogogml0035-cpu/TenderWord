@@ -130,6 +130,7 @@ def _run_annotation_llm(
         marker_already_applied=True,
     )
     # 标注失败不阻断生成：捕获异常并返回空列表。
+    # 同步节点内新建 loop 调用异步 LLM（与 generate_polished_text 同类节点一致）。
     try:
         loop = asyncio.new_event_loop()
         try:
@@ -140,7 +141,7 @@ def _run_annotation_llm(
                     system_prompt=_CORRECTION_SYSTEM,
                     user_prompt=user_prompt,
                     callbacks=StreamCallbacks(),
-                    temperature=0.1,
+                    extra_params_override={"temperature": 0.1},
                 )
             )
         finally:
