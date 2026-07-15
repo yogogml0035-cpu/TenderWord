@@ -1,8 +1,8 @@
 # TenderWord 系统地图
 
-**生成日期：** 2026-06-29
+**生成日期：** 2026-07-15
 
-本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它基于 2026-06-29 刷新的子项目事实文档（`backend/.planning/codebase/` 与 `frontend/.planning/codebase/`）和根级 `AGENTS.md`、`ARCHITECTURE.md`、`INTERFACES.md`，不替代代码真源、不替代根级文档的执行红线，也不替代子项目事实文档。子项目实现细节请直接看对应 `.planning/codebase/`，本地图只保留系统层。
+本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它基于 2026-07-15 刷新的子项目事实文档（`backend/.planning/codebase/` 与 `frontend/.planning/codebase/`）和根级 `AGENTS.md`、`ARCHITECTURE.md`、`INTERFACES.md`，不替代代码真源、不替代根级文档的执行红线，也不替代子项目事实文档。子项目实现细节请直接看对应 `.planning/codebase/`，本地图只保留系统层。
 
 ## 系统目的与仓库形态
 
@@ -41,7 +41,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 4. `frontend/lib/formDataConverter.ts` 把前端 `TenderType` 转为后端 `GenerateRequest`，只提交 `file_paths.template` 与 `file_paths.tender_params`；其中 `gngk` 后端 `form_type` 由共享 helper `frontend/lib/gngkFormType.ts`（`resolveGngkFormType`）按 `tender_lx + fund_lx + ifzgcg` 分派。
 5. `frontend/lib/api.ts` 的 `createGenerateTask()` 调用 `POST /api/generate`。
 6. `backend/api/generate.py` 委派 `backend/services/document_service.py`；`DocumentService` 从 `GRAPH_REGISTRY`（6 种 form type）选 graph，`_build_initial_state()` 装配初始 state（只写 `template_path` + `tender_param_paths`），`_submit_graph_task()` 提交 `TaskQueueManager`。
-7. `backend/graphs/base_graph.py` 的 `StandardTenderWorkflowGraph` 执行共享主干：`generation_mode_gate` 后 `workflow` 走 `generate_polished_text`、`agent` 走公共 `content_agent`；按 `comment_generation_mode` 决定批注分支；`update_word` 后再按 `generation_mode=agent && comment_generation_mode=on` 决定是否进入公共 `comment_agent`。
+7. `backend/graphs/base_graph.py` 的 `StandardTenderWorkflowGraph` 执行共享主干：`generation_mode_gate` 后 `workflow` 走 `generate_polished_text`、`agent` 走公共 `content_agent`；两路正文在 Word 写回前都经过 `annotate_corrections`，先规范条款标识，再按同包、同对象、同语义槽位比较技术参数与最终正文；仅可确定的参数文字变化写入固定格式更正批注。随后按 `comment_generation_mode` 决定普通批注分支，`update_word` 后再按 `generation_mode=agent && comment_generation_mode=on` 决定是否进入公共 `comment_agent`。
 8. Word 业务逻辑经 `backend/helper/word_helper/` 和 `backend/util/word_util/`；prompt 经 `backend/prompts/`；正文智能体运行时在 `backend/agents/generation/`，批注智能体运行时在 `backend/agents/comments/`。
 9. `generation_mode=agent` 路径中，技术参数结构化表以 `[[TABLE:<id>]]` 作为内部写回入口；占位符识别在 `backend/agents/generation/table_placeholder_utils.py`，按 sidecar 恢复/丢弃在 `backend/helper/word_helper/text_parsing.py`，`table_id` 字符集需与 `backend/util/word_util/table_models.py` 一致。
 10. `DocumentService` 收敛 output file、file size、model、style/comment writeback 摘要，通过 `TaskQueueManager` + `SSEManager` 推送 `done` 或 `error`；前端经 `useChatSSE.ts` 更新任务消息、智能体过程卡和下载入口。

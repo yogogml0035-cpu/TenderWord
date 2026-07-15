@@ -1,13 +1,13 @@
 # 前端技术栈事实地图
 
-**分析日期：** 2026-06-29
+**分析日期：** 2026-07-15
 
-**范围：** 仅 `frontend/` 子项目。依据 `frontend/package.json`、`frontend/package-lock.json`、`frontend/next.config.ts`、`frontend/tsconfig.json`、`frontend/tsconfig.typecheck.json`、`frontend/jest.config.ts`、`frontend/playwright.config.ts`、`frontend/eslint.config.mjs`、`frontend/postcss.config.mjs`、`frontend/.prettierrc`、`frontend/.nvmrc`、`frontend/.npmrc`、`frontend/app/`、`frontend/components/`、`frontend/hooks/`、`frontend/lib/`、`frontend/stores/`、`frontend/types/` 和 `README.md`。`frontend/.env.local` 与 `frontend/.env.local.example` 文件存在；只记录配置键名，不读取 `.env.local` 真实值。
+**范围：** 仅 `frontend/` 子项目。依据 `frontend/package.json`、`frontend/package-lock.json`、`frontend/next.config.ts`、`frontend/tsconfig.json`、`frontend/tsconfig.typecheck.json`、`frontend/jest.config.ts`、`frontend/playwright.config.ts`、`frontend/eslint.config.mjs`、`frontend/postcss.config.mjs`、`frontend/.prettierrc`、`frontend/.nvmrc`、`frontend/.npmrc`、`frontend/app/`、`frontend/components/`、`frontend/hooks/`、`frontend/lib/`、`frontend/stores/`、`frontend/types/` 与相关配置。`frontend/.env.local` 与 `frontend/.env.local.example` 文件存在；只记录配置键名，不读取 `.env.local` 真实值。
 
 ## 语言
 
 **主要语言：**
-- TypeScript（`typescript ^5`，锁版本 5.9.x）- 应用源码、API client、hooks、Zustand store、类型定义、测试配置和 Playwright 配置。代表路径：`frontend/app/tender/page.tsx`、`frontend/components/chat/ChatPanel.tsx`、`frontend/hooks/useChatSSE.ts`、`frontend/lib/api.ts`、`frontend/stores/chatStore.ts`、`frontend/types/api.ts`、`frontend/jest.config.ts`、`frontend/playwright.config.ts`。
+- TypeScript（`typescript ^5`，锁版本 5.9.3）- 应用源码、API client、hooks、Zustand store、类型定义、测试配置和 Playwright 配置。代表路径：`frontend/app/tender/page.tsx`、`frontend/components/chat/ChatPanel.tsx`、`frontend/hooks/useChatSSE.ts`、`frontend/lib/api.ts`、`frontend/stores/chatStore.ts`、`frontend/types/api.ts`、`frontend/jest.config.ts`、`frontend/playwright.config.ts`。
 - TSX / React JSX - Next.js App Router 页面和客户端组件。代表路径：`frontend/app/page.tsx`、`frontend/app/layout.tsx`、`frontend/components/forms/TenderFormShared.tsx`、`frontend/components/chat/MessageList.tsx`。
 
 **辅助语言：**
@@ -33,14 +33,14 @@
 **核心：**
 - Next.js `^16.2.6`（锁版本 16.2.6）- App Router、dev/build/start、`/api/:path*` rewrite、生产 header、图片 remote patterns、React strict mode、devIndicators 关闭和 TypeScript build 校验，见 `frontend/package.json`、`frontend/app/`、`frontend/next.config.ts`。
 - React `19.2.3` / React DOM `19.2.3`（精确版本）- 组件和 hooks runtime，见 `frontend/components/`、`frontend/hooks/`。
-- Zustand `^5.0.11` - 会话、草稿、任务、stream、历史和 UI 状态，见 `frontend/stores/chatStore.ts`、`frontend/stores/chatStreamStore.ts`、`frontend/stores/chatTaskSessionStore.ts`、`frontend/stores/historyStore.ts`、`frontend/stores/useAppStore.ts`。
-- Tailwind CSS `^4`（锁版本 4.2.x）+ `@tailwindcss/postcss ^4` - utility 样式、`@theme inline` 和 PostCSS 插件，见 `frontend/app/globals.css`、`frontend/postcss.config.mjs`（仅注册 `@tailwindcss/postcss` 一个插件）。
+- Zustand `^5.0.11`（锁版本 5.0.11）- 会话、草稿、任务、stream、历史和 UI 状态，见 `frontend/stores/chatStore.ts`、`frontend/stores/chatStreamStore.ts`、`frontend/stores/chatTaskSessionStore.ts`、`frontend/stores/historyStore.ts`、`frontend/stores/useAppStore.ts`。
+- Tailwind CSS `^4`（锁版本 4.2.1）+ `@tailwindcss/postcss ^4` - utility 样式、`@theme inline` 和 PostCSS 插件，见 `frontend/app/globals.css`、`frontend/postcss.config.mjs`（仅注册 `@tailwindcss/postcss` 一个插件）。
 
 **测试：**
-- Jest `^29.7.0` - 单元测试 runner，配置位于 `frontend/jest.config.ts`。
+- Jest `^29.7.0`（锁版本 29.7.0）- 单元测试 runner，配置位于 `frontend/jest.config.ts`。
 - `jest-environment-jsdom ^30.3.0` - DOM 测试环境，见 `frontend/jest.config.ts`。
 - Testing Library - React 组件、hook 和用户事件测试：`@testing-library/react ^16.2.0`、`@testing-library/jest-dom ^6.6.3`、`@testing-library/user-event ^14.6.1`；测试位于 `frontend/__tests__/`。
-- Playwright `^1.58.2` - E2E 测试，配置位于 `frontend/playwright.config.ts`，测试位于 `frontend/e2e/`。
+- Playwright `^1.58.2`（锁版本 1.58.2）- E2E 测试，配置位于 `frontend/playwright.config.ts`，测试位于 `frontend/e2e/`。
 
 **构建/开发：**
 - Next dev server - `npm run dev` 执行 `next dev --webpack -p 8502`（强制 webpack 引擎、固定端口 8502），见 `frontend/package.json`。
@@ -101,7 +101,7 @@ npm run test:e2e
 ## 配置
 
 **环境变量（配置键名）：**
-- `NEXT_PUBLIC_API_URL` - 可选 API base URL 配置键（支持逗号分隔多候选地址）；解析逻辑在 `frontend/lib/apiBaseUrl.ts`，Next rewrite 和开发期 allowed origins 在 `frontend/next.config.ts`。
+- `NEXT_PUBLIC_API_URL` - 可选 API base URL 配置键（支持逗号分隔多候选地址）；解析逻辑在 `frontend/lib/apiBaseUrl.ts`，Next rewrite 和开发期 allowed origins 在 `frontend/next.config.ts`。模板见 `frontend/.env.local.example`。
 - `NODE_ENV` - `frontend/next.config.ts` 用于生产 header 分支。
 - `CI` - `frontend/playwright.config.ts` 用于控制 forbidOnly、retries、workers 和 dev server reuse。
 - `PLAYWRIGHT_USE_SYSTEM_CHROME` - `frontend/playwright.config.ts` 非 CI 环境下控制是否使用系统 Chrome channel（默认开启，`'0'` 关闭）。
@@ -109,14 +109,14 @@ npm run test:e2e
 - `frontend/.env.local.example` 文件存在，记录 `NEXT_PUBLIC_API_URL` 配置键名（示例值可多候选、逗号分隔）。
 
 **构建：**
-- `frontend/next.config.ts`：`allowedDevOrigins`（含 `localhost`、`127.0.0.1` 与 `NEXT_PUBLIC_API_URL` 解析 hostname）、`/api/:path*` rewrite、生产缓存 header、`images.remotePatterns`（仅 `localhost:8000`）、`reactStrictMode: true`、`devIndicators: false`、`typescript.ignoreBuildErrors: false`。
+- `frontend/next.config.ts`：`allowedDevOrigins`（含 `localhost`、`127.0.0.1` 与 `NEXT_PUBLIC_API_URL` 解析 hostname）、`/api/:path*` rewrite 到 `resolveApiBaseUrl()` 结果、生产缓存 header、`images.remotePatterns`（仅 `localhost:8000`）、`reactStrictMode: true`、`devIndicators: false`、`typescript.ignoreBuildErrors: false`。
 - `frontend/tsconfig.json`：`strict: true`、`moduleResolution: bundler`、`jsx: react-jsx`、Next 插件、`@/*` path alias；`exclude` 同时排除 `node_modules` 与 `node_modules-*`（覆盖跨平台依赖目录）。
 - `frontend/tsconfig.typecheck.json`：继承 `tsconfig.json`，type-check 专用，排除 `.next/dev`。
 - `frontend/eslint.config.mjs`：`eslint-config-next/core-web-vitals` + `eslint-config-next/typescript` + `eslint-plugin-react-hooks`（规则 `react-hooks/set-state-in-effect: warn`）；全局 ignore 含 `.next`、`node_modules-*/**`、`coverage`、`playwright-report`、`test-results`。
 - `frontend/.prettierrc`：`semi`、`trailingComma: es5`、`singleQuote`、`printWidth: 100`、`tabWidth: 2`、Tailwind 插件。
 - `frontend/postcss.config.mjs`：仅注册 `@tailwindcss/postcss` 插件。
 - `frontend/jest.config.ts`：`next/jest` 集成、`testEnvironment: jsdom`、`coverageProvider: v8`、`moduleNameMapper: ^@/(.*)$`、`polyfills.js` + `jest.setup.js`、忽略 `node_modules-wsl/`、全局 coverage threshold 50%（branches/functions/lines/statements）。
-- `frontend/playwright.config.ts`：`baseURL: http://localhost:8502`、Chromium 项目（非 CI 默认用系统 Chrome）、HTML reporter、失败截图/视频/trace、`webServer` 复用已运行的 dev server（CI 下不复用）。
+- `frontend/playwright.config.ts`：`baseURL: http://localhost:8502`、Chromium 项目（非 CI 默认用系统 Chrome）、HTML reporter、失败截图/视频/trace、`webServer` 启动 `npm run dev -- --webpack`（CI 下不复用已运行 server）。
 
 **应用入口：**
 - `frontend/app/page.tsx` 直接 `redirect('/tender')`。
@@ -131,12 +131,21 @@ npm run test:e2e
 - `frontend/stores/historyStore.ts` persist 到 `sessionStorage` 的 `tender-history-storage`，保存最近生成历史。
 - `frontend/stores/useAppStore.ts` persist 到 `tender-app-storage`（未显式指定 storage adapter，Zustand 默认 `localStorage`），`partialize` 只保留 `sidebarOpen`。
 
+**Hooks（网络/任务相关）：**
+- `frontend/hooks/useSSE.ts` - 通用 EventSource 连接 hook，封装 `createSSEConnection()`。
+- `frontend/hooks/useChatSSE.ts` - 任务 SSE 事件到 chat/stream store 的映射与终态清理。
+- `frontend/hooks/useTaskHeartbeat.ts` - 周期调用 `sendTaskHeartbeat()`（默认间隔 5s）。
+- `frontend/hooks/useCurrentConversationTaskStatus.ts` - 拉取当前会话任务状态。
+- `frontend/hooks/useLatestActiveTaskSummary.ts` - 任务列表/活跃摘要。
+- `frontend/hooks/useUrlParams.ts` - URL 深链与招标类型 canonical。
+- `frontend/hooks/useHydrated.ts` - persist 水合完成标记。
+
 ## 平台要求
 
 **开发：**
 - 前端开发端口固定 `8502`，脚本见 `frontend/package.json` 的 `dev` / `start`。
 - 后端 API 默认端口 `8000`，前端通过 `NEXT_PUBLIC_API_URL`、`frontend/lib/apiBaseUrl.ts` 和 `frontend/next.config.ts` 对接。
-- `README.md` 记录 Windows/WSL 双模式开发；前端依赖目录可能出现 `frontend/node_modules/`、`frontend/node_modules-wsl/` 或 `frontend/node_modules-win/`，跨平台切换时不要复用原生依赖目录（`tsconfig.json` / `jest.config.ts` 已对 `node_modules-*` 做忽略）。
+- 前端依赖目录可能出现 `frontend/node_modules/`、`frontend/node_modules-wsl/` 或 `frontend/node_modules-win/`，跨平台切换时不要复用原生依赖目录（`tsconfig.json` / `jest.config.ts` 已对 `node_modules-*` 做忽略）。
 - 完整 Word 生成闭环依赖后端 Windows Python、pywin32 和 Word/WPS COM 环境；前端自身只负责浏览器工作台和 API/SSE 接入。
 
 **生产：**
@@ -147,4 +156,4 @@ npm run test:e2e
 
 ---
 
-*前端技术栈分析：2026-06-29*
+*前端技术栈分析：2026-07-15*

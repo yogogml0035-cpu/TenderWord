@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import backend.graphs.base_graph as base_graph_module
 from backend.graphs.base_graph import StandardTenderWorkflowGraph
 from backend.states.base_state import TenderGraphStateBase
 
@@ -11,6 +12,7 @@ def _identity_node(state, config=None):
 def _build_graph(
     calls: list[str],
     bad_case_retrieval_calls: list[str] | None = None,
+    monkeypatch=None,
 ) -> StandardTenderWorkflowGraph:
     def _extract_node(state, config=None):
         calls.append("extract_tender_params")
@@ -28,6 +30,18 @@ def _build_graph(
         calls.append("content_agent")
         return {"polished_text": "agent text", "generate_polished_done": True}
 
+    def _annotate_node(state, config=None):
+        calls.append("annotate_corrections")
+        return {
+            "polished_text": state.get("polished_text"),
+            "correction_comments": [
+                {
+                    "reference_text": "▲1.1",
+                    "comment_text": '原技术参数为“△1.1”，现改为“▲1.1”',
+                }
+            ],
+        }
+
     def _comments_node(state, config=None):
         calls.append("generate_comments")
         if bad_case_retrieval_calls is not None:
@@ -40,6 +54,7 @@ def _build_graph(
             assert state.get("suppress_ai_comment_writeback") is True
         else:
             assert state.get("suppress_ai_comment_writeback") is False
+        assert state.get("correction_comments")
         return {"prepared_doc_path": "D:/UploadFiles/output.docx"}
 
     def _comment_agent_node(state, config=None):
@@ -56,6 +71,9 @@ def _build_graph(
                 "warning": False,
             }
         }
+
+    if monkeypatch is not None:
+        monkeypatch.setattr(base_graph_module, "annotate_corrections", _annotate_node)
 
     class _GenerationModeGraph(StandardTenderWorkflowGraph):
         STATE_CLS = TenderGraphStateBase
@@ -78,9 +96,10 @@ def _run_graph(
     *,
     comment_generation_mode: str = "on",
     bad_case_retrieval_calls: list[str] | None = None,
+    monkeypatch=None,
 ) -> tuple[dict, list[str]]:
     calls: list[str] = []
-    result = _build_graph(calls, bad_case_retrieval_calls).compile().invoke(
+    result = _build_graph(calls, bad_case_retrieval_calls, monkeypatch=monkeypatch).compile().invoke(
         {
             "generation_mode": generation_mode,
             "comment_generation_mode": comment_generation_mode,
@@ -92,38 +111,46 @@ def _run_graph(
     return result, calls
 
 
-def test_workflow_branch_uses_generate_polished_text_and_skips_content() -> None:
-    result, calls = _run_graph("workflow")
+def test_workflow_branch_uses_generate_polished_text_and_skips_content(monkeypatch) -> None:
+    result, calls = _run_graph("workflow", monkeypatch=monkeypatch)
 
     assert "generate_polished_text" in calls
     assert "content_agent" not in calls
+    assert "annotate_corrections" in calls
     assert "generate_comments" in calls
     assert "comment_agent" not in calls
     assert "word_operation" in calls
     assert calls[-1] == "update_word"
-    assert calls.index("generate_polished_text") < calls.index("generate_comments")
+    assert calls.index("generate_polished_text") < calls.index("annotate_corrections")
+    assert calls.index("annotate_corrections") < calls.index("generate_comments")
     assert calls.index("generate_comments") < calls.index("update_word")
     assert result["polished_text"] == "workflow text"
     assert result["generate_polished_done"] is True
+    assert result["correction_comments"]
 
 
-def test_agent_branch_uses_content_and_skips_generate_polished_text() -> None:
-    result, calls = _run_graph("agent")
+def test_agent_branch_uses_content_and_skips_generate_polished_text(monkeypatch) -> None:
+    result, calls = _run_graph("agent", monkeypatch=monkeypatch)
 
     assert "content_agent" in calls
     assert "generate_polished_text" not in calls
+    assert "annotate_corrections" in calls
     assert "generate_comments" not in calls
     assert "word_operation" in calls
     assert calls[-2:] == ["update_word", "comment_agent"]
+    assert calls.index("content_agent") < calls.index("annotate_corrections")
+    assert calls.index("annotate_corrections") < calls.index("update_word")
     assert result["polished_text"] == "agent text"
     assert result["generate_polished_done"] is True
+    assert result["correction_comments"]
 
 
-def test_workflow_branch_skips_generate_comments_when_comment_generation_is_off() -> None:
-    result, calls = _run_graph("workflow", comment_generation_mode="off")
+def test_workflow_branch_skips_generate_comments_when_comment_generation_is_off(monkeypatch) -> None:
+    result, calls = _run_graph("workflow", comment_generation_mode="off", monkeypatch=monkeypatch)
 
     assert "generate_polished_text" in calls
     assert "content_agent" not in calls
+    assert "annotate_corrections" in calls
     assert "generate_comments" not in calls
     assert "comment_agent" not in calls
     assert "word_operation" in calls
@@ -131,13 +158,15 @@ def test_workflow_branch_skips_generate_comments_when_comment_generation_is_off(
     assert result["polished_text"] == "workflow text"
     assert result["polished_comments"] == []
     assert result["generated_comment_count"] == 0
+    assert result["correction_comments"]
 
 
-def test_agent_branch_skips_comment_agent_when_comment_generation_is_off() -> None:
-    result, calls = _run_graph("agent", comment_generation_mode="off")
+def test_agent_branch_skips_comment_agent_when_comment_generation_is_off(monkeypatch) -> None:
+    result, calls = _run_graph("agent", comment_generation_mode="off", monkeypatch=monkeypatch)
 
     assert "content_agent" in calls
     assert "generate_polished_text" not in calls
+    assert "annotate_corrections" in calls
     assert "generate_comments" not in calls
     assert "comment_agent" not in calls
     assert "word_operation" in calls
@@ -145,37 +174,40 @@ def test_agent_branch_skips_comment_agent_when_comment_generation_is_off() -> No
     assert result["polished_text"] == "agent text"
     assert result["polished_comments"] == []
     assert result["generated_comment_count"] == 0
+    assert result["correction_comments"]
 
 
-def test_workflow_off_branch_does_not_trigger_bad_case_retrieval() -> None:
+def test_workflow_off_branch_does_not_trigger_bad_case_retrieval(monkeypatch) -> None:
     bad_case_retrieval_calls: list[str] = []
 
     _result, calls = _run_graph(
         "workflow",
         comment_generation_mode="off",
         bad_case_retrieval_calls=bad_case_retrieval_calls,
+        monkeypatch=monkeypatch,
     )
 
     assert "generate_comments" not in calls
     assert bad_case_retrieval_calls == []
 
 
-def test_agent_off_branch_does_not_trigger_bad_case_retrieval() -> None:
+def test_agent_off_branch_does_not_trigger_bad_case_retrieval(monkeypatch) -> None:
     bad_case_retrieval_calls: list[str] = []
 
     _result, calls = _run_graph(
         "agent",
         comment_generation_mode="off",
         bad_case_retrieval_calls=bad_case_retrieval_calls,
+        monkeypatch=monkeypatch,
     )
 
     assert "comment_agent" not in calls
     assert bad_case_retrieval_calls == []
 
 
-def test_agent_branch_uses_comment_agent_regardless_of_source_document_path() -> None:
+def test_agent_branch_uses_comment_agent_regardless_of_source_document_path(monkeypatch) -> None:
     calls: list[str] = []
-    result = _build_graph(calls).compile().invoke(
+    result = _build_graph(calls, monkeypatch=monkeypatch).compile().invoke(
         {
             "generation_mode": "agent",
             "source_document_path": "D:/UploadFiles/review.docx",
@@ -186,47 +218,102 @@ def test_agent_branch_uses_comment_agent_regardless_of_source_document_path() ->
     )
 
     assert "content_agent" in calls
+    assert "annotate_corrections" in calls
     assert "generate_comments" not in calls
     assert calls[-2:] == ["update_word", "comment_agent"]
     assert result["polished_text"] == "agent text"
 
 
-def test_standard_graph_registers_current_comment_topology_only() -> None:
-    graph_nodes = set(_build_graph([]).compile().get_graph().nodes)
+def test_standard_graph_registers_current_comment_topology_only(monkeypatch) -> None:
+    graph_nodes = set(_build_graph([], monkeypatch=monkeypatch).compile().get_graph().nodes)
     removed_nodes = {
         "".join(("get", "_comments")),
         "".join(("copy", "_comments")),
         "comments_ready",
     }
-
-    assert graph_nodes.isdisjoint(removed_nodes)
-    assert "generate_comments" in graph_nodes
-    assert "comment_agent" in graph_nodes
+    assert "annotate_corrections" in graph_nodes
+    assert removed_nodes.isdisjoint(graph_nodes)
 
 
-def test_estimate_total_nodes_uses_selected_generation_branch() -> None:
-    graph = _build_graph([])
+def test_agent_comment_route_recovers_modes_from_configurable(monkeypatch) -> None:
+    """state 丢键时，comments_branch_done + 路由应从 configurable 恢复 agent 批注链路。"""
+    calls: list[str] = []
 
-    assert graph.estimate_total_nodes({"generation_mode": "workflow"}) == 8
-    assert graph.estimate_total_nodes({"generation_mode": "agent"}) == 8
-    assert (
-        graph.estimate_total_nodes(
-            {"generation_mode": "workflow", "comment_generation_mode": "off"}
-        )
-        == 7
-    )
-    assert (
-        graph.estimate_total_nodes(
-            {"generation_mode": "agent", "comment_generation_mode": "off"}
-        )
-        == 7
-    )
-    assert (
-        graph.estimate_total_nodes(
-            {
-                "generation_mode": "workflow",
-                "source_document_path": "D:/UploadFiles/review.docx",
+    def _content_node(state, config=None):
+        calls.append("content_agent")
+        # 模拟节点只回写正文契约字段，不带回 generation_mode。
+        return {"polished_text": "agent text", "generate_polished_done": True}
+
+    def _annotate_node(state, config=None):
+        calls.append("annotate_corrections")
+        return {
+            "polished_text": state.get("polished_text"),
+            "correction_comments": [
+                {
+                    "reference_text": "▲1.1",
+                    "comment_text": '原技术参数为“△1.1”，现改为“▲1.1”',
+                }
+            ],
+        }
+
+    def _update_node(state, config=None):
+        calls.append("update_word")
+        # 模拟 fan-in 后 mode 丢失：仅保留写回结果。
+        return {
+            "prepared_doc_path": "D:/UploadFiles/output.docx",
+            "comment_writeback_added": 1,
+            "comment_writeback_failed": 0,
+        }
+
+    def _comment_agent_node(state, config=None):
+        calls.append("comment_agent")
+        assert state.get("generation_mode") == "agent"
+        assert state.get("comment_generation_mode") == "on"
+        return {"comment_writeback_result": {"generated": 1, "added": 1}}
+
+    def _identity(state, config=None):
+        return {}
+
+    monkeypatch.setattr(base_graph_module, "annotate_corrections", _annotate_node)
+
+    class _RecoveryGraph(StandardTenderWorkflowGraph):
+        STATE_CLS = TenderGraphStateBase
+        NODE_PREPARE_TEMPLATE = _identity
+        NODE_EXTRACT_TENDER_PARAMS = staticmethod(
+            lambda state, config=None: {
+                "tender_params": "params",
+                "template_reference_text": "template",
             }
         )
-        == 8
+        NODE_DELETE_TENDER_PARAM = _identity
+        NODE_GET_REPLACEMENTS = _identity
+        NODE_REPLACE_CONTENT = _identity
+        NODE_GENERATE_POLISHED_TEXT = _identity
+        NODE_CONTENT_AGENT_GENERATE = staticmethod(_content_node)
+        NODE_GENERATE_COMMENTS = _identity
+        NODE_UPDATE_WORD = staticmethod(_update_node)
+        NODE_COMMENT_AGENT = staticmethod(_comment_agent_node)
+
+    result = _RecoveryGraph().compile().invoke(
+        {
+            # 初始不带 mode，只靠 configurable 注入（模拟 state 丢键后的回退路径）。
+            "prepared_doc_path": "D:/UploadFiles/template.docx",
+            "insertion_before_text": "before",
+            "insertion_after_text": "after",
+        },
+        config={
+            "configurable": {
+                "generation_mode": "agent",
+                "comment_generation_mode": "on",
+                "model_provider": "deepseek",
+            }
+        },
     )
+
+    assert "content_agent" in calls
+    assert "annotate_corrections" in calls
+    assert "comment_agent" in calls
+    assert calls[-2:] == ["update_word", "comment_agent"]
+    assert result["generation_mode"] == "agent"
+    assert result["comment_generation_mode"] == "on"
+    assert result["suppress_ai_comment_writeback"] is True

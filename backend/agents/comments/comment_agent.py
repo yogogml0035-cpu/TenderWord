@@ -53,6 +53,7 @@ COMMENT_AGENT_GENERATION_SYSTEM_PROMPT = """
 4. 同 index 的 comment_text 在校验后不得改写、润色、删减或新增；reference_text 必须精确来自 polished_text，连续、逐字、原标点一致。
 5. 校验完成后必须调用 1 次 write_validated_comments_to_word，把最终 proposed_comments 作为工具参数提交；该工具不直接写 Word，真正写入由运行时在 graph 节点线程执行。重复锚点由写回层确定性扩展，不需要你再修复。
 6. 工具提交完成后，最终只输出简短中文结果摘要；如果未调用工具，则直接输出纯 JSON 数组，不展示额外排障细节。
+7. 你只收到 polished_text，没有原始技术参数，禁止凭猜测生成`原技术参数为“...”，现改为“...”`或“请确认是否修改参数”类差异批注。原技术参数与最终正文的逐字段差异由写回前的专用技术参数差异标注器处理；你只生成当前正文自身可判定的合规、公平和严谨性批注。
 """.strip()
 
 NO_VALID_GENERATED_COMMENTS_NOTICE = (

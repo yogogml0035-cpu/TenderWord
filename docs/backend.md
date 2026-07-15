@@ -29,11 +29,13 @@
   正文写回使用真实段落边界；显式空行属于正文语义，拆块和 cleanup 不得无差别压平。
   参数源表的合并单元格拓扑只在后端内部保留：提取阶段写入 `tender_param_table_models` 侧车，prompt 正文在结构化表位置保留完整表格投影并紧跟 `[[TABLE:table_id]]` 占位符；生成结果需要该表时必须原样保留占位符，写回解析继续兼容相邻投影表反查 sidecar，并按侧车模型恢复 merge。
   带锚点结构化表（`[[TABLE:<id>]]`）的处理按 `generation_style` 区分：评分/评审表在任何生成风格下都删除标题、投影表和锚点；`template` 风格下，一列或仅长句/条款的投影表可展开为普通技术正文并删除锚点，避免写回层重复插入原表；`param` 风格下，非评分锚点表必须锚点直通（锚点独占一行并删除投影表），不得展开成普通正文或改写成另一种表格。该规则由 `verify_agent_graph` 与 `revise_agent_graph` 共同强制，改审核/修订规则时两侧必须同步。
+  首次生成在 workflow/agent 最终正文确定后、Word 写回前，统一经共享 `annotate_corrections` 节点：确定性规范条款标识（三角类→`▲`、星/`*`/`※` 类→`★`，仅行/单元格起点），同步规范化 `tender_param_table_models` 单元格；同时结合项目基础信息，按同包、同对象、同语义槽位逐字比较原始技术参数与最终正文，对名称限定词、同义改写、数字写法、数值/单位/范围、否定词、型号和专有名词等可确定文字变化生成固定口径 `correction_comments`（`原技术参数为“aaa”，现改为“bbb”`）。模板字段壳换名和复合值无损拆格（如 `维保设备→设备名称`、`1套→数量1+单位套`）不标注，但项目名称不得授权设备/维保设备/服务/采购标的名称；候选还要通过原值存在于技术参数、现值与锚点存在于最终正文以及固定句式的代码门禁。rewrite 不接入该节点。
+  Word 写回先写更正批注再写普通 AI 批注；`comment_generation_mode=off` 与 agent 的 `suppress_ai_comment_writeback` 只关闭普通批注，不关闭更正告知。
 
 ## 智能体与生成运行时
 
   `content_agent`、`comment_agent` 和 `agent_step` 是共享运行时契约；类型 graph 不复制智能体分支，过程事件不替代 `done` / `error` 终态。
-  批注与样式写回摘要属于任务结果和 SSE `done` 契约，不得在 state、任务结果或前端下载卡中丢失。
+  批注与样式写回摘要属于任务结果和 SSE `done` 契约，不得在 state、任务结果或前端下载卡中丢失；agent 后续普通批注摘要须累计保留更正批注计数。
   Agent run 只做任务创建前置流；只有 `task_accepted` 才进入后台 task、SSE 和下载链路，`needs_input` 不创建任务也不复制任务状态机。
   上传 Word 文件后的修改统一走 `rewrite`；`/api/edit`、edit skill 和 edit task kind 已删除，不保留兼容入口。
   上传文件 rewrite 的前端文件类型是 `rewrite_source`；后端 task skill state 内部用 `rewrite_source="uploaded_file"` 路由上传来源。

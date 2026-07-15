@@ -70,6 +70,94 @@ def build_comment_writeback_summary_payload(
     }
 
 
+def empty_comment_writeback_result() -> CommentWritebackResult:
+    return {
+        "total": 0,
+        "attempted": 0,
+        "added": 0,
+        "failed": 0,
+        "skipped": 0,
+        "issues": [],
+    }
+
+
+def merge_comment_writeback_results(
+    *results: Mapping[str, Any] | None,
+) -> CommentWritebackResult:
+    merged = empty_comment_writeback_result()
+    for result in results:
+        if not result:
+            continue
+        merged["total"] += _coerce_non_negative_int(result.get("total"))
+        merged["attempted"] += _coerce_non_negative_int(result.get("attempted"))
+        merged["added"] += _coerce_non_negative_int(result.get("added"))
+        merged["failed"] += _coerce_non_negative_int(result.get("failed"))
+        merged["skipped"] += _coerce_non_negative_int(result.get("skipped"))
+        issues = result.get("issues") or []
+        if isinstance(issues, list):
+            merged["issues"].extend(issues)
+    return merged
+
+
+def apply_correction_and_ai_comments(
+    *,
+    doc,
+    state: Mapping[str, Any],
+    bound_start: int,
+    bound_end: int,
+    log_parts: list[str],
+    step_label: str = "步骤6",
+    suppress_ai_comment_writeback: bool = False,
+) -> tuple[CommentWritebackResult, CommentWritebackSummaryPayload]:
+    """先写更正批注，再写普通 AI 批注；suppress 只跳过普通批注。"""
+    correction_comments = list(state.get("correction_comments") or [])
+    polished_comments = list(state.get("polished_comments") or [])
+    generated_count = _coerce_non_negative_int(state.get("generated_comment_count"))
+
+    correction_result = empty_comment_writeback_result()
+    if correction_comments:
+        correction_result = write_polished_comments(
+            doc=doc,
+            polished_comments=correction_comments,
+            bound_start=bound_start,
+            bound_end=bound_end,
+            log_parts=log_parts,
+            step_label=f"{step_label}-更正批注",
+        )
+    else:
+        log_parts.append(f"{step_label}-更正批注：无 correction_comments，跳过。")
+
+    ai_result = empty_comment_writeback_result()
+    if suppress_ai_comment_writeback:
+        log_parts.append(
+            f"{step_label}：跳过普通 AI 批注写入（agent 模式或 comment_generation_mode=off）。"
+        )
+    elif polished_comments:
+        ai_result = write_polished_comments(
+            doc=doc,
+            polished_comments=polished_comments,
+            bound_start=bound_start,
+            bound_end=bound_end,
+            log_parts=log_parts,
+            step_label=step_label,
+        )
+    else:
+        log_parts.append(f"{step_label}：无 polished_comments，跳过普通批注。")
+
+    merged = merge_comment_writeback_results(correction_result, ai_result)
+    # 汇总：更正批注 + 普通批注；generated 以普通批注生成数 + 更正数为准，避免 agent 覆盖后丢失更正计数。
+    total_generated = generated_count + _coerce_non_negative_int(correction_result.get("total"))
+    summary = build_comment_writeback_summary_payload(
+        generated_count=total_generated,
+        writeback_result=merged,
+    )
+    if correction_result.get("added"):
+        summary["summary"] = (
+            f"更正批注成功={correction_result['added']}；{summary['summary']}"
+        )
+    return merged, summary
+
+
 def _ranges_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
     return not (int(a_end) <= int(b_start) or int(b_end) <= int(a_start))
 

@@ -941,27 +941,39 @@ def test_gjgk_update_word_writes_comments_before_save(monkeypatch) -> None:
         "_visible_log",
         lambda *_args, **_kwargs: None,
     )
+    def _fake_apply_comments(**kwargs):
+        state = kwargs["state"]
+        polished = tuple(state.get("polished_comments") or [])
+        events.append(
+            (
+                "write_comments",
+                polished,
+                kwargs["bound_start"],
+                kwargs["bound_end"],
+            )
+        )
+        result = {
+            "total": 1,
+            "attempted": 1,
+            "added": 1,
+            "failed": 0,
+            "skipped": 0,
+            "issues": [],
+        }
+        summary = {
+            "summary": "AI批注写入: 生成=1, 成功=1, 失败=0, 跳过=0",
+            "generated": 1,
+            "added": 1,
+            "failed": 0,
+            "skipped": 0,
+            "warning": False,
+        }
+        return result, summary
+
     monkeypatch.setattr(
         gjgk_update_word_module,
-        "write_polished_comments",
-        lambda **kwargs: (
-            events.append(
-                (
-                    "write_comments",
-                    tuple(kwargs["polished_comments"]),
-                    kwargs["bound_start"],
-                    kwargs["bound_end"],
-                )
-            )
-            or {
-                "total": 1,
-                "attempted": 1,
-                "added": 1,
-                "failed": 0,
-                "skipped": 0,
-                "issues": [],
-            }
-        ),
+        "apply_correction_and_ai_comments",
+        _fake_apply_comments,
     )
     monkeypatch.setattr(
         gjgk_update_word_module,
@@ -1092,10 +1104,29 @@ def _patch_gjgk_node(monkeypatch, fake_doc, writeback_result):
         "_visible_log",
         lambda *_args, **_kwargs: None,
     )
+    def _fake_apply_comments(**kwargs):
+        generated = 0
+        try:
+            generated = int((kwargs.get("state") or {}).get("generated_comment_count") or 0)
+        except (TypeError, ValueError):
+            generated = 0
+        summary = {
+            "summary": (
+                f"AI批注写入: 生成={generated}, 成功={writeback_result.get('added', 0)}, "
+                f"失败={writeback_result.get('failed', 0)}, 跳过={writeback_result.get('skipped', 0)}"
+            ),
+            "generated": generated,
+            "added": writeback_result.get("added", 0),
+            "failed": writeback_result.get("failed", 0),
+            "skipped": writeback_result.get("skipped", 0),
+            "warning": generated > 0 and writeback_result.get("failed", 0) > 0,
+        }
+        return writeback_result, summary
+
     monkeypatch.setattr(
         gjgk_update_word_module,
-        "write_polished_comments",
-        lambda **kwargs: writeback_result,
+        "apply_correction_and_ai_comments",
+        _fake_apply_comments,
     )
     monkeypatch.setattr(
         gjgk_update_word_module,

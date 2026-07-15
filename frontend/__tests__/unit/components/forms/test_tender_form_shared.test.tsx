@@ -500,6 +500,9 @@ describe('TenderFormShared', () => {
     expect(screen.getByRole('group', { name: '生成风格' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '按模板优先' })).toHaveClass('bg-blue-600');
     expect(screen.getByRole('button', { name: '按参数优先' })).not.toHaveClass('bg-blue-600');
+    expect(
+      screen.getByText('当前为按模板优先：优先沿用模板的章节结构和基础格式。')
+    ).toBeInTheDocument();
 
     firstRender.unmount();
     renderSharedForm({
@@ -508,6 +511,9 @@ describe('TenderFormShared', () => {
 
     expect(screen.getByRole('button', { name: '按参数优先' })).toHaveClass('bg-blue-600');
     expect(screen.getByRole('button', { name: '按模板优先' })).not.toHaveClass('bg-blue-600');
+    expect(
+      screen.getByText('当前为按参数优先：优先沿用技术参数的章节结构和内容顺序。')
+    ).toBeInTheDocument();
   });
 
   it('renders generation mode inside advanced settings with workflow default and restores agent draft', () => {
@@ -517,6 +523,7 @@ describe('TenderFormShared', () => {
     expect(screen.getByRole('group', { name: '生成方式' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '工作流' })).toHaveClass('bg-blue-600');
     expect(screen.getByRole('button', { name: '智能体' })).not.toHaveClass('bg-blue-600');
+    expect(screen.getByText('当前为工作流：按固定流程生成正文。')).toBeInTheDocument();
 
     firstRender.unmount();
     renderSharedForm({
@@ -525,6 +532,8 @@ describe('TenderFormShared', () => {
 
     expect(screen.getByRole('button', { name: '智能体' })).toHaveClass('bg-blue-600');
     expect(screen.getByRole('button', { name: '工作流' })).not.toHaveClass('bg-blue-600');
+    expect(screen.getByText('当前为智能体：会自主生成、审核并修订正文。')).toBeInTheDocument();
+    expect(screen.getByText('当前为开：文档生成后会运行批注生成智能体。')).toBeInTheDocument();
   });
 
   it('renders style writeback mode inside advanced settings with full default and restores bold-only draft', () => {
@@ -537,6 +546,7 @@ describe('TenderFormShared', () => {
     expect(within(firstStyleGroup).getByRole('button', { name: '关' })).not.toHaveClass(
       'bg-blue-600'
     );
+    expect(screen.getByText('当前为开：回填加粗、下划线、颜色等行内样式。')).toBeInTheDocument();
 
     firstRender.unmount();
     renderSharedForm({
@@ -550,6 +560,7 @@ describe('TenderFormShared', () => {
     expect(within(restoredStyleGroup).getByRole('button', { name: '开' })).not.toHaveClass(
       'bg-blue-600'
     );
+    expect(screen.getByText('当前为关：仅保留加粗样式。')).toBeInTheDocument();
   });
 
   it('renders comment generation mode inside advanced settings with on default and restores off draft', () => {
@@ -564,6 +575,7 @@ describe('TenderFormShared', () => {
     expect(within(firstCommentGroup).getByRole('button', { name: '关' })).not.toHaveClass(
       'bg-blue-600'
     );
+    expect(screen.getByText('当前为开：文档生成后会生成并写入 AI 批注。')).toBeInTheDocument();
 
     firstRender.unmount();
     renderSharedForm({
@@ -577,6 +589,9 @@ describe('TenderFormShared', () => {
     expect(within(restoredCommentGroup).getByRole('button', { name: '开' })).not.toHaveClass(
       'bg-blue-600'
     );
+    expect(
+      screen.getByText('当前为关：跳过 AI 批注，仅保留条款标识等更正批注。')
+    ).toBeInTheDocument();
   });
 
   it('groups advanced settings into two responsive rows', () => {

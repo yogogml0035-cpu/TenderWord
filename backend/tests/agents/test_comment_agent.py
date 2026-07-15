@@ -24,6 +24,14 @@ from backend.agents.comments import (
 from backend.agents.comments import comment_agent as comment_agent_module
 from backend.agents.comments import workspace as comment_workspace
 
+
+def test_autonomous_comment_agent_does_not_invent_source_diff_comments() -> None:
+    prompt = comment_agent_module.COMMENT_AGENT_GENERATION_SYSTEM_PROMPT
+    assert "没有原始技术参数" in prompt
+    assert '原技术参数为“...”' in prompt
+    assert "专用技术参数差异标注器" in prompt
+
+
 class _FakeFind:
     def __init__(self, target_range: "_FakeRange") -> None:
         self._target_range = target_range

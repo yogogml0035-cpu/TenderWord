@@ -72,6 +72,7 @@ class TenderGraphStateBase(BaseState, total=False):
     polished_text: str
 
     polished_comments: List[CommentInstruction]
+    correction_comments: List[CommentInstruction]
     generated_comment_count: int
     comment_writeback_summary: str
     comment_writeback_result: Optional[Dict[str, Any]]

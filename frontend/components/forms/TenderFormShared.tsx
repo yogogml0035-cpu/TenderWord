@@ -1826,6 +1826,11 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
                     智能体
                   </button>
                 </div>
+                <p className="text-xs leading-5 text-slate-500">
+                  {generationMode === 'agent'
+                    ? '当前为智能体：会自主生成、审核并修订正文。'
+                    : '当前为工作流：按固定流程生成正文。'}
+                </p>
               </div>
 
               <div className="space-y-1.5">
@@ -1859,6 +1864,11 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
                     按参数优先
                   </button>
                 </div>
+                <p className="text-xs leading-5 text-slate-500">
+                  {generationStyle === 'param'
+                    ? '当前为按参数优先：优先沿用技术参数的章节结构和内容顺序。'
+                    : '当前为按模板优先：优先沿用模板的章节结构和基础格式。'}
+                </p>
               </div>
             </div>
 
@@ -1894,6 +1904,13 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
                     关
                   </button>
                 </div>
+                <p className="text-xs leading-5 text-slate-500">
+                  {commentGenerationMode === 'off'
+                    ? '当前为关：跳过 AI 批注，仅保留条款标识等更正批注。'
+                    : generationMode === 'agent'
+                      ? '当前为开：文档生成后会运行批注生成智能体。'
+                      : '当前为开：文档生成后会生成并写入 AI 批注。'}
+                </p>
               </div>
 
               <div className="space-y-1.5">
@@ -1927,6 +1944,11 @@ export function TenderFormShared<TFormData extends BaseTenderFormData = BaseTend
                     关
                   </button>
                 </div>
+                <p className="text-xs leading-5 text-slate-500">
+                  {styleWritebackMode === 'full'
+                    ? '当前为开：回填加粗、下划线、颜色等行内样式。'
+                    : '当前为关：仅保留加粗样式。'}
+                </p>
               </div>
             </div>
           </div>

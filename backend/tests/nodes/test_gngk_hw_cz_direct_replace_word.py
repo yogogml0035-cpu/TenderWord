@@ -232,11 +232,39 @@ def _patch_hw_cz_update_runtime(
         "summarize_style_writeback_result",
         lambda _result: "样式摘要",
     )
+    def _fake_apply_comments(**kwargs):
+        result = comment_result or {
+            "total": 0,
+            "attempted": 0,
+            "added": 0,
+            "failed": 0,
+            "skipped": 0,
+            "issues": [],
+        }
+        state = kwargs.get("state") or {}
+        try:
+            generated = int(state.get("generated_comment_count") or 0)
+        except (TypeError, ValueError):
+            generated = 0
+        if generated <= 0:
+            generated = int(result.get("total") or 0)
+        added = int(result.get("added") or 0)
+        failed = int(result.get("failed") or 0)
+        skipped = int(result.get("skipped") or 0)
+        summary = {
+            "summary": f"AI批注写入: 生成={generated}, 成功={added}, 失败={failed}, 跳过={skipped}",
+            "generated": generated,
+            "added": added,
+            "failed": failed,
+            "skipped": skipped,
+            "warning": generated > 0 and failed > 0,
+        }
+        return result, summary
+
     monkeypatch.setattr(
         update_module,
-        "write_polished_comments",
-        lambda **_kwargs: comment_result
-        or {"added": 0, "failed": 0, "skipped": 0, "issues": []},
+        "apply_correction_and_ai_comments",
+        _fake_apply_comments,
     )
 
     return style_calls
