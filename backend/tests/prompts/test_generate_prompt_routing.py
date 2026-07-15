@@ -117,7 +117,7 @@ def test_generate_prompts_drop_scoring_sections() -> None:
 
     assert "采购需求边界与评分污染过滤" in template_rendered.system_prompt
     assert "评分大章不参与定位" in template_rendered.system_prompt
-    assert "严禁触发“全量框架锁定+定点注入”" in template_rendered.system_prompt
+    assert "严禁作为模板字段或商务正文保留" in template_rendered.system_prompt
 
 
 def test_render_generate_by_template_prompt_preserves_colon_attached_lists() -> None:
@@ -355,7 +355,9 @@ def test_verify_prompt_states_protected_field_non_deletion_contract() -> None:
     assert "服务地点" in VERIFY_SYSTEM_PROMPT
     assert "服务期限" in VERIFY_SYSTEM_PROMPT
     assert "字段值优先级为" in VERIFY_SYSTEM_PROMPT
-    assert "项目基础信息 > 技术参数项目概述同名字段 > 参考模板同包字段原句" in VERIFY_SYSTEM_PROMPT
+    assert "项目基础信息同字段/同语义槽位" in VERIFY_SYSTEM_PROMPT
+    assert "技术参数项目概述同字段/同语义槽位" in VERIFY_SYSTEM_PROMPT
+    assert "参考模板同包字段原句" in VERIFY_SYSTEM_PROMPT
     assert "字段存在性优先级高于旧事实清理" in VERIFY_SYSTEM_PROMPT
     assert "审核只能要求补回/恢复受保护字段行，不能要求删除" in VERIFY_SYSTEM_PROMPT
     # 黑名单仍删除的伪装字段保留。
@@ -480,3 +482,42 @@ def test_generate_prompts_cover_tender_param_source_markers() -> None:
         assert "辅助判断包件边界" in rendered.user_prompt
         assert "最终标题以**文件内容为准**" in rendered.user_prompt
         assert "第一份技术参数文件名称为..." in rendered.user_prompt
+
+
+def test_generate_prompts_freeze_fact_values_by_field() -> None:
+    template_rendered = render_generate_by_template_prompt(build_prompt_input())
+    param_rendered = render_generate_by_param_prompt(
+        build_prompt_input(generation_style="param")
+    )
+
+    for rendered in (template_rendered, param_rendered):
+        assert "事实" in rendered.system_prompt
+        assert "逐字" in rendered.system_prompt
+        assert "项目名称" in rendered.system_prompt
+        assert "设备名称" in rendered.system_prompt
+        assert "维保设备：磁共振系统" in rendered.system_prompt
+        assert "医用核磁共振系统" in rendered.system_prompt
+        assert "项目名称不等于设备名称" in rendered.user_prompt
+        assert "数量=1" in rendered.system_prompt
+        assert "单位=套" in rendered.system_prompt
+        assert "无字段标签" in rendered.system_prompt
+        assert "不得覆盖" in rendered.system_prompt
+
+    assert "1个月`不得改成`30天" in template_rendered.system_prompt
+    assert "`项目名称`描述整个项目" in param_rendered.system_prompt
+    assert "默认绝不是`设备名称/维保设备/服务名称/采购标的名称`" in param_rendered.system_prompt
+
+
+def test_verify_and_revise_prompts_restore_exact_source_field_value() -> None:
+    assert "事实原子逐字审计" in VERIFY_SYSTEM_PROMPT
+    assert "项目名称不能作为设备名称的取值来源" in VERIFY_SYSTEM_PROMPT
+    assert "原技术参数的维保设备值为 `磁共振系统`" in VERIFY_SYSTEM_PROMPT
+    assert "设备清单写成 `医用核磁共振系统`" in VERIFY_SYSTEM_PROMPT
+    assert "服务期限：3年" in VERIFY_SYSTEM_PROMPT
+    assert "响应时间不超过2小时" in VERIFY_SYSTEM_PROMPT
+
+    assert "只做精确还原" in REVISE_SYSTEM_PROMPT
+    assert "项目名称`描述整个项目" in REVISE_SYSTEM_PROMPT
+    assert "`维保设备`放入`设备名称`列" in REVISE_SYSTEM_PROMPT
+    assert "医用核磁共振系统" in REVISE_SYSTEM_PROMPT
+    assert "磁共振系统" in REVISE_SYSTEM_PROMPT

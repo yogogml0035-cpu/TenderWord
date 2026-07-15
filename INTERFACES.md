@@ -1,8 +1,8 @@
 # TenderWord 接口边界
 
-**生成日期：** 2026-06-29
+**生成日期：** 2026-07-15
 
-本文件是根级**系统级接口边界文档**，记录 TenderWord 当前已确认的跨系统接口边界、跨系统调用关系、任务排查建议和可扩展集成文档入口。具体模型和行为以代码真源为准，并参考 2026-06-29 刷新的 `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 事实层。
+本文件是根级**系统级接口边界文档**，记录 TenderWord 当前已确认的跨系统接口边界、跨系统调用关系、任务排查建议和可扩展集成文档入口。具体模型和行为以代码真源为准，并参考 2026-07-15 刷新的 `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 事实层。
 
 > 分层定位：本文件承接**跨项目接口与协作**。子系统内部集成（如后端 LLM provider 调用细节、前端 store 内部结构）留在各自 `.planning/codebase/INTEGRATIONS.md`；按任务的完整阅读指南在 `coding_maps/SYSTEM_MAP.md`。本文件不复制底层实现细节。
 

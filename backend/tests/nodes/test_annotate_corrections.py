@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from backend.nodes.common_word_nodes.annotate_corrections import annotate_corrections
+from backend.nodes.common_word_nodes.annotate_corrections import (
+    _CORRECTION_SYSTEM,
+    _build_user_prompt,
+    _parse_correction_comments,
+    annotate_corrections,
+)
 
 
 def test_annotate_corrections_normalizes_text_and_tables(monkeypatch) -> None:
@@ -101,3 +106,73 @@ def test_run_annotation_llm_passes_temperature_via_extra_params(monkeypatch) -> 
     assert comments == []
     assert "temperature" not in captured
     assert captured.get("extra_params_override") == {"temperature": 0.1}
+
+
+def test_correction_prompt_marks_all_parameter_text_changes() -> None:
+    assert "建立事实账本" in _CORRECTION_SYSTEM
+    assert "增字、减字、替换或拼接" in _CORRECTION_SYSTEM
+    assert "项目名称`描述整个项目" in _CORRECTION_SYSTEM
+    assert "`维保设备`可对齐设备清单的`设备名称`" in _CORRECTION_SYSTEM
+    assert "`数量：1套`可对齐`数量=1`与`单位=套`" in _CORRECTION_SYSTEM
+    assert "无标签文本" in _CORRECTION_SYSTEM
+    assert "不得靠猜测拆分并覆盖原始技术参数" in _CORRECTION_SYSTEM
+    assert "原技术参数为“aaa”，现改为“bbb”" in _CORRECTION_SYSTEM
+    assert "磁共振系统" in _CORRECTION_SYSTEM
+    assert "医用核磁共振系统" in _CORRECTION_SYSTEM
+    assert "服务期限：3年" in _CORRECTION_SYSTEM
+    assert "服务期限：三年" in _CORRECTION_SYSTEM
+
+    prompt = _build_user_prompt(
+        tender_params="维保设备：磁共振系统",
+        polished_text="设备名称：医用核磁共振系统",
+        marker_already_applied=True,
+    )
+    assert "先按包、对象、来源字段标签和目标语义槽位拆分" in prompt
+    assert "只标注事实值字符变化，不标注纯结构变化" in prompt
+    assert "只授权项目名称槽位" in prompt
+
+
+def test_correction_parser_enforces_sources_anchor_and_fixed_wording() -> None:
+    raw = """[
+      {"reference_text":"医用核磁共振系统","comment_text":"原技术参数为“磁共振系统”，现改为“医用核磁共振系统”"},
+      {"reference_text":"不存在的锚点","comment_text":"原技术参数为“磁共振系统”，现改为“其它系统”"},
+      {"reference_text":"医用核磁共振系统","comment_text":"建议确认是否修改设备名称"},
+      {"reference_text":"医用核磁共振系统","comment_text":"原技术参数为“模板旧设备”，现改为“医用核磁共振系统”"}
+    ]"""
+
+    comments = _parse_correction_comments(
+        raw,
+        tender_params="维保设备：磁共振系统",
+        polished_text="设备名称：医用核磁共振系统",
+    )
+
+    assert comments == [
+        {
+            "reference_text": "医用核磁共振系统",
+            "comment_text": "原技术参数为“磁共振系统”，现改为“医用核磁共振系统”",
+        }
+    ]
+
+
+def test_annotate_corrections_passes_project_sources_to_diff_prompt(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(
+        "backend.nodes.common_word_nodes.annotate_corrections._run_annotation_llm",
+        _capture,
+    )
+    annotate_corrections(
+        {
+            "polished_text": "设备名称：医用核磁共振系统",
+            "tender_params": "维保设备：磁共振系统",
+            "project_name": "医用核磁共振系统维保",
+            "project_content": "医用核磁共振系统维保\t叁年",
+        }
+    )
+
+    assert captured["project_name"] == "医用核磁共振系统维保"
+    assert captured["project_info"] == "医用核磁共振系统维保\t叁年"

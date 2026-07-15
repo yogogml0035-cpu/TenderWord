@@ -1,8 +1,8 @@
 # TenderWord 架构地图
 
-**生成日期：** 2026-06-29
+**生成日期：** 2026-07-15
 
-本文件是根级**系统级架构总览**，描述 TenderWord 的系统目的与边界、子系统职责、推荐理解路径、稳定目录职责和系统层维护约定。实现细节以代码为准；子系统内部事实以 2026-06-29 刷新的 `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 为准。
+本文件是根级**系统级架构总览**，描述 TenderWord 的系统目的与边界、子系统职责、推荐理解路径、稳定目录职责和系统层维护约定。实现细节以代码为准；子系统内部事实以 2026-07-15 刷新的 `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 为准。
 
 > 分层定位：本文件比 `AGENTS.md` 更偏系统架构，比 `coding_maps/SYSTEM_MAP.md` 更偏稳定总览；跨项目接口与调用关系沉淀在 `INTERFACES.md`，按任务的阅读指南沉淀在 `coding_maps/SYSTEM_MAP.md`。本文件不复制子项目内部实现细节。
 
@@ -144,4 +144,4 @@ FastAPI + LangGraph + Word COM 后端。职责：
 
 ---
 
-*系统架构地图：2026-06-29*
+*系统架构地图：2026-07-15*

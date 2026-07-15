@@ -1,16 +1,16 @@
 # 后端测试模式
 
-**分析日期：** 2026-06-29
+**分析日期：** 2026-07-15
 
 **范围：** `backend/tests/`、`backend/requirements.txt`、`backend/scripts/diagnose_word.py`、`docs/backend.md`、`docs/interfaces-runtime.md`、`docs/knowledge-validation.md` 和与测试直接相关的后端实现文件。`backend/.env` 文件存在，但不得读取或引用内容。
 
 **关键事实来源：**
 - 测试配置与依赖：`backend/requirements.txt`、`backend/tests/conftest.py`
-- API 与模型测试：`backend/tests/api/test_generate_api.py`、`backend/tests/api/test_agent_run_api.py`、`backend/tests/api/test_tender_api.py`、`backend/tests/api/test_template_candidates.py`、`backend/tests/models/test_generate_request_generation_style.py`
-- Service 与任务测试：`backend/tests/services/test_document_service_initial_state.py`、`backend/tests/services/test_document_service_task_result.py`、`backend/tests/services/test_agent_run_service.py`、`backend/tests/services/test_document_service_llm_snapshot.py`
-- Graph、rewrite、进度测试：`backend/tests/graphs/test_generation_mode_branching.py`、`backend/tests/graphs/test_gngk_tender_graph.py`、`backend/tests/nodes/test_rewrite_nodes.py`、`backend/tests/progress/test_uploaded_rewrite_progress_tracking.py`
-- Word helper 与隐私审计测试：`backend/tests/helper/test_inline_style_ops.py`、`backend/tests/nodes/test_uploaded_rewrite_inline_style_context.py`、`backend/tests/agents/test_task_context_assistant_logging.py`、`backend/tests/agents/test_content_sanitizer.py`
-- Prompt、LLM 与 retrieval 测试：`backend/tests/prompts/test_generate_prompt_routing.py`、`backend/tests/util/test_llm_stream_utils.py`、`backend/tests/agents/test_table_placeholder_utils.py`、`backend/tests/retrieval/test_comment_bad_case_runtime.py`、`backend/tests/retrieval/test_qdrant_store.py`
+- API 与模型测试：`backend/tests/api/`、`backend/tests/models/`
+- Service 与任务测试：`backend/tests/services/`
+- Graph、rewrite、进度测试：`backend/tests/graphs/`、`backend/tests/nodes/test_rewrite_nodes.py`、`backend/tests/progress/`
+- Word helper 与隐私审计测试：`backend/tests/helper/`、`backend/tests/nodes/test_uploaded_rewrite_inline_style_context.py`、`backend/tests/agents/test_task_context_assistant_logging.py`、`backend/tests/agents/test_content_sanitizer.py`
+- Prompt、LLM 与 retrieval 测试：`backend/tests/prompts/`、`backend/tests/util/test_llm_stream_utils.py`、`backend/tests/agents/test_table_placeholder_utils.py`、`backend/tests/retrieval/`
 
 ## 测试框架
 
@@ -54,7 +54,7 @@ TMPDIR=/tmp TMP=/tmp TEMP=/tmp .venv-linux/bin/python -m pytest tests -v
 **位置：**
 - 测试集中在 `backend/tests/<scope>/`，不与源码 co-locate。
 - `backend/tests/conftest.py` 只把项目根和 `backend/` 加入 `sys.path`，没有全局业务 fixture。
-- `backend/tests/` 下检测到 82 个 `test_*.py` 文件。
+- `backend/tests/` 下当前约 86 个 `test_*.py` 文件（按目录计数，见下表）。
 
 **命名：**
 - 测试文件使用 `test_*.py`。
@@ -65,14 +65,15 @@ TMPDIR=/tmp TMP=/tmp TEMP=/tmp .venv-linux/bin/python -m pytest tests -v
 
 ```text
 backend/tests/
+├── conftest.py    # 仅 sys.path 注入
 ├── agents/        (7)
 ├── api/           (5)
 ├── config/        (2)
 ├── graphs/        (11)
-├── helper/        (6)
+├── helper/        (7)
 ├── logging/       (1)
 ├── models/        (3)
-├── nodes/         (25)
+├── nodes/         (28)
 ├── progress/      (1)
 ├── prompts/       (3)
 ├── retrieval/     (5)
@@ -187,7 +188,7 @@ result = style_ops.apply_inline_style_fragments(
 ## 夹具与工厂
 
 **共享 setup：**
-- `backend/tests/conftest.py` 只维护 import path setup；新增共享 fixture 前先确认多个测试文件都需要。
+- `backend/tests/conftest.py` 只维护 import path setup（项目根 + `backend/` 入 `sys.path`）；新增共享 fixture 前先确认多个测试文件都需要。
 - 多数 fake object、payload builder、`autouse` 清理 fixture 放在测试文件内部，避免隐藏依赖（参考 `isolate_task_queue` / `stub_progress_sse`）。
 
 **本地 factory：**
@@ -211,12 +212,18 @@ def build_request(*, template: str | None, generation_mode=GenerationMode.WORKFL
 - 使用 `tmp_path` 创建测试 docx 占位、审计日志和输出文件；不要写入真实 `settings.UPLOAD_DIR`。
 - 测试路径可使用 `D:/UploadFiles/...` 作为字符串契约，但不要求真实文件存在，除非测试目标是文件存在性。
 
+**典型文件级 fixture：**
+- `backend/tests/progress/test_uploaded_rewrite_progress_tracking.py`：`isolate_task_queue`（`autouse`，清空 `TaskQueueManager` 内部状态）、`stub_progress_sse`（`autouse`，stub SSE progress）。
+- `backend/tests/agents/test_generation_content_agent.py`：文件级 `autouse` fixture 隔离 content agent workspace / 环境。
+- helper 测试内联 `_FakeDoc` / `_FakeRange` / `_FakeFont` 等 COM 替身类，不依赖 pytest fixture 注册。
+
 ## 请求/任务模型测试
 
 - `GenerateRequest` 字段默认值和枚举接受值由 `backend/tests/models/test_generate_request_generation_style.py` 覆盖；`file_paths.tender_params` 的 string / 对象双形态由 `backend/tests/models/test_generate_request_tender_params.py` 覆盖。
 - `GenerateRequest.file_paths` 只接受 `template` 与 `tender_params`，并由 `backend/tests/services/test_document_service_initial_state.py` 断言不产生旧 `source_document_path`。
 - `TaskKind`、任务状态、任务结果和 task public summary 由 `backend/tests/services/test_task_service_task_kind.py`、`backend/tests/services/test_document_service_task_result.py`、`backend/tests/agents/test_task_context_assistant_tools.py` 覆盖。
 - NDJSON agent run 响应头和事件解析由 `backend/tests/api/test_agent_run_api.py` 覆盖（含 `Cache-Control: no-cache`、`media_type="application/x-ndjson"`、必填 `context_snapshot`）。
+- SSE `agent_step` / content_agent / comment_agent 载荷由 `backend/tests/models/test_sse_agent_step.py` 覆盖。
 - `GET /api/tender/{tender_no}` 的 `ifzgcg` 透传、`investment` 数值强转字符串、不支持的采购方式返回非阻断 `warning`，由 `backend/tests/api/test_tender_api.py` 覆盖。
 
 ## Generate 与 Rewrite 边界测试
@@ -224,7 +231,7 @@ def build_request(*, template: str | None, generation_mode=GenerationMode.WORKFL
 - generate-only 字段测试集中在 `backend/tests/models/test_generate_request_generation_style.py` 和 `backend/tests/services/test_document_service_initial_state.py`。
 - rewrite state 不接收 `generation_style` / `generation_mode` 的约束由 `test_uploaded_rewrite_and_rewrite_initial_state_do_not_receive_generation_style()` 覆盖。
 - 上传文件 rewrite 的 `rewrite_source="uploaded_file"`、工作副本、样式和批注抽取由 `backend/tests/nodes/test_uploaded_rewrite_inline_style_context.py` 覆盖。
-- rewrite workflow 公开节点名（`REWRITE_NODE_NAMES`）和 tender-aware dispatch 由 `backend/tests/nodes/test_tender_aware_word_dispatch.py` 覆盖。
+- rewrite workflow 公开节点名（`REWRITE_NODE_NAMES`）和 tender-aware dispatch 由 `backend/tests/nodes/test_tender_aware_word_dispatch.py`、`backend/tests/nodes/test_rewrite_nodes.py` 覆盖。
 - 上传 rewrite 进度节点必须加入 `TRACKED_PROGRESS_NODES`，受检集合 `UPLOADED_REWRITE_PROGRESS_NODES`，由 `backend/tests/progress/test_uploaded_rewrite_progress_tracking.py`（含 `autouse` fixture）覆盖。
 - Agent run 对上传文件 rewrite 上下文的预检、`needs_input`、`task_accepted` 和错误终态由 `backend/tests/api/test_agent_run_api.py`、`backend/tests/services/test_agent_run_service.py` 覆盖。
 
@@ -232,7 +239,7 @@ def build_request(*, template: str | None, generation_mode=GenerationMode.WORKFL
 
 - Prompt routing 使用真实 `GeneratePromptInput` 和 prompt builder；`backend/tests/prompts/test_generate_prompt_routing.py` 保护 `generation_style="param"` 与模板模式分派。
 - 结构化表占位符使用真实 `backend/agents/generation/table_placeholder_utils.py`；`backend/tests/agents/test_table_placeholder_utils.py`、`backend/tests/agents/test_generation_content_agent.py` 和 `backend/tests/helper/test_text_parsing_table_placeholder.py` 覆盖占位符提取、审核不再对缺失占位符报 finding、以及写回层对未命中 sidecar 占位符/投影表的静默丢弃语义。
-- LLM 内容清洗契约（剥离 AI 客套语 / Markdown / 填充占位句、保留 `[[TABLE:id]]` / 技术符号 / 重要性标识、空输入与纯噪声返回空）由 `backend/tests/agents/test_content_sanitizer.py` 覆盖。
+- LLM 内容清洗契约由 `backend/tests/agents/test_content_sanitizer.py` 覆盖。
 - LLM stream 测试只 mock provider client、heartbeat 或 settings 属性；`backend/tests/util/test_llm_stream_utils.py` 覆盖 `LLM_STREAM_TIMEOUT_SECONDS`、provider extra body 和 chat stream 终态、`LLMTimeoutError` 与 `ensure_llm_env()` 配置缺失错误（错误信息只含配置键）。
 - Retrieval 测试以本地 Markdown bad case、fake embedding/Qdrant client 和 `tmp_path` 为主；`backend/tests/retrieval/test_comment_bad_case_runtime.py` 覆盖 hybrid / BM25 fallback，`backend/tests/retrieval/test_qdrant_store.py` 覆盖 Qdrant client proxy 行为。
 - 批注 bad case 检索失败只断言降级、warning 或审计 JSON，不要求外部 Qdrant 服务在线。
@@ -241,6 +248,7 @@ def build_request(*, template: str | None, generation_mode=GenerationMode.WORKFL
 
 - 能脱离 COM 的段落、范围、受保护字段、语义归一化、inline style、comment writeback 和 cleanup 逻辑必须拆到 `backend/helper/word_helper/` 并用 fake objects 测试。
 - Graph/node 单元测试不启动真实 Word；使用 fake `create_word_application()`、`open_document_with_retry()`、`WordDocumentInspector` 和 `_FakeDoc`。
+- **未使用** `pytest.skip` / `importorskip` / `sys.platform` 条件跳过 COM：套件默认 no-COM，通过 fake 与 monkeypatch 覆盖 COM 交互面。
 - `backend/util/word_util/` 的真实 COM 生命周期通过 Windows 诊断脚本或真实生成任务验证。
 - WSL/Linux pytest 只能证明 no-COM 逻辑，不证明 Word/WPS COM 可用。
 - Direct-replace 和受保护字段边界优先覆盖缺字段、乱序、非法区间、字段值区写入阻断、显式空行和样式回填摘要；参考 `backend/tests/nodes/test_gngk_hw_cz_direct_replace_word.py`、`backend/tests/nodes/test_gngk_fw_zc_update_word.py`、`backend/tests/nodes/test_common_update_word_split.py`。
@@ -263,17 +271,18 @@ def build_request(*, template: str | None, generation_mode=GenerationMode.WORKFL
 **单元测试：**
 - 模型：`backend/tests/models/test_generate_request_generation_style.py`、`backend/tests/models/test_generate_request_tender_params.py`、`backend/tests/models/test_sse_agent_step.py`
 - 配置：`backend/tests/config/test_settings_langsmith.py`、`backend/tests/config/test_tender_config_protected_fields.py`
-- Helper：`backend/tests/helper/test_content_ops.py`、`backend/tests/helper/test_inline_style_ops.py`、`backend/tests/helper/test_paragraph_boundary_ops.py`
+- Helper：`backend/tests/helper/test_content_ops.py`、`backend/tests/helper/test_inline_style_ops.py`、`backend/tests/helper/test_paragraph_boundary_ops.py`、`backend/tests/helper/test_clause_marker_normalize.py`
 - Prompt：`backend/tests/prompts/test_generate_prompt_routing.py`、`backend/tests/prompts/test_comment_prompt_reference_contract.py`
 - 清洗/占位符：`backend/tests/agents/test_content_sanitizer.py`、`backend/tests/agents/test_table_placeholder_utils.py`
 
 **无 COM 集成风格测试：**
 - API：`backend/tests/api/test_generate_api.py`、`backend/tests/api/test_agent_run_api.py`、`backend/tests/api/test_tender_api.py`、`backend/tests/api/test_comment_supplement_api.py`、`backend/tests/api/test_template_candidates.py`
 - Service：`backend/tests/services/test_document_service_initial_state.py`、`backend/tests/services/test_document_service_task_result.py`、`backend/tests/services/test_agent_run_service.py`、`backend/tests/services/test_document_service_llm_snapshot.py`
-- Graph：`backend/tests/graphs/test_generation_mode_branching.py`、`backend/tests/graphs/test_gngk_tender_graph.py`、`backend/tests/graphs/test_comment_supplement_graph.py`
+- Graph：`backend/tests/graphs/test_generation_mode_branching.py`、`backend/tests/graphs/test_gngk_tender_graph.py`、`backend/tests/graphs/test_comment_supplement_graph.py`，以及各 form type 的 `*_generation_mode_agent.py`
 - Skill/Node：`backend/tests/skills/test_task_skill_runtime.py`、`backend/tests/nodes/test_rewrite_nodes.py`、`backend/tests/nodes/test_tender_aware_word_dispatch.py`
 - Retrieval：`backend/tests/retrieval/test_comment_bad_case_runtime.py`、`backend/tests/retrieval/test_comment_hybrid_retrieval_script.py`
 - LLM/stream util：`backend/tests/util/test_llm_stream_utils.py`
+- 日志审计：`backend/tests/logging/test_task_audit_log_paths.py`、`backend/tests/agents/test_task_context_assistant_logging.py`
 
 **E2E 测试：**
 - `backend/tests/` 下未检测到浏览器 E2E。
@@ -349,6 +358,7 @@ assert events[0]["event"] == "run_started"
 - 招标数据 / `GET /api/tender` 变更：运行 `backend/tests/api/test_tender_api.py`；如改 `backend/util/common_util/fetch_tender_data.py` 或 `tender_number.py`，加跑对应 util 测试。
 - 模板候选变更：运行 `backend/tests/api/test_template_candidates.py`；如改 `backend/util/common_util/template_candidates.py`，加跑对应 util 测试。
 - Retrieval / bad case prompt 变更：运行 `backend/tests/retrieval/` 和 `backend/tests/prompts/test_comment_prompt_bad_case_context.py`。
+- 审计 scrub / 日志路径变更：运行 `backend/tests/agents/test_task_context_assistant_logging.py`、`backend/tests/logging/test_task_audit_log_paths.py`、`backend/tests/nodes/test_skill_audit_log_path_resolution.py`、`backend/tests/nodes/test_rewrite_audit_logging.py`。
 
 ## 跨层同步检查
 
@@ -365,7 +375,8 @@ assert events[0]["event"] == "run_started"
 - 未检测到针对 Qdrant/embedding 的持久外部服务集成测试；`backend/scripts/test_comment_hybrid_retrieval.py` 是诊断脚本，不属于主 pytest 套件。
 - `backend/tests/` 下未检测到浏览器 E2E。
 - Task/SSE/文件下载的完整跨前端流程需要前端或真实本地应用验证。
+- 未配置 coverage 阈值；回归以“相关目录 pytest 全绿”为门禁，而非行覆盖率。
 
 ---
 
-*后端测试分析：2026-06-29*
+*后端测试分析：2026-07-15*
