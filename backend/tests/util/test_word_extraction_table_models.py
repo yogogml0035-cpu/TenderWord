@@ -235,8 +235,8 @@ def test_extract_content_with_table_models_maps_symbol_font_delta_in_table_cell(
     assert any("Δ3.1.1" in text for text in cell_texts)
 
 
-def test_extract_content_with_table_models_ignores_non_symbol_font_sym() -> None:
-    """非 Symbol 字体的 sym 元素不应被错误映射。"""
+def test_extract_content_with_table_models_keeps_unknown_symbol_font_sym_losslessly() -> None:
+    """未知符号字体不得被静默丢弃，必须保留原始 font/code token。"""
     xml = """
     <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
       <w:body>
@@ -250,7 +250,45 @@ def test_extract_content_with_table_models_ignores_non_symbol_font_sym() -> None
     content, models = extract_content_with_table_models(_FakeRange(xml))
 
     assert "正文" in content
-    assert "Δ" not in content
+    assert "[[WORD_SYMBOL:V2luZ2Rpbmdz:F044]]" in content
+    assert models == []
+
+
+def test_extract_content_with_table_models_maps_wingdings_three_triangle_text_run() -> None:
+    """旧 DOC 用 Wingdings 3 的 ``(`` 标重要条款时，统一提取为 ▲。"""
+    xml = """
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body>
+        <w:p>
+          <w:r><w:rPr><w:rFonts w:ascii="Wingdings 3"/></w:rPr><w:t>(</w:t></w:r>
+          <w:r><w:t>7. 注射器安装后</w:t></w:r>
+        </w:p>
+      </w:body>
+    </w:document>
+    """
+
+    content, models = extract_content_with_table_models(_FakeRange(xml))
+
+    assert "▲7. 注射器安装后" in content
+    assert models == []
+
+
+def test_extract_content_with_table_models_maps_wingdings_three_sym_triangle() -> None:
+    """OOXML 的 Wingdings 3 实心上三角也必须提取为 ▲。"""
+    xml = """
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body>
+        <w:p>
+          <w:r><w:sym w:font="Wingdings 3" w:char="F070"/></w:r>
+          <w:r><w:t>7. 注射器安装后</w:t></w:r>
+        </w:p>
+      </w:body>
+    </w:document>
+    """
+
+    content, models = extract_content_with_table_models(_FakeRange(xml))
+
+    assert "▲7. 注射器安装后" in content
     assert models == []
 
 

@@ -5,6 +5,7 @@ import backend.helper.word_helper.content_ops as content_ops_module
 
 from backend.util.word_util import wdWithInTable
 from backend.helper.word_helper.content_ops import (
+    WordSymbolRestoreError,
     apply_standard_insert_format,
     ensure_following_body_paragraph_insert_pos,
     insert_content_with_formatting,
@@ -13,6 +14,7 @@ from backend.helper.word_helper.content_ops import (
     reset_generated_text_font_format,
     resolve_following_insert_pos,
 )
+from backend.util.word_util.word_symbol_tokens import WordSymbolSpan
 
 
 def test_resolve_following_insert_pos_prefers_distinct_paragraph_boundary() -> None:
@@ -439,6 +441,17 @@ def test_insert_content_with_formatting_sanitizes_inserted_range() -> None:
 
     assert_clean_generated_format(inserted_range)
     assert doc.inserted[-1] == (10, "红色宿主后的正文\r")
+
+
+def test_restore_word_symbol_font_failure_is_not_silently_ignored() -> None:
+    doc = _FakeFormatDoc(fail_font_attrs={"Name"})
+
+    with pytest.raises(WordSymbolRestoreError, match="Wingdings 3"):
+        content_ops_module._restore_word_symbol_fonts(
+            doc,
+            10,
+            [WordSymbolSpan(start=0, end=1, font_name="Wingdings 3")],
+        )
 
 
 def test_insert_items_inline_at_end_of_paragraph_sanitizes_inline_text() -> None:
