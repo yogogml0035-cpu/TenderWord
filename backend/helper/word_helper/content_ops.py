@@ -30,11 +30,16 @@ from backend.util.word_util.table_models import (
     normalize_structured_table_model,
     render_structured_table_grid,
 )
+from backend.util.word_util.word_symbol_tokens import decode_word_symbol_tokens
 
 GENERATED_TEXT_FONT_RESET_VERSION = "font_sanitize_v1"
 GENERATED_TEXT_DEFAULT_COLOR = 0
 GENERATED_TEXT_DEFAULT_HIGHLIGHT = 0
 GENERATED_TEXT_DEFAULT_UNDERLINE = 0
+
+
+class WordSymbolRestoreError(RuntimeError):
+    """Word 特殊字形无法按原字体恢复。"""
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +156,18 @@ def apply_standard_insert_format(
 # 文本插入
 # ---------------------------------------------------------------------------
 
+def _restore_word_symbol_fonts(doc, start_pos: int, symbol_spans) -> None:
+    for span in symbol_spans:
+        if not span.font_name:
+            continue
+        try:
+            doc.Range(start_pos + span.start, start_pos + span.end).Font.Name = span.font_name
+        except Exception as exc:
+            raise WordSymbolRestoreError(
+                f"无法恢复 Word 特殊字形字体: {span.font_name}"
+            ) from exc
+
+
 def insert_content_with_formatting(
     doc,
     insert_range,
@@ -170,7 +187,8 @@ def insert_content_with_formatting(
     """
     ensure_editable_insert_range(doc, insert_range, bound_start, get_bound_end)
     start_pos = insert_range.End
-    insert_range.InsertAfter(normalize_word_body_text(line) + "\r")
+    text, symbol_spans = decode_word_symbol_tokens(normalize_word_body_text(line))
+    insert_range.InsertAfter(text + "\r")
     end_pos = insert_range.End
     inserted_rng = doc.Range(start_pos, end_pos - 1)
 
@@ -180,6 +198,7 @@ def insert_content_with_formatting(
         font_size=font_size,
         log_parts=log_parts,
     )
+    _restore_word_symbol_fonts(doc, start_pos, symbol_spans)
 
     insert_range.Collapse(wdCollapseEnd)
     return inserted_rng
@@ -208,7 +227,8 @@ def _write_table_cell_text(
 
     cell_range = cell.Range
     cell_text = "" if value is None else str(value)
-    cell_text = normalize_word_cell_text(cell_text)
+    cell_text, symbol_spans = decode_word_symbol_tokens(normalize_word_cell_text(cell_text))
+    cell_start = int(cell_range.Start)
     cell_range.InsertBefore(cell_text)
 
     cell_range = cell.Range
@@ -220,6 +240,7 @@ def _write_table_cell_text(
     )
     cell_range.ParagraphFormat.Alignment = 0
     cell.VerticalAlignment = 1
+    _restore_word_symbol_fonts(doc, cell_start, symbol_spans)
 
 
 def _sorted_structured_merge_cells(table_model: StructuredTableModel) -> list[Dict[str, Any]]:
@@ -444,6 +465,8 @@ def insert_table_with_formatting(
                         font_size=font_size,
                         log_parts=log_parts,
                     )
+                except WordSymbolRestoreError:
+                    raise
                 except Exception as exc:
                     if log_parts is not None:
                         log_parts.append(
@@ -464,26 +487,18 @@ def insert_table_with_formatting(
             for c_idx in range(cols):
                 val = row[c_idx] if c_idx < len(row) else ""
                 try:
-                    cell = table.Cell(r_idx + 1, c_idx + 1)
-                    cell_range = cell.Range
-                    if cell_range.End > cell_range.Start + 1:
-                        delete_range = doc.Range(cell_range.Start, cell_range.End - 1)
-                        delete_range.Delete()
-
-                    cell_range = cell.Range
-                    cell_text = "" if val is None else str(val)
-                    cell_text = normalize_word_cell_text(cell_text)
-                    cell_range.InsertBefore(cell_text)
-
-                    cell_range = cell.Range
-                    apply_standard_insert_format(
-                        cell_range,
+                    _write_table_cell_text(
+                        doc,
+                        table,
+                        r_idx + 1,
+                        c_idx + 1,
+                        val,
                         font_name=font_name,
                         font_size=font_size,
                         log_parts=log_parts,
                     )
-                    cell_range.ParagraphFormat.Alignment = 0
-                    cell.VerticalAlignment = 1
+                except WordSymbolRestoreError:
+                    raise
                 except Exception as exc:
                     if log_parts is not None:
                         log_parts.append(
@@ -779,7 +794,10 @@ def insert_items_inline_at_end_of_paragraph(
 
     for item in items:
         if item["type"] == "text":
-            s = "\r" + normalize_word_body_text(item["line"])
+            text, symbol_spans = decode_word_symbol_tokens(
+                normalize_word_body_text(item["line"])
+            )
+            s = "\r" + text
             st = int(rng.Start)
             rng.InsertAfter(s)
             ed = int(rng.End)
@@ -790,6 +808,7 @@ def insert_items_inline_at_end_of_paragraph(
                 font_size=font_size,
                 log_parts=log_parts,
             )
+            _restore_word_symbol_fonts(doc, st + 1, symbol_spans)
             rng.Collapse(wdCollapseEnd)
             inserted += 1
         elif item["type"] == "structured_table":
@@ -808,7 +827,10 @@ def insert_items_inline_at_end_of_paragraph(
                 if log_parts is not None:
                     log_parts.append(f"    警告: 内联插入结构化表格失败，改为文本: {e}")
                 for row in render_structured_table_grid(item["table_model"]):
-                    s = "\r" + normalize_word_body_text(" | ".join(row))
+                    text, symbol_spans = decode_word_symbol_tokens(
+                        normalize_word_body_text(" | ".join(row))
+                    )
+                    s = "\r" + text
                     st = int(rng.Start)
                     rng.InsertAfter(s)
                     ed = int(rng.End)
@@ -819,6 +841,7 @@ def insert_items_inline_at_end_of_paragraph(
                         font_size=font_size,
                         log_parts=log_parts,
                     )
+                    _restore_word_symbol_fonts(doc, st + 1, symbol_spans)
                     rng.Collapse(wdCollapseEnd)
                     inserted += 1
         elif item["type"] == "table":
@@ -837,7 +860,10 @@ def insert_items_inline_at_end_of_paragraph(
                 if log_parts is not None:
                     log_parts.append(f"    警告: 内联插入表格失败，改为文本: {e}")
                 for row in item["rows"]:
-                    s = "\r" + normalize_word_body_text(" | ".join(row))
+                    text, symbol_spans = decode_word_symbol_tokens(
+                        normalize_word_body_text(" | ".join(row))
+                    )
+                    s = "\r" + text
                     st = int(rng.Start)
                     rng.InsertAfter(s)
                     ed = int(rng.End)
@@ -848,6 +874,7 @@ def insert_items_inline_at_end_of_paragraph(
                         font_size=font_size,
                         log_parts=log_parts,
                     )
+                    _restore_word_symbol_fonts(doc, st + 1, symbol_spans)
                     rng.Collapse(wdCollapseEnd)
                     inserted += 1
     return inserted

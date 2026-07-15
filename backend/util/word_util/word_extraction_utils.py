@@ -21,6 +21,11 @@ from backend.util.word_util.table_models import (
     StructuredTableModel,
     render_structured_table_markdown,
 )
+from backend.util.word_util.word_symbol_tokens import (
+    build_word_symbol_token,
+    is_legacy_symbol_font,
+    normalize_symbol_font_name,
+)
 
 
 # Unicode 上标和下标字符映射表
@@ -116,13 +121,42 @@ SYMBOL_FONT_CHAR_MAP = {
     "F0BF": "￮",
 }
 
+# Word 97-2003 文件常用 Wingdings 3 的普通字符码画重要性三角。这个
+# 可见字形有稳定 Unicode 等价物；其它无法可靠翻译的字体字形走无损 token，
+# 由写回时按原 font/code 还原，绝不再静默删除。
+LEGACY_SYMBOL_UNICODE_MAP = {
+    ("wingdings 3", "0028"): "▲",
+    ("wingdings 3", "F070"): "▲",
+}
+
+
+def _resolve_symbol_character(font_name: str, char_code: str) -> str:
+    """将已知字形转 Unicode；未知字形保留为可逆 token。"""
+    normalized_font = normalize_symbol_font_name(font_name)
+    normalized_code = str(char_code or "").strip().upper().zfill(4)
+    candidate_codes = [normalized_code]
+    try:
+        numeric_code = int(normalized_code, 16)
+        if numeric_code <= 0xFF:
+            candidate_codes.append(f"F0{numeric_code:02X}")
+        elif 0xF000 <= numeric_code <= 0xF0FF:
+            candidate_codes.append(f"{numeric_code - 0xF000:04X}")
+    except ValueError:
+        pass
+
+    for candidate_code in dict.fromkeys(candidate_codes):
+        if normalized_font == SYMBOL_FONT_NAME:
+            mapped = SYMBOL_FONT_CHAR_MAP.get(candidate_code)
+            if mapped:
+                return mapped
+        mapped = LEGACY_SYMBOL_UNICODE_MAP.get((normalized_font, candidate_code))
+        if mapped:
+            return mapped
+    return build_word_symbol_token(font_name, normalized_code)
+
 
 def _resolve_sym_element(run_content: str) -> str:
-    """从 <w:r> 内容中解析 <w:sym w:font="..." w:char="..."/>，返回可见字符或空串。
-
-    Symbol 字体的 sym 元素不产生可见文本，必须显式映射；只有 font 为 Symbol
-    且 char 命中映射表时才替换，其它情况返回空串（保持原有跳过行为）。
-    """
+    """从 <w:r> 内容中解析一个 ``w:sym``，未知字形不再返回空串。"""
     sym_match = re.search(
         r'<w:sym\s+[^>]*?w:font=["\']([^"\']+)["\'][^>]*?w:char=["\']([0-9A-Fa-f]+)["\']',
         run_content,
@@ -140,9 +174,45 @@ def _resolve_sym_element(run_content: str) -> str:
     else:
         font_name = sym_match.group(1)
         char_code = sym_match.group(2)
-    if str(font_name or "").strip().lower() != SYMBOL_FONT_NAME:
+    return _resolve_symbol_character(font_name, char_code)
+
+
+def _extract_run_font_name(run_content: str) -> str:
+    fonts_match = re.search(r"<w:rFonts\b([^>]*)/?>", run_content, re.DOTALL)
+    if fonts_match is None:
         return ""
-    return SYMBOL_FONT_CHAR_MAP.get(str(char_code or "").strip().upper(), "")
+    attrs = fonts_match.group(1)
+    for attr_name in ("ascii", "hAnsi", "cs", "eastAsia"):
+        match = re.search(
+            rf'w:{attr_name}=["\']([^"\']+)["\']', attrs, re.IGNORECASE
+        )
+        if match is not None:
+            return match.group(1)
+    return ""
+
+
+def _extract_run_font_name_from_element(run) -> str:
+    rfonts = run.find("./w:rPr/w:rFonts", WORD_XML_NS)
+    if rfonts is None:
+        return ""
+    for attr_name in ("ascii", "hAnsi", "cs", "eastAsia"):
+        value = rfonts.attrib.get(f"{{{WORD_XML_NS['w']}}}{attr_name}")
+        if value:
+            return str(value)
+    return ""
+
+
+def _extract_text_run_value(text: str, font_name: str, *, superscript: bool, subscript: bool) -> str:
+    if is_legacy_symbol_font(font_name):
+        return "".join(
+            _resolve_symbol_character(font_name, f"{ord(character):04X}")
+            for character in text
+        )
+    if superscript:
+        return "".join(SUPERSCRIPT_MAP.get(char, char) for char in text)
+    if subscript:
+        return "".join(SUBSCRIPT_MAP.get(char, char) for char in text)
+    return text
 
 
 def _xml_unescape(text):
@@ -223,29 +293,34 @@ def _process_run_text(run_content, align_pattern, position_pattern, text_pattern
                 logger.debug(f"[_process_run_text] 解析position偏移失败（可忽略）: {e}")
 
     run_texts = []
-    # Symbol 字体（如 <w:sym w:font="Symbol" w:char="F044"/>）不产生 <w:t>，
-    # 必须先把映射后的可见字符（如 Δ）拼到 run 文本前部，保证段落/cell/prompt context 一致。
-    sym_char = ""
-    if "<w:sym" in run_content:
-        try:
-            sym_char = _resolve_sym_element(run_content)
-        except Exception as e:
-            logger.debug(f"[_process_run_text] 解析 w:sym 失败（可忽略）: {e}")
-            sym_char = ""
-    if sym_char:
-        run_texts.append(sym_char)
+    run_font_name = _extract_run_font_name(run_content)
+    # 按 XML 中的实际次序读取 text/sym；原实现会先拼 sym 再拼全部 text，
+    # 多个特殊字形与普通文本交错时会改变顺序。
+    child_pattern = re.compile(
+        r"(?P<sym><w:sym\b[^>]*/>)|(?P<text_tag><w:t\b[^>]*>(?P<text>.*?)</w:t>)",
+        re.DOTALL,
+    )
+    for child_match in child_pattern.finditer(run_content):
+        if child_match.group("sym") is not None:
+            try:
+                symbol_xml = child_match.group(0)
+                symbol_text = _resolve_sym_element(symbol_xml)
+            except Exception as e:
+                logger.debug(f"[_process_run_text] 解析 w:sym 失败（可忽略）: {e}")
+                symbol_text = ""
+            if symbol_text:
+                run_texts.append(symbol_text)
+            continue
 
-    text_matches = text_pattern.finditer(run_content)
-    for tm in text_matches:
-        raw_text = tm.group(1)
-        text = _xml_unescape(raw_text)
-
-        if is_superscript:
-            run_texts.append("".join(SUPERSCRIPT_MAP.get(char, char) for char in text))
-        elif is_subscript:
-            run_texts.append("".join(SUBSCRIPT_MAP.get(char, char) for char in text))
-        else:
-            run_texts.append(text)
+        text = _xml_unescape(child_match.group("text") or "")
+        run_texts.append(
+            _extract_text_run_value(
+                text,
+                run_font_name,
+                superscript=is_superscript,
+                subscript=is_subscript,
+            )
+        )
 
     return "".join(run_texts)
 
@@ -290,33 +365,30 @@ def _iter_paragraph_texts_from_xml(
                         logger.debug(f"[_iter_paragraph_texts_from_xml] 解析position失败（可忽略）: {e}")
 
             texts = []
-            # Symbol 字体 sym 元素（如 <w:sym w:font="Symbol" w:char="F044"/> -> Δ）
-            # 不产生 <w:t>，必须先把映射后的可见字符拼到 run 文本前，保证 cell/prompt
-            # context 与段落抽取一致。
-            sym_char = ""
-            for sym_node in run.findall(".//w:sym", WORD_XML_NS):
-                font_name = str(
-                    sym_node.attrib.get(f"{{{WORD_XML_NS['w']}}}font", "") or ""
-                ).strip().lower()
-                char_code = str(
-                    sym_node.attrib.get(f"{{{WORD_XML_NS['w']}}}char", "") or ""
-                ).strip().upper()
-                if font_name != SYMBOL_FONT_NAME or not char_code:
+            run_font_name = _extract_run_font_name_from_element(run)
+            for node in run.iter():
+                local_name = str(node.tag).rsplit("}", 1)[-1]
+                if local_name == "sym":
+                    font_name = str(
+                        node.attrib.get(f"{{{WORD_XML_NS['w']}}}font", "")
+                        or run_font_name
+                    )
+                    char_code = str(
+                        node.attrib.get(f"{{{WORD_XML_NS['w']}}}char", "") or ""
+                    )
+                    if char_code:
+                        texts.append(_resolve_symbol_character(font_name, char_code))
                     continue
-                mapped = SYMBOL_FONT_CHAR_MAP.get(char_code, "")
-                if mapped:
-                    sym_char = mapped
-                    break
-            if sym_char:
-                texts.append(sym_char)
-            for text_node in run.findall(".//w:t", WORD_XML_NS):
-                text_value = _xml_unescape(text_node.text or "")
-                if is_superscript:
-                    texts.append("".join(SUPERSCRIPT_MAP.get(char, char) for char in text_value))
-                elif is_subscript:
-                    texts.append("".join(SUBSCRIPT_MAP.get(char, char) for char in text_value))
-                else:
-                    texts.append(text_value)
+                if local_name != "t":
+                    continue
+                texts.append(
+                    _extract_text_run_value(
+                        _xml_unescape(node.text or ""),
+                        run_font_name,
+                        superscript=is_superscript,
+                        subscript=is_subscript,
+                    )
+                )
             if texts:
                 run_texts.append("".join(texts))
         if run_texts:
