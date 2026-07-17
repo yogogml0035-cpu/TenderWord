@@ -121,6 +121,8 @@ def test_correction_prompt_marks_all_parameter_text_changes() -> None:
     assert "医用核磁共振系统" in _CORRECTION_SYSTEM
     assert "服务期限：3年" in _CORRECTION_SYSTEM
     assert "服务期限：三年" in _CORRECTION_SYSTEM
+    assert "编号隔离硬规则" in _CORRECTION_SYSTEM
+    assert "通道反转分析" in _CORRECTION_SYSTEM
 
     prompt = _build_user_prompt(
         tender_params="维保设备：磁共振系统",
@@ -129,6 +131,7 @@ def test_correction_prompt_marks_all_parameter_text_changes() -> None:
     )
     assert "先按包、对象、来源字段标签和目标语义槽位拆分" in prompt
     assert "只标注事实值字符变化，不标注纯结构变化" in prompt
+    assert "通道反转分析" in prompt
     assert "只授权项目名称槽位" in prompt
 
 
@@ -150,6 +153,27 @@ def test_correction_parser_enforces_sources_anchor_and_fixed_wording() -> None:
         {
             "reference_text": "医用核磁共振系统",
             "comment_text": "原技术参数为“磁共振系统”，现改为“医用核磁共振系统”",
+        }
+    ]
+
+
+def test_correction_parser_drops_number_only_changes() -> None:
+    raw = """[
+      {"reference_text":"4、通道反转分析","comment_text":"原技术参数为“通道反转分析”，现改为“4、通道反转分析”"},
+      {"reference_text":"2、★独立婴幼儿分析模式","comment_text":"原技术参数为“*独立婴幼儿分析模式”，现改为“2、★独立婴幼儿分析模式”"},
+      {"reference_text":"5、通道反转分析，支持自动记录","comment_text":"原技术参数为“通道反转分析”，现改为“5、通道反转分析，支持自动记录”"}
+    ]"""
+
+    comments = _parse_correction_comments(
+        raw,
+        tender_params="通道反转分析\n*独立婴幼儿分析模式",
+        polished_text="4、通道反转分析\n2、★独立婴幼儿分析模式\n5、通道反转分析，支持自动记录",
+    )
+
+    assert comments == [
+        {
+            "reference_text": "5、通道反转分析，支持自动记录",
+            "comment_text": "原技术参数为“通道反转分析”，现改为“5、通道反转分析，支持自动记录”",
         }
     ]
 

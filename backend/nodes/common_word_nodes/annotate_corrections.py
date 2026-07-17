@@ -28,6 +28,17 @@ _CORRECTION_COMMENT_PATTERN = re.compile(
     re.DOTALL,
 )
 
+# 编号是生成阶段允许重排/补全的结构壳，不属于事实值。
+# ponytail: 仅剥离常见行首编号壳；若抽取层保留 Word list metadata，应升级为 token-aware diff。
+_LEADING_CLAUSE_NUMBER_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:\(\s*(?:\d+(?:\.\d+)*|[一二三四五六七八九十百千万]+)\s*\)|"
+    r"（\s*(?:\d+(?:\.\d+)*|[一二三四五六七八九十百千万]+)\s*）)|"
+    r"(?:\d+(?:[.-]\d+)*|[一二三四五六七八九十百千万]+)"
+    r"[、.．:：)）]"
+    r")\s*"
+)
+
 _CORRECTION_SYSTEM = """你是招标文件技术参数差异标注器。唯一任务是比较事实值：找出【原始技术参数】在【最终正文】中被增字、减字、替换、改写或错误拼接的内容，并生成 Word 更正批注候选。不要做合规审查，不要提出修改建议。
 
 执行顺序（必须从第 1 步做到第 7 步，不要跳步）：
@@ -43,6 +54,7 @@ _CORRECTION_SYSTEM = """你是招标文件技术参数差异标注器。唯一�
    - 模板只有在前两个来源都没有该槽位值时才是合法兜底；若原始技术参数已经有同槽位值，模板旧值不能覆盖它。
 4. 逐字比较：将原值与现值逐字符比较。除第 5 步白名单外，只要现值发生增字、减字、替换或拼接，就生成批注；即使语义相同也要标注。
 5. 结构变化白名单：纯章节/条款编号重排、模板字段标签壳、字段从句子无损拆到表格单元格、换行、缩进、字体、段落、表格布局、系统来源标记删除、评分/评审污染删除不标注。`△/Δ→▲`、`*/※→★` 已由代码生成更正批注，本步骤不要重复输出。无损拆格必须满足“目标单元格字符按原顺序拼回等于原字段值”；否则仍要标注。
+   - **编号隔离硬规则：** 先从原值和现值每个原子条款行首剥离纯结构编号（例如 `1、`、`2.1、`、`（1）`、`一、`），再比较事实文字。仅新增、删除、替换、重排或恢复可见编号时，必须输出 `[]`，不得生成“原技术参数为……现改为……”批注；编号后的 `★/▲` 与条款正文仍需继续比较。
 6. 必查变化：
    - 名称、品牌、型号、专有名词增加或删除限定词；
    - 同义改写、简称展开、术语规范化、语序润色；
@@ -71,6 +83,12 @@ _CORRECTION_SYSTEM = """你是招标文件技术参数差异标注器。唯一�
 输出：[]
 
 反例 2（只有编号变化）：原条款仅从`2.1`重排为`1.1`，其它文字未变。
+输出：[]
+
+反例 3（自动补号）：原始技术参数为`通道反转分析`，最终正文为`4、通道反转分析`。
+输出：[]
+
+反例 4（补号同时规范标识）：原始技术参数为`*独立婴幼儿分析模式`，最终正文为`2、★独立婴幼儿分析模式`。
 输出：[]"""
 
 
@@ -116,6 +134,25 @@ def _extract_json_array(text: str) -> Optional[str]:
     return None
 
 
+def _normalize_for_correction_comparison(value: str) -> str:
+    """去除编号壳并规范条款标识，用于过滤结构变化误报。"""
+    lines: list[str] = []
+    for line in str(value or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        lines.append(_LEADING_CLAUSE_NUMBER_RE.sub("", line.strip(), count=1))
+    normalized, _ = normalize_clause_markers("\n".join(lines))
+    return normalized.strip()
+
+
+def _is_structure_only_correction(original: str, current: str) -> bool:
+    """编号/标识规范化后无事实差异时，拒绝 LLM 的更正批注候选。"""
+    return (
+        bool(str(original or "").strip())
+        and bool(str(current or "").strip())
+        and _normalize_for_correction_comparison(original)
+        == _normalize_for_correction_comparison(current)
+    )
+
+
 def _parse_correction_comments(
     raw: str,
     *,
@@ -150,6 +187,8 @@ def _parse_correction_comments(
         current = match.group("current")
         if not original or not current or original == current:
             continue
+        if _is_structure_only_correction(original, current):
+            continue
         if tender_params is not None and original not in tender_params:
             continue
         if polished_text is not None and (
@@ -179,7 +218,8 @@ def _build_user_prompt(
         "请先按包、对象、来源字段标签和目标语义槽位拆分原始技术参数，再逐字段对齐最终正文并逐字比较。"
         "优先检查名称限定词、同义改写、数字写法、单位/范围、否定词、型号和专有名词；"
         "允许`维保设备`对齐设备清单`设备名称`，允许`数量：1套`无损拆为`数量=1、单位=套`；"
-        "只标注事实值字符变化，不标注纯结构变化。\n\n"
+        "只标注事实值字符变化，不标注纯结构变化。先剥离行首的`1、`、`2.1、`、`（1）`、`一、`等编号再比较；"
+        "例如`通道反转分析`与`4、通道反转分析`、`无线连接技术……`与`1、无线连接技术……`都不生成更正批注。\n\n"
         f"【项目名称（只授权项目名称槽位）】\n{project_name or ''}\n\n"
         "【其它项目基础信息】\n"
         "只有带明确字段标签的同槽位值才能按优先级覆盖原始技术参数；无字段标签的稳定分隔片段只能在原始技术参数没有该槽位值时补充项目级字段；"
