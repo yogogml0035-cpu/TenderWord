@@ -1,6 +1,6 @@
 # 前端编码约定
 
-**分析日期：** 2026-06-29
+**分析日期：** 2026-07-18
 
 **范围：** `frontend/` 的组件、hooks、stores、API client、类型、表单、上传、SSE/agent run、测试和配置文件。`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc` 仅确认存在，不读取内容，不在文档中记录任何密钥、token、客户原文或私有下载路径。
 
@@ -37,10 +37,11 @@
 ## 代码风格
 
 **格式化：**
-- 使用 Prettier 3，配置在 `frontend/.prettierrc`。
+- 使用 Prettier 3（`package.json` 中 `prettier` `^3.8.1`），配置在 `frontend/.prettierrc`。
 - 保持 `semi: true`、`singleQuote: true`、`printWidth: 100`、`tabWidth: 2`、`trailingComma: "es5"`。
 - Tailwind class 排序由 `prettier-plugin-tailwindcss` 处理。
 - `frontend/.prettierignore` 排除 `node_modules`、`.next`、`out`、`dist`、`*.log`。
+- 命令：`npm run format`（`prettier --write .`）、`npm run format:check`（`prettier --check .`）。
 
 **Lint：**
 - 使用 ESLint 9 flat config，配置在 `frontend/eslint.config.mjs`。
@@ -49,10 +50,11 @@
 - ESLint 忽略 `.next/**`、`out/**`、`build/**`、`next-env.d.ts`、`node_modules-*/**`、`coverage/**`、`playwright-report/**`、`test-results/**`。
 - 运行命令：`npm run lint`（即 `eslint`）。
 
-**TypeScript:**
+**TypeScript：**
 - `frontend/tsconfig.json` 启用 `strict: true`、`jsx: "react-jsx"`、`moduleResolution: "bundler"`、`baseUrl: "."` 和 `@/*` alias。
 - 类型检查入口是 `frontend/tsconfig.typecheck.json`（继承 `tsconfig.json`，排除 `.next/dev`），命令为 `npm run type-check`（即 `tsc -p tsconfig.typecheck.json --noEmit`）。
 - `frontend/next.config.ts` 中 `typescript.ignoreBuildErrors` 为 `false`，不要依赖构建跳过类型错误。
+- Node 引擎要求 `>=20.9.0`（`frontend/package.json` `engines`）。
 
 ## 导入组织
 
@@ -111,7 +113,7 @@ export async function createGenerateTask(params: GenerateRequest): Promise<Creat
 - 合理示例：`frontend/lib/gngkFormType.ts` 中说明工程类复用服务链路；`frontend/utils/tenderTypeMapper.ts` 中说明前端判型只依赖 `purchase_method`。
 - 不用注释替代类型、测试或命名；新增 API 字段必须同步 `frontend/types/api.ts` 和测试。
 
-**JSDoc/TSDoc:**
+**JSDoc/TSDoc：**
 - 公共 helper、底层 hook 和测试工厂可以保留短 TSDoc，例如 `frontend/hooks/useSSE.ts`、`frontend/__tests__/mocks/data-factories.ts`。
 - 组件内部简单 handler 不需要 JSDoc；优先通过函数名和局部变量名表达意图。
 
@@ -147,27 +149,40 @@ export async function createGenerateTask(params: GenerateRequest): Promise<Creat
 ## 组件与状态约定
 
 **组件：**
-- Next App Router 页面位于 `frontend/app/`；交互组件以 `'use client'` 开头，例如 `frontend/components/chat/ChatPanel.tsx`、`frontend/components/forms/TenderFormShared.tsx`。
+- Next App Router 页面位于 `frontend/app/`；交互组件以 `'use client'` 开头，例如 `frontend/components/chat/ChatPanel.tsx`、`frontend/components/forms/TenderFormShared.tsx`、hooks 与 layout 客户端组件。
+- 根布局 `frontend/app/layout.tsx` 使用 `lang="zh-CN"`，标题与描述为中文产品文案。
 - 表单 wrapper 只绑定招标类型差异；共享逻辑、上传、模板候选、生成方式和插入锚点留在 `frontend/components/forms/TenderFormShared.tsx`。
-- 共享表单 UI 放在 `frontend/components/forms/shared/`，使用 `FormSection`、`FormField`、`ErrorDisplay`、`InfoCard` 和 shared button class。
+- 共享表单 UI 放在 `frontend/components/forms/shared/`，使用 `FormSection`、`FormField`、`ErrorDisplay`、`InfoCard` 和 shared button class（`secondaryActionButtonClassName`）。
+- 样式使用 Tailwind CSS 4 + `clsx` / `tailwind-merge`；class 合并走 `cn()`。
 
-**状态：**
-- 会话、草稿、任务摘要、任务消息分组由 `frontend/stores/chatStore.ts` 维护，并通过 `sessionStorage` key `chat-storage` 持久化。
+**状态（Zustand）：**
+- 会话、草稿、任务摘要、任务消息分组由 `frontend/stores/chatStore.ts` 维护，通过 `sessionStorage` key `chat-storage` 持久化；`partialize` 保留 `conversations`、`currentConversationId`、`selectedTenderType`、`conversationDrafts`、`taskSummaries`、`unreadConversationResults`。
 - 运行中的 SSE 日志、AI 文本、进度、agent step 临时快照放在 `frontend/stores/chatStreamStore.ts`，不持久化。
 - 任务恢复用的 `lastEventId` 放在 `frontend/stores/chatTaskSessionStore.ts`，通过 `sessionStorage` key `chat-task-session-storage` 持久化。
-- 历史列表状态在 `frontend/stores/historyStore.ts`，UI 基础状态在 `frontend/stores/useAppStore.ts`。
+- 历史列表状态在 `frontend/stores/historyStore.ts`（`sessionStorage` key `tender-history-storage`）。
+- UI 基础状态在 `frontend/stores/useAppStore.ts`（`localStorage` key `tender-app-storage`，`partialize` 仅 `sidebarOpen`）。
 - Store 测试或组件测试设置状态时使用 `useXxxStore.setState()`，不要绕过 store action 修改浏览器 storage JSON。
 
 ## API Client 约定
 
 - 所有后端 JSON、上传、下载、NDJSON、模板候选、任务状态和 heartbeat 请求统一走 `frontend/lib/api.ts`。
 - 组件不得裸写后端 `fetch()`；当前源码中 `fetch(` 只出现在 `frontend/lib/api.ts`（`request()`、`streamNdjson()`、`fetchTenderDataWithType()`、`downloadFile()`）。组件/hooks/stores 中无裸 `fetch`。
-- `NEXT_PUBLIC_API_URL` 解析集中在 `frontend/lib/apiBaseUrl.ts`；修改该链路时同时检查 `frontend/next.config.ts` 的 `rewrites()` 和 `allowedDevOrigins`。
+- 组件侧消费点示例：`ChatPanel`、`FormPanel`、`TenderFormShared`、`FileUploader` 均 `import` 自 `@/lib/api`。
+- `NEXT_PUBLIC_API_URL` 解析集中在 `frontend/lib/apiBaseUrl.ts`（支持逗号分隔多候选、按当前 hostname 匹配、默认 `http://localhost:8000`）；修改该链路时同时检查 `frontend/next.config.ts` 的 `rewrites()` 和 `allowedDevOrigins`。
+- 开发服默认前端端口 `8502`（`npm run dev` / `npm start`）；后端默认 `8000`。
 - SSE URL 由 `frontend/lib/api.ts` 的 `getTaskStreamUrl()` 或 `frontend/hooks/useChatSSE.ts` 经 `frontend/lib/sse.ts` 创建，不在组件里拼后端 stream URL。
 - 模板候选只通过项目内 API helper：`fetchTemplateCandidates()`、`selectTemplateCandidate()`、`getTemplateCandidateDownloadUrl()`。组件不直接访问外部模板候选 URL。
 - 文件上传使用 `uploadFile()` / `uploadFiles()`；下载使用 `downloadFile()` / `getDownloadUrl()`。
 - `POST /api/agent/runs/stream` 是右侧聊天的 NDJSON 入口，前端解析在 `frontend/lib/api.ts` 的 `streamAgentRun()` 和 `parseAgentRunEvent()`。
 - 招标数据拉取的 draft 同步逻辑封装在 `frontend/lib/tenderFetch.ts` 的 `syncTenderDataDraft()`，调用 `fetchTenderDataWithType()`，组件不直接拼 `/api/tender/{tender_no}`。
+
+**主要 API helper 清单（`frontend/lib/api.ts`）：**
+- 招标：`fetchTenderData`、`fetchTenderDataWithType`
+- 模板候选：`fetchTemplateCandidates`、`selectTemplateCandidate`、`getTemplateCandidateDownloadUrl`
+- 上传：`uploadFile`、`uploadFiles`
+- 任务：`createGenerateTask`、`createCommentSupplementTask`、`getTaskStatus`、`cancelTask`、`getTaskList`、`sendTaskHeartbeat`、`sendConversationHeartbeat`
+- 流：`streamNdjson`、`streamAgentRun`
+- 下载：`downloadFile`、`getDownloadUrl`、`getTaskStreamUrl`
 
 ## 类型同步与跨端契约
 
@@ -191,12 +206,15 @@ export async function createGenerateTask(params: GenerateRequest): Promise<Creat
 
 ## SSE 与 Agent Run 约定
 
+- 底层连接：`frontend/lib/sse.ts` 的 `createSSEConnection()` 使用浏览器 `EventSource`，支持 `lastEventId` 查询参数、事件去重、可选自动重连与 heartbeat timeout。
+- React 封装：`frontend/hooks/useSSE.ts` 管理连接生命周期；任务流业务映射在 `frontend/hooks/useChatSSE.ts`（写 `chatStreamStore` / `chatStore` / `chatTaskSessionStore`）。
 - `task_accepted` 才创建后台任务并接入 task/SSE 链路；`needs_input` 只追加普通 AI 提示，不创建任务。
 - `agent_step` 过程卡由 `frontend/hooks/useChatSSE.ts` 映射到 `frontend/stores/chatStore.ts` 的 task message group；运行中快照先放 `frontend/stores/chatStreamStore.ts`。
 - `content_agent` 和 `comment_agent` 过程卡复用 `agent_step` 事件族；generate workflow 不应渲染 `comment_agent` 过程卡。
 - rewrite 和 `comment_supplement` 任务使用 agent-step 卡，不再创建普通 `task-content` 卡。
 - thinking 卡阶段标签与视图状态映射在 `frontend/lib/agentThinking.ts`（如 `understand`、`execute`、`tool`、`retry`），与 `AgentThinkingViewStageKey` 对齐。
 - SSE reconnect、`lastEventId`、heartbeat 和后端重启恢复由 `frontend/lib/sse.ts`、`frontend/hooks/useChatSSE.ts`、`frontend/stores/chatTaskSessionStore.ts` 管理。
+- Agent run NDJSON 事件族（`parseAgentRunEvent`）：`run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`needs_input`、`done`、`error`。
 
 ## i18n / 语言约定
 
@@ -214,4 +232,4 @@ export async function createGenerateTask(params: GenerateRequest): Promise<Creat
 
 ---
 
-*前端约定分析：2026-06-29*
+*前端约定分析：2026-07-18*

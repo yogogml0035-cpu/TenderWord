@@ -25,16 +25,22 @@ TenderWord 是招标文档生成、修改、补充批注和模板复用系统；
 - 上传文件 rewrite 前端使用 `rewrite_source` 文件类型，后端 task skill state 用 `rewrite_source="uploaded_file"` 标记来源；不要恢复旧 edit 入口或把上传修改做成第二套任务链路。
 - rewrite 任务由显式 `RewriteSkillGraph` 承载；不要恢复 `SkillGraph.for_skill + TaskSkillWorkflow` 元数据驱动框架。
 - Agent run 只负责任务创建前置流；审计日志和摘要工具只暴露 scrub 后白名单信息，不记录或返回完整客户原文、真实密钥、私有路径、traceback 或下载路径。
+- `annotate_corrections` 仅接入初次 generate；技术参数差异更正批注只由该链路产出，`comment_agent` 不得生成“原技术参数为…现改为…”类差异批注；编号/项目符号/展示壳变化不得当作事实更正。
+- Word 写回先写更正批注再写普通 AI 批注；`comment_generation_mode=off` / `suppress_ai_comment_writeback` 只跳过普通 AI 批注，不跳过更正批注。
 
 ## 常用命令
 
-非显而易见的环境信息：后端开发服跑在 8000、前端开发服跑在 8502；后端在 `backend/` 下用 `python -m uvicorn main:app --reload --port 8000`，测试用 `python -m pytest tests -v`（async 用例需显式 `@pytest.mark.asyncio`）；前端在 `frontend/` 下用 npm（`npm run dev/lint/type-check/test/test:e2e`，具体 scripts 见 `frontend/package.json`）。
+非显而易见的环境信息：后端开发服 **8000**、前端开发服 **8502**。
+
+- 后端（在 `backend/` 下）：`python -m uvicorn main:app --reload --port 8000`；测试 `python -m pytest tests -v`（async 用例需显式 `@pytest.mark.asyncio`）。
+- 前端（在 `frontend/` 下，包管理器 npm）：`npm run dev` / `lint` / `type-check` / `test` / `test:e2e`（完整 scripts 见该目录 `package.json`）。
 
 ## 验证与维护
 
 - 文档型变更至少运行 `git diff --check`，并扫描本轮改动文档中的密钥/token 模式；仅文档变更不需要跑代码测试或 E2E。
 - 前端代码改动至少运行 lint、type-check 和相关测试；后端代码改动至少运行 pytest；Word COM 闭环需要 Windows + Word/WPS COM。
 - 改动影响长期边界时，同步刷新对应 `.planning/codebase/`、`coding_maps/`、`docs/` 或 `asset/` 知识包。
+- 子项目事实变化先更新对应 `.planning/codebase/`；长期边界进入 `asset/`；影响多数未来需求的规则上提到本文件。
 
 ## 详细文档
 

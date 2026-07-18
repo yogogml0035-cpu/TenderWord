@@ -313,7 +313,7 @@ def test_write_tool_adds_only_validated_anchor_inside_word_bound() -> None:
     assert doc.Comments.Count == 1
     assert doc.Comments(1).Text == "建议提示：不得要求原厂授权函。"
 
-def test_write_tool_counts_existing_comment_as_skipped() -> None:
+def test_write_tool_adds_comment_when_anchor_already_has_comment() -> None:
     doc = _FakeDocument("投标人须提供原厂授权函，并承诺售后。")
     doc.Comments._items.append(_FakeComment(doc, 0, len("投标人须提供原厂授权函"), "existing"))
 
@@ -336,11 +336,12 @@ def test_write_tool_counts_existing_comment_as_skipped() -> None:
         bound_end=len(doc.text),
     )
 
-    assert writeback["added"] == 0
+    assert writeback["added"] == 1
     assert writeback["failed"] == 0
-    assert writeback["skipped"] == 1
-    assert writeback["issues"][0]["reason"] == "overlapping_comment_exists"
-    assert doc.Comments.Count == 1
+    assert writeback["skipped"] == 0
+    assert writeback["issues"] == []
+    assert doc.Comments.Count == 2
+    assert doc.Comments(2).Text == "建议提示：不得要求原厂授权函。"
 
 def test_write_validated_comment_candidates_to_word_reuses_shared_helper_for_duplicate_anchors() -> None:
     """write_validated_comment_candidates_to_word 复用共享 helper，重复锚点不会返回
@@ -523,6 +524,57 @@ def test_run_comment_agent_can_generate_candidates_in_generation_mode(tmp_path) 
     assert audit["initial_comments"][0]["reference_text"] == "投标人须提供原厂授权函"
     assert audit["final_proposed_comments"][0]["reference_text"] == "投标人须提供原厂授权函"
 
+
+def test_run_comment_agent_default_autonomous_generation_bypasses_tool_agent(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    doc = _FakeDocument("投标人须提供原厂授权函，并承诺售后。")
+    audit_path = tmp_path / "comment-agent-audit.json"
+    raw_candidate_text = (
+        '[{"reference_text":"投标人须提供原厂授权函",'
+        '"comment_text":"建议提示：不得要求原厂授权函。"}]'
+    )
+    captured: dict[str, Any] = {}
+
+    class FakeModel:
+        def invoke(self, messages):
+            captured["messages"] = messages
+            return AIMessage(content=raw_candidate_text)
+
+    monkeypatch.setattr(
+        comment_agent_module,
+        "create_generation_chat_model",
+        lambda _provider: FakeModel(),
+    )
+    monkeypatch.setattr(
+        comment_agent_module,
+        "create_comment_agent_runner",
+        lambda *_args, **_kwargs: pytest.fail("自主生成不应创建 tool agent"),
+    )
+    monkeypatch.setattr(comment_agent_module, "_fake_runner", None)
+
+    result = run_comment_agent(
+        initial_comments=[],
+        polished_text=doc.text,
+        doc=doc,
+        bound_start=0,
+        bound_end=len(doc.text),
+        task_id="task-direct-model",
+        audit_log_path=audit_path,
+        allow_comment_generation=True,
+        comment_generation_instruction="请仅依据修改文本生成纯净 JSON 数组。",
+    )
+
+    assert captured["messages"][0].content == (
+        comment_agent_module.COMMENT_AGENT_GENERATION_SYSTEM_PROMPT
+    )
+    assert result.ai_messages == [raw_candidate_text]
+    assert result.validation.passed_count == 1
+    assert result.writeback_result["added"] == 1
+    assert doc.Comments.Count == 1
+
+
 def test_run_comment_agent_accepts_json_generation_fallback_without_tool_submission(
     tmp_path,
 ) -> None:
@@ -535,7 +587,7 @@ def test_run_comment_agent_accepts_json_generation_fallback_without_tool_submiss
 
     class FakeRunner:
         def stream(self, _payload, _config, **_kwargs):
-            yield AIMessage(content=raw_candidate_text)
+            yield (AIMessage(content=raw_candidate_text), {"langgraph_node": "model"})
 
     events = []
     result = run_comment_agent(

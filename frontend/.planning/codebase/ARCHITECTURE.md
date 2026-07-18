@@ -1,6 +1,6 @@
 # 前端架构事实地图
 
-**分析日期：** 2026-07-15
+**分析日期：** 2026-07-18
 
 **范围：** `frontend/` 子项目。分析覆盖 App Router 工作台、API client、hooks、Zustand 状态流、上传、generate/rewrite/comment_supplement UI 边界、SSE 与目录分层。未读取 `.env`、`.env.*`、`.npmrc`、凭据或真实密钥文件。
 
@@ -40,7 +40,7 @@
 
 前端是 TenderWord 的浏览器工作台，负责招标类型选择、URL 深链、会话与草稿、招标信息预取、模板候选、文件上传、generate 任务创建、agent run、上传文件 rewrite、补充批注、SSE 进度和下载入口。浏览器端不执行 Word COM、LLM、检索、真实文件落盘或外部模板候选直连；这些能力由后端 `/api/*` 封装。
 
-组件层（`frontend/components/`）不写裸 `fetch`，也不直接访问外部模板候选 URL；所有后端请求统一经 `frontend/lib/api.ts`（及内部 SSE/NDJSON helper）。
+组件层（`frontend/components/`）不写裸 `fetch`，也不直接访问外部模板候选 URL；所有后端请求统一经 `frontend/lib/api.ts`（及内部 SSE/NDJSON helper）。仓库内 `fetch(` 仅出现在 `frontend/lib/api.ts`。
 
 ## 组件职责
 
@@ -57,7 +57,7 @@
 | Task content card | 展示普通 AI 正文、rewrite 正文、`content_agent` 和 `comment_agent` 过程 | `frontend/components/chat/TaskContentMessage.tsx` |
 | Task download card | 展示下载入口、批注写回警告、generate 产物的补充批注按钮 | `frontend/components/chat/TaskDownloadMessage.tsx` |
 | Dual column message | 左进度日志 / 右 AI 内容的双列消息卡（含复制、下载、重试）；当前未接入主消息分派 | `frontend/components/chat/DualColumnMessage.tsx` |
-| New chat popup | 类型侧栏的悬浮"新建对话/最近对话"弹窗，含重命名/删除右键菜单；当前未接入侧栏 | `frontend/components/chat/NewChatPopup.tsx` |
+| New chat popup | 类型侧栏的悬浮“新建对话/最近对话”弹窗，含重命名/删除右键菜单；当前未接入侧栏 | `frontend/components/chat/NewChatPopup.tsx` |
 | Skeleton | shimmer 占位与页面/消息/双列骨架组件；当前未接入主流程 | `frontend/components/chat/Skeleton.tsx` |
 | Shared tender form | 招标信息、模板/参数上传、模板候选、插入锚点、生成模式和 draft 同步 | `frontend/components/forms/TenderFormShared.tsx` |
 | Form registry | `TenderType` 到显示名、表单组件、converter 的映射 | `frontend/components/chat/tenderFormRegistry.ts` |
@@ -157,6 +157,7 @@
 3. `streamAgentRun()` 以 NDJSON 调用 `/api/agent/runs/stream`。
 4. `run_started`、`thinking_stage`、`tool_call` 更新 thinking card 或普通 AI 消息；`needs_input`/`done`/`error` 只更新普通消息，不创建后台 task。
 5. 只有 `task_accepted` 调用 `startTask()` 并进入任务/SSE 体系。
+6. `selected_skills` 是一次性 agent run 草稿字段：消息发出后清空；存在 `rewrite_file` 时隐式选择 rewrite。
 
 ### 上传文件 Rewrite 链路
 
@@ -166,6 +167,7 @@
 4. `rewrite_context` 字段仅含：`form_type`、`insertion_config`、`tender_lx`、`fund_source_lx`、`tender_data_snapshot`（见 `AgentRunRewriteContextSnapshot`）。**不含** `generation_style` / `generation_mode` / `comment_generation_mode` / `style_writeback_mode`。
 5. `resolveRewriteFormType()` 为上传 rewrite 计算后端 `form_type`；`gngk` 继续复用 `resolveGngkFormType()`。
 6. rewrite task 完成后，`ChatPanel` 通过 `pending_rewrite_task_id` 监听终态，用下载卡产物回写 draft 的 `rewrite_file`，让下一轮 rewrite 基于最新文档。
+7. 后端 task skill state 侧以 `rewrite_source="uploaded_file"` 标记来源；前端上传侧 `FileType` 使用 `rewrite_source`，不要恢复旧 edit 入口或第二套任务链路。
 
 ### 任务 SSE 与产物流转
 
@@ -175,18 +177,21 @@
 4. `log` / `llm` / `agent_step` / `progress` 更新 `chatStreamStore` 和 task summary。
 5. `done` / `error` 关闭连接并调用 `completeTask()` / `failTask()` / `cancelTask()`。
 6. `MessageList` 按 `message.metadata.messageKind` 渲染 `task-log`、`task-content`、`agent-step`、`task-download` 或 thinking card，其余为普通消息。
+7. `agent_step` 只表示智能体过程事件，不替代 `done` / `error` 终态。
 
 ### 模板候选链路
 
 1. `TenderFormShared` 用招标编号和项目名维护候选缓存，并调用 `fetchTemplateCandidates()`。
 2. 候选选择使用 `selectTemplateCandidate()`，后端返回 selected file 后写入模板上传槽。
 3. 候选模板下载 URL 必须由 `getTemplateCandidateDownloadUrl()` 生成项目内代理 URL。
+4. `year < 2025` 或非法年份的模板不可选择，只允许下载参考。
 
 ### 补充批注链路
 
 1. `TaskDownloadMessage` 只对 `taskKind === 'generate'` 显示补充批注入口。
 2. `ChatPanel.handleCommentSupplement()` 从下载卡读取 `metadata.outputFile`，调用 `createCommentSupplementTask()`（`/api/comment-supplement`）。
 3. `comment_supplement` 复用 task summary、SSE、agent-step 和下载卡，不引入第二套任务流。
+4. rewrite 和 comment_supplement 下载卡不应再次显示补充批注动作。
 
 **状态管理：**
 - `chatStore` 是持久化主状态，storage name 为 `chat-storage`，持久化 `conversations`、`currentConversationId`、`selectedTenderType`、`conversationDrafts`、`taskSummaries`、`unreadConversationResults`。
@@ -205,6 +210,7 @@
 - 职责： 初次生成任务 payload。
 - Examples: `frontend/types/api.ts`, `frontend/lib/formDataConverter.ts`
 - Pattern: converter 负责默认值、文件路径提取、generate-only 字段和 `gngk` form type 分派。
+- Backend form types: `xjcg_tender`、`gngk_hw_zc_tender`、`gngk_hw_cz_tender`、`gngk_fw_zc_tender`、`gngk_fw_cz_tender`、`gjgk_tender`。
 
 **`FileType`:**
 - 职责： 上传接口 `file_type` 参数。
@@ -262,6 +268,7 @@
 - Location: `frontend/lib/api.ts`
 - Triggers: 表单提交、聊天发送、上传、下载、模板候选、任务状态/heartbeat。
 - Responsibilities: 构造请求、解析 wrapped/unwrapped response、抛出 `ApiError`、解析 NDJSON agent run。
+- Key exports: `streamAgentRun`、`uploadFile`、`createGenerateTask`、`createCommentSupplementTask`、`getTaskStatus`、`cancelTask`、`sendTaskHeartbeat`、`sendConversationHeartbeat`、`fetchTemplateCandidates`、`selectTemplateCandidate`、`getTemplateCandidateDownloadUrl`、`getTaskStreamUrl`、`downloadFile`。
 
 **SSE Entry:**
 - Location: `frontend/hooks/useChatSSE.ts`（底层 `frontend/lib/sse.ts`，封装层 `frontend/hooks/useSSE.ts`）
@@ -273,7 +280,7 @@
 - **Threading:** 浏览器单线程 React 渲染；异步 `fetch`、`EventSource`、timer、focus、pageshow、online 和 visibility 事件驱动任务状态。
 - **Global state:** Zustand stores 是模块级 singleton，见 `frontend/stores/chatStore.ts`、`frontend/stores/chatStreamStore.ts`、`frontend/stores/chatTaskSessionStore.ts`、`frontend/stores/historyStore.ts`、`frontend/stores/useAppStore.ts`。
 - **Circular imports:** `frontend/types/` 保持无运行时副作用；修改 `stores/types/lib` 边界时避免让类型层反向依赖组件或 store runtime。
-- **API boundary:** 新增后端请求放到 `frontend/lib/api.ts`；组件负责用户交互和调用 API helper，不实现协议解析或裸 `fetch`。
+- **API boundary:** 新增后端请求放到 `frontend/lib/api.ts`；组件负责用户交互和调用 API helper，不实现协议解析或裸 `fetch`。该约定靠评审和测试维护，无专门 lint 规则兜底。
 - **Generate-only fields:** `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 只属于 generate 请求和会话 draft，不进入 rewrite request、skill state 或 prompt surface。
 - **GNGK dispatch:** `gngk` 是 UI 类型；后端 `form_type` 分派集中到 `frontend/lib/gngkFormType.ts`，generate 与上传文件 rewrite 复用同一 helper。
 - **Rewrite upload:** 源文档 `file_type` 必须为 `rewrite_source`；产物通过 `pending_rewrite_task_id` 回写 draft，不另开任务状态机。
@@ -341,6 +348,7 @@
 - `frontend/hooks/useCurrentConversationTaskStatus.ts` 轮询当前任务，`TASK_NOT_FOUND` 或 404 调用 `discardStaleTask()`。
 - `frontend/hooks/useTaskHeartbeat.ts` 对活跃 task 发 heartbeat，终态回调给 `FormPanel` 做补拉收敛。
 - `frontend/app/tender/page.tsx` 用 conversation heartbeat 检测后端 `instance_id` 变化，并调用 `handleBackendRestart()`。
+- 从 `sessionStorage` 恢复 running task 前必须先查任务状态；404 或 `TASK_NOT_FOUND` 收敛为本地中断态。
 - UI 组件展示用户可读错误；下载失败路径在 `ChatPanel` 使用 alert + console 错误。
 
 ## 横切关注点
@@ -355,8 +363,10 @@
 
 **外部 API 隔离：** 招标详情、模板候选、模板下载、Word COM、LLM 和检索运行时都在后端封装；前端只消费项目内 `/api/*`（经 Next rewrite 代理）。
 
-**运行端口：** 前端开发服默认 `8502`（`npm run dev`）；后端 API 经 `NEXT_PUBLIC_API_URL` / `apiBaseUrl` 解析，Next rewrite 转发 `/api/:path*`。
+**运行端口：** 前端开发服默认 `8502`（`npm run dev`）；后端 API 经 `NEXT_PUBLIC_API_URL` / `apiBaseUrl` 解析，Next rewrite 转发 `/api/:path*`。`NEXT_PUBLIC_API_URL` 会同时影响 API client、Next rewrite 目标和开发期 allowed origin。
+
+**技术栈锚点：** Next.js 16、React 19、Zustand 5、Tailwind 4、Jest + Testing Library、Playwright；包管理器 npm；Node.js `>=20.9.0`。
 
 ---
 
-*前端架构分析：2026-07-15*
+*前端架构分析：2026-07-18*

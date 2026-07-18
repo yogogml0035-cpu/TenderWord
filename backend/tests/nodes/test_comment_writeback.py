@@ -820,6 +820,30 @@ class TestCommentWritebackDuplicateAnchorMultiWrite:
         assert doc.Comments.Count == 2
         assert result["issues"][0]["reason"] == "overlapping_comment_exists"
 
+    def test_write_polished_comments_can_add_on_existing_normalized_anchor(self) -> None:
+        """显式放宽时，规范化匹配到已有批注的锚点仍可追加批注。"""
+        doc = _FakeDocument("A，B")
+        doc.Comments._items.append(_FakeComment(doc, 0, len(doc.text), "existing"))
+        log_parts: list[str] = []
+
+        result = write_polished_comments(
+            doc=doc,
+            polished_comments=[
+                {"reference_text": "A B", "comment_text": "追加批注"},
+            ],
+            bound_start=0,
+            bound_end=len(doc.text),
+            log_parts=log_parts,
+            allow_existing_comments=True,
+        )
+
+        assert result["added"] == 1
+        assert result["failed"] == 0
+        assert result["skipped"] == 0
+        assert doc.Comments.Count == 2
+        assert doc.Comments(2).Text == "追加批注"
+        assert any("规范化匹配添加" in part for part in log_parts)
+
     def test_write_polished_comments_markdown_pipe_row_matched_across_duplicates(self) -> None:
         """规范化匹配（Markdown pipe 行）仍能处理标点、换行、pipe 表格行。"""
         doc = _FakeDocument("A B 说明，另含 A B 结尾。")
