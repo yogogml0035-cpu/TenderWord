@@ -1,6 +1,6 @@
 # 前端结构事实地图
 
-**分析日期：** 2026-07-15
+**分析日期：** 2026-07-18
 
 **范围：** `frontend/` 子项目。未读取 `.env`、`.env.*`、`.npmrc`、凭据或真实密钥文件。
 
@@ -200,17 +200,43 @@ frontend/
 - Primary code: 工作台页面编排放 `app/tender/page.tsx`；工作台交互放 `components/chat/`；表单、字段、上传、模板候选放 `components/forms/` 或 `forms/shared/`。
 - Tests: 单元测试放 `__tests__/unit/<scope>/test_*.test.ts(x)`；浏览器契约放 `e2e/test_*.spec.ts`。
 
-**New Component/Module:**
-- Implementation: 聊天消息或任务 UI 放 `components/chat/`；表单控件放 `forms/shared/`；招标表单 wrapper 放 `forms/<Type>TenderForm.tsx` 并同步 `tenderFormRegistry.ts`。
-- Tests: 组件单测按作用域放 `__tests__/unit/components/chat/` 或 `forms/`。
+**New Component:**
+- 聊天消息、任务 UI、侧栏、面板：`components/chat/`。
+- 招标表单 wrapper：`components/forms/<Type>TenderForm.tsx`，并同步 `tenderFormRegistry.ts`。
+- 表单字段/区块/错误展示等低层控件：`components/forms/shared/`。
+- 通用布局壳（非 workbench 三栏）：`components/layout/`。
+- Tests: 组件单测按作用域放 `__tests__/unit/components/chat/`、`forms/` 或 `layout/`。
+
+**New Hook:**
+- Implementation: `frontend/hooks/useXxx.ts`。
+- SSE 生命周期类放 `useSSE.ts` 扩展或新 hook；任务 SSE 映射优先扩展 `useChatSSE.ts`。
+- URL/hydration/task status/heartbeat 继续落在 `hooks/`，不要塞进组件内部重复实现。
+- Tests: `__tests__/unit/hooks/test_use_xxx.test.tsx`。
+
+**New Store:**
+- 会话/任务/draft 主状态优先扩展 `stores/chatStore.ts`，避免再开平行会话 store。
+- 运行中 SSE stream 状态放 `stores/chatStreamStore.ts`（内存）。
+- 任务 resume 元数据放 `stores/chatTaskSessionStore.ts`。
+- 非 workbench 局部 UI 可扩展 `useAppStore.ts` / `historyStore.ts`。
+- Tests: `__tests__/unit/stores/test_*.test.ts`。
+
+**New Types:**
+- 后端 API shape、SSE、agent run、上传/任务类型：`types/api.ts`。
+- 聊天消息、会话、messageKind、thinking 状态：`types/chat.ts`。
+- UI 级招标类型与通用前端类型：`types/index.ts`。
+- API shape 变更必须同步 `lib/api.ts`、调用方和测试。
 
 **Utilities:**
-- Shared helpers: 通用 class/helper → `lib/utils.ts`；API base URL → `lib/apiBaseUrl.ts`；URL/tender type → `utils/tenderTypeMapper.ts`；消息/会话纯函数 → `lib/chat-utils.ts`。
-- API helpers: 后端请求 → `lib/api.ts`，同步 `types/api.ts`。**禁止**在 `components/` 写裸 `fetch`。
-- SSE helpers: `EventSource` → `lib/sse.ts`；生命周期 → `hooks/useSSE.ts`；任务映射 → `hooks/useChatSSE.ts`。
-- State helpers: 主会话/任务 → `chatStore.ts`；stream runtime → `chatStreamStore.ts`；task resume → `chatTaskSessionStore.ts`。
+- 通用 class/helper → `lib/utils.ts`。
+- API base URL → `lib/apiBaseUrl.ts`。
+- URL / tender type 映射 → `utils/tenderTypeMapper.ts`。
+- 消息/会话纯函数 → `lib/chat-utils.ts`。
+- 表单 → `GenerateRequest` → `lib/formDataConverter.ts`。
+- `gngk` 后端 form type 分派 → `lib/gngkFormType.ts`（generate 与 rewrite 共用）。
+- API helpers：后端请求只进 `lib/api.ts`，同步 `types/api.ts`。**禁止**在 `components/` 写裸 `fetch`。
+- SSE helpers：`EventSource` → `lib/sse.ts`；生命周期 → `hooks/useSSE.ts`；任务映射 → `hooks/useChatSSE.ts`。
 
-**Contracts:**
+**Contracts 同步清单:**
 - API shape 变化：同步 `types/api.ts`、`lib/api.ts`、相关调用组件、store 和测试。
 - SSE 事件变化：同步 `types/api.ts`、`lib/sse.ts`、`hooks/useChatSSE.ts`、相关 unit tests。
 - `TenderType` 或 `form_type` 变化：同步 `types/index.ts`、`types/api.ts`、`tenderFormRegistry.ts`、`formDataConverter.ts`、`gngkFormType.ts`、`tenderTypeMapper.ts`。
@@ -218,6 +244,12 @@ frontend/
 - Agent run / rewrite：同步 `types/api.ts`、`lib/api.ts`、`ChatPanel.tsx`、`ChatInput.tsx`、`chatStore.ts`。
 - 上传文件 rewrite：同步 `FileType`（`rewrite_source`）、`ChatInput`/`ChatPanel`、agent context 类型；**不要**把 generation_* 加入 rewrite 请求。
 - 任务产物展示：同步 `types/chat.ts`、`chatStore.ts`、`useChatSSE.ts`、`MessageList.tsx`、`TaskDownloadMessage.tsx`。
+
+**New Tests:**
+- 单元：`__tests__/unit/<对应源码目录>/test_<topic>.test.ts(x)`。
+- 测试工厂/SSE mock：`__tests__/mocks/`。
+- E2E：`e2e/test_<topic>.spec.ts`。
+- 异步等待 helper：优先复用 `test-shims/until-async.ts`。
 
 ## 特殊目录
 
@@ -259,4 +291,4 @@ frontend/
 
 ---
 
-*前端结构分析：2026-07-15*
+*前端结构分析：2026-07-18*

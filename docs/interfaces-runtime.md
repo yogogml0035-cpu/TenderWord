@@ -16,7 +16,9 @@
 - 合并单元格表格拓扑是后端内部运行时状态：结构化 sidecar 字段 `tender_param_table_models` 与正文中的 `[[TABLE:table_id]]` 占位符只在生成/写回运行时内部使用；给 LLM 的结构化表输入只保留简短上下文和占位符，不进入前端 API、SSE 契约或 rewrite 请求模型。最终正文是否保留占位符由后端写回层结合 sidecar 决定。
 - `generation_style`、`generation_mode`、`comment_generation_mode` 和 `style_writeback_mode` 都是 generate-only 字段，不得进入 rewrite 请求模型、skill state 或 prompt surface。
 - `generation_mode=workflow` 走旧 `generate_polished_text`，`generation_mode=agent` 走公共 `content_agent`。
-- `comment_generation_mode=off` 时 workflow 与 agent 生成都跳过 AI 批注生成和 bad case 检索增强，不进入 rewrite 链路。
+- `comment_generation_mode=off` 时 workflow 与 agent 生成都跳过**普通** AI 批注生成和 bad case 检索增强，不关闭更正批注，也不进入 rewrite 链路。
+- 技术参数差异更正批注仅由初次 generate 主干的 `annotate_corrections` 产出；`RewriteSkillGraph` 不接入该节点。`comment_agent` 不得生成“原技术参数为…现改为…”类差异批注；编号/项目符号/展示壳变化不得当作事实更正。
+- Word 写回先写更正批注再写普通 AI 批注；标准写回默认跳过已有批注重叠锚点，`comment_agent` 写回显式允许同锚点追加。
 
 ## 任务与 SSE
 

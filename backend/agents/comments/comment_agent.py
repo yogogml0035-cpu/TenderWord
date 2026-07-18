@@ -6,7 +6,13 @@ from typing import Any, Callable, Iterable, Protocol
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import ToolCallLimitMiddleware
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.tools import BaseTool
 
 from backend.agents.comments.tools import (
@@ -33,29 +39,44 @@ from backend.nodes.common_word_nodes.comment_writeback import CommentWritebackRe
 from backend.util.log_util.progress_log import progress_log
 
 COMMENT_AGENT_SYSTEM_PROMPT = """
-你是批注锚点智能体 comment_agent，只负责提交批注候选的首版校验，不做多轮修复。
+你是 comment_agent 的“候选提交执行器”。当前模式已经提供初始批注候选；你只负责校验锚点并提交写回，不重新生成、改写或扩充批注意见。
 
-硬性规则：
-1. 必须先调用 validate_comment_references，把当前 proposed_comments 作为工具参数提交；校验工具只能调用 1 次。
-2. 同 index 的 comment_text 必须和初始 JSON 完全一致，不得改写、润色、删减或新增批注意见。
-3. reference_text 必须精确来自 polished_text，连续、逐字、原标点一致，不得跨段拼接；不得改写正文或凭空新增批注。
-4. 校验完成后最多调用 1 次 write_validated_comments_to_word 提交最终候选；该工具不直接写 Word，真正写入由运行时在 graph 节点线程执行。重复锚点由写回层确定性扩展，不需要你再修复。
-5. 只处理当前正文自身可判定的合规、公平和严谨性问题；序号/编号的新增、删除、重排、层级号或标点变化，以及换行、缩进、表格布局，不是普通批注理由，不得新增这类批注，但是注意如果是`★/▲` 规范化，必须新增这类批注。
-6. 最终只输出简短中文结果摘要，不展示工具消息或排障细节。
+【固定执行流程】
+1. 读取用户消息中的【初始批注 JSON】和【polished_text】。
+2. 按原数组顺序准备 `proposed_comments`：保留每一项的 `comment_text` 原文，只允许把 `reference_text` 替换为 polished_text 中逐字存在的连续片段。不能新增、删除、合并或重排候选。
+3. 立即真正调用一次 `validate_comment_references`，把完整数组作为 `proposed_comments` 参数提交；即使数组为空也必须调用一次。不要把工具名和参数写成普通文字，也不要先输出分析。
+4. 读取校验结果。只有当 polished_text 中能逐字核对时，才可以依据结果修正 `reference_text`；不得直接复制带省略号、空格归一化或截断的候选片段。任何情况下都不得改变对应的 `comment_text`。
+5. 校验后立即真正调用一次 `write_validated_comments_to_word`，提交最终 `proposed_comments`；即使没有通过项也要提交 `[]`。工具不直接操作 Word，真正写回由运行时在 graph 节点线程完成；重复锚点由写回层确定性扩展。
+6. 工具调用完成后，只输出一句简短中文结果摘要，不输出工具参数、校验明细、Markdown 或排障过程。
+
+【不可违反的内容边界】
+- `reference_text` 必须来自 polished_text，连续、逐字、原空白和原标点一致；不得跨段、跨表格单元格拼接，不得凭语义改写。
+- `comment_text` 必须与初始 JSON 同 index 完全一致；不得润色、删减、翻译、补写或替换意见。
+- 只处理正文自身可以直接判定的合规、公平和严谨性问题。编号、项目符号、换行、缩进、表格布局或展示顺序变化不是普通批注理由；但 `★/▲` 规范化属于明确例外，必须保留对应批注。
+- 不得把原始技术参数与 polished_text 的差异当作普通批注；该差异由专用技术参数差异标注器处理。
 """.strip()
 
 COMMENT_AGENT_GENERATION_SYSTEM_PROMPT = """
-你是批注生成智能体 comment_agent，负责生成批注候选首版，再校验锚点并提交写回，不做多轮修复。
+你是 comment_agent 的自主批注生成器。当前模型为无思考模式；不要输出分析、自述、工具调用或 Markdown，只在最后输出一个合法 JSON 数组。
 
-硬性规则：
-1. 先在内部基于 polished_text 和批注生成规则生成 proposed_comments，元素只能包含 reference_text 与 comment_text。
-2. 工具提交优先；如果没有调用工具，允许直接输出纯 JSON 数组作为候选提交，数组元素只能包含 reference_text 与 comment_text，且不要夹带解释。
-3. 生成首版候选后，必须调用 validate_comment_references，把完整 proposed_comments 放入工具参数；校验工具只能调用 1 次。如果未发现任何候选，也必须用 proposed_comments=[] 调用该工具。
-4. 同 index 的 comment_text 在校验后不得改写、润色、删减或新增；reference_text 必须精确来自 polished_text，连续、逐字、原标点一致。
-5. 校验完成后必须调用 1 次 write_validated_comments_to_word，把最终 proposed_comments 作为工具参数提交；该工具不直接写 Word，真正写入由运行时在 graph 节点线程执行。重复锚点由写回层确定性扩展，不需要你再修复。
-6. 工具提交完成后，最终只输出简短中文结果摘要；如果未调用工具，则直接输出纯 JSON 数组，不展示额外排障细节。
-7. 你只收到 polished_text，没有原始技术参数，禁止凭猜测生成`原技术参数为“...”，现改为“...”`或“请确认是否修改参数”类差异批注。原技术参数与最终正文的逐字段差异由写回前的专用技术参数差异标注器处理；你只生成当前正文自身可判定的合规、公平和严谨性批注。
-8. **结构变化过滤：** 不得仅因正文出现 `1、`、`2.1、`、`（1）` 等编号，或编号与来源顺序不同，而生成批注；例如 `通道反转分析` 与 `4、通道反转分析` 属于同一正文。编号后的条款文字、数值、单位和重要性标识仍按原文审查，但编号本身不是风险。
+【输入和职责】
+- 只依据用户消息中的 polished_text 和【批注生成规则】生成候选。
+- 只生成正文自身可以直接判定的合规、公平和严谨性批注。没有充分依据时宁可不生成，不要为了凑数量猜测风险。
+- 你没有原始技术参数，禁止生成格式如 `原技术参数为“...”，现改为“...”` 或“请确认是否修改参数”等差异批注；这类差异由专用技术参数差异标注器处理。
+
+【静默执行步骤】
+1. 扫描 polished_text，筛选确实存在且可由正文直接证明的问题；同一问题只保留一条代表性批注，避免重复。
+2. 为每条问题创建一个候选。每个候选只能有两个字段：`reference_text`、`comment_text`。`reference_text` 从 polished_text 原样复制，必须是连续、逐字、原空白和原标点一致的片段；禁止跨段、跨表格单元格拼接、改写、概括或凭空补字。优先选择带足够上下文且容易搜索的片段。
+3. 输出前逐项核对：每个对象只有上述两个字段且值都是字符串；数组和对象语法完整；无尾逗号。字符串内部若必须出现 ASCII 双引号，必须写成 `\\"`；更推荐使用中文引号“”。
+
+【内容过滤】
+- 不得仅因 `1、`、`2.1、`、`（1）` 等编号、项目符号、编号顺序、换行、缩进、表格布局或展示顺序变化生成普通批注；编号后的条款文字、数值、单位和重要性标识仍需按正文审查。`★/▲` 规范化是例外，必须保留对应批注。
+- 不得把参数数值、单位、名称、型号等与原始技术参数的差异当作本 agent 的批注理由。
+
+【唯一输出格式】
+只输出 JSON 数组本身：[{"reference_text":"...","comment_text":"..."}]。没有合规候选时只输出 []。不得输出代码块、标题、说明、分析、工具名或任何数组外字符。
+
+格式示例仅用于模仿语法，不得复制其中内容：[{"reference_text":"设备保修期为3年","comment_text":"建议提示：请补充服务范围、响应时限等可验收内容。"}]
 """.strip()
 
 NO_VALID_GENERATED_COMMENTS_NOTICE = (
@@ -159,8 +180,8 @@ def _emit_ai_messages(
     for message in _iter_messages(value):
         if not _is_ai_message(message):
             continue
-        content = _message_text(message).strip()
-        if not content:
+        content = _message_text(message)
+        if not content.strip():
             continue
         ai_messages.append(content)
 
@@ -502,14 +523,9 @@ def _stream_runner(
     for chunk in stream:
         final_chunk = chunk
         if isinstance(chunk, tuple):
-            if len(chunk) == 2:
+            for item in chunk:
                 _emit_ai_messages(
-                    chunk[1],
-                    ai_messages=ai_messages,
-                )
-            elif len(chunk) == 3:
-                _emit_ai_messages(
-                    chunk[2],
+                    item,
                     ai_messages=ai_messages,
                 )
             emitted_snapshot_count = _emit_tool_snapshots(
@@ -533,6 +549,26 @@ def _stream_runner(
         step_callback=step_callback,
     )
     return final_chunk
+
+
+def _run_default_autonomous_generation(
+    *,
+    model_provider: str,
+    task_id: str,
+    payload: dict[str, Any],
+    ai_messages: list[str],
+) -> None:
+    response = create_generation_chat_model(model_provider).invoke(
+        [
+            SystemMessage(content=COMMENT_AGENT_GENERATION_SYSTEM_PROMPT),
+            *list(payload.get("messages") or []),
+        ]
+    )
+    content = _message_text(response)
+    if content.strip():
+        ai_messages.append(content)
+        return
+    progress_log.warning("[comment_agent] 自主批注模型返回空内容: task_id=%s", task_id)
 
 def _build_runner_config(
     config: dict[str, Any] | None,
@@ -561,18 +597,18 @@ def _build_user_prompt(
             else ""
         )
         return (
-            "请直接接手批注生成任务：先生成批注候选 proposed_comments。"
-            "优先把完整 proposed_comments 作为 validate_comment_references 的工具参数提交，"
-            "再调用工具完成首版校验和最终候选提交；如果不调用工具，就直接输出纯 JSON 数组，不要混入解释。"
-            "Word 写入由运行时完成，工具线程不会直接操作 Word；重复锚点由写回层确定性扩展，无需修复。\n\n"
+            "请直接接手批注生成任务。静默完成审查后，只输出一个合法 JSON 数组；"
+            "不要输出分析、代码块、标题、工具调用或任何数组外文字。"
+            "下面的【批注生成规则】定义审查内容和批注口径。\n\n"
             f"{instruction_block}"
             "【polished_text】\n"
             f"{polished_text}"
         )
 
     return (
-        "请提交以下批注候选的首版校验，并用工具完成校验与最终候选提交。"
-        "Word 写入由运行时完成，工具线程不会直接操作 Word；重复锚点由写回层确定性扩展，无需修复。\n\n"
+        "请按系统消息中的固定流程提交以下批注候选：先真正调用 validate_comment_references 一次，"
+        "再真正调用 write_validated_comments_to_word 一次；不要输出分析或把工具调用写成普通文字。"
+        "Word 写入由运行时完成，工具线程不会直接操作 Word；重复锚点由写回层确定性扩展。\n\n"
         "【初始批注 JSON】\n"
         f"{json.dumps(initial_comments, ensure_ascii=False, indent=2)}\n\n"
         "【polished_text】\n"
@@ -699,11 +735,17 @@ def run_comment_agent(
         allow_comment_generation=allow_comment_generation and not normalized_initial,
     )
     tools = create_comment_agent_tools(context)
-    selected_runner = runner or _fake_runner or create_comment_agent_runner(
-        model_provider,
-        tools=tools,
-        allow_comment_generation=context.allow_comment_generation,
+    selected_runner = runner or _fake_runner
+    # 自主生成只需要文本候选；校验和 Word 写回均由下方确定性路径完成。
+    use_default_autonomous_generation = (
+        context.allow_comment_generation and selected_runner is None
     )
+    if selected_runner is None and not use_default_autonomous_generation:
+        selected_runner = create_comment_agent_runner(
+            model_provider,
+            tools=tools,
+            allow_comment_generation=context.allow_comment_generation,
+        )
     runner_config = _build_runner_config(config, context=context)
     payload = {
         "messages": [
@@ -750,6 +792,17 @@ def run_comment_agent(
                 context=context,
                 emitted_count=0,
                 step_callback=step_callback,
+            )
+        elif use_default_autonomous_generation:
+            progress_log.info(
+                "[comment_agent] 自主批注使用直接 JSON 模型调用: task_id=%s",
+                task_id,
+            )
+            _run_default_autonomous_generation(
+                model_provider=model_provider,
+                task_id=task_id,
+                payload=payload,
+                ai_messages=ai_messages,
             )
         elif _runner_supports_stream(selected_runner):
             _stream_runner(

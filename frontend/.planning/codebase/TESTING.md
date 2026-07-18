@@ -1,6 +1,6 @@
 # 前端测试约定
 
-**分析日期：** 2026-06-29
+**分析日期：** 2026-07-18
 
 **范围：** `frontend/__tests__/`、`frontend/e2e/`、`frontend/test-shims/`、`frontend/jest.config.ts`、`frontend/jest.setup.js`、`frontend/polyfills.js`、`frontend/playwright.config.ts`、`frontend/package.json`、`frontend/tsconfig.typecheck.json`。`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc` 仅确认存在，不读取内容。
 
@@ -14,6 +14,7 @@
 - `setupFilesAfterEnv`: `frontend/jest.setup.js`。
 - `testMatch`: `**/?(*.)+(spec|test).[jt]s?(x)`。
 - `coverageProvider`: `v8`。
+- `moduleNameMapper`: `^@/(.*)$` → `<rootDir>/$1`。
 
 **断言库：**
 - Jest `expect`。
@@ -86,6 +87,10 @@ frontend/e2e/
 └── test_*.spec.ts
 ```
 
+**当前 inventory（2026-07-18）：**
+- Jest unit：约 31 个 `test_*.test.*` 文件，分布在 app / components / hooks / lib / stores / types / utils。
+- Playwright e2e：6 个 spec——`test_home.spec.ts`、`test_url_conversation.spec.ts`、`test_agent_run_chat_panel.spec.ts`、`test_generation_mode_agent.spec.ts`、`test_comment_supplement.spec.ts`、`test_tender_form_upload_slots.spec.ts`。
+
 ## 测试结构
 
 **Suite 组织：**
@@ -143,7 +148,7 @@ await waitFor(() => expect(mockUploadFile).toHaveBeenCalledWith(file, 'rewrite_s
 - Jest mock function / module mock。
 - Playwright `page.route()`。
 
-**Fetch mock：**
+**Fetch mock（JSON）：**
 ```typescript
 globalThis.fetch = jest.fn().mockResolvedValue({
   ok: true,
@@ -152,9 +157,23 @@ globalThis.fetch = jest.fn().mockResolvedValue({
 } as unknown as Response) as unknown as typeof fetch;
 ```
 
-实际文件：`frontend/__tests__/unit/lib/test_api.test.ts`。
+**Fetch mock（NDJSON stream）：**
+```typescript
+// test_api.test.ts 中的 mockFetchStream 模式：
+// 返回 body.getReader()，逐行 yield TextEncoder 编码的 NDJSON 行
+```
 
-**SSE hook mock：**
+实际文件：`frontend/__tests__/unit/lib/test_api.test.ts`（含 `mockFetchJson`、`mockFetchBlob`、`mockFetchStream`）。
+
+**SSE 连接 mock（EventSource）：**
+```typescript
+// test_sse.test.ts：替换 global.EventSource 为 MockEventSource
+// 支持 addEventListener / emit / emitError，断言 URL 与 lastEventId 查询参数
+```
+
+实际文件：`frontend/__tests__/unit/lib/test_sse.test.ts`。
+
+**SSE hook mock（业务层）：**
 ```typescript
 act(() => {
   latestOptions?.onMessage?.({
@@ -170,7 +189,10 @@ act(() => {
 });
 ```
 
-实际文件：`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`。
+实际文件：`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`（`jest.mock('@/hooks/useSSE')`，捕获 `latestOptions` 后手动注入事件）。
+
+**共享 SSE mock 工具：**
+- `frontend/__tests__/mocks/sse-mock.ts` 提供 `SSEMock`（`connect/on/emit/queueEvent/flushQueue`）与事件工厂：`createLogEvent`、`createLLMEvent`、`createProgressEvent`、`createStatusEvent`、`createErrorEvent`、`createDoneEvent`、`simulateTaskFlow`。
 
 **Playwright route mock：**
 ```typescript
@@ -184,12 +206,48 @@ await page.route('**/api/generate', async (route) => {
 });
 ```
 
-实际文件：`frontend/e2e/test_generation_mode_agent.spec.ts`。
+Agent run NDJSON：
+```typescript
+function toNdjsonLines(events: Array<Record<string, unknown>>): string {
+  return `${events.map((event) => JSON.stringify(event)).join('\n')}\n`;
+}
+
+await page.route('**/api/agent/runs/stream', async (route) => {
+  agentRunPayload = (await route.request().postDataJSON()) as Record<string, unknown>;
+  await route.fulfill({
+    status: 200,
+    contentType: 'application/x-ndjson',
+    body: toNdjsonLines([...]),
+  });
+});
+```
+
+实际文件：`frontend/e2e/test_agent_run_chat_panel.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`。
+
+**sessionStorage 预置（Playwright）：**
+```typescript
+await page.addInitScript(({ conversationId, draft, messages }) => {
+  window.sessionStorage.setItem(
+    'chat-storage',
+    JSON.stringify({
+      state: {
+        conversations: [/* ... */],
+        currentConversationId: conversationId,
+        conversationDrafts: { [conversationId]: { /* draft */ } },
+        // ...
+      },
+      version: 0,
+    })
+  );
+}, { conversationId, draft, messages });
+```
+
+实际文件：`frontend/e2e/test_agent_run_chat_panel.spec.ts`（`seedConversation`）。
 
 **需要 mock 的内容：**
 - 后端 API response、fetch stream、SSE hook、task status、heartbeat、sessionStorage/localStorage。
 - Agent run NDJSON 事件族：`run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`needs_input`、`done`、`error`。
-- Playwright 中的 `/api/generate`、`/api/agent/runs/stream`、`/api/stream/{taskId}`、`/api/tasks/{taskId}`、`/api/comment-supplement`、conversation heartbeat。
+- Playwright 中的 `/api/generate`、`/api/agent/runs/stream`、`/api/stream/{taskId}`、`/api/tasks/{taskId}`、`/api/comment-supplement`、`/api/upload`、conversation heartbeat。
 - Word COM、真实后端队列、真实文件下载内容、真实模板候选外部 URL。
 
 **不要 mock 的内容：**
@@ -218,13 +276,12 @@ export class ConversationFactory {
 
 实际文件：`frontend/__tests__/mocks/data-factories.ts`，提供 `ConversationFactory`、`MessageFactory`、`LogEntryFactory`、`TaskFactory`（含 `createRunning`/`createCompleted`/`createFailed`）、`DualColumnContentFactory`，均支持 `overrides` 合并。
 
-SSE mock 文件 `frontend/__tests__/mocks/sse-mock.ts` 提供 `SSEMock` 类（`connect/on/emit/queueEvent/flushQueue`）和事件工厂 helper：`createLogEvent`、`createLLMEvent`、`createProgressEvent`、`createStatusEvent`、`createErrorEvent`、`createDoneEvent`、`simulateTaskFlow`。
-
 **位置：**
 - 通用数据工厂：`frontend/__tests__/mocks/data-factories.ts`。
 - SSE mock：`frontend/__tests__/mocks/sse-mock.ts`。
 - 文件上传测试局部创建 `File`，例如 `frontend/__tests__/unit/components/forms/test_file_uploader.test.tsx`。
 - Playwright 使用 `page.addInitScript()` 写入 `sessionStorage`，见 `frontend/e2e/test_agent_run_chat_panel.spec.ts`、`frontend/e2e/test_generation_mode_agent.spec.ts`、`frontend/e2e/test_url_conversation.spec.ts`、`frontend/e2e/test_tender_form_upload_slots.spec.ts`、`frontend/e2e/test_comment_supplement.spec.ts`。
+- 异步轮询等待：`frontend/test-shims/until-async.ts` 的 `until(check, { interval, timeout })`。
 
 ## 覆盖率
 
@@ -304,13 +361,14 @@ await expect(createGenerateTask(validGenerateRequest)).rejects.toMatchObject({
 - `useChatSSE` 测试通过 mock `useSSE()` 捕获 `latestOptions`，再用 `act()` 手动注入 `log`、`llm`、`progress`、`agent_step`、`done`、`error`。
 - 运行中内容保存在 `chatStreamStore`，终态才落到 `chatStore` 的 message group。
 - `TASK_NOT_FOUND` 和 backend restart 路径必须覆盖。
+- 底层 `createSSEConnection` 用 `MockEventSource` 测 URL 选择、正常关闭不重连、`lastEventId` 等。
 
-实际文件：`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`。
+实际文件：`frontend/__tests__/unit/hooks/test_use_chat_sse.test.tsx`、`frontend/__tests__/unit/lib/test_sse.test.ts`。
 
 **Playwright 测试：**
-- 使用 `page.route()` mock 后端接口和 SSE stream。
+- 使用 `page.route()` mock 后端接口和 SSE/NDJSON stream。
 - 使用 `page.addInitScript()` 预置 `sessionStorage` 的 `chat-storage`。
-- locator 优先使用 role、accessible name、`data-testid` 和限定容器。
+- locator 优先使用 role、accessible name、`data-testid` 和限定容器（如 `chat-send-button`、`chat-skill-picker`、`agent-thinking-card`、`tender-type-button-xjcg`）。
 - 收集 `console` error 和 `pageerror`，测试末尾断言 `consoleErrors` 为空（`expect(consoleErrors).toEqual([])`），见 `frontend/e2e/test_agent_run_chat_panel.spec.ts`。
 - 需要留 evidence 时写入 requirement-scoped `tasks/<requirement-slug>/screenshots/` 与 `tasks/<requirement-slug>/logs/`，示例在 `frontend/e2e/test_generation_mode_agent.spec.ts`、`frontend/e2e/test_comment_supplement.spec.ts`、`frontend/e2e/test_agent_run_chat_panel.spec.ts`。
 
@@ -333,4 +391,4 @@ await expect(createGenerateTask(validGenerateRequest)).rejects.toMatchObject({
 
 ---
 
-*前端测试分析：2026-06-29*
+*前端测试分析：2026-07-18*

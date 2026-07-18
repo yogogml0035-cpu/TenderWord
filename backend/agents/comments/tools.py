@@ -375,6 +375,9 @@ def write_validated_comment_candidates_to_word(
         bound_end=search_end,
         log_parts=logs,
         step_label="comment_agent",
+        # comment_agent 的新增批注允许与已有批注共用同一锚点；其他写回
+        # 调用仍保持共享层默认的保守去重策略。
+        allow_existing_comments=True,
     )
 
     # 合并失败/跳过候选的确定性 issue，保留按 index 可追溯的审计。

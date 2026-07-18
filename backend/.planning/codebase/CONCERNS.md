@@ -1,39 +1,39 @@
 # 后端风险事实地图
 
-**分析日期：** 2026-07-15（完整刷新，覆盖 Word COM / 队列 / LLM agent / 批注门禁 / 密钥 / SSE / 近期风险）
+**分析日期：** 2026-07-18（完整刷新；证据来自 `backend/` 当前实现与工作区未提交改动面）
 
-> 本文档只记录与 AGENTS.md 红线一致的风险/关注点事实，不展开 validator/progress log/agent harness 内部实现细节。每条含「风险/关注点」「影响范围」「当前缓解或约束」「建议（如适用）」。
+> 本文档只记录与 `Agents.md` 红线一致的风险/关注点事实。每条尽量含「风险/关注点」「影响范围」「当前缓解或约束」「建议（如适用）」。
 > **禁止**在本文档写入真实密钥、token、`.env` 值、客户原文或本机绝对私有路径。
 
 ## 技术债
 
 **Word COM、公平锁与终态收尾耦合在同一条链上：**
-- 风险/关注点： `backend/graphs/base_graph.py` 的 `invoke_with_timing_async()`、`backend/task/task_queue_manager.py` 和 `backend/services/document_service.py` 把排队（`wait_for_turn()`）、跨进程文件锁（`CrossProcessFileLock`）、取消检查、COM 生命周期、`complete_task()` 占位收尾和业务结果落盘串在同一执行序里；`complete_task()` 会先用 `"success"` 或 `prepared_doc_path` 占位，`DocumentService` 再覆盖为完整 payload。
+- 风险/关注点： `backend/graphs/base_graph.py` 的 `invoke_with_timing_async()`、`backend/task/task_queue_manager.py` 与 `backend/services/document_service.py` 把排队（`wait_for_turn()`）、跨进程文件锁（`CrossProcessFileLock`）、取消检查、COM 生命周期、`complete_task()` 占位收尾和业务结果落盘串在同一执行序里；`complete_task()` 可先写占位结果，再由 `DocumentService` 覆盖为完整 payload。
 - 影响范围： `backend/graphs/base_graph.py`, `backend/task/task_queue_manager.py`, `backend/services/document_service.py`, `backend/util/word_util/word_application_util.py`
-- 当前缓解或约束： `complete_task()` 对已 `CANCELLED` 的任务会跳过覆盖；`_finalize_task_locked()` 统一终态收尾、清理运行态上下文并 `notify_all()`；运行中取消会 `call_soon_threadsafe(async_task.cancel())`，失败时由节点级取消检查兜底。
+- 当前缓解或约束： `complete_task()` 对已 `CANCELLED` 任务会跳过覆盖；`_finalize_task_locked()` 统一终态收尾并清理运行态；运行中取消会 `call_soon_threadsafe(async_task.cancel())`，失败时由节点级取消检查兜底。
 - 建议： 保持“队列收尾”与“业务结果落盘”分层；改顺序前先补 `wait_for_turn()`、运行中取消、双完成路径与 SSE 终态回归测试。
 
 **进程内任务队列与线程池假并行：**
-- 风险/关注点： `DocumentService` 使用 `ThreadPoolExecutor(max_workers=4)` 提交后台任务，但真正进入 Word COM 前必须 `wait_for_turn()` + `CrossProcessFileLock`；多 worker 只提高排队/LLM 准备阶段的重叠度，不能提高 Word 写回吞吐。多 uvicorn worker / 多进程部署会让进程内队列、SSE、取消状态分裂，仅靠文件锁挡 COM 撞车，任务状态与事件流不共享。
+- 风险/关注点： `DocumentService` 使用 `ThreadPoolExecutor(max_workers=4)` 提交后台任务，但进入 Word COM 前必须 `wait_for_turn()` + `CrossProcessFileLock`；多 worker 只提高排队/LLM 准备阶段重叠度，不能提高 Word 写回吞吐。多 uvicorn worker / 多进程部署会让进程内队列、SSE、取消状态分裂，仅靠文件锁挡 COM 撞车。
 - 影响范围： `backend/services/document_service.py`, `backend/task/task_queue_manager.py`, `backend/core/sse_manager.py`, `backend/main.py`
 - 当前缓解或约束： 单例 `TaskQueueManager` + 公平条件变量；`CrossProcessFileLock`（`msvcrt.locking` + 线程锁）跨进程互斥 COM。
 - 建议： 生产默认单 worker；扩展吞吐需专用 Windows COM worker 池或外部队列，不要只调大 `max_workers`。
 
-**rewrite/graph 写回逻辑分散在大文件：**
+**rewrite / graph 写回逻辑分散在大文件：**
 - 风险/关注点： `backend/helper/word_helper/inline_style_ops.py`、`backend/nodes/gjgk_word_nodes/gjgk_update_word.py`、`backend/nodes/gngk_word_nodes/gngk_fw_zc_update_word.py`、`backend/nodes/common_word_nodes/update_word.py`、`backend/services/document_service.py` 同时承担样式匹配、段落边界、表格投影、批注写回与 task 编排。
 - 影响范围： `.doc/.docx` 写回、受保护字段、批注回填、`style_writeback_mode` 分支。
 - 当前缓解或约束： `backend/helper/word_helper/` 与 `backend/tests/helper/`、`backend/tests/nodes/` 有定点测试。
 - 建议： 改动前先缩到最小 helper/node，用定点 fixture 锁住行为，避免在大文件里连带重写。
 
 **进程内状态仍是默认实现：**
-- 风险/关注点： `backend/core/sse_manager.py`、`backend/task/task_queue_manager.py`、`backend/services/conversation_service.py` 把任务、SSE 事件、取消状态、rewrite 历史都保存在单进程内存。
+- 风险/关注点： `backend/core/sse_manager.py`、`backend/task/task_queue_manager.py`、`backend/services/conversation_service.py` 把任务、SSE 事件、取消状态、rewrite 历史保存在单进程内存。
 - 影响范围： 服务重启丢历史事件与会话状态；多进程部署会让队列、事件流、取消状态分裂。
-- 当前缓解或约束： `cleanup_old_tasks()` 按年龄回收已完成任务；SSE 受 `SSE_MAX_EVENTS_PER_TASK`（默认 1000）与 `SSE_EVENT_TTL` 截断。
+- 当前缓解或约束： `cleanup_old_tasks()` 按年龄回收已完成任务；SSE 受 `SSE_MAX_EVENTS_PER_TASK`（默认 1000）与 `SSE_EVENT_TTL`（默认 3600 秒）截断。
 - 建议： 引入持久化前先定义 task store、SSE event id、会话快照与 artifact 生命周期的统一契约。
 
 **`/health/ready` 仍是轻量探针：**
 - 风险/关注点： `backend/main.py` 的 `upload_dir_accessible` 仍写死为 `True`（代码中明确 `# TODO: 实际检查目录权限`），未检查 Word/WPS COM、LLM provider、向量检索。
-- 影响范围： readiness 返回成功不代表系统具备生成/rewrite/补充批注能力。
+- 影响范围： readiness 返回成功不代表系统具备生成 / rewrite / 补充批注能力。
 - 当前缓解或约束： `/health` 与 `/health/live` 仅作为进程存活探针。
 - 建议： 拆分上传目录、COM、LLM、Qdrant/embedding、外部 HTTP 的分项就绪检查。
 
@@ -53,7 +53,7 @@
 
 **心跳超时默认偏紧：**
 - 风险/关注点： `TASK_HEARTBEAT_TIMEOUT` 默认 15 秒；长任务期间若前端 SSE/心跳抖动，后台清理线程会把仍在运行的任务标为 `CANCELLED`（`heartbeat_timeout`），与用户主动取消共用取消路径。
-- 影响范围： `backend/task/task_queue_manager.py`, `backend/config/settings.py`, `backend/core/sse_manager.py`
+- 影响范围： `backend/task/task_queue_manager.py`, `backend/config/settings.py`, `backend/core/sse_manager.py`, `backend/api/tasks.py`
 - 当前缓解或约束： 仅对 `QUEUED`/`RUNNING` 更新心跳；取消后节点级 `_check_cancellation` 与 async cancel 协同退出。
 - 建议： 长任务场景评估超时与前端心跳间隔的匹配；改超时前补心跳/取消交互测试。
 
@@ -62,43 +62,43 @@
 **Word COM 只经后端任务队列 + graph 锁 + 取消检查 + 进度包装（平台绑定 Windows + Word/WPS COM）：**
 - 风险/关注点： `backend/util/word_util/word_application_util.py`、`backend/util/word_util/word_com_manager.py` 直接依赖 Windows Python、本机 Word/WPS COM（`pythoncom`、`win32com`、`DispatchEx`、`CoInitialize`）；任何绕过 `CrossProcessFileLock` + 公平队列的并发执行都会撞 COM。`CrossProcessFileLock` 使用 `msvcrt.locking`，非 Windows 不可用。
 - 影响范围： `backend/graphs/base_graph.py`, `backend/task/task_queue_manager.py`, `backend/helper/word_helper/*`, `backend/nodes/*_update_word.py`
-- 当前缓解或约束： `invoke_with_timing_async()` 强制 `wait_for_turn()` → 文件锁 → `start_task()` → 节点级 `wrap_node_with_progress` 取消检查（执行前/后各一次）；COM 通过 `com_lock`、`is_rpc_error()`、重试与 gencache 清理做降级。
+- 当前缓解或约束： `invoke_with_timing_async()` 强制 `wait_for_turn()` → 文件锁 → `start_task()` → 节点级 `wrap_node_with_progress` 取消检查；COM 通过 `com_lock`、`is_rpc_error()`、重试与 gencache 清理做降级。
 - 建议： 不要新增直接调用 COM 的旁路；扩展吞吐需走专用 Windows worker 池或外部队列，不能只调大线程数。
 
 **`.env` / token 不进文档、日志、测试夹具与最终回复：**
 - 风险/关注点： `backend/config/settings.py`、`backend/retrieval/config.py` 从环境与 `backend/.env` 读取配置；日志、SSE、agent 审计通道一旦写入真实路径、密钥值或 traceback 就会泄密。
 - 影响范围： `backend/config/settings.py`, `backend/retrieval/config.py`, `backend/agents/task_context_assistant/logging.py`, `backend/util/log_util/sse_log_handler.py`, `backend/util/log_util/progress_log.py`
-- 当前缓解或约束： `scrub_sensitive_text()` 统一 redact bearer token、密钥赋值、Windows/Unix 路径、`.env` 字面量与 traceback（返回 `[REDACTED_SECRET]` / `[REDACTED_PATH]` / `[REDACTED_STACK]`）；`AgentRunAuditLogger` 只写白名单字段（`event`、`run_id`、`conversation_id`、`selected_skills`、`stage`、`tool_name`、`status`、`task_id`、`task_kind`、`queue_position` 等），其余 `summary`/`message` 全部过 scrub。
+- 当前缓解或约束： `scrub_sensitive_text()` 统一 redact bearer token、密钥赋值、Windows/Unix 路径、`.env` 字面量与 traceback（返回 `[REDACTED_SECRET]` / `[REDACTED_PATH]` / `[REDACTED_STACK]`）；`AgentRunAuditLogger` 只写白名单字段，其余 `summary`/`message` 全部过 scrub。
 - 建议： 新增日志/SSE/审计字段前先经 scrub；客户原文、真实路径、密钥值、traceback 不得直接进用户可见通道。**本文档与知识包亦不得粘贴 secret 样例。**
 
 **generate-only 字段不进 rewrite 请求模型 / skill state / prompt surface：**
 - 风险/关注点： `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 只属于初次 generate，若漏进 rewrite 路由就会改变生成分支或污染 prompt。
 - 影响范围： `backend/models/agent_run.py`, `backend/services/agent_run_service.py`, `backend/agents/task_context_assistant/tools.py`, `backend/states/skill_state.py`, `backend/nodes/skills_nodes/rewrite_nodes.py`, `backend/skills/rewrite/scripts/runtime.py`
-- 当前缓解或约束： 这些字段只在 `StandardTenderWorkflowGraph` 与 `backend/agents/generation/*` 消费；`TaskSkillGraphState` 只含 rewrite 字段（`rewrite_mode`、`rewrite_source`、`rewrite_user_prompt` 等），不含 generate-only 选项。
+- 当前缓解或约束： 这些字段只在标准 tender graph 与 `backend/agents/generation/*` 消费；`TaskSkillGraphState` 不含 generate-only 选项。
 - 建议： 新增生成选项只进 `GenerateRequest` 与初始 generate state，不要写进 rewrite 请求模型、skill state 或 prompt。
 
-**rewrite 必须用 RewriteSkillGraph，不恢复元数据驱动框架：**
-- 风险/关注点： `backend/graphs/skill_graph.py` 的 `RewriteSkillGraph(BaseGraph)` 是显式 graph（节点、边、条件分支直接写在 `build_graph()`），取代了原 `SkillGraph.for_skill + TaskSkillWorkflow` 元数据驱动框架；任何回退都会重新引入隐式路由。
+**rewrite 必须用 `RewriteSkillGraph`，不恢复元数据驱动框架：**
+- 风险/关注点： `backend/graphs/skill_graph.py` 的 `RewriteSkillGraph(BaseGraph)` 是显式 graph；回退 `SkillGraph.for_skill + TaskSkillWorkflow` 会重新引入隐式路由。
 - 影响范围： `backend/graphs/skill_graph.py`, `backend/nodes/skills_nodes/rewrite_nodes.py`, `backend/skills/rewrite/scripts/runtime.py`, `backend/states/skill_state.py`
 - 当前缓解或约束： `REWRITE_NODE_NAMES` / `REWRITE_NODE_HANDLERS` 显式声明流程；分支函数来自 `backend/skills/rewrite/scripts/runtime.py`。
 - 建议： 改 rewrite 流程时改这个显式 graph，不要复活元数据驱动调度。
 
 **上传文件 rewrite 用 `rewrite_source` 标记，不做第二套任务链路：**
-- 风险/关注点： 上传文件 rewrite 与会话 rewrite 共用同一条 `RewriteSkillGraph`，仅靠 `rewrite_source="uploaded_file"` 区分；若另起一套任务链路会导致取消/进度/SSE 分裂。
-- 影响范围： `backend/nodes/skills_nodes/rewrite_nodes.py`（`UPLOADED_REWRITE_SOURCE = "uploaded_file"`）, `backend/services/document_service.py`, `backend/skills/rewrite/scripts/runtime.py`
-- 当前缓解或约束： 上传分支在 `resolve_rewrite_target` 中把 `source_document_path` 拷贝到 `rewrite_temp_output_path` 并复用同一 graph；相关 skill/node 测试守住该标记存活。
-- 建议： 上传 rewrite 的新行为继续走 `rewrite_source` 标记 + 同一 graph，不要开第二套队列或第二个 graph。
+- 风险/关注点： 上传文件 rewrite 与会话 rewrite 共用同一条 `RewriteSkillGraph`，仅靠 `rewrite_source="uploaded_file"` 区分；另起任务链路会导致取消/进度/SSE 分裂。
+- 影响范围： `backend/nodes/skills_nodes/rewrite_nodes.py`, `backend/services/document_service.py`, `backend/skills/rewrite/scripts/runtime.py`
+- 当前缓解或约束： 上传分支在 `resolve_rewrite_target` 中把 `source_document_path` 拷贝到 `rewrite_temp_output_path` 并复用同一 graph。
+- 建议： 上传 rewrite 的新行为继续走 `rewrite_source` 标记 + 同一 graph。
 
 **审计 / 摘要只暴露 scrub 白名单：**
 - 风险/关注点： `AgentRunAuditLogger.read_conversation_summaries()` 会把历史 run 摘要回读给前端；若把 bad case 命中详情、`case_id`、`score`、`chunk_id`、匹配条款一并写入审计字段会泄露内部检索细节。
 - 影响范围： `backend/agents/task_context_assistant/logging.py`, `backend/retrieval/comment_bad_case_runtime.py`, `backend/prompts/comment_prompt.py`
-- 当前缓解或约束： 审计只落白名单字段，所有 `summary`/`message`/`missing_requirements`/`task_id`/`task_kind` 都经 `scrub_sensitive_text()`；prompt 上下文只保留策略字段，命中详情留在后端审计产物。
+- 当前缓解或约束： 审计只落白名单字段，所有 `summary`/`message`/`missing_requirements`/`task_id`/`task_kind` 都经 `scrub_sensitive_text()`。
 - 建议： 新增审计/摘要字段前先确认是否在白名单，并同步 scrub。
 
 **`[[TABLE:<id>]]` 占位符不当用户可见正文：**
 - 风险/关注点： `[[TABLE:<id>]]` 是内部写回入口（审核、sidecar 恢复、投影表），不是最终 Word 可见内容；若被写成 Markdown 表格或手绘表格，或各环节丢弃语义不一致，会把表格近似文本写错、写漏或误判。
 - 影响范围： `backend/agents/generation/table_placeholder_utils.py`, `backend/agents/generation/verify_agent_graph.py`, `backend/agents/generation/revise_agent_graph.py`, `backend/helper/word_helper/text_parsing.py`, `backend/agents/generation/content_sanitizer.py`
-- 当前缓解或约束： 提取、修复、写回入口由同一组工具串接；`backend/tests/agents/test_table_placeholder_utils.py`、`backend/tests/helper/test_text_parsing_table_placeholder.py` 守契约；revise 规则要求保留已有锚点、不得手绘表格。
+- 当前缓解或约束： 提取、修复、写回入口由同一组工具串接；相关 unit tests 守契约；revise 规则要求保留已有锚点、不得手绘表格。
 - 建议： 改 regex、sidecar 匹配、`table_id` 字符集或写回语义时同步上述测试；占位符不得出现在最终用户可见回复正文。
 
 **下载接口的路径边界必须保持：**
@@ -119,18 +119,24 @@
 - 当前缓解或约束： `validate_template_download_url()` 只允许 `http/https` 且主机在 `TEMPLATE_CANDIDATE_ALLOWED_HOSTS` 内，年份过旧拦截。
 - 建议： 新增来源/主机/文件类型时同步更新白名单、协议校验与测试，前端不直接接触上游模板 URL。
 
+**API 面缺少统一认证与任务归属授权：**
+- 风险/关注点： `backend/api/` 多数端点按 `task_id` / `conversation_id` / 文件路径操作资源；`user_session_id` 仅是列表过滤可选参数，不是强制鉴权。
+- 影响范围： `backend/api/tasks.py`, `backend/api/download.py`, `backend/api/stream.py`, `backend/api/conversations.py`, `backend/services/task_service.py`
+- 当前缓解或约束： 下载仍受 `UPLOAD_DIR` containment；生产依赖部署边界与网络隔离。
+- 建议： 若多租户暴露，先定义 task/conversation/file 归属与鉴权层，再改 API shape。
+
 ## 性能瓶颈
 
 **Word COM 只能串行化：**
 - 风险/关注点： `word_com_manager`、`word_application_util`、`base_graph`、`task_queue_manager` 把 Word COM 保护成单通道临界资源；公平锁 + 文件锁双重串行。
 - 影响范围： 长任务阻塞后续 Word 写入；Word/WPS 注册异常拖垮整条生成链路。
-- 当前缓解或约束： `DispatchEx`、`CoInitialize()`、`Quit()`、`CrossProcessFileLock`、公平队列共同限制并发。
+- 当前缓解或约束： `DispatchEx`、`CoInitialize()`、`Quit()`、`CrossProcessFileLock`、公平队列、`com_lock` 共同限制并发。
 - 建议： 扩展吞吐需上外部队列或专用 Windows worker 池。
 
 **长任务 = 多轮 LLM + 串行 COM：**
 - 风险/关注点： generate agent 模式可走 content → verify/revise 最多 `MAX_REVISION_ROUNDS=3` 轮，再加 `annotate_corrections` LLM、批注生成/agent、最终 `update_word` COM；单任务墙钟时间可很长，期间占满公平锁后段。
 - 影响范围： `backend/agents/generation/*`, `backend/nodes/common_word_nodes/annotate_corrections.py`, `backend/agents/comments/*`, `backend/nodes/common_word_nodes/update_word.py`
-- 当前缓解或约束： 协议轮次硬上限 3；标注 LLM 失败不阻断主流程（仅保留代码标识更正批注）。
+- 当前缓解或约束： 协议轮次硬上限 3；标注 LLM 失败不阻断主流程（代码路径标识更正仍可保留）。
 - 建议： 监控单任务耗时与队列等待；超时/取消路径必须可回归。
 
 **SSE 与任务状态都吃内存：**
@@ -141,7 +147,7 @@
 **SSE 断线重连窗口有限：**
 - 风险/关注点： `SSEManager` 支持 `Last-Event-ID` 回放，但事件列表有上限与 TTL；长任务 + 多客户端 + `agent_step` 高频快照时，晚到客户端可能丢中间进度。跨线程发送依赖 `bind_loop()` 与 `run_coroutine_threadsafe`，主 loop 未绑定或已关闭时事件静默丢弃。
 - 影响范围： `backend/core/sse_manager.py`, `backend/api/stream.py`, `backend/services/document_service.py`, `backend/agents/generation/agent_step_events.py`
-- 当前缓解或约束： 心跳间隔默认 15 秒；事件按 task 截断；测试覆盖 `agent_step` 相关发送路径。
+- 当前缓解或约束： SSE 心跳间隔默认 15 秒；事件按 task 截断。
 - 建议： 改 SSE 事件模型时同步前后端；补多客户端重连与队列溢出测试。
 
 **坏案例混合检索网络路径较长：**
@@ -165,7 +171,7 @@
 **任务完成链路对顺序敏感：**
 - 风险/关注点： 完成、取消、进度、SSE `done`/`error` 与结果 payload 依赖同一条顺序链；任何一层顺序变掉，前端可能读到旧状态或丢终态。
 - 影响范围： `backend/graphs/base_graph.py`, `backend/task/task_queue_manager.py`, `backend/services/document_service.py`, `backend/core/sse_manager.py`
-- 当前缓解或约束： `complete_task()` 对 `CANCELLED` 状态不覆盖；`cancel_task()` 对 RUNNING 除 cancel event 外还会 `call_soon_threadsafe(async_task.cancel())`，失败时由节点取消检查兜底。
+- 当前缓解或约束： `complete_task()` 对 `CANCELLED` 状态不覆盖；`cancel_task()` 对 RUNNING 除 cancel event 外还会 async cancel，失败时由节点取消检查兜底。
 - 建议： 改队列/锁/SSE 前先补 `wait_for_turn()`、运行中取消、双完成收尾单测。
 
 **API shape 与内部 payload 不同源：**
@@ -181,14 +187,14 @@
 **LLM 不稳定与 agent 协议校验：**
 - 风险/关注点： content/verify/revise 依赖严格 JSON 或完整正文输出；`GenerationAgentProtocolError`、`json_utils` 解析/修复、`ensure_round_within_protocol`（`MAX_REVISION_ROUNDS=3`）是硬门禁。模型输出 Markdown 围栏、中文字段名、noop finding、越界轮次都会触发协议错误或空结果。
 - 影响范围： `backend/agents/generation/json_utils.py`, `backend/agents/generation/workspace.py`, `backend/agents/generation/verify_agent_graph.py`, `backend/agents/generation/revise_agent_graph.py`, `backend/agents/generation/content_agents.py`
-- 当前缓解或约束： verify 侧有 JSON 修复重试（温度压低）；`filter_noop_audit_findings` / `sanitize_protected_field_findings` 做确定性过滤；workspace 读写失败抛协议错误。
+- 当前缓解或约束： verify 侧有 JSON 修复重试；`filter_noop_audit_findings` / `sanitize_protected_field_findings` 做确定性过滤；workspace 读写失败抛协议错误。
 - 建议： 改协议字段或轮次上限时同步 tests/agents 与 generation 工作区契约。
 
-**批注 agent 工具门禁与写回：**
-- 风险/关注点： `comment_agent` 强制工具序：`validate_comment_references`（最多 1 次）→ `write_validated_comments_to_word`（最多 1 次）；`ToolCallLimitMiddleware` 限次。工具本身不直接写 Word——`write_validated_comment_candidates_to_word` 校验通过后由 graph 节点线程调用 `write_polished_comments`。若模型跳过工具、改写 `comment_text`、锚点不在 `polished_text` 中，则候选失败/跳过且可能无 Word 批注。
+**批注生成与写回（含同锚点追加开关）：**
+- 风险/关注点： 自主生成模式要求模型直接输出 JSON 数组，不再依赖模型发起 function call；候选仍须经过 `validate_comment_reference_candidates`，再由 `write_validated_comment_candidates_to_word` 在 graph 节点线程调用 `write_polished_comments`。空响应、非法 JSON、改写 `comment_text` 或锚点不在 `polished_text` 中都会导致候选无法写入。
 - 影响范围： `backend/agents/comments/comment_agent.py`, `backend/agents/comments/tools.py`, `backend/nodes/common_word_nodes/comment_agent.py`, `backend/nodes/common_word_nodes/comment_writeback.py`
-- 当前缓解或约束： 校验确定性 reason；生成模式允许无工具时回退解析纯 JSON 数组；写回层对重复锚点做确定性扩展；`tests/agents/test_comment_agent.py`、`tests/nodes/test_comment_agent_writeback_node.py` 覆盖主路径。
-- 建议： 改工具名、次数、写回语义时同步 middleware 与节点测试；禁止在工具外直写 COM。
+- 当前缓解或约束： 自主生成使用无工具的直接模型调用；写回层对重复锚点做确定性扩展；`allow_existing_comments` 默认 `False`（标准写回保守跳过已有批注锚点），comment agent 显式传 `True` 允许同锚点追加；相关 tests 覆盖主路径。
+- 建议： 改 JSON 契约、候选校验或写回语义时同步调用方测试；禁止在运行时外直写 COM。
 
 **generate-only 字段与 rewrite 字段边界很窄：**
 - 风险/关注点： `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 只属于初次 generate；`rewrite_source="uploaded_file"` 是上传 rewrite 的路由开关。
@@ -205,7 +211,7 @@
 **Prompt 与 bad case 上下文绑定很紧：**
 - 风险/关注点： `render_generate_prompt` 按 `generation_style`（`template`/`param`）路由到不同 registry；comment prompt 绑定 bad case 锚点规则；改动后若不同步解析器，会让 `reference_text` 或 JSON 结构漂移。
 - 影响范围： `backend/prompts/generate_prompt.py`, `backend/prompts/generate_by_param_prompt.py`, `backend/prompts/generate_by_template_prompt.py`, `backend/prompts/comment_prompt.py`, `backend/retrieval/comment_bad_case_runtime.py`
-- 当前缓解或约束： `backend/tests/prompts/test_generate_prompt_routing.py`、`test_comment_prompt_reference_contract.py`、`test_comment_prompt_bad_case_context.py`。
+- 当前缓解或约束： `backend/tests/prompts/` 相关契约测试。
 - 建议： 改 prompt 路由或字段时同步上述测试与前端 generate-only 选项。
 
 **Word COM 生命周期必须收尾完整：**
@@ -221,10 +227,16 @@
 
 ## 近期风险（2026-07 重点）
 
+**批注编号隔离与同锚点写回（当前工作区风险面）：**
+- 风险/关注点： 工作区未提交改动集中在 `comment_writeback`、`comment_agent`、`annotate_corrections` 与相关 tests。`write_polished_comments(..., allow_existing_comments=...)` 把“同锚点是否允许追加批注”做成 opt-in：标准写回默认跳过已有批注重叠锚点，comment agent 显式 `allow_existing_comments=True`。同时 `annotate_corrections` 正在强化“编号/项目符号/展示壳变化不得生成事实更正批注、重要性标识 `*/※→★` 与 `△/Δ→▲` 必须保留”的编号隔离语义，并引入生成后审核器。这两条若交叉回归失败，会出现：合规批注被误跳过、同锚点重复批注失控，或编号重排被误标成“原技术参数为…现改为…”。
+- 影响范围： `backend/nodes/common_word_nodes/comment_writeback.py`, `backend/agents/comments/tools.py`, `backend/agents/comments/comment_agent.py`, `backend/nodes/common_word_nodes/annotate_corrections.py`, `backend/tests/nodes/test_comment_writeback.py`, `backend/tests/nodes/test_annotate_corrections.py`, `backend/tests/agents/test_comment_agent.py`
+- 当前缓解或约束： 默认保守去重 + comment agent 显式 opt-in；annotate 代码路径仍负责条款标识规范化；相关单测同步增补中。
+- 建议： 合入前分别锁住（1）标准写回去重、（2）comment agent 同锚点追加、（3）编号壳变化不生成更正批注、（4）重要性标识必须生成更正批注；不要把编号隔离逻辑散落到 writeback 层。
+
 **`annotate_corrections` 节点（条款标识 + 技术参数差异标注）：**
-- 风险/关注点： 位于最终正文确定之后、普通批注与 Word 写回之前；代码路径规范化 `△/Δ→▲`、`*/※→★` 并生成更正批注，另起一次 LLM 做事实值差异标注。LLM 输出必须匹配固定句式 `原技术参数为“…”，现改为“…”`，且 `reference_text`/`original`/`current` 由代码二次门禁（须落在 polished_text / tender_params 中）。对齐规则复杂（跨字段壳、无损拆格、项目名称不得补全设备名），误报/漏报直接影响 Word 更正批注质量。标注失败只 warning 并降级为空 LLM 列表，主流程继续。
+- 风险/关注点： 位于最终正文确定之后、普通批注与 Word 写回之前；代码路径规范化 `△/Δ→▲`、`*/※→★` 并生成更正批注，另起 LLM 做事实值差异标注。`comment_text` 仍须匹配固定句式 `原技术参数为“…”，现改为“…”`，且 `reference_text`/`original`/`current` 由代码二次门禁。对齐规则复杂（跨字段壳、无损拆格、项目名称不得补全设备名、编号隔离），误报/漏报直接影响 Word 更正批注质量。标注失败只 warning 并降级，主流程继续。
 - 影响范围： `backend/nodes/common_word_nodes/annotate_corrections.py`, `backend/helper/word_helper/clause_marker_normalize.py`, 标准 tender graph 节点序（`NODE_ANNOTATE_CORRECTIONS`）
-- 当前缓解或约束： 代码标识更正优先；解析门禁过滤非法句式；`backend/tests/nodes/test_annotate_corrections.py` 覆盖规范化、合并 LLM、无参数跳过、project sources 入 prompt。
+- 当前缓解或约束： 代码标识更正优先；解析门禁过滤非法句式；`backend/tests/nodes/test_annotate_corrections.py` 覆盖规范化、合并 LLM、无参数跳过等。
 - 建议： 改对齐规则或句式时同步单测；不要让该节点直接操作 Word；与 comment_agent 职责边界保持清晰（差异批注归 annotate，合规批注归 comment）。
 
 **verify / revise agent 协议与事实审计加严：**
@@ -247,7 +259,7 @@
 - 扩展路径： 需更长历史时先引入持久化队列与会话存储。
 
 **Windows COM worker 边界：**
-- 当前能力： 只允许串行 Word COM；线程池 max_workers=4 不能突破 COM 串行。
+- 当前能力： 只允许串行 Word COM；线程池 `max_workers=4` 不能突破 COM 串行。
 - 限制： 长任务阻塞后续 Word 写入；Word/WPS 注册异常拖垮整条链路；非 Windows 无法跑完整闭环。
 - 扩展路径： 专用 Windows worker 池、任务隔离、外部调度器。
 
@@ -257,7 +269,7 @@
 - 扩展路径： 显式索引刷新、共享缓存、可持久化事件流。
 
 **本地文件与日志产物：**
-- 当前能力： settings、progress/execution 日志、agent 审计、content agent workspace、upload 落本地磁盘。
+- 当前能力： settings、progress/execution 日志、agent 审计、content agent workspace、comment agent audit、upload 落本地磁盘；`backend/context_log/` 会累积 generate / content / comment 产物。
 - 限制： 上传、生成、审计、workspace 长期累积。
 - 扩展路径： 统一保留策略、对象存储、清理策略。
 
@@ -269,7 +281,7 @@
 - 迁移建议： 保持诊断脚本与 Word utility 分层；替代方案需重做 COM 访问层。
 
 **`langgraph` / `deepagents` / LangChain：**
-- 风险/关注点： content agents、comment agent（`create_agent` + middleware）、agent_run_service、llm_stream_utils 依赖这些运行时。
+- 风险/关注点： content agents、comment agent、agent_run_service、llm_stream_utils 依赖这些运行时。
 - 影响： 升级可能改掉 agent 协议、工具调用限次语义或流式回调。
 - 迁移建议： 升级前先跑 `backend/tests/agents/`、`backend/tests/services/test_agent_run_service.py` 与 SSE 相关测试。
 
@@ -342,6 +354,12 @@
 - 风险： 单点 mock 测通过后，prompt 变更仍可能在生产引入删除受保护字段或越界轮次。
 - Priority: High
 
+**批注编号隔离与写回 opt-in：**
+- What’s not tested: 编号壳变化 / 重要性标识 / 同锚点追加 与 annotate + comment_agent + write_polished_comments 的端到端顺序；`allow_existing_comments=False/True` 在真实 COM Comments 集合上的行为。
+- 相关文件： `backend/nodes/common_word_nodes/annotate_corrections.py`, `backend/nodes/common_word_nodes/comment_writeback.py`, `backend/agents/comments/tools.py`, `backend/tests/nodes/test_annotate_corrections.py`, `backend/tests/nodes/test_comment_writeback.py`
+- 风险： 单测通过后仍可能在 Word 中出现漏写、重复批注或编号误标。
+- Priority: High
+
 **annotate_corrections 事实对齐边界：**
 - What’s not tested: 跨槽位误对齐、项目名称补全设备名、无损拆格 vs 改写的边界组合在 LLM 输出侧的全量矩阵；与 comment_agent 批注合并写回的端到端顺序。
 - 相关文件： `backend/nodes/common_word_nodes/annotate_corrections.py`, `backend/tests/nodes/test_annotate_corrections.py`, `backend/nodes/common_word_nodes/comment_writeback.py`
@@ -380,4 +398,4 @@
 
 ---
 
-*后端风险分析：2026-07-15*
+*后端风险分析：2026-07-18*

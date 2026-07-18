@@ -329,6 +329,7 @@ def _try_normalized_comment_insert(
     search_end: int,
     log_parts: list[str],
     idx: int,
+    allow_existing_comments: bool = False,
 ) -> tuple[str, int]:
     bounded_matches = _find_normalized_ranges(
         doc,
@@ -367,7 +368,7 @@ def _try_normalized_comment_insert(
     except Exception:
         return "not_found", int(current_start)
 
-    if _has_comment_on_range(doc, target_range):
+    if not allow_existing_comments and _has_comment_on_range(doc, target_range):
         log_parts.append(
             f"  批注 [{idx}] 规范化匹配位置已存在批注，按保守去重策略跳过: {reference_text[:50]}..."
         )
@@ -435,7 +436,14 @@ def write_polished_comments(
     bound_end: int,
     log_parts: list[str],
     step_label: str = "步骤6",
+    allow_existing_comments: bool = False,
 ) -> CommentWritebackResult:
+    """Write comment candidates to Word.
+
+    ``allow_existing_comments`` is intentionally opt-in.  Standard writeback
+    continues to skip anchors that already overlap a comment, while the
+    comment agent can explicitly append another comment at the same anchor.
+    """
     comments = list(polished_comments or [])
     result: CommentWritebackResult = {
         "total": len(comments),
@@ -537,7 +545,7 @@ def write_polished_comments(
                 except Exception:
                     break
 
-                if _has_comment_on_range(doc, find_range):
+                if not allow_existing_comments and _has_comment_on_range(doc, find_range):
                     skipped_overlap_here += 1
                     log_parts.append(
                         f"  批注 [{idx}] 位置已存在批注，继续向后查找 reference_text={reference_text[:40]}..."
@@ -580,6 +588,7 @@ def write_polished_comments(
                 search_end=search_end,
                 log_parts=log_parts,
                 idx=idx,
+                allow_existing_comments=allow_existing_comments,
             )
             if normalized_status == "added":
                 added_here += 1
