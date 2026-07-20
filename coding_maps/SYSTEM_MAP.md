@@ -1,8 +1,8 @@
 # TenderWord 系统地图
 
-**生成日期：** 2026-07-18
+**生成日期：** 2026-07-21
 
-本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它基于 **2026-07-18** 刷新的子项目事实文档（`backend/.planning/codebase/` 与 `frontend/.planning/codebase/`）和根级 `AGENTS.md`、`ARCHITECTURE.md`、`INTERFACES.md`，并参考 `asset/` 知识包与 `docs/` 边界摘要。不替代代码真源、不替代根级文档的执行红线，也不替代子项目事实文档。子项目实现细节请直接看对应 `.planning/codebase/`，本地图只保留系统层。
+本文件是仓库级系统地图，用于帮助后续开发先判断“该看哪里、跨层如何协作、哪些边界不能破坏”。它基于 **2026-07-21** 刷新的子项目事实文档（`backend/.planning/codebase/` 与 `frontend/.planning/codebase/`，对照提交 `e748f16d1a2b253c766008f1a060e3ebba9b2f85`）和根级 `AGENTS.md`、`ARCHITECTURE.md`、`INTERFACES.md`，并参考 `asset/` 知识包与 `docs/` 边界摘要。不替代代码真源、不替代根级文档的执行红线，也不替代子项目事实文档。子项目实现细节请直接看对应 `.planning/codebase/`，本地图只保留系统层。
 
 ## 系统目的与仓库形态
 
@@ -59,7 +59,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
    - `prepare_template -> extract_tender_params`
    - 并行 Word 操作子图与生成分支
    - `generation_mode_gate`：`workflow` → `generate_polished_text`，`agent` → 公共 `content_agent`
-   - 两路正文汇合到共享 **`annotate_corrections`（仅首次 generate 接入；`RewriteSkillGraph` 不接入）**：先规范条款标识（如 `△/Δ→▲`、`*/※→★`），再按技术参数与最终正文比较，仅对可确定事实变化产出固定句式更正批注；**编号/项目符号/展示壳变化不得生成事实更正批注**（编号隔离）
+   - 两路正文汇合到共享 **`annotate_corrections`（仅首次 generate 接入；`RewriteSkillGraph` / `CommentSupplementGraph` 不接入）**：先规范条款标识（如 `△/Δ→▲`、`*/※→★`），再按技术参数与最终正文比较，仅对可确定事实变化产出固定句式更正批注；**编号/项目符号/展示壳变化不得生成事实更正批注**（编号隔离）
    - 再按 `comment_generation_mode` 决定普通批注分支，`update_word` 写回
    - `update_word` **先写 `correction_comments` 再写普通 `polished_comments`**；`comment_generation_mode=off` / `suppress_ai_comment_writeback` **只跳过普通 AI 批注，不跳过更正批注**
    - 最后按 `generation_mode=agent && comment_generation_mode=on` 决定是否进入公共 `comment_agent`
@@ -85,9 +85,10 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - agent run 必须先流出 `run_started` 和 `thinking_stage: understand completed`，再由 task-context assistant 决定 `needs_input`（追问）或经 `create_rewrite_task_tool` 创建 rewrite 任务（`task_accepted`）。
 - task-context assistant 运行时在 `backend/agents/task_context_assistant/`：只允许受控 `rewrite` skill（`TASK_CONTEXT_ASSISTANT_ALLOWED_SKILLS=("rewrite",)`）、只读摘要工具，并通过 `CompositeBackend` 分隔 `/skills/`、`/scratch/`、`/workspace/`。
 - `task_accepted` 后 agent run 即结束；后续排队、**显式 `RewriteSkillGraph`** 执行、SSE、取消和下载继续沿用既有任务主链路，不在 agent run 里复制第二套任务状态机。
-- `RewriteSkillGraph`（`backend/graphs/skill_graph.py`）节点序：`resolve_rewrite_target` → `extract_rewrite_context` → `get_rewrite_comments` → `delete_section` → `rewrite_text` → `update_word`；分支判定在 `backend/skills/rewrite/scripts/runtime.py`（按 `rewrite_source` / `source_document_path` 分派）。删除与写回经 `dispatch_tender_aware_*` 按类型路由。
+- `RewriteSkillGraph`（`backend/graphs/skill_graph.py`）显式 6 节点 + 条件边：`resolve_rewrite_target` →（`uploaded_file` 时）`extract_rewrite_context` → `rewrite_text` / 可选 `get_rewrite_comments` → `delete_section` → 汇合 `update_word`。分支判定在 `backend/skills/rewrite/scripts/runtime.py`（`select_resolve_branch` / `select_comment_branch`，按 `rewrite_source` / `source_document_path` 分派）。删除与写回经 `dispatch_tender_aware_*` 按类型路由。
 - 上传 Word 文件后的修改统一归入 rewrite：前端用 `rewrite_source` 文件类型（`uploadFile(file, 'rewrite_source')`），`context_snapshot.uploaded_files` 提供文件摘要，`context_snapshot.rewrite_context` 提供当前页面 `form_type`、锚点、`tender_lx`、`fund_source_lx` 和可选招标数据快照；后端 task skill state 用 `rewrite_source="uploaded_file"` 路由。
 - 上传文件 rewrite 必须有非空用户重写指令、文件路径、完整锚点、`tender_lx`、`fund_source_lx`；`tender_data_snapshot` 只是可选快照，缺招标数据不阻断。缺必需条件只返回 `needs_input`。rewrite 完成后前端用 SSE `done.output_file` 回写文件卡，下一轮 rewrite 基于最新输出。
+- 上传文件 rewrite 的 task graph 必须保持**单次 Word 删除**语义（`extract_rewrite_context -> rewrite_text -> delete_section -> update_word`），避免 `delete_section` 执行两次并与 `update_word` 并发抢 COM。
 - `/api/edit`、edit skill、edit task kind、`create_edit_task_tool` 已删除；旧调用表现为 404，不做历史会话迁移。不要恢复 `SkillGraph.for_skill + TaskSkillWorkflow` 元数据驱动框架。
 - agent run 审计日志只写白名单结构化字段并 scrub；只读工具只返回 rewrite 可用性、公共进度和摘要。
 
@@ -141,7 +142,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - **Form type（`GenerateRequest.form_type`）：** `xjcg_tender`、`gngk_hw_zc_tender`、`gngk_hw_cz_tender`、`gngk_fw_zc_tender`、`gngk_fw_cz_tender`、`gjgk_tender`（`backend/models/generate.py`）。
 - **运行态 `tender_type` / family：** graph state 用 `form_type.value.replace("_tender", "")` 去后缀；`get_tender_type_family()` 把所有 `gngk_*` 归并为 `gngk`。
 - **gngk 分派：** `gngk` 在前端是单一 UI 类型，提交后端时必须由 `frontend/lib/gngkFormType.ts` 的 `resolveGngkFormType({ tender_lx, fund_lx, ifzgcg })` 分派。两个调用点都走该 helper：generate 经 `formDataConverter.ts`，上传文件 rewrite 经 `ChatPanel.tsx`（`resolveRewriteFormType`）。不能绕开 helper 单独改调用点。
-- **generate-only 字段：** `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 只出现在 `GenerateRequest` 和生成 draft（`TenderFormShared.tsx`），不得进入 rewrite 请求模型（`AgentRunStreamRequest` / `AgentRunRewriteContextSnapshot`）、skill state 或 prompt surface。
+- **generate-only 字段：** `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 只出现在 `GenerateRequest` 和生成 draft（`TenderFormShared.tsx`），不得进入 rewrite 请求模型（`AgentRunStreamRequest` / `AgentRunRewriteContextSnapshot`）、skill state 或 prompt surface。注意：后端 `TaskSkillGraphState` 结构上继承了 generate base state 字段面（技术债），运行时仍不得主动填入或从 generate state 整包拷贝。
 - **rewrite_source：** 上传文件 rewrite 前端用 `rewrite_source` 文件类型；后端 task skill state 用 `rewrite_source="uploaded_file"` 标记来源并穿过 LangGraph schema。前端 `FileType` 另含 `template` / `params` / `qualification`。
 - **Agent run NDJSON 事件：** `run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`needs_input`、`done`、`error`；未知事件在前端 parser 白名单外静默丢弃。
 
@@ -288,7 +289,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 - 前端新增请求是否仍经过 API client；当前没有 lint 规则自动阻止组件或 hooks 写裸 `fetch`，评审时要人工检查。
 - `gngk` 的 `tender_lx + fund_lx + ifzgcg` 分派是否集中在 `frontend/lib/gngkFormType.ts`，且 `formDataConverter.ts`（generate）与 `ChatPanel.tsx`（rewrite）是否都调用该 helper；工程类复用 `gngk_fw_*` 若拆独立 graph 是否两端同步。
 - 生成文件契约是否仍是 `template + tender_params`，后端初始 state 是否只装配 `template_path + tender_param_paths`。
-- `generation_style` / `generation_mode` / `comment_generation_mode` / `style_writeback_mode` 是否仍为 generate-only，没有进入 rewrite 请求模型、skill state 或 prompt surface。
+- `generation_style` / `generation_mode` / `comment_generation_mode` / `style_writeback_mode` 是否仍为 generate-only，没有进入 rewrite 请求模型、skill state 或 prompt surface；是否未从 generate state 整包拷贝到 `TaskSkillGraphState`。
 - 上传文件 rewrite 是否仍用前端 `rewrite_source` 文件类型，并在后端 task skill state 中通过 `rewrite_source="uploaded_file"` 路由；是否未恢复旧 edit 入口。
 - 上传文件 rewrite 是否保持单次 Word 删除（`extract_rewrite_context -> rewrite_text -> delete_section -> update_word` 分支语义），避免 `delete_section` 执行两次并与 `update_word` 并发抢 Word COM。
 - 新增/修改 SSE 事件是否同步后端 `SSEEventType`、前端 union、`frontend/lib/sse.ts` named event、`useChatSSE` 和测试；是否区分后端真实事件与前端 `connected` / `status` 包装/映射事件。
@@ -311,10 +312,10 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 
 ## 验证入口
 
-- 后端常规验证：在 `backend/` 运行 `.\.venv\Scripts\python.exe -m pytest tests -v`（pytest + pytest-asyncio，async 测试需显式 `@pytest.mark.asyncio`）。当前约 87 个 `test_*.py`（2026-07-18 fact doc）。
+- 后端常规验证：在 `backend/` 运行 `.\.venv\Scripts\python.exe -m pytest tests -v`（pytest + pytest-asyncio，async 测试需显式 `@pytest.mark.asyncio`）。当前约 **87** 个 `test_*.py`（2026-07-21 fact doc）。
 - 后端 Word 闭环验证：必须回到 Windows + Word/WPS COM 环境；无 COM 环境只能覆盖 API shape、service、prompt、retrieval、agent guard 和 helper 纯逻辑。诊断脚本：`backend/scripts/diagnose_word.py`（不得作为业务写回旁路）。
-- 前端常规验证：在 `frontend/` 运行 `npm run lint`、`npm run type-check`、`npm run test`（Jest；约 31 个 unit 文件）。
-- 前端 E2E：在 `frontend/` 运行 `npm run test:e2e`（Playwright；6 个 spec：home、URL/conversation、表单上传槽、agent run chat panel、补充批注、generation_mode=agent）。
+- 前端常规验证：在 `frontend/` 运行 `npm run lint`、`npm run type-check`、`npm run test`（Jest；约 **31** 个 unit 文件）。
+- 前端 E2E：在 `frontend/` 运行 `npm run test:e2e`（Playwright；**6** 个 spec：home、URL/conversation、表单上传槽、agent run chat panel、补充批注、generation_mode=agent）。
 - 文档型变更：根目录运行 `git diff --check`，并扫描文档中的密钥/token 模式；仅文档变更不需要跑代码测试或 E2E。
 
 本次系统地图是文档层产物；具体功能验证仍以受影响代码路径的测试要求为准。
@@ -334,7 +335,7 @@ TenderWord 是前后端分离的招标文档生成、修改、补充批注和模
 
 - 根级：`AGENTS.md`、`ARCHITECTURE.md`、`INTERFACES.md`、`README.md`（导航）
 - 工作流文档：`docs/backend.md`、`docs/frontend.md`、`docs/interfaces-runtime.md`、`docs/knowledge-validation.md`（边界摘要）
-- 后端事实层（2026-07-18）：`backend/.planning/codebase/ARCHITECTURE.md`、`STRUCTURE.md`、`INTEGRATIONS.md`、`STACK.md`、`CONVENTIONS.md`、`TESTING.md`、`CONCERNS.md`
-- 前端事实层（2026-07-18）：`frontend/.planning/codebase/ARCHITECTURE.md`、`STRUCTURE.md`、`INTEGRATIONS.md`、`STACK.md`、`CONVENTIONS.md`、`TESTING.md`、`CONCERNS.md`
+- 后端事实层（2026-07-21）：`backend/.planning/codebase/ARCHITECTURE.md`、`STRUCTURE.md`、`INTEGRATIONS.md`、`STACK.md`、`CONVENTIONS.md`、`TESTING.md`、`CONCERNS.md`
+- 前端事实层（2026-07-21）：`frontend/.planning/codebase/ARCHITECTURE.md`、`STRUCTURE.md`、`INTEGRATIONS.md`、`STACK.md`、`CONVENTIONS.md`、`TESTING.md`、`CONCERNS.md`
 - 知识包：`asset/README.md`、`asset/shared_runtime_word_skill_knowledge_pack.md`、`asset/tender_type_identity_session_knowledge_pack.md`、`asset/template_candidate_pipeline_knowledge_pack.md`
-- 刷新基线：既有 `coding_maps/SYSTEM_MAP.md`（2026-07-15 版；保留仍正确的系统层结论，按新 fact docs 改写过时结论）
+- 刷新基线：本文件为 2026-07-21 全量刷新版（对照提交 `e748f16d`）；在保留仍正确的系统层结论基础上，按当日前后端 fact docs 改写过时结论

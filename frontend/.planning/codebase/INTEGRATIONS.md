@@ -1,10 +1,10 @@
 # 前端外部集成事实地图
 
-**分析日期：** 2026-07-18
+**分析日期：** 2026-07-21
 
 **范围：** 仅 `frontend/` 对后端 API、SSE、NDJSON、浏览器运行时、本地存储、上传下载、模板候选、agent run 前置流、测试工具与开发服务器的集成边界。只记录 `frontend/.env.local.example` 中的配置键名；不读取 `.env.local` 真实值。
 
-**对照提交：** `29f47e1557a34bbbec0ad3f6938e1a46aa94e5e3`（映射时仓库 HEAD 与该提交一致）。
+**对照提交：** `e748f16d1a2b253c766008f1a060e3ebba9b2f85`（映射时仓库 HEAD 与该提交一致）。
 
 ## API 与外部服务
 
@@ -48,7 +48,7 @@
 - 服务用途：生成、rewrite、补充批注任务的实时日志、进度、LLM 文本、agent step、终态与 heartbeat。
 - 入口：`getTaskStreamUrl()`、`createSSEConnection()`、`useSSE()`、`useChatSSE()`，见 `frontend/lib/api.ts`、`frontend/lib/sse.ts`、`frontend/hooks/useSSE.ts`、`frontend/hooks/useChatSSE.ts`。
 - 运行时：`frontend/lib/sse.ts` 包装浏览器 `EventSource`，支持 `lastEventId` query、事件去重（`seenEventIds`，上限 5000）、heartbeat timeout 与可选指数退避重连（默认 `autoReconnect: false`）。
-- 命名事件：`connected`、`log`、`llm`、`progress`、`agent_step`、`status`、`error`、`done`、`heartbeat`（`sse.ts` 中显式 `addEventListener`；类型 union 见 `SSEEventType`）。
+- 命名事件：`connected`、`log`、`llm`、`progress`、`agent_step`、`status`、`error`、`done`、`heartbeat`（`sse.ts` 中显式 `addEventListener`）。
 - 状态映射：`useChatSSE.ts` 写入 `chatStreamStore` / `chatStore`，终态后清理 `chatTaskSessionStore`；必要时回退 `getTaskStatus()`。`useChatSSE` / `useSSE` 默认 `heartbeatTimeout: 45000`。
 
 **模板候选：**
@@ -59,7 +59,7 @@
 - 约束：前端只消费后端返回的候选、ranking、`selectable` 与 `blocked_reason`；不得直接访问外部模板候选 URL。外部下载必须走 `/api/template-candidates/download`。
 
 **模型选择：**
-- UI 选项：`deepseek`、`qwen`、`doubao`，定义在 `frontend/components/forms/ModelSelector.tsx` 的 `MODEL_OPTIONS`。
+- UI 选项：`deepseek`、`qwen`、`doubao`，定义在 `frontend/components/forms/ModelSelector.tsx` 的 `MODEL_OPTIONS`；聊天侧复用见 `frontend/components/chat/ChatModelPicker.tsx`。
 - 前端职责：仅把模型枚举传给 `GenerateRequest`、`CommentSupplementTaskRequest` 或 `AgentRunStreamRequest`。
 - Provider 密钥与真实 LLM 调用不在前端；前端不保存 provider key。
 
@@ -162,4 +162,4 @@
 
 ---
 
-*前端集成分析：2026-07-18*
+*前端集成分析：2026-07-21*

@@ -1,8 +1,8 @@
 # TenderWord 接口边界
 
-**生成日期：** 2026-07-18
+**生成日期：** 2026-07-21
 
-本文件是根级**系统级接口边界文档**，记录 TenderWord 当前已确认的跨系统接口边界、跨系统调用关系、任务排查建议和可扩展集成文档入口。具体模型和行为以代码真源为准，并参考 2026-07-18 刷新的 `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 事实层。
+本文件是根级**系统级接口边界文档**，记录 TenderWord 当前已确认的跨系统接口边界、跨系统调用关系、任务排查建议和可扩展集成文档入口。具体模型和行为以代码真源为准，并参考 2026-07-21 刷新的 `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 事实层。
 
 > 分层定位：本文件承接**跨项目接口与协作**。子系统内部集成（如后端 LLM provider 调用细节、前端 store 内部结构）留在各自 `.planning/codebase/INTEGRATIONS.md`；按任务的完整阅读指南在 `coding_maps/SYSTEM_MAP.md`。本文件不复制底层实现细节。
 
@@ -12,7 +12,7 @@
 
 - 后端真实 API 前缀是 `/api`，FastAPI router 注册在 `backend/main.py`。
 - 根级健康检查端点是 `/health`、`/health/ready` 和 `/health/live`，**不挂 `/api` 前缀**；它们只表达应用进程层状态。注意 `/health/ready` 的 `upload_dir_accessible` 当前固定为 `True`，不代表 Word COM / LLM / 外部 HTTP 真实可用。
-- 前端所有后端调用统一经由 `frontend/lib/api.ts`。JSON 请求走 `request<T>()` / `api.get/post/put/delete` 封装；流式、上传和下载使用其内专用 helper；产品源码中后端 `fetch(` 集中于 `api.ts`，组件层不写裸 `fetch`。
+- 前端所有后端调用统一经由 `frontend/lib/api.ts`。JSON 请求走 `request<T>()` / `api.get/post/put/delete` 封装；流式、上传和下载使用其内专用 helper；产品源码中后端 `fetch(` 集中于 `api.ts`，组件层不写裸 `fetch`。该约定当前主要靠评审和测试维护，没有专门 lint 规则兜底。
 - 前端基础 URL 由 `frontend/lib/apiBaseUrl.ts` 解析 `NEXT_PUBLIC_API_URL`（支持逗号分隔多候选，无配置时用 `http://localhost:8000`）；Next rewrites 在 `frontend/next.config.ts`，把 `/api/:path*` rewrite 到 `resolveApiBaseUrl()` 结果，并将候选 hostname 纳入 `allowedDevOrigins`。修改 `NEXT_PUBLIC_API_URL` 时需同时验证浏览器 base URL、Next rewrite 目标和开发期 allowed origin。
 
 ### 跨层枚举与关键约定（系统级契约）
@@ -25,7 +25,7 @@
 | **Form type（`GenerateRequest.form_type`）** | `xjcg_tender`、`gngk_hw_zc_tender`、`gngk_hw_cz_tender`、`gngk_fw_zc_tender`、`gngk_fw_cz_tender`、`gjgk_tender`（`backend/models/generate.py`）。 | 新增/改类型同步前端 UI 类型、后端 `FormType`、`GRAPH_REGISTRY`、graph/state/node、anchor config 和测试。 |
 | **运行态 `tender_type` / family** | graph state 用 `form_type.value.replace("_tender","")` 去后缀；`get_tender_type_family()` 把所有 `gngk_*` 归并为 `gngk`。 | family 行为族改动集中在 `backend/config/tender_config.py`。 |
 | **gngk 分派** | `gngk` 在前端是单一 UI 类型，提交后端时由共享 helper `frontend/lib/gngkFormType.ts` 的 `resolveGngkFormType({ tender_lx, fund_lx, ifzgcg })` 分派。两个调用点：generate 经 `formDataConverter.ts`，上传文件 rewrite 经 `ChatPanel.tsx`（`resolveRewriteFormType`）。工程类（`tender_lx` 1/2）当前复用服务链路 `gngk_fw_*`（产品临时策略）。 | 不能绕开 helper 单独改调用点；拆独立 graph 时两端同步。 |
-| **generate-only 字段** | `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 只出现在 `GenerateRequest` 和生成 draft（`TenderFormShared.tsx`）。 | 不得进入 rewrite 请求模型（`AgentRunStreamRequest` / `AgentRunRewriteContextSnapshot`）、skill state 或 prompt surface。 |
+| **generate-only 字段** | `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 只出现在 `GenerateRequest` 和生成 draft（`TenderFormShared.tsx`）。 | 不得进入 rewrite 请求模型（`AgentRunStreamRequest` / `AgentRunRewriteContextSnapshot`）、skill state 或 prompt surface。注意：后端 `TaskSkillGraphState` 结构上继承了 generate base state 字段面（技术债），运行时仍不得主动填入或从 generate state 整包拷贝。 |
 | **rewrite_source** | 上传文件 rewrite 前端用 `rewrite_source` 文件类型（`uploadFile(file,'rewrite_source')`），后端 task skill state 用 `rewrite_source="uploaded_file"` 路由并穿过 LangGraph schema。前端 `FileType` 另含 `template` / `params` / `qualification`。 | 不要恢复旧 edit 入口或第二套任务链路。 |
 | **批注职责** | 技术参数差异更正批注仅由 generate 主干的 `annotate_corrections` 产出；合规批注由 `comment_agent` / `generate_comments` 产出；`comment_agent` 不得生成“原技术参数为…现改为…”类差异批注。编号/项目符号/展示壳变化不得生成事实更正；重要性标识规范化（`*/※→★`、`△/Δ→▲`）可保留。 | 改对齐规则、句式门禁或写回顺序时同步后端节点/测试与 `docs/backend.md`；不要把编号隔离散落到 writeback 层。 |
 | **批注写回顺序与开关** | `update_word` 先写 `correction_comments` 再写普通 `polished_comments`。`comment_generation_mode=off` / `suppress_ai_comment_writeback` 只跳过普通 AI 批注，不跳过更正批注。标准写回默认跳过已有批注重叠锚点；`comment_agent` 显式允许同锚点追加。 | 改写回语义时同步 comment writeback helper、comment agent 调用方、任务结果/SSE `done` 中的 writeback 摘要与测试。 |
@@ -88,6 +88,7 @@
 - `comment_writeback_*` 和 `style_writeback_*` 摘要属于任务结果契约，不得在 state、任务结果或 `done` 事件中丢失。
 - `agent_step` 是智能体过程事件，允许断线重放和前端过程卡展示，但不替代 `done` / `error` 终态。`comment_supplement` 任务复用同一 SSE 通道。
 - retrieval 命中详情 / 检索 JSON **不进入** SSE、下载卡或 `agent_step`。
+- 刷新后内存 `chatStreamStore` 为空时，当前实现会强制从起点回放 SSE（即使 session 仍有 `lastEventId`）。
 
 ### Agent Run、聊天与 Rewrite（NDJSON 回流）
 
@@ -108,6 +109,7 @@
 - NDJSON event shape 变化必须同步 `frontend/types/api.ts`、`parseAgentRunEvent()` 和 `ChatPanel`。当前事件：`run_started`、`thinking_stage`、`tool_call`、`task_accepted`、`needs_input`、`done`、`error`；未知事件在前端 parser 白名单外静默丢弃。
 - 显式 `$rewrite` / `/rewrite` 和上传 Word 文件都归入 rewrite：上传文件用 `rewrite_source` 文件类型；`context_snapshot.rewrite_context` 提供 `form_type`、锚点、`tender_lx`、`fund_source_lx` 和可选招标数据快照，**不含** generate-only 字段。
 - 上传文件 rewrite 必须有非空用户重写指令、文件路径、完整锚点、`tender_lx`、`fund_source_lx`；`tender_data_snapshot` 可选，缺招标数据不阻断。
+- 上传文件 rewrite 的 task graph 必须保持**单次 Word 删除**语义，避免 `delete_section` 执行两次并与 `update_word` 并发抢 COM。
 - `/api/edit`、edit skill、edit task kind 已删除；不要恢复 `SkillGraph.for_skill + TaskSkillWorkflow` 元数据驱动框架。
 
 ### 补充批注任务
@@ -245,4 +247,4 @@ retrieval 系统级边界（已确认）：
 
 ---
 
-*接口边界文档：2026-07-18*
+*接口边界文档：2026-07-21*

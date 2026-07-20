@@ -1,28 +1,30 @@
-# 后端测试模式
+# 测试约定
 
-**分析日期：** 2026-07-18
+**分析日期：** 2026-07-21
 
 **范围：** `backend/tests/`、`backend/requirements.txt`、`backend/scripts/diagnose_word.py` 及与测试直接相关的实现。未读取 `backend/.env`。
 
 **关键事实来源：**
 - 配置与依赖：`backend/requirements.txt`、`backend/tests/conftest.py`
-- 近期批注链路：`tests/agents/test_comment_agent.py`、`tests/nodes/test_annotate_corrections.py`、`tests/nodes/test_comment_writeback.py`、`tests/nodes/test_comment_agent_writeback_node.py`、`tests/graphs/test_comment_supplement_graph.py`、`tests/api/test_comment_supplement_api.py`
-- API / model / service / graph / helper / retrieval / logging 全套 `tests/` 镜像目录
+- 批注链路：`tests/agents/test_comment_agent.py`、`tests/nodes/test_annotate_corrections.py`、`tests/nodes/test_comment_writeback.py`、`tests/nodes/test_comment_agent_writeback_node.py`、`tests/graphs/test_comment_supplement_graph.py`、`tests/api/test_comment_supplement_api.py`
+- API / model / service / graph / helper / retrieval / logging / progress 全套 `tests/` 镜像目录
 
 ## 测试框架
 
 **运行器：**
-- `pytest>=8.3.0`、`pytest-asyncio>=0.24.0`（`backend/requirements.txt`）。
+- `pytest>=8.3.0`、`pytest-asyncio>=0.24.0`（`backend/requirements.txt` Dev dependencies）。
 - **无** 后端 `pytest.ini` / `pyproject.toml` / `setup.cfg` / `tox.ini`；**无** 全局 `asyncio_mode`。
 - 异步测试必须逐用例标注 `@pytest.mark.asyncio`（strict 显式标记，不自动发现 async）。
 - **无** `pytest-cov` / `coverage` 依赖或阈值。
-- 全仓唯一共享 conftest：`backend/tests/conftest.py`（仅 `sys.path`：项目根 + `backend/`）。
+- 全仓唯一共享 conftest：`backend/tests/conftest.py`（仅 `sys.path`：项目根 + `backend/`，无业务 fixture）。
 
 **断言：**
 - pytest 原生 `assert`。
 - 局部使用 `HTTPException`、`ValidationError` / `model_validate()`、`pytest.raises`、`pytest.mark.parametrize`、fake class。
 
 ## 如何运行
+
+在 `backend/` 目录下（与 `Agents.md` 一致）：
 
 ```bash
 cd backend
@@ -53,7 +55,7 @@ TMPDIR=/tmp TMP=/tmp TEMP=/tmp .venv-linux/bin/python -m pytest tests -v
 
 **位置：** `backend/tests/<scope>/test_*.py`，不与源码 co-locate。
 
-**规模（2026-07-18）：** 约 **87** 个 `test_*.py` 文件。
+**规模（2026-07-21）：** **87** 个 `test_*.py` 文件。
 
 | 目录 | 约计 | 关注点 |
 |------|------|--------|
@@ -100,7 +102,7 @@ state = service._build_initial_state(request, task_id="task-1")
 assert "generation_style" not in rewrite_state
 ```
 
-**Graph 编译与分支：** 子类化真实 graph 基类，替换节点为轻量 callable，`.compile().invoke(state)` 断言调用顺序。
+**Graph 编译与分支：** 子类化真实 graph 基类，用 `monkeypatch.setattr(GraphClass, "NODE_*", stub)` 替换节点为轻量 callable，`.compile().invoke(state)` 断言调用顺序（见 `tests/graphs/test_generation_mode_branching.py`、各 `*_generation_mode_agent.py`）。
 
 **Word helper / comment writeback（fake COM 对象）：** 内联 `_FakeDocument` / `_FakeRange` / `_FakeFind` / `_FakeCommentsCollection`，实现 `Range`、`Find.Execute`、`Comments.Add` 等最小表面，**不**启动 Word。
 
@@ -115,10 +117,11 @@ assert "generation_style" not in rewrite_state
 - Word 生命周期：`create_word_application`、`open_document_with_retry`、`save_document_with_retry`、`close_word_application`、`find_anchor_range` 等（见 `test_comment_agent_writeback_node.py` 的 `_patch_word_success`）。
 - 审计/workspace 根目录：`COMMENT_AGENT_AUDIT_ROOT`、`get_generate_context_log_dir` → `tmp_path`。
 - 进度套件：`autouse` 清空 `TaskQueueManager` 并 stub SSE（`tests/progress/`）。
+- bad case 检索：`autouse` 返回空 context，避免依赖 Qdrant。
 
 **不应 Mock：**
 - Pydantic 请求/响应 shape 与枚举默认值。
-- Graph registry 类属性绑定。
+- Graph registry 类属性绑定（除非测分支时局部 stub 节点实现）。
 - 下载路径 containment 与上传类型校验本身。
 - Prompt 契约字符串、sanitizer、table placeholder 纯函数（确定性输入直接调用）。
 - `MODEL_CONFIGS` 默认值（stream 测试只 mock client / heartbeat / settings 属性）。
@@ -130,8 +133,9 @@ assert "generation_style" not in rewrite_state
 - 临时文件一律 `tmp_path`；勿写真实 `settings.UPLOAD_DIR`。
 - 路径字符串可用 `D:/UploadFiles/...` 作契约，不要求文件真实存在（除非测存在性）。
 - 本地 factory 示例：`build_request(...)`、`build_select_request(...)` 在各文件内定义。
+- 异步场景亦常见 `asyncio.run(...)` 包装（见 `tests/logging/test_task_audit_log_paths.py`、`tests/util/test_llm_stream_utils.py`），与 `@pytest.mark.asyncio` 并存。
 
-## 近期真实模式：批注链路
+## 批注链路测试模式
 
 ### `annotate_corrections`（`tests/nodes/test_annotate_corrections.py`）
 
@@ -174,6 +178,12 @@ assert "generation_style" not in rewrite_state
 - Agent run NDJSON：`tests/api/test_agent_run_api.py`（`media_type`、`Cache-Control`、必填 `context_snapshot`）。
 - Tender API：`ifzgcg` 透传、investment 字符串化、不支持采购方式的非阻断 warning。
 
+## Graph / generation_mode 测试
+
+- `tests/graphs/test_generation_mode_branching.py`：`workflow` vs `agent` 分支、`comment_generation_mode=off` 跳过批注节点且不触发 bad case 检索。
+- 各 form 专属：`test_gjgk_generation_mode_agent.py`、`test_gngk_*_generation_mode_agent.py`、`test_xjcg_generation_mode_agent.py`——stub 类属性节点，断言 agent 路径与 post-update 顺序。
+- `tests/graphs/test_gngk_tender_graph.py` 等：拓扑与节点注册。
+
 ## Prompt / LLM / Retrieval
 
 - Prompt routing 真实 builder：`tests/prompts/test_generate_prompt_routing.py`。
@@ -182,16 +192,23 @@ assert "generation_style" not in rewrite_state
 - LLM stream：`tests/util/test_llm_stream_utils.py`（超时、`ensure_llm_env` 只暴露配置键）。
 - Retrieval：本地 Markdown + fake embedding/Qdrant + `tmp_path`；失败断言降级，不要求在线 Qdrant。
 
+## 进度与取消相关测试
+
+- 上传 rewrite 进度：`tests/progress/test_uploaded_rewrite_progress_tracking.py`——断言节点在 `TRACKED_PROGRESS_NODES` 中，进度更新路径可观测。
+- 取消路径主要由 `BaseGraph._check_cancellation` + `TaskCancelledException` 实现；service 层识别取消并写 `progress_log.warning`。单元套件通过 monkeypatch 队列/SSE 覆盖，不启真实多任务竞争。
+
 ## Word COM 策略与闭环门槛
 
 **默认套件 = no-COM：**
 - 不依赖 `pytest.skip` / `importorskip` / `sys.platform` 条件跳过；通过 fake + monkeypatch 覆盖 COM 交互面。
 - Graph/node 单元测试不启动真实 Word。
+- helper 测试用 fake 段落/Range/Find 对象验证样式、删除、cleanup、段落边界等纯逻辑。
 
 **完整 COM 闭环：**
 - 必须在 Windows + 本机 Word/WPS + `pywin32`（requirements 中 `platform_system == "Windows"` 条件安装）。
-- 诊断：`python scripts/diagnose_word.py`。
+- 诊断：`python scripts/diagnose_word.py`（检查 `win32com` 与 Word 安装）。
 - WSL/Linux pytest **不能**证明 COM 或真实 `.doc/.docx` 写回正确。
+- 完整 Word 生成验收必须回到 Windows Python、pywin32 和本机 Word/WPS COM 环境（与根级 `Agents.md` 一致）。
 
 ## 覆盖率
 
@@ -219,13 +236,15 @@ async def test_service_streams_events(monkeypatch):
 
 - 漏标 `@pytest.mark.asyncio` 会导致 async 测试不被正确执行或失败（无 auto mode）。
 - 同步测试（绝大多数 node/helper）不要无故标 asyncio。
+- 部分同步测试用 `asyncio.run(...)` 驱动内部 async helper，属于合法混合模式。
 
 ## 安全与夹具卫生
 
 - 测试不得读取或打印真实 `.env` 密钥。
 - Agent run / audit 相关断言验证 scrub 后摘要与白名单字段（`tests/agents/test_task_context_assistant_logging.py`）。
 - 审计与 workspace 输出隔离到 `tmp_path`。
+- 外部 HTTP 一律 mock；不向真实模板候选或招标数据服务发请求。
 
 ---
 
-*后端测试模式分析：2026-07-18*
+*后端测试模式分析：2026-07-21*

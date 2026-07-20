@@ -1,7 +1,8 @@
 # 后端外部集成
 
-**分析日期：** 2026-07-18
-**last_mapped_commit：** `29f47e1557a34bbbec0ad3f6938e1a46aa94e5e3`（分析时另含工作区未提交代码事实）
+**分析日期：** 2026-07-21
+
+**last_mapped_commit：** `e748f16d1a2b253c766008f1a060e3ebba9b2f85`
 
 **范围：** 本文只覆盖 `backend/` 子项目。事实来源包括 `backend/main.py`、`backend/config/settings.py`、`backend/.env.example`、`backend/api/`、`backend/services/`、`backend/agents/`、`backend/retrieval/`、`backend/util/common_util/`、`backend/util/word_util/`、`backend/util/log_util/`、`backend/task/task_queue_manager.py`、`backend/core/sse_manager.py`、`backend/models/`、`backend/graphs/base_graph.py`、`backend/graphs/skill_graph.py`、`backend/nodes/common_word_nodes/annotate_corrections.py`。`backend/.env` 与 `backend/.env.example` 均可能存在；本文档只引用配置键名与 `.env.example` 中的示例值，不读取或泄露 `.env` 真实值。
 
@@ -57,6 +58,7 @@
   - SDK/Client: `deepagents.create_deep_agent`、`CompiledSubAgent`、`BackendProtocol` / `FilesystemBackend`
   - Auth: 使用请求选择的 LLM provider 配置
   - 使用路径：`backend/agents/generation/content_agents.py`、`backend/agents/generation/workspace.py`、`backend/agents/generation/model_factory.py`、`backend/agents/generation/*_agent_graph.py`
+  - 表格占位符：content agent 将技术参数中的 `[[TABLE:<id>]]` 视为内部写回入口；提取与缺失校验在 `backend/agents/generation/table_placeholder_utils.py`；最终是否恢复真实表格由 Word 写回层决定（`backend/helper/word_helper/text_parsing.py` + `backend/util/word_util/table_models.py`），占位符不得作为用户可见正文。
 - DeepAgents task context assistant — 右侧聊天 agent run 前置流，仅允许受控 `rewrite` skill 和只读摘要工具，受控路由 `/skills/`、`/scratch/`、`/workspace/`。
   - SDK/Client: `deepagents.create_deep_agent`、`CompositeBackend`、`FilesystemBackend`、`FilesystemPermission`
   - Auth: 使用请求选择的 LLM provider 配置
@@ -72,6 +74,7 @@
   - SDK/Client: `stream_llm_completion`（`backend/util/common_util/llm_stream_utils.py`）
   - 职责：条款标识规范化（`clause_marker_normalize`）+ 技术参数差异更正批注候选生成/审核
   - 使用路径：`backend/nodes/common_word_nodes/annotate_corrections.py`、`backend/helper/word_helper/clause_marker_normalize.py`、`backend/graphs/base_graph.py`
+  - 写回顺序：先写更正批注再写普通 AI 批注；`comment_generation_mode=off` / `suppress_ai_comment_writeback` 只跳过普通 AI 批注，不跳过更正批注。
 
 **外部招标详情系统：**
 - 招标详情接口 — 按招标编号获取项目数据并归一化 form routing 所需 `type`。
@@ -119,6 +122,7 @@
   - 诊断 ProgID（`word_diagnostics.py`）：`Word.Application`、`WPS.Application`、`KWPS.Application`
   - 并发护栏：`com_lock()`（`backend/util/word_util/word_com_manager.py`）、任务队列 `wait_for_turn`（`backend/task/task_queue_manager.py`）、`CrossProcessFileLock`（`backend/graphs/base_graph.py`）
   - 抽取保真：`word_extraction_utils` 保留 Symbol/Wingdings 与未知字形（`[[WORD_SYMBOL:...]]`）、段落自动编号（`ListFormat`/`ListString`）；写回侧 `word_symbol_tokens` + `content_ops` 解码并恢复字体；字段替换查找串长度上限 256（`replace_content.WORD_FIND_TEXT_MAX_LEN`）
+  - 表格 sidecar：`backend/util/word_util/table_models.py` 配合 `[[TABLE:id]]` 占位符在写回时恢复真实表格结构
   - 使用路径：`backend/util/word_util/word_application_util.py`、`backend/util/word_util/word_com_manager.py`、`backend/util/word_util/word_diagnostics.py`、`backend/util/word_util/word_extraction_utils.py`、`backend/util/word_util/word_symbol_tokens.py`、`backend/helper/word_helper/content_ops.py`、`backend/nodes/common_word_nodes/replace_content.py`、`backend/scripts/diagnose_word.py`
 
 ## 数据存储
@@ -232,6 +236,19 @@
 - Qdrant 和 embedding HTTP 调用来自 `backend/retrieval/qdrant_store.py`、`backend/retrieval/embeddings.py`。
 - LangSmith tracing 由 `backend/config/settings.py` 暴露环境变量后交给 LangChain/LangSmith SDK 使用。
 
+## 内部集成（前端 API / SSE / 任务契约）
+
+**前端到后端契约要点：**
+- 前端所有后端请求应统一走 API client，不直接访问外部模板候选 URL 或招标详情 URL；后端侧对应代理入口是 `backend/api/template_candidates.py`、`backend/api/tender.py`。
+- 任务进度与实时日志通过 SSE（`GET /api/stream/{task_id}`）推送；agent 前置流通过 NDJSON（`POST /api/agent/runs/stream`）推送。
+- CORS 默认允许前端开发端口 `8502`（及 `.env.example` 中的 `3000`），并暴露 `Last-Event-ID`、`X-Accel-Buffering` 等 SSE 相关头。
+
+**任务类型与 generate-only 字段：**
+- `TaskKind`：`generate` / `rewrite` / `comment_supplement`（`backend/task/task_queue_manager.py`）。
+- `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 仅用于初次 generate，写入 `base_state` / `document_service` 初始状态；不得进入 rewrite 请求模型、skill state 或 prompt surface。
+- 上传文件 rewrite：后端 skill state 使用 `rewrite_source="uploaded_file"` 标记来源（`backend/states/skill_state.py`、`backend/services/document_service.py`、`backend/skills/rewrite/scripts/runtime.py`）；不要恢复旧 edit 入口或第二套任务链路。
+- rewrite 由显式 `RewriteSkillGraph` 承载（`backend/graphs/skill_graph.py`），节点：`resolve_rewrite_target`、`extract_rewrite_context`、`get_rewrite_comments`、`delete_section`、`rewrite_text`、`update_word`。
+
 ## 集成护栏
 
 - 前端不得直接访问外部招标详情或模板候选 URL；统一走后端代理和白名单校验；实现点是 `backend/api/template_candidates.py`、`backend/util/common_util/template_candidates.py`。
@@ -248,7 +265,8 @@
 - 批注写回同锚点策略：`write_polished_comments(..., allow_existing_comments=False)` 为默认保守去重；仅 `comment_agent` 工具写回传 `True`。
 - Retrieval bad case 命中详情只进入后端 prompt/retrieval 审计，不进入 SSE、下载卡、任务结果或 `agent_step`。
 - Agent run 审计日志只记录 scrub 后白名单字段；不要返回完整客户原文、真实密钥、私有路径、traceback 或下载路径；实现点是 `backend/agents/task_context_assistant/logging.py`。
+- `[[TABLE:<id>]]` 是 content agent / 写回层内部契约，不得当作用户可见正文或 Markdown 手绘表格；实现点是 `backend/agents/generation/table_placeholder_utils.py`、`backend/helper/word_helper/text_parsing.py`。
 
 ---
 
-*后端集成分析：2026-07-18*
+*后端集成分析：2026-07-21*

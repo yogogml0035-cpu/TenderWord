@@ -1,6 +1,6 @@
 # 前端结构事实地图
 
-**分析日期：** 2026-07-18
+**分析日期：** 2026-07-21
 
 **范围：** `frontend/` 子项目。未读取 `.env`、`.env.*`、`.npmrc`、凭据或真实密钥文件。
 
@@ -38,11 +38,13 @@ frontend/
 └── postcss.config.mjs       # Tailwind 4 PostCSS 插件
 ```
 
+**说明：** 无 `src/` 目录；`@/*` 映射到 `frontend/` 根。工作台主路径是 `app/tender` + `components/chat` + `components/forms`，不是 `components/layout`。
+
 ## 目录职责
 
 **`frontend/app/`:**
 - 职责： Next.js App Router 页面边界和全局样式。
-- 包含： `layout.tsx`、`page.tsx`、`globals.css`、`tender/page.tsx`。
+- 包含： `layout.tsx`、`page.tsx`、`globals.css`、`tender/page.tsx`、`favicon.ico`。
 - 关键文件：
   - `frontend/app/page.tsx`：`redirect('/tender')`。
   - `frontend/app/tender/page.tsx`：工作台入口；组合 `TenderTypeSidebar` + `FormPanel` + `ChatPanel`；URL 会话、招标预取、conversation heartbeat。
@@ -52,7 +54,7 @@ frontend/
 - 职责： 工作台三栏中的类型侧栏、表单挂载、聊天交互、任务消息、agent run 和上传文件 rewrite UI。
 - 包含： `ChatPanel.tsx`、`ChatInput.tsx`、`ChatModelPicker.tsx`、`FormPanel.tsx`、`TenderTypeSidebar.tsx`、`MessageList.tsx`、`TaskLogMessage.tsx`、`TaskContentMessage.tsx`、`TaskDownloadMessage.tsx`、`AgentThinkingMessage.tsx`、`DualColumnMessage.tsx`、`NewChatPopup.tsx`、`Skeleton.tsx`、`tenderFormRegistry.ts`。
 - 关键文件：
-  - `ChatPanel.tsx`：agent run、`rewrite_source` 上传、rewrite 终态回写、`createCommentSupplementTask`、下载。
+  - `ChatPanel.tsx`：agent run、`rewrite_source` 上传、rewrite 终态回写、`createCommentSupplementTask`、下载；内含 `buildAgentRunContextSnapshot` / `resolveRewriteFormType`。
   - `FormPanel.tsx`：generate task、`useChatSSE` / `useTaskHeartbeat` / `useCurrentConversationTaskStatus`。
   - `ChatInput.tsx`：`/rewrite` skill、Word 文件选择、`ChatModelPicker`。
   - `tenderFormRegistry.ts`：`TenderType` → 表单组件 / converter / 显示名。
@@ -74,7 +76,7 @@ frontend/
 **`frontend/components/layout/`:**
 - 职责： 通用布局和历史侧栏组件。
 - 包含： `Header.tsx`、`HistorySection.tsx`、`MainLayout.tsx`、`Sidebar.tsx`。
-- 关键文件： `MainLayout.tsx` 组合 Sidebar + History + Header；**`/tender` 工作台不引用本目录**，直接使用 `components/chat/` 三栏。
+- 关键文件： `MainLayout.tsx` 组合 Sidebar + History + Header；**`/tender` 工作台不引用本目录**，直接使用 `components/chat/` 三栏。消费方主要是 `historyStore` / `useAppStore`。
 
 **`frontend/hooks/`:**
 - 职责： 封装 hydration、URL 参数、SSE（`useSSE`/`useChatSSE` 两层）、任务状态轮询/确认、任务 heartbeat 和活跃任务摘要。
@@ -103,10 +105,10 @@ frontend/
 - 包含： `chatStore.ts`、`chatStreamStore.ts`、`chatTaskSessionStore.ts`、`historyStore.ts`、`useAppStore.ts`。
 - 关键文件：
   - `chatStore.ts`：会话、draft（含 generate 字段与 `rewrite_file` / `pending_rewrite_*`）、任务消息组、URL 同步；persist `chat-storage`。
-  - `chatStreamStore.ts`：运行中 SSE stream（内存）。
+  - `chatStreamStore.ts`：运行中 SSE stream（内存，不 persist）。
   - `chatTaskSessionStore.ts`：task resume 元数据；persist `chat-task-session-storage`。
   - `historyStore.ts`：生成历史列表；persist `tender-history-storage`（layout 路径）。
-  - `useAppStore.ts`：侧栏/局部 UI；persist `tender-app-storage`（仅 `sidebarOpen`）。
+  - `useAppStore.ts`：侧栏/局部 UI（`sidebarOpen`、`currentTask`、`activeTenderType`、`isGenerating`）；persist `tender-app-storage`（仅 `sidebarOpen`）。
 
 **`frontend/types/`:**
 - 职责： API、聊天、全局招标类型和测试类型补全。
@@ -114,7 +116,7 @@ frontend/
 - 关键文件：
   - `api.ts`：`TaskKind`、`FileType`（含 `rewrite_source`）、`GenerateRequest`、`AgentRunStreamRequest` / `AgentRunRewriteContextSnapshot`（无 generation_*）、SSE 事件、`ErrorCodes`。
   - `chat.ts`：消息、会话、`TaskMessageKind`、agent thinking 状态。
-  - `index.ts`：`TenderType`、`TenderLx`、`FundLx` 等 UI 级类型。
+  - `index.ts`：`TenderType`、`TenderLx`、`FundLx` 等 UI 级类型；并 re-export `./api`。
 
 **`frontend/utils/`:**
 - 职责： 非 React 的共享映射工具。
@@ -291,4 +293,4 @@ frontend/
 
 ---
 
-*前端结构分析：2026-07-18*
+*前端结构分析：2026-07-21*
