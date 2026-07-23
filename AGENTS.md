@@ -7,7 +7,7 @@ TenderWord 是招标文档生成、修改、补充批注和模板复用系统；
 - 代码是真源；根级文档只做导航和稳定规则沉淀。
 - 按任务先看下方详细文档，再进入对应子项目事实文档和知识包；不要只凭根级摘要改跨层逻辑。
 - 长期文档说明性正文默认使用简体中文；代码标识符、文件路径、命令、配置键和 API 名称保留原文。
-- 前端包管理器是 npm；后端依赖以 `backend/requirements.txt` 为准。
+- 前端包管理器是 npm（Node `>=20.9.0`）；后端依赖以 `backend/requirements.txt` 为准（Python 3.12）。
 - 完整 Word 生成验收必须回到 Windows Python、pywin32 和本机 Word/WPS COM 环境。
 - 先看现有实现和同模块写法，再做最小必要改动；不要顺手重构、目录洗牌、批量改名或清理无关旧代码。
 - 不回滚用户已有改动；不提交、不推送、不暂存，除非用户明确要求。
@@ -20,7 +20,7 @@ TenderWord 是招标文档生成、修改、补充批注和模板复用系统；
 - Word COM 写入只允许经过后端任务队列、graph 锁、取消检查和进度包装；不得在 API route、service、前端或随意脚本中直接操作 COM。
 - 前端所有后端请求统一走 API client；组件不写裸 `fetch`，也不直接访问外部模板候选 URL。
 - API shape、SSE、任务类型、招标类型、Prompt/LLM、Word helper、模板候选等跨层改动必须同步前后端模型、类型、客户端、测试和相关知识包。
-- `generation_style`、`generation_mode`、`comment_generation_mode` 和 `style_writeback_mode` 是 generate-only 字段，不得进入 rewrite 请求模型、skill state 或 prompt surface。
+- `generation_style`、`generation_mode`、`comment_generation_mode` 和 `style_writeback_mode` 是 generate-only 字段，不得进入 rewrite 请求模型、skill state 或 prompt surface（含 draft 可恢复、payload 不得携带）。
 - `gngk` 在前端只是一种 UI 类型；提交到后端时必须由共享 helper 按 `tender_lx + fund_lx + ifzgcg` 分派到具体 form type。
 - 上传文件 rewrite 前端使用 `rewrite_source` 文件类型，后端 task skill state 用 `rewrite_source="uploaded_file"` 标记来源；不要恢复旧 edit 入口或把上传修改做成第二套任务链路。
 - rewrite 任务由显式 `RewriteSkillGraph` 承载；不要恢复 `SkillGraph.for_skill + TaskSkillWorkflow` 元数据驱动框架。

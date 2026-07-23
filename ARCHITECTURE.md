@@ -1,8 +1,8 @@
 # TenderWord 架构地图
 
-**生成日期：** 2026-07-18
+**生成日期：** 2026-07-21
 
-本文件是根级**系统级架构总览**，描述 TenderWord 的系统目的与边界、子系统职责、推荐理解路径、稳定目录职责和系统层维护约定。实现细节以代码为准；子系统内部事实以 2026-07-18 刷新的 `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 为准。
+本文件是根级**系统级架构总览**，描述 TenderWord 的系统目的与边界、子系统职责、推荐理解路径、稳定目录职责和系统层维护约定。实现细节以代码为准；子系统内部事实以 2026-07-21 刷新的 `backend/.planning/codebase/` 与 `frontend/.planning/codebase/` 为准。
 
 > 分层定位：本文件比 `AGENTS.md` 更偏系统架构，比 `coding_maps/SYSTEM_MAP.md` 更偏稳定总览；跨项目接口与调用关系沉淀在 `INTERFACES.md`，按任务的阅读指南沉淀在 `coding_maps/SYSTEM_MAP.md`。本文件不复制子项目内部实现细节。
 
@@ -41,7 +41,7 @@ Next.js 16 + React 19 + Zustand 5 + TypeScript 5 工作台。职责：
 - generate 任务创建、agent run（任务上下文助手前置流）、上传文件 rewrite、补充批注、SSE/agent-step 过程卡、上传下载、模板候选弹窗。
 - 通过 `frontend/lib/api.ts` 调用后端 JSON、上传、下载、NDJSON 和 SSE helper；组件不写裸 `fetch`。
 
-**可独立维护性：** 前端是独立可构建的 Next.js 子项目（npm，端口 8502），仅通过 `/api/*` 契约耦合后端。事实入口见 `frontend/.planning/codebase/`。
+**可独立维护性：** 前端是独立可构建的 Next.js 子项目（npm，端口 8502，Node `>=20.9.0`），仅通过 `/api/*` 契约耦合后端。事实入口见 `frontend/.planning/codebase/`。
 
 ### `backend/` —— 执行端
 
@@ -128,7 +128,8 @@ FastAPI + LangGraph + Word COM 后端。职责：
 - **接口变化**必须同步 `INTERFACES.md`、`backend/models/`、`frontend/types/api.ts`、`frontend/lib/api.ts` 和前后端测试；新增任务类型还要同步 `TaskKind`、SSE 终态、下载卡和会话结果语义。
 - **新增/修改 SSE 事件**必须同步后端 `SSEEventType`、前端 union、`frontend/lib/sse.ts` named event、`useChatSSE` 和测试；区分后端真实事件与前端连接/映射层事件（`connected`/`status`）。
 - **招标类型变化**必须同步前端 UI 类型、后端 `FormType`、`GRAPH_REGISTRY`、graph/state/node、anchor config 和测试。
-- **批注职责边界：** 差异更正批注归 `annotate_corrections`（仅 generate）；合规批注归 `comment_agent`；批注写回收敛到共享 writeback helper。
+- **批注职责边界：** 差异更正批注归 `annotate_corrections`（仅 generate）；合规批注归 `comment_agent`；批注写回收敛到共享 writeback helper。编号/项目符号/展示壳变化不得当作事实更正。
+- **generate / rewrite 字段边界：** `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 为 generate-only；rewrite 走显式 `RewriteSkillGraph`，不得从 generate state 整包拷贝。
 - 当前任务类型只有 `generate` / `rewrite` / `comment_supplement`。
 
 ### 验证门槛
@@ -148,7 +149,8 @@ FastAPI + LangGraph + Word COM 后端。职责：
 - agent run 审计与公共摘要工具只暴露 scrub 后白名单字段，不返回完整客户原文、token、私有路径、traceback 或下载路径。
 - 文件下载受 `settings.UPLOAD_DIR` containment 校验；外部模板下载受 `TEMPLATE_CANDIDATE_ALLOWED_HOSTS` 白名单校验。
 - retrieval 命中详情只进入后端 prompt/审计，不进入 SSE、下载卡或 `agent_step`。
+- `content agent` 把技术参数里的 `[[TABLE:<id>]]` 当作内部写回入口；占位符不得当作用户可见正文，最终是否恢复真实表格由后端写回层决定。
 
 ---
 
-*系统架构地图：2026-07-18*
+*系统架构地图：2026-07-21*

@@ -1,6 +1,6 @@
 # 前端测试约定
 
-**分析日期：** 2026-07-18
+**分析日期：** 2026-07-21
 
 **范围：** `frontend/__tests__/`、`frontend/e2e/`、`frontend/test-shims/`、`frontend/jest.config.ts`、`frontend/jest.setup.js`、`frontend/polyfills.js`、`frontend/playwright.config.ts`、`frontend/package.json`、`frontend/tsconfig.typecheck.json`。`frontend/.env.local`、`frontend/.env.local.example`、`frontend/.npmrc` 仅确认存在，不读取内容。
 
@@ -87,8 +87,8 @@ frontend/e2e/
 └── test_*.spec.ts
 ```
 
-**当前 inventory（2026-07-18）：**
-- Jest unit：约 31 个 `test_*.test.*` 文件，分布在 app / components / hooks / lib / stores / types / utils。
+**当前 inventory（2026-07-21）：**
+- Jest unit：31 个 `test_*.test.*` 文件，分布在 app(2) / components/chat(9) / components/forms(5) / components/layout(1) / hooks(3) / lib(5) / stores(4) / types(1) / utils(1)。
 - Playwright e2e：6 个 spec——`test_home.spec.ts`、`test_url_conversation.spec.ts`、`test_agent_run_chat_panel.spec.ts`、`test_generation_mode_agent.spec.ts`、`test_comment_supplement.spec.ts`、`test_tender_form_upload_slots.spec.ts`。
 
 ## 测试结构
@@ -391,4 +391,4 @@ await expect(createGenerateTask(validGenerateRequest)).rejects.toMatchObject({
 
 ---
 
-*前端测试分析：2026-07-18*
+*前端测试分析：2026-07-21*

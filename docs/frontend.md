@@ -28,6 +28,12 @@
 - `selected_skills` 是一次性 agent run 草稿字段，消息发出后必须清空；上传 rewrite 文件存在时才隐式选择 rewrite。
 - 上传文件 rewrite 使用 `rewrite_source` 文件类型，并通过 `uploaded_files` + `rewrite_context` 向 agent run 提供受控上下文。
 
+## 生成选项（generate-only）
+
+- `generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode` 只属于初次 generate 表单 draft 与 `GenerateRequest`；可在会话 draft / `sessionStorage` 中恢复，但**不得**进入 agent run / rewrite 请求体、`context_snapshot`、`rewrite_context` 或任何 skill surface。
+- 表单 UI 可对上述选项提供说明文案（例如“关批注时仍保留条款标识等更正批注”），说明必须与后端语义一致：`comment_generation_mode=off` 只跳过普通 AI 批注，不跳过更正批注。
+- 改 generate 选项默认值、选项文案或 payload 映射时，同步 `TenderFormShared`、converter、类型定义与相关单测；改 rewrite 能力时不要顺手带上 generate-only 键（后端 agent run 模型 `extra="forbid"` 会直接失败）。
+
 ## SSE 与任务展示
 
 - 新增或修改 SSE 事件必须同步后端事件模型/发送方、前端 named event 注册、类型、解析、store 映射和测试。

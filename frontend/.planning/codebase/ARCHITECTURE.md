@@ -1,6 +1,6 @@
 # 前端架构事实地图
 
-**分析日期：** 2026-07-18
+**分析日期：** 2026-07-21
 
 **范围：** `frontend/` 子项目。分析覆盖 App Router 工作台、API client、hooks、Zustand 状态流、上传、generate/rewrite/comment_supplement UI 边界、SSE 与目录分层。未读取 `.env`、`.env.*`、`.npmrc`、凭据或真实密钥文件。
 
@@ -40,7 +40,9 @@
 
 前端是 TenderWord 的浏览器工作台，负责招标类型选择、URL 深链、会话与草稿、招标信息预取、模板候选、文件上传、generate 任务创建、agent run、上传文件 rewrite、补充批注、SSE 进度和下载入口。浏览器端不执行 Word COM、LLM、检索、真实文件落盘或外部模板候选直连；这些能力由后端 `/api/*` 封装。
 
-组件层（`frontend/components/`）不写裸 `fetch`，也不直接访问外部模板候选 URL；所有后端请求统一经 `frontend/lib/api.ts`（及内部 SSE/NDJSON helper）。仓库内 `fetch(` 仅出现在 `frontend/lib/api.ts`。
+组件层（`frontend/components/`）不写裸 `fetch`，也不直接访问外部模板候选 URL；所有后端请求统一经 `frontend/lib/api.ts`（及内部 SSE/NDJSON helper）。仓库内业务 `fetch(` 集中在 `frontend/lib/api.ts`。
+
+无 `src/` 目录：App Router 页面在 `frontend/app/`，业务代码与 `app/` 同级（`components/`、`hooks/`、`lib/`、`stores/`、`types/`、`utils/`）。路径别名 `@/*` 指向 `frontend/` 根。
 
 ## 组件职责
 
@@ -57,7 +59,7 @@
 | Task content card | 展示普通 AI 正文、rewrite 正文、`content_agent` 和 `comment_agent` 过程 | `frontend/components/chat/TaskContentMessage.tsx` |
 | Task download card | 展示下载入口、批注写回警告、generate 产物的补充批注按钮 | `frontend/components/chat/TaskDownloadMessage.tsx` |
 | Dual column message | 左进度日志 / 右 AI 内容的双列消息卡（含复制、下载、重试）；当前未接入主消息分派 | `frontend/components/chat/DualColumnMessage.tsx` |
-| New chat popup | 类型侧栏的悬浮“新建对话/最近对话”弹窗，含重命名/删除右键菜单；当前未接入侧栏 | `frontend/components/chat/NewChatPopup.tsx` |
+| New chat popup | 类型侧栏的悬浮“新建对话/最近对话”弹窗；当前未接入侧栏 | `frontend/components/chat/NewChatPopup.tsx` |
 | Skeleton | shimmer 占位与页面/消息/双列骨架组件；当前未接入主流程 | `frontend/components/chat/Skeleton.tsx` |
 | Shared tender form | 招标信息、模板/参数上传、模板候选、插入锚点、生成模式和 draft 同步 | `frontend/components/forms/TenderFormShared.tsx` |
 | Form registry | `TenderType` 到显示名、表单组件、converter 的映射 | `frontend/components/chat/tenderFormRegistry.ts` |
@@ -76,7 +78,7 @@
 
 **Key Characteristics:**
 - 页面层只组合路由、三栏 UI 和启动副作用；长期业务状态放在 `frontend/stores/`。
-- 后端请求集中到 `frontend/lib/api.ts`；组件调用 helper，不在组件内实现请求协议或裸 `fetch`（`frontend/components/` 与 `frontend/stores/` 中无 `fetch(` 调用）。
+- 后端请求集中到 `frontend/lib/api.ts`；组件调用 helper，不在组件内实现请求协议或裸 `fetch`。
 - `TenderType`（`xjcg`/`gngk`/`gjgk`）是前端 **UI 类型**；后端 `GenerateRequest.form_type` 由 `frontend/lib/formDataConverter.ts` 和 `frontend/lib/gngkFormType.ts` 在提交时生成。`gngk` 不是后端 form type。
 - 任务链路以 `task_id` 为主键，SSE、任务消息组、下载卡、补充批注和 rewrite 产物续写都围绕 task summary 收敛。
 - 会话、草稿、任务摘要和未读结果持久化到 `sessionStorage`；SSE stream runtime 是内存态，task resume metadata 单独持久化。
@@ -96,14 +98,14 @@
 - Location: `frontend/components/chat/`、`frontend/components/forms/`、`frontend/components/layout/`
 - 包含： `ChatPanel`、`ChatInput`、`ChatModelPicker`、`FormPanel`、`MessageList`、`TaskLogMessage`、`TaskContentMessage`、`TaskDownloadMessage`、`TenderFormShared`、`FileUploader`、`TemplateCandidateDialog`。
 - Depends on: `frontend/stores/`、`frontend/hooks/`、`frontend/lib/api.ts`、`frontend/types/`。
-- Used by: `frontend/app/tender/page.tsx` 直接挂载 chat 三栏；`layout/` 为通用壳，当前未被 workbench 路由引用。
+- Used by: `frontend/app/tender/page.tsx` 直接挂载 chat 三栏；`layout/` 为通用壳，当前未被 workbench 路由引用（仅有 layout 单测）。
 
 **State Layer:**
 - 职责： 保存会话、草稿、任务摘要、任务消息分组、运行中 stream、历史和局部 UI 状态。
 - Location: `frontend/stores/`
 - 包含： `chatStore.ts`、`chatStreamStore.ts`、`chatTaskSessionStore.ts`、`historyStore.ts`、`useAppStore.ts`。
 - Depends on: Zustand、`frontend/types/`、纯 helper。
-- Used by: 页面、聊天组件、表单组件、任务 hooks；`historyStore`/`useAppStore` 主要服务 `components/layout/`。
+- Used by: 页面、聊天组件、表单组件、任务 hooks；`historyStore`/`useAppStore` 主要服务 `components/layout/` 路径，**不是** `/tender` 主状态源。
 
 **Integration Layer:**
 - 职责： 后端 API、SSE、NDJSON、上传下载、表单 payload 转换、URL canonical 化。
@@ -136,9 +138,10 @@
 ### URL 与会话链路
 
 1. `useUrlParams()` 使用 `useSearchParams()` 读取 `tender_lx`、`purchase_method`、`fund_lx`、`tenderno`。
-2. `getTenderTypeFromParams()` 只按 `purchase_method` 判定前端 `TenderType`（`0`→`gjgk`、`2`→`gngk`、`5`→`xjcg`）；`tender_lx`/`fund_lx` 不参与前端 UI 判型。
+2. `getTenderTypeFromParams()` 只按 `purchase_method` 判定前端 `TenderType`（`0`→`gjgk`、`2`→`gngk`、`5`→`xjcg`）；`tender_lx`/`fund_lx` **不参与**前端 UI 判型。
 3. `TenderPageContent` 对 `gngk` 使用 tenderno + `tender_lx` + `fund_lx` 查找会话（`findGngkConversationByIdentity`），避免不同子类型复用同一 draft。
 4. `syncBrowserUrlToConversation()` 和 `chatStore.syncUrlToCurrentConversation()` 维护 canonical query。
+5. gngk 深链新建会话时，会把 URL 的 `tender_lx`/`fund_lx` 写入 conversation draft。
 
 ### 生成请求载荷链路
 
@@ -146,9 +149,10 @@
 2. 模板文件使用 `fileType="template"` 上传，技术参数文件使用 `fileType="params"` 上传。
 3. `convertXjcgFormToApiRequest()` → `form_type: 'xjcg_tender'`；`convertGjgkFormToApiRequest()` → `form_type: 'gjgk_tender'`；`convertGngkFormToApiRequest()` 调用 `resolveGngkFormType()`。
 4. 三个 converter 均写入 generate-only 字段：`generation_style`、`generation_mode`、`comment_generation_mode`、`style_writeback_mode`。
-5. **`gngk` UI 类型分派：** `resolveGngkFormType({ tender_lx, fund_lx, ifzgcg })`：
-   - 工程类（`tender_lx` 1/2）先复用服务链路：`gngk_fw_cz_tender` / `gngk_fw_zc_tender`；
+5. **`gngk` UI 类型分派：** `resolveGngkFormType({ tender_lx, fund_lx, ifzgcg })`（`frontend/lib/gngkFormType.ts`）：
+   - 工程/服务类（`tender_lx` 1 或 2）先复用服务链路：`gngk_fw_cz_tender` / `gngk_fw_zc_tender`；
    - 货物类按 `fund_lx` + `ifzgcg` 分 `gngk_hw_cz_tender` / `gngk_hw_zc_tender`。
+6. 默认：`generation_mode` 缺省 `workflow`，`comment_generation_mode` 缺省 `on`。
 
 ### Agent Run 与聊天链路
 
@@ -164,10 +168,10 @@
 1. `ChatInput` 的隐藏文件输入只接受 `.doc` / `.docx`。
 2. `ChatPanel.handleRewriteFileSelect()` 调用 `uploadFile(file, 'rewrite_source')`，把返回文件写入 conversation draft 的 `rewrite_file`，并设置 `selected_skills: ['rewrite']`。
 3. `buildAgentRunContextSnapshot()` 放入 `rewrite_available`、`uploaded_files` 和可选 `rewrite_context`。
-4. `rewrite_context` 字段仅含：`form_type`、`insertion_config`、`tender_lx`、`fund_source_lx`、`tender_data_snapshot`（见 `AgentRunRewriteContextSnapshot`）。**不含** `generation_style` / `generation_mode` / `comment_generation_mode` / `style_writeback_mode`。
+4. `rewrite_context`（`AgentRunRewriteContextSnapshot`）字段仅含：`form_type`、`insertion_config`、`tender_lx`、`fund_source_lx`、`tender_data_snapshot`。**不含** `generation_style` / `generation_mode` / `comment_generation_mode` / `style_writeback_mode`。
 5. `resolveRewriteFormType()` 为上传 rewrite 计算后端 `form_type`；`gngk` 继续复用 `resolveGngkFormType()`。
 6. rewrite task 完成后，`ChatPanel` 通过 `pending_rewrite_task_id` 监听终态，用下载卡产物回写 draft 的 `rewrite_file`，让下一轮 rewrite 基于最新文档。
-7. 后端 task skill state 侧以 `rewrite_source="uploaded_file"` 标记来源；前端上传侧 `FileType` 使用 `rewrite_source`，不要恢复旧 edit 入口或第二套任务链路。
+7. 后端 task skill state 侧以 `rewrite_source="uploaded_file"` 标记来源；前端上传侧 `FileType` 使用 `rewrite_source`。**不要**恢复旧 edit 入口或第二套任务链路——rewrite 一律经 agent run → `task_accepted` → 同一 task/SSE 状态机。
 
 ### 任务 SSE 与产物流转
 
@@ -240,7 +244,7 @@
 **`AgentRunRewriteContextSnapshot`:**
 - 职责： 上传文件 rewrite / rewrite skill 的上下文快照。
 - Fields: `form_type?`、`insertion_config?`、`tender_lx?`、`fund_source_lx?`、`tender_data_snapshot?`
-- Pattern: 与 `GenerateRequest` 共享 form_type 分派，但刻意不携带 generation_* 字段。
+- Pattern: 与 `GenerateRequest` 共享 form_type 分派，但刻意不携带 generation_* / style_writeback_mode 字段。
 
 ## 入口清单
 
@@ -369,4 +373,4 @@
 
 ---
 
-*前端架构分析：2026-07-18*
+*前端架构分析：2026-07-21*

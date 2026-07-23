@@ -1,10 +1,10 @@
 # 前端技术栈事实地图
 
-**分析日期：** 2026-07-18
+**分析日期：** 2026-07-21
 
 **范围：** 仅 `frontend/` 子项目。依据 `frontend/package.json`、`frontend/package-lock.json`、`frontend/next.config.ts`、`frontend/tsconfig.json`、`frontend/tsconfig.typecheck.json`、`frontend/jest.config.ts`、`frontend/playwright.config.ts`、`frontend/eslint.config.mjs`、`frontend/postcss.config.mjs`、`frontend/.prettierrc`、`frontend/.nvmrc`、`frontend/.npmrc`、`frontend/app/`、`frontend/components/`、`frontend/hooks/`、`frontend/lib/`、`frontend/stores/`、`frontend/types/`、`frontend/utils/` 与相关配置。只记录 `frontend/.env.local.example` 中的配置键名；不读取 `.env.local` 真实值。
 
-**对照提交：** `29f47e1557a34bbbec0ad3f6938e1a46aa94e5e3`（映射时仓库 HEAD 与该提交一致）。
+**对照提交：** `e748f16d1a2b253c766008f1a060e3ebba9b2f85`（映射时仓库 HEAD 与该提交一致）。
 
 ## 语言
 
@@ -141,7 +141,7 @@ npm run test:e2e
 - `frontend/hooks/useSSE.ts` — 通用 EventSource 连接（`createSSEConnection()`）。
 - `frontend/hooks/useChatSSE.ts` — 任务 SSE 事件到 chat/stream store 映射与终态清理；SSE `heartbeatTimeout: 45000`。
 - `frontend/hooks/useTaskHeartbeat.ts` — 周期调用 `sendTaskHeartbeat()`（`HEARTBEAT_INTERVAL_MS = 5000`）。
-- `frontend/hooks/useCurrentConversationTaskStatus.ts` — 当前会话任务状态轮询（默认 5s）。
+- `frontend/hooks/useCurrentConversationTaskStatus.ts` — 当前会话任务状态轮询（默认 5s；starting 任务可降至 400ms）。
 - `frontend/hooks/useLatestActiveTaskSummary.ts` — 任务列表 / 活跃摘要（默认 5s）。
 - `frontend/hooks/useUrlParams.ts` — URL 深链与招标类型 canonical。
 - `frontend/hooks/useHydrated.ts` — persist 水合完成标记。
@@ -173,4 +173,4 @@ npm run test:e2e
 
 ---
 
-*前端技术栈分析：2026-07-18*
+*前端技术栈分析：2026-07-21*

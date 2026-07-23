@@ -1,8 +1,8 @@
-# 后端编码约定
+# 编码约定
 
-**分析日期：** 2026-07-18
+**分析日期：** 2026-07-21
 
-**范围：** `backend/` 源码与 `backend/tests/`。未读取 `backend/.env` 或任何密钥文件；配置键名仅来自 `backend/config/settings.py` 与 `backend/.env.example` 的公开结构。
+**范围：** `backend/` 源码与 `backend/tests/`。未读取 `backend/.env` 或任何密钥文件；配置键名仅来自 `backend/config/settings.py` 与公开代码引用。
 
 **关键事实来源：**
 - 入口与 API：`backend/main.py`、`backend/api/*.py`
@@ -20,7 +20,7 @@
 - 招标类型 graph：`<form_type>_tender_graph.py`（如 `gngk_hw_cz_tender_graph.py`）。
 - 类型专属 Word 节点：`<runtime_type>_<operation>.py`（如 `gngk_fw_zc_update_word.py`），放在 `nodes/gngk_word_nodes/`、`nodes/gjgk_word_nodes/`、`nodes/xjcg_word_nodes/`。
 - 跨类型公共节点在 `nodes/common_word_nodes/`；rewrite 相关在 `nodes/skills_nodes/`。
-- task skill 声明在 `skills/<skill_id>/SKILL.md`，运行时 helper 在 `skills/<skill_id>/scripts/`；rewrite 执行图为显式 `RewriteSkillGraph`（`graphs/skill_graph.py`），不要恢复 `SkillGraph.for_skill + TaskSkillWorkflow` 元数据驱动框架。
+- task skill 声明在 `skills/<skill_id>/SKILL.md`，运行时 helper 在 `skills/<skill_id>/scripts/`；rewrite 执行图为显式 `RewriteSkillGraph`（`graphs/skill_graph.py`），**不要**恢复 `SkillGraph.for_skill + TaskSkillWorkflow` 元数据驱动框架。
 - 测试文件：`backend/tests/<scope>/test_*.py`。
 
 **函数：**
@@ -31,7 +31,7 @@
 
 **变量与常量：**
 - 参数、局部变量、state key、JSON key 使用 `snake_case`。
-- 模块级常量 `UPPER_SNAKE_CASE`：`TASK_KIND_TO_LLM_NODE`、`TRACKED_PROGRESS_NODES`、`UPLOADED_REWRITE_SOURCE`、`REWRITE_NODE_NAMES`、`TASK_AUDIT_STAGES`、`COMMENT_AGENT_NODE`。
+- 模块级常量 `UPPER_SNAKE_CASE`：`TASK_KIND_TO_LLM_NODE`、`TRACKED_PROGRESS_NODES`、`UPLOADED_REWRITE_SOURCE`、`REWRITE_NODE_NAMES`、`REWRITE_NODE_HANDLERS`、`TASK_AUDIT_STAGES`、`COMMENT_AGENT_NODE`。
 - 协议字符串保持稳定原文：`xjcg_tender`、`gngk_hw_cz_tender`、`agent_step`、`uploaded_file`、`comment_supplement`、`[[TABLE:<id>]]`。
 
 **类型：**
@@ -49,7 +49,8 @@
 
 **质量门禁：**
 - 无自动 lint 配置；文档型改动至少 `git diff --check`。
-- 后端代码改动以 `python -m pytest tests -v`（或更窄路径）为主要门禁。
+- 后端代码改动以 `python -m pytest tests -v`（在 `backend/` 下）或更窄路径为主要门禁。
+- async 用例必须显式 `@pytest.mark.asyncio`。
 
 ## 导入组织
 
@@ -69,7 +70,7 @@
 
 **API（薄入口）— `backend/api/`**
 - 只做 HTTP/SSE/NDJSON 绑定、校验、`HTTPException` 封装与 service 调用。
-- 不直接操作 LangGraph、任务队列或 Word COM。
+- **不**直接操作 LangGraph、任务队列或 Word COM。
 - 示例：`create_comment_supplement_task()` 调用 `get_document_service().create_comment_supplement_task()`，失败时把 service 的 `error` 码写入 `HTTPException.detail`。
 
 **模型 — `backend/models/`**
@@ -79,9 +80,11 @@
 **Service（编排）— `backend/services/`**
 - 连接 API 与 graph、task queue、SSE、agent、conversation、外部 ranking。
 - 内部队列状态到公共 API 模型的转换集中在 `task_service.py`。
+- 任务执行与取消结果收敛在 `document_service.py`（识别 `TaskCancelledException`，写进度日志，更新任务状态）。
 
 **Graph / State / Node — `backend/graphs/`、`backend/states/`、`backend/nodes/`**
 - LangGraph 承载长任务；新节点经 `BaseGraph.wrap_node()` / `wrap_node_with_progress()` 或 rewrite 的 `REWRITE_NODE_HANDLERS` 接入进度与取消检查。
+- 子类实现 `build_graph()` 与 `get_state_class()`；可选覆写 `estimate_total_nodes()`。
 
 **Word helper vs COM util**
 - 可复用业务逻辑：`backend/helper/word_helper/`（段落边界、样式、删除、cleanup、受保护字段语义等）。
@@ -120,7 +123,10 @@
 
 ## Rewrite Skill Graph
 
-- 显式节点序 `REWRITE_NODE_NAMES`：`resolve_rewrite_target` → `extract_rewrite_context` → `get_rewrite_comments` → `delete_section` → `rewrite_text` → `update_word`（分支由 `select_resolve_branch` / `select_comment_branch` 控制，最终汇入 `update_word`）。
+- 显式类 `RewriteSkillGraph`（`graphs/skill_graph.py`），继承 `BaseGraph`。
+- 节点序 `REWRITE_NODE_NAMES`：`resolve_rewrite_target` → `extract_rewrite_context` → `get_rewrite_comments` → `delete_section` → `rewrite_text` → `update_word`。
+- 处理函数表 `REWRITE_NODE_HANDLERS`；每个节点经 `self.wrap_node(name, handler)` 注册。
+- 条件分支：`select_resolve_branch` / `select_comment_branch`（`skills/rewrite/scripts/runtime.py`）；最终汇入 `update_word`。
 - 上传 rewrite 进度节点须在 `TRACKED_PROGRESS_NODES` 中；见 `tests/progress/test_uploaded_rewrite_progress_tracking.py`。
 
 ## Content Agent 与表格占位符
@@ -128,12 +134,14 @@
 - 统一清洗入口：`agents/generation/content_sanitizer.py::sanitize_generated_content()`——去 AI 客套/Markdown 外壳，**保留** `[[TABLE:<id>]]` 与技术符号。
 - `[[TABLE:<id>]]` 是内部写回入口，不是用户可见最终正文；是否恢复真表由写回层 + `tender_param_table_models` sidecar 决定。
 - 占位符工具真源：`table_placeholder_utils.py`；`table_id` 字符集与 `util/word_util/table_models.py` 对齐（`[A-Za-z0-9_-]+`）。
-- Content agent 阶段 `draft → audit → revision → final`；`MAX_REVISION_ROUNDS = 3`；审核 JSON 经 `json_utils`；受保护字段守卫 `protected_field_guard.sanitize_protected_field_findings()`。
+- Content agent 阶段 `draft → audit → revision → final`；审核 JSON 经 `json_utils`；受保护字段守卫 `protected_field_guard.sanitize_protected_field_findings()`。
 
 ## 批注与更正批注约定
 
 - 批注 agent：`agents/comments/`（tools、workspace、runner）；节点写回 `nodes/common_word_nodes/comment_agent.py::comment_agent_writeback`。
-- 更正批注：`nodes/common_word_nodes/annotate_corrections.py`——先规范化重要性标识（如 `△/*` → `▲/★`），再合并 LLM 更正批注；无技术参数时跳过 LLM。编号/项目符号/展示壳变化不生成事实更正批注（编号隔离）；代码门禁只校验 JSON、固定句式与原/现值可定位，不在 writeback 层推断编号语义。
+- 更正批注：`nodes/common_word_nodes/annotate_corrections.py`——**仅接入初次 generate**；先规范化重要性标识（如 `△/*` → `▲/★`），再合并 LLM 更正批注；无技术参数时跳过 LLM。
+- `comment_agent` **不得**生成「原技术参数为…现改为…」类差异批注；编号/项目符号/展示壳变化不得当作事实更正。
+- 写回顺序：Word 写回 **先写更正批注再写普通 AI 批注**；`comment_generation_mode=off` / `suppress_ai_comment_writeback` 只跳过普通 AI 批注，**不**跳过更正批注。
 - 批注写回：`nodes/common_word_nodes/comment_writeback.py::write_polished_comments`——RPC 重试、摘要 payload（`build_comment_writeback_summary_payload`）、表格/锚点匹配；`allow_existing_comments` 默认 `False`（标准写回跳过重叠锚点），`comment_agent` 经 `write_validated_comment_candidates_to_word` 显式 `True` 允许同锚点追加。
 - 缺 Word 上下文时 `comment_agent_writeback` 降级为 warning（`missing_comment_agent_anchor_context`），不伪造成功写回。
 
@@ -160,9 +168,32 @@
 **Service / Graph：**
 - Service 返回响应模型或把失败收敛为任务 `failed`、SSE `error`、进度日志。
 - Graph 节点对 Word 写入边界 fail-fast（受保护字段缺失、锚点缺失、空 rewrite 正文等）。
+- 任务取消：`TaskCancelledException`（`graphs/base_graph.py`）；`document_service` 将其映射为取消态而非 fatal 失败。
 - Retrieval/embedding/Qdrant 失败降级 `bm25_only` + warning。
 - Agent run 预检失败 → `needs_input`（不创建任务）；运行时异常 → `error` 事件。
 - LLM 超时：`LLMTimeoutError`；`ensure_llm_env()` 错误信息只含配置键名。
+- 批注写回失败可 `progress_log.exception` 后降级继续完成任务（见 `comment_agent` 节点），不把批注失败一律升级为任务失败。
+
+## 进度与取消检查
+
+**真源：** `backend/graphs/base_graph.py`
+
+- `TRACKED_PROGRESS_NODES`：纳入前端进度条的节点名集合（含 `prepare_template`、`content_agent`、`annotate_corrections`、`comment_agent`、rewrite 各节点、`update_word` 等）。
+- `_check_cancellation(config)`：从 `config["configurable"]["task_id"]` 查 `get_task_queue().is_task_cancelled()`；若已取消则抛 `TaskCancelledException`。
+- `_update_node_progress(node_name, config, completed)`：仅对 `TRACKED_PROGRESS_NODES` 内节点调用 `queue.update_progress`。
+- `wrap_node_with_progress(node_func, node_name)`：
+  - 执行前：`_check_cancellation` + 进度 `completed=False`
+  - 执行节点
+  - 执行后：`_check_cancellation` + 进度 `completed=True`
+  - 同步与 async 节点均支持（`asyncio.iscoroutinefunction` 分支）。
+- `BaseGraph.wrap_node(node_name, node_func)` 是子类注册节点的统一入口。
+- `CrossProcessFileLock`：跨进程文件锁 + 同进程 `threading.Lock`，保证 Word COM 互斥；超时抛 `RuntimeError`。
+- `invoke_with_timing` / `invoke_with_timing_async`：带锁、计时与等待期取消检查。
+
+**进度日志：**
+- `util/log_util/progress_log.py`：`QueueHandler` + `QueueListener` 线程安全；写入 `logs/progress-YYYYMMDD.log`。
+- 节点内业务进度文案多用 `progress_log.info(f"[{NODE_NAME}] ...")`。
+- state 开关：`verbose_style_progress_logs`、`suppress_comment_progress_logs`（`states/base_state.py`）。
 
 ## 异步模式
 
@@ -200,10 +231,11 @@ Agent run 摘要与 tool 返回经 scrub；见 `agents/task_context_assistant/to
 ## Word COM 红线
 
 - COM 写入 **仅** 经任务队列 + LangGraph + graph 锁 + 取消检查 + 进度包装。
-- 禁止在 API route、service、前端或随意脚本中直接操作 COM。
+- **禁止**在 API route、service、前端或随意脚本中直接操作 COM。
 - `util/word_util/word_application_util.py`：`create_word_application` / `close_word_application`；节点内 `finally` 关闭。
 - 可脱离 COM 的逻辑放 helper 并用 fake 对象测。
 - 完整生成验收：Windows Python + `pywin32` + 本机 Word/WPS；诊断 `scripts/diagnose_word.py`。
+- `pywin32` 在 `requirements.txt` 中为 `platform_system == "Windows"` 条件依赖。
 
 ## 函数与模块设计
 
@@ -214,7 +246,7 @@ Agent run 摘要与 tool 返回经 scrub；见 `agents/task_context_assistant/to
 ## 安全与隐私
 
 - Settings：`pydantic-settings` BaseSettings，从 `backend/.env` 加载；文档/测试只记键名。
-- 关键键族：`DEBUG`、`LLM_STREAM_TIMEOUT_SECONDS`、`UPLOAD_DIR`、`TEMPLATE_CANDIDATE_ALLOWED_HOSTS`、`LOG_DIR`、`LOG_QUEUE_MAXSIZE`、`PROGRESS_LOG_BACKUP_COUNT`、`EXTERNAL_REQUEST_TIMEOUT_SECONDS`，以及 `ARK_*` / `DASHSCOPE_*` / `DEEPSEEK_*`（经 `settings.get_llm_config(provider)`）。
+- 关键键族：`DEBUG`、`LLM_STREAM_TIMEOUT_SECONDS`、`UPLOAD_DIR`、`TEMPLATE_CANDIDATE_ALLOWED_HOSTS`、`LOG_DIR`、`LOG_QUEUE_MAXSIZE`、`PROGRESS_LOG_BACKUP_COUNT`、`EXTERNAL_REQUEST_TIMEOUT_SECONDS`、`LOCK_FILE_PATH`、`LOCK_TIMEOUT`、`TASK_TOTAL_NODES`，以及 `ARK_*` / `DASHSCOPE_*` / `DEEPSEEK_*`（经 `settings.get_llm_config(provider)`）。
 - 模板候选主机白名单；下载接口 `UPLOAD_DIR` 路径 containment（`api/download.py`）。
 - 外部招标数据：`EXTERNAL_REQUEST_TIMEOUT_SECONDS`；采购方式越界返回非阻断 `warning`，不抛异常。
 
@@ -225,4 +257,4 @@ Agent run 摘要与 tool 返回经 scrub；见 `agents/task_context_assistant/to
 
 ---
 
-*后端编码约定分析：2026-07-18*
+*后端编码约定分析：2026-07-21*

@@ -1,8 +1,8 @@
 # 后端技术栈
 
-**分析日期：** 2026-07-18
+**分析日期：** 2026-07-21
 
-**last_mapped_commit：** `29f47e1557a34bbbec0ad3f6938e1a46aa94e5e3`（分析时另含工作区未提交代码事实）
+**last_mapped_commit：** `e748f16d1a2b253c766008f1a060e3ebba9b2f85`
 
 **范围：** 本文只覆盖 `backend/` 子项目。事实来源包括 `backend/requirements.txt`、`backend/.env.example`、`backend/main.py`、`backend/config/settings.py`、`backend/config/tender_config.py`、`backend/api/`、`backend/services/`、`backend/graphs/`、`backend/agents/`、`backend/nodes/`、`backend/retrieval/`、`backend/helper/`、`backend/util/`、`backend/task/`、`backend/core/`、`backend/models/`、`backend/skills/`、`backend/states/`、`backend/prompts/`、`backend/tests/conftest.py`、`backend/scripts/`，以及仓库根 `scripts/start-dev.ps1`、`scripts/start-dev-win.ps1`、`scripts/start-dev-wsl.sh`。`backend/.env` 与 `backend/.env.example` 均可能存在；本文档只引用配置键名与 `.env.example` 中的示例值，不读取或泄露 `.env` 真实值。
 
@@ -12,7 +12,7 @@
 - Python 3.12（开发机线索）— 仓库内可见 `backend/__pycache__/*.cpython-312.pyc` 等字节码产物，表明当前常用解释器为 CPython 3.12。启动脚本 `scripts/start-dev.ps1` 要求 Windows Python `sys.version_info >= (3, 11)`，并优先探测 `py.exe -3.12`、`py.exe -3.11`、`py.exe -3`，最后回退 `python.exe`。后端 API、任务队列、LangGraph graph、DeepAgents/LangChain 智能体、Word COM 自动化、检索运行时和 pytest 测试均用 Python 实现；核心路径包括 `backend/main.py`、`backend/api/`、`backend/services/`、`backend/graphs/`、`backend/nodes/`、`backend/agents/`、`backend/retrieval/`、`backend/helper/`、`backend/util/`、`backend/task/`、`backend/core/`、`backend/models/`、`backend/skills/`、`backend/states/`、`backend/prompts/` 和 `backend/tests/`。
 
 **辅助语言：**
-- Markdown — rewrite skill 说明、bad case 知识、事实文档；路径包括 `backend/skills/rewrite/`、`backend/retrieval/bad_cases/`、`backend/.planning/codebase/`。
+- Markdown — rewrite skill 说明、bad case 知识、事实文档；路径包括 `backend/skills/rewrite/SKILL.md`、`backend/retrieval/bad_cases/`、`backend/.planning/codebase/`。
 - PowerShell — Windows 原生开发启动和依赖准备；路径包括 `scripts/start-dev.ps1`、`scripts/start-dev-win.ps1`。
 - Bash — WSL 协作启动入口；路径是 `scripts/start-dev-wsl.sh`。
 
@@ -69,6 +69,7 @@
 **未在 requirements 中、但运行时相关：**
 - 标准库 `asyncio`、`threading`、`concurrent.futures`、`msvcrt`（Windows 文件锁）、`logging` — 任务队列、SSE 跨线程调度、跨进程锁、日志。
 - 无 ORM / Redis / SQL client / JWT 鉴权库声明。
+- 无官方 `qdrant-client` 包；Qdrant 通过 `httpx` 直连 REST API（`backend/retrieval/qdrant_store.py`）。
 
 ## 配置
 
@@ -134,12 +135,12 @@
   - 生成分支：`generation_mode=workflow` → `generate_polished_text`；`generation_mode=agent` → `content_agent`。
   - 两路正文汇合后统一进入 `annotate_corrections`（条款标识规范化 + 技术参数更正批注候选），再按 `comment_generation_mode` / `generation_mode` 选择 `generate_comments` 或跳过，最终 fan-in 到 `update_word`；`generation_mode=agent` 且批注开启时，`update_word` 后进入 `comment_agent`。
 - 招标类型 graph：`backend/graphs/gjgk_tender_graph.py`、`gngk_*_tender_graph.py`、`xjcg_tender_graph.py`。
-- rewrite：`backend/graphs/skill_graph.py` 的 `RewriteSkillGraph` + `backend/skills/rewrite/` + `backend/nodes/skills_nodes/rewrite_nodes.py`（显式 Rewrite skill graph，非元数据驱动框架）。
+- rewrite：`backend/graphs/skill_graph.py` 的 `RewriteSkillGraph` + `backend/skills/rewrite/` + `backend/nodes/skills_nodes/rewrite_nodes.py`（显式 Rewrite skill graph，非元数据驱动框架）。节点顺序：`resolve_rewrite_target` → 条件分支 → `extract_rewrite_context` / `rewrite_text` → 可选 `get_rewrite_comments` → `delete_section` 与 `rewrite_text` fan-in → `update_word`。
 - 补充批注：`backend/graphs/comment_supplement_graph.py`。
 - Word 节点：`backend/nodes/common_word_nodes/`、`gjgk_word_nodes/`、`gngk_word_nodes/`、`xjcg_word_nodes/`、`skills_nodes/`。
 
 **Agents：**
-- Content agents（DeepAgents）：`backend/agents/generation/content_agents.py`、workspace `backend/agents/generation/workspace.py`、model factory `backend/agents/generation/model_factory.py`；子图 `generate_agent_graph.py` / `verify_agent_graph.py` / `revise_agent_graph.py`。
+- Content agents（DeepAgents）：`backend/agents/generation/content_agents.py`、workspace `backend/agents/generation/workspace.py`、model factory `backend/agents/generation/model_factory.py`；子图 `generate_agent_graph.py` / `verify_agent_graph.py` / `revise_agent_graph.py`。表格占位符工具：`backend/agents/generation/table_placeholder_utils.py`（`[[TABLE:<id>]]` 提取与缺失校验）。
 - Comment agent（LangChain `create_agent`）：`backend/agents/comments/comment_agent.py`；工具与写回校验 `backend/agents/comments/tools.py`；审计 workspace `backend/agents/comments/workspace.py`。comment agent 与 content agent 的编号/标识处理边界分离：`★/▲` 规范化例外由 comment agent 保留，技术参数差异批注由 `annotate_corrections` 专用链路产出。
 - Task context assistant（DeepAgents）：`backend/agents/task_context_assistant/factory.py`、`tools.py`、`logging.py`；服务入口 `backend/services/agent_run_service.py`、API `backend/api/agent.py`（NDJSON）。
 
@@ -150,12 +151,17 @@
 
 **Word helper：**
 - COM 之外的文档操作辅助：`backend/helper/word_helper/`（`content_ops`、`delete_ops`、`inline_style_ops`、`paragraph_boundary_ops`、`protected_fields`、`semantic_matcher`、`clause_marker_normalize`、`range_utils`、`text_parsing`、`cleanup_ops` 等）。
+- `text_parsing.py` 负责 `[[TABLE:id]]` 占位符契约：内部写回入口，绝不可见写入最终 Word；与 `table_models`、写回层配合恢复真实表格。
+- `inline_style_ops.py` 支持 `style_writeback_mode`（`full` / `bold_only`）样式回填过滤。
 
 **领域模型与状态：**
 - API/任务模型：`backend/models/`。
-- Graph state：`backend/states/`（`base_state`、`gjgk_tender_state`、`gngk_tender_state`、`xjcg_tender_state`、`skill_state`）。
-- Prompt 装配：`backend/prompts/`。
-- Skill 目录与 rewrite skill：`backend/skills/catalog.py`、`backend/skills/rewrite/`。
+  - generate-only 字段枚举：`GenerationStyle`（`template`/`param`）、`GenerationMode`（`workflow`/`agent`）、`CommentGenerationMode`（`on`/`off`）、`StyleWritebackMode`（`full`/`bold_only`）——均在 `backend/models/generate.py`。
+  - LLM provider 枚举：`LLMModel` = `deepseek` / `qwen` / `doubao`。
+  - 表单类型：`FormType`（`xjcg_tender`、`gngk_hw_zc_tender`、`gngk_hw_cz_tender`、`gngk_fw_zc_tender`、`gngk_fw_cz_tender`、`gjgk_tender`）。
+- Graph state：`backend/states/`（`base_state` 含 `generation_style`/`generation_mode`/`comment_generation_mode`/`style_writeback_mode`；`skill_state` 含 `rewrite_source`；以及 `gjgk_tender_state`、`gngk_tender_state`、`xjcg_tender_state`）。
+- Prompt 装配：`backend/prompts/`（含 `generate_by_param_prompt`、`generate_by_template_prompt`、`comment_prompt`、`skill_prompt`、`rewrite_target_selection_prompt`、`template_candidate_ranking_prompt`）。
+- Skill 目录与 rewrite skill：`backend/skills/catalog.py`、`backend/skills/rewrite/`（`SKILL.md` + `scripts/runtime.py`）。
 
 ## 平台要求
 
@@ -213,4 +219,4 @@ cd backend
 
 ---
 
-*后端技术栈分析：2026-07-18*
+*后端技术栈分析：2026-07-21*

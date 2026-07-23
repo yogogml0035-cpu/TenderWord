@@ -1,6 +1,7 @@
 # 后端结构事实地图
 
-**分析日期：** 2026-07-18
+**分析日期：** 2026-07-21
+**HEAD:** `e748f16d1a2b253c766008f1a060e3ebba9b2f85`
 
 **范围：** 仅覆盖 `backend/` 子项目。`backend/.env` 文件存在，但不得读取或引用内容；`backend/logs/`、`backend/context_log/` 只按目录职责描述，不读取真实运行日志。
 
@@ -8,51 +9,220 @@
 
 ```text
 backend/
-├── agents/                    # DeepAgents/LangChain 智能体运行时
-│   ├── comments/               # 批注 agent、工具、类型、写回、审计 workspace
-│   ├── generation/             # content_agent、generate/verify/revise 子图、workspace、sanitizer、guard
-│   ├── task_context_assistant/ # agent run 前置流、受控工具、scrub 审计
-│   └── log_naming.py           # agent workspace/审计文件名清洗
-├── api/                        # FastAPI routers（薄入口）
-├── config/                     # settings 与招标类型配置
-├── core/                       # SSE manager 等核心运行设施
-├── graphs/                     # LangGraph 工作流
+├── main.py                        # FastAPI 应用入口（router/CORS/startup/health）
+├── requirements.txt               # 后端依赖清单
+├── __init__.py
+│
+├── api/                           # FastAPI routers（薄入口）
+│   ├── generate.py                # POST /api/generate
+│   ├── agent.py                   # POST /api/agent/runs/stream (NDJSON)
+│   ├── comment_supplement.py      # POST /api/comment-supplement
+│   ├── tasks.py                   # 任务列表/详情/取消/心跳
+│   ├── stream.py                  # SSE 事件流
+│   ├── upload.py                  # 文件上传
+│   ├── download.py                # 文件下载
+│   ├── tender.py                  # 招标详情代理
+│   ├── template_candidates.py     # 模板候选代理/下载/选择
+│   └── conversations.py           # 会话状态
+│
+├── models/                        # Pydantic API/runtime 模型
+│   ├── generate.py                # FormType, GenerateRequest, generate-only 字段
+│   ├── task.py                    # TaskKind/Status/Progress 响应模型
+│   ├── sse.py                     # SSE 事件 shape
+│   ├── agent_run.py               # Agent run NDJSON 契约
+│   ├── tender.py                  # TenderData
+│   ├── upload.py
+│   ├── template_candidates.py
+│   └── common.py
+│
+├── config/                        # 运行配置与招标类型配置
+│   ├── settings.py                # Settings / env 加载（勿读 .env 真值）
+│   └── tender_config.py           # 锚点、字号、content mode、保护字段
+│
+├── services/                      # API ↔ graph/task/agent 编排
+│   ├── document_service.py        # GRAPH_REGISTRY、generate/rewrite/comment_supplement
+│   ├── task_service.py            # 任务查询/取消/心跳封装
+│   ├── conversation_service.py    # 会话 rewrite history
+│   ├── agent_run_service.py       # 任务上下文助手前置流
+│   ├── chat_stream_service.py
+│   └── template_candidate_ranking_service.py
+│
+├── task/                          # 进程内任务队列
+│   └── task_queue_manager.py      # TaskQueueManager、公平锁、进度、取消、心跳
+│
+├── core/                          # 核心运行设施
+│   └── sse_manager.py             # SSEManager、event cache、threadsafe 推送
+│
+├── graphs/                        # LangGraph 工作流
+│   ├── base_graph.py              # BaseGraph、CrossProcessFileLock、StandardTenderWorkflowGraph
+│   ├── skill_graph.py             # RewriteSkillGraph（显式 rewrite）
+│   ├── comment_supplement_graph.py
+│   ├── xjcg_tender_graph.py
+│   ├── gngk_hw_zc_tender_graph.py # gngk family 基图之一
+│   ├── gngk_hw_cz_tender_graph.py
+│   ├── gngk_fw_zc_tender_graph.py
+│   ├── gngk_fw_cz_tender_graph.py
+│   └── gjgk_tender_graph.py
+│
+├── states/                        # LangGraph state TypedDict
+│   ├── base_state.py              # TenderGraphStateBase、generate-only 字段、table models
+│   ├── skill_state.py             # TaskSkillGraphState（rewrite_source 等）
+│   ├── xjcg_tender_state.py
+│   ├── gngk_tender_state.py
+│   └── gjgk_tender_state.py
+│
+├── nodes/                         # LangGraph 节点实现
+│   ├── common_word_nodes/         # 共享 Word/LLM/agent 节点
+│   │   ├── prepare_template.py
+│   │   ├── extract_tender_params.py
+│   │   ├── delete_tender_param.py
+│   │   ├── get_replacements_core.py / get_replacements_shared.py
+│   │   ├── replace_content.py
+│   │   ├── generate_polished_text.py
+│   │   ├── content_agent_generate.py
+│   │   ├── annotate_corrections.py    # 仅 generate：更正批注候选
+│   │   ├── generate_comments.py
+│   │   ├── comment_agent.py
+│   │   ├── comment_writeback.py       # 先更正后普通 AI 批注
+│   │   ├── comment_supplement.py
+│   │   ├── comment_extraction.py
+│   │   ├── get_rewrite_comments.py
+│   │   └── update_word.py
+│   ├── gngk_word_nodes/           # 国内公开差异（hw/fw × zc/cz）
+│   ├── gjgk_word_nodes/           # 国际公开差异
+│   ├── xjcg_word_nodes/           # 询价采购差异
+│   └── skills_nodes/              # rewrite skill 节点 + tender-aware dispatch
+│       ├── rewrite_nodes.py
+│       └── tender_aware_word_dispatch.py
+│
 ├── helper/
-│   └── word_helper/            # Word 业务 helper（段落/样式/保护字段/表占位符）
-├── models/                     # Pydantic API/runtime 模型
-├── nodes/                      # LangGraph 节点
-│   ├── common_word_nodes/      # 共享 Word/LLM/agent 节点
-│   ├── gjgk_word_nodes/        # 国际公开差异节点
-│   ├── gngk_word_nodes/        # 国内公开差异节点（hw/fw × zc/cz）
-│   ├── skills_nodes/           # rewrite skill 节点和 tender-aware dispatch
-│   └── xjcg_word_nodes/        # 询价采购差异节点
-├── prompts/                    # prompt builders、prompt types、契约解析
-├── retrieval/                  # 批注 bad case BM25/Qdrant/embedding/hybrid runtime
-│   └── bad_cases/              # bad case 源数据
-├── scripts/                    # Word 诊断和检索调试脚本
-├── services/                   # API 与 graph/task/agent 之间的业务编排
-├── skills/
-│   ├── catalog.py              # skill 目录
-│   └── rewrite/                # rewrite task skill 声明与 runtime helper
-│       ├── SKILL.md
-│       └── scripts/runtime.py
-├── states/                     # LangGraph state TypedDict
-├── task/                       # 任务队列、进度、取消、心跳
-├── tests/                      # pytest 测试（镜像源码分层）
+│   └── word_helper/               # Word 业务 helper（非 COM 生命周期）
+│       ├── content_ops.py
+│       ├── paragraph_boundary_ops.py
+│       ├── protected_fields.py
+│       ├── inline_style_ops.py
+│       ├── delete_ops.py
+│       ├── cleanup_ops.py
+│       ├── range_utils.py
+│       ├── semantic_matcher.py
+│       ├── text_parsing.py        # [[TABLE:id]] + sidecar 恢复
+│       └── clause_marker_normalize.py
+│
 ├── util/
-│   ├── common_util/            # 上传、外部 HTTP、LLM stream、模板候选等通用工具
-│   ├── log_util/               # progress/execution/SSE/audit 日志工具
-│   └── word_util/              # Word COM 技术工具和诊断
-├── .planning/codebase/         # 后端事实文档
-├── main.py                     # FastAPI 应用入口
-└── requirements.txt            # 后端依赖清单
+│   ├── common_util/               # 上传、外部 HTTP、LLM stream、模板候选
+│   │   ├── upload_storage.py
+│   │   ├── template_candidates.py
+│   │   ├── fetch_tender_data.py
+│   │   ├── llm_stream_utils.py
+│   │   └── tender_number.py
+│   ├── log_util/                  # progress/execution/SSE/audit/context 日志
+│   │   ├── progress_log.py
+│   │   ├── execution_log.py
+│   │   ├── sse_log_handler.py
+│   │   ├── skill_audit_log.py
+│   │   ├── context_log.py
+│   │   ├── daily_file_handler.py
+│   │   └── log_cleanup.py
+│   └── word_util/                 # Word COM 技术工具层
+│       ├── word_application_util.py
+│       ├── word_com_manager.py    # com_lock / RPC retry
+│       ├── word_constants.py
+│       ├── anchor_utils.py
+│       ├── table_models.py
+│       ├── word_extraction_utils.py
+│       ├── word_symbol_tokens.py
+│       ├── word_insert_text.py
+│       ├── word_document_inspector.py
+│       └── word_diagnostics.py
+│
+├── agents/                        # DeepAgents / LangChain 智能体运行时
+│   ├── generation/                # content_agent、generate/verify/revise 子图
+│   │   ├── content_agents.py
+│   │   ├── generate_agent_graph.py
+│   │   ├── verify_agent_graph.py
+│   │   ├── revise_agent_graph.py
+│   │   ├── content_agent_generate 接入见 nodes
+│   │   ├── table_placeholder_utils.py
+│   │   ├── content_sanitizer.py
+│   │   ├── protected_field_guard.py
+│   │   ├── agent_step_events.py
+│   │   ├── workspace.py
+│   │   ├── model_factory.py
+│   │   ├── json_utils.py
+│   │   └── types.py
+│   ├── comments/                  # 批注 agent
+│   │   ├── comment_agent.py
+│   │   ├── tools.py
+│   │   ├── types.py
+│   │   └── workspace.py
+│   ├── task_context_assistant/    # agent run 前置流
+│   │   ├── factory.py
+│   │   ├── tools.py               # create_rewrite_task_tool
+│   │   └── logging.py             # scrub_sensitive_text
+│   └── log_naming.py
+│
+├── prompts/                       # Prompt Layer（无副作用）
+│   ├── generate_prompt.py
+│   ├── generate_by_template_prompt.py
+│   ├── generate_by_param_prompt.py
+│   ├── comment_prompt.py
+│   ├── skill_prompt.py
+│   ├── rewrite_target_selection_prompt.py
+│   ├── template_candidate_ranking_prompt.py
+│   ├── prompt_values.py
+│   └── types.py
+│
+├── retrieval/                     # 批注 bad case 检索
+│   ├── bad_cases/
+│   ├── bad_case_loader.py
+│   ├── bm25.py
+│   ├── qdrant_store.py
+│   ├── embeddings.py
+│   ├── hybrid.py
+│   ├── comment_bad_case_runtime.py
+│   └── config.py
+│
+├── skills/                        # task skill 声明与 runtime helper
+│   ├── catalog.py
+│   └── rewrite/
+│       ├── SKILL.md
+│       └── scripts/
+│           └── runtime.py         # select_*_branch / estimate_total_nodes
+│
+├── scripts/                       # 运维/诊断脚本（非 API 入口）
+│   ├── diagnose_word.py
+│   ├── index_comment_bad_cases.py
+│   └── test_comment_hybrid_retrieval.py
+│
+├── tests/                         # pytest（镜像源码分层）
+│   ├── conftest.py
+│   ├── api/
+│   ├── agents/
+│   ├── config/
+│   ├── graphs/
+│   ├── helper/
+│   ├── logging/
+│   ├── models/
+│   ├── nodes/
+│   ├── progress/
+│   ├── prompts/
+│   ├── retrieval/
+│   ├── services/
+│   ├── skills/
+│   └── util/
+│
+└── .planning/
+    └── codebase/                  # 后端事实文档（本目录）
 ```
 
 运行产物目录（非源码，不要当业务模块扩展）：
 
 ```text
-backend/logs/                   # progress/execution 日滚日志
-backend/context_log/            # agent workspace 与审计落盘
+backend/logs/                      # progress/execution 日滚日志
+backend/context_log/               # agent workspace 与审计落盘
+  ├── generate_log/
+  ├── content_agent_workspace/
+  └── comment_agent_audit/
 ```
 
 ## 目录职责
@@ -109,11 +279,11 @@ backend/context_log/            # agent workspace 与审计落盘
 **`backend/nodes/common_word_nodes/`:**
 - 职责： 共享 graph 节点，覆盖模板准备、抽参、删除、替换、正文生成、批注生成、agent 节点、补充批注和写回。
 - 包含： `prepare_template.py`, `extract_tender_params.py`, `delete_tender_param.py`, `replace_content.py`, `generate_polished_text.py`, `annotate_corrections.py`, `generate_comments.py`, `content_agent_generate.py`, `comment_agent.py`, `comment_supplement.py`, `update_word.py`, `comment_writeback.py`, `get_replacements_core.py`, `get_replacements_shared.py`, `get_rewrite_comments.py`, `comment_extraction.py`
-- 关键文件： `update_word.py`, `annotate_corrections.py`, `generate_comments.py`, `content_agent_generate.py`
+- 关键文件： `update_word.py`, `annotate_corrections.py`, `generate_comments.py`, `content_agent_generate.py`, `comment_writeback.py`
 
 **`backend/nodes/gngk_word_nodes/`:**
 - 职责： 国内公开类型差异节点（货物/服务 × 自筹/财政）。
-- 包含： `gngk_hw_zc_get_replacements.py`, `gngk_hw_cz_delete_tender_param.py`, `gngk_hw_cz_update_word.py`, `gngk_fw_zc_*`, `gngk_get_replacements.py`
+- 包含： `gngk_hw_zc_get_replacements.py`, `gngk_hw_cz_delete_tender_param.py`, `gngk_hw_cz_update_word.py`, `gngk_fw_zc_*`, `gngk_get_replacements.py` 等
 - 关键文件： `gngk_hw_cz_update_word.py`, `gngk_fw_zc_update_word.py`, `gngk_get_replacements.py`
 
 **`backend/nodes/gjgk_word_nodes/`:**
@@ -137,7 +307,7 @@ backend/context_log/            # agent workspace 与审计落盘
 
 **`backend/util/word_util/`:**
 - 职责： Word COM 技术工具层。
-- 包含： COM app 生命周期、COM lock/retry、Word 常量、锚点工具、底层插入、文档检查、诊断、table models、symbol tokens（`word_symbol_tokens.py`）、抽取（`word_extraction_utils.py`，含特殊字形与 `extract_text_with_list_numbers` 自动编号恢复）。
+- 包含： COM app 生命周期、COM lock/retry、Word 常量、锚点工具、底层插入、文档检查、诊断、table models、symbol tokens、抽取（含特殊字形与自动编号恢复）。
 - 关键文件： `word_application_util.py`, `word_com_manager.py`, `anchor_utils.py`, `table_models.py`, `word_diagnostics.py`, `word_symbol_tokens.py`, `word_extraction_utils.py`
 
 **`backend/agents/generation/`:**
@@ -217,11 +387,12 @@ backend/context_log/            # agent workspace 与审计落盘
 
 **Word Logic:**
 - `backend/nodes/common_word_nodes/update_word.py`
+- `backend/nodes/common_word_nodes/annotate_corrections.py`
+- `backend/nodes/common_word_nodes/comment_writeback.py`
 - `backend/nodes/common_word_nodes/delete_tender_param.py`
 - `backend/nodes/common_word_nodes/replace_content.py`
-- `backend/nodes/gngk_word_nodes/gngk_hw_cz_update_word.py`
-- `backend/nodes/gngk_word_nodes/gngk_fw_zc_update_word.py`
-- `backend/nodes/gjgk_word_nodes/gjgk_update_word.py`
+- `backend/nodes/gngk_word_nodes/`
+- `backend/nodes/gjgk_word_nodes/`
 - `backend/helper/word_helper/`
 - `backend/util/word_util/word_application_util.py`
 - `backend/util/word_util/word_com_manager.py`
@@ -255,6 +426,8 @@ backend/context_log/            # agent workspace 与审计落盘
 - Graph runtime `tender_type`：去掉 `_tender`（如 `gngk_hw_zc`）。
 - 任务类别：`generate` / `rewrite` / `comment_supplement`。
 - 上传 rewrite 来源标记：`rewrite_source="uploaded_file"`。
+- 结构化表内部写回入口：`[[TABLE:<id>]]`。
+- Generate-only：`generation_style` / `generation_mode` / `comment_generation_mode` / `style_writeback_mode`。
 
 ## 新代码落位（Where do I put new code?）
 
@@ -377,8 +550,10 @@ backend/context_log/            # agent workspace 与审计落盘
 | 类型差异 Word 步骤 | 对应 `*_tender_graph.py` + `nodes/*_word_nodes/` |
 | rewrite 流程 | `backend/graphs/skill_graph.py` + `skills/rewrite/` + `nodes/skills_nodes/` |
 | 补充批注 | `backend/graphs/comment_supplement_graph.py` + `nodes/common_word_nodes/comment_supplement.py` |
+| 更正批注 | `nodes/common_word_nodes/annotate_corrections.py` + `comment_writeback.py` |
 | 正文 LLM/agent | `backend/prompts/` + `agents/generation/` + `nodes/.../generate_polished_text.py` / `content_agent_generate.py` |
 | 批注 LLM/agent | `backend/prompts/comment_prompt.py` + `agents/comments/` + `nodes/.../generate_comments.py` / `comment_agent.py` |
+| `[[TABLE:id]]` 写回 | `agents/generation/table_placeholder_utils.py` + `helper/word_helper/text_parsing.py` + `util/word_util/table_models.py` |
 | Word 写回业务规则 | `backend/helper/word_helper/` |
 | Word COM 生命周期 | `backend/util/word_util/` |
 | 招标锚点/保护字段 | `backend/config/tender_config.py` |
@@ -392,7 +567,9 @@ backend/context_log/            # agent workspace 与审计落盘
 - 不要把 prompt 渲染副作用（SSE、COM、会话状态）放进 `backend/prompts/`。
 - 不要把 generate-only 字段塞进 rewrite skill state。
 - 不要在 `backend/logs/`、`backend/context_log/` 下新增业务源码。
+- 不要恢复 `SkillGraph.for_skill + TaskSkillWorkflow` 元数据驱动框架。
+- 不要让 `comment_agent` 产出技术参数差异更正批注（仅 `annotate_corrections`）。
 
 ---
 
-*后端结构分析：2026-07-18*
+*后端结构分析：2026-07-21 · HEAD e748f16d1a2b253c766008f1a060e3ebba9b2f85*
